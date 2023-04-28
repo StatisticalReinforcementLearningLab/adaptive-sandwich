@@ -254,7 +254,8 @@ def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
 ###############################################################
 
 def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
-                                    study_RLalg, study_df, return_full=False):
+                                    study_RLalg, study_df, return_full=False,
+                                    alg_correction="", theta_correction=""):
     all_user_ids = np.unique( study_df['user_id'].to_numpy() )
 
     thetahat = all_beta_params[-theta_dim:]
@@ -296,7 +297,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
                 tmp_user_ids = np.unique( prev_policy_data['user_id'].to_numpy() )
                 action1probs = study_RLalg.get_action_probs_inner(
                         curr_timestep_data = prev_policy_data,
-                        est_params = prev_beta_est, n_users = len(tmp_user_ids))
+                        beta_est = prev_beta_est, n_users = len(tmp_user_ids))
                 action1probs_index = prev_policy_data.index.to_numpy()
                 
                 # Combine all action selection probabilities and sort
@@ -309,18 +310,20 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
             est_eqns_dict = study_RLalg.get_est_eqns(beta_params=beta_est,
                                                      data_sofar=data_sofar,
                                                      all_user_ids=all_user_ids,
-                                                     action1probs=all_action1probs)
+                                                     action1probs=all_action1probs,
+                                                     correction=alg_correction)
         else:
             est_eqns_dict = study_RLalg.get_est_eqns(beta_params=beta_est,
                                                      data_sofar=data_sofar,
-                                                     all_user_ids=all_user_ids)
+                                                     all_user_ids=all_user_ids,
+                                                     correction=alg_correction)
             # we require all RL algorithms to have a function `get_est_eqns` that
                 # forms the estimating equation for policy parameters
 
         # Check estimating equation sums to zero
-        ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) # TODO incremental recruitment
         try:
-            assert np.mean( np.absolute( ave_est_eqn ) ) < 0.2
+            tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(all_user_ids)
+            assert np.mean( np.absolute( tmp_ave_est_eqn ) ) < 0.1
         except:
             import ipdb; ipdb.set_trace()
        
@@ -328,7 +331,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
         prev_weights_prod = np.prod(all_weights, axis=0)
         prev_weights_prod = np.expand_dims(prev_weights_prod, 1)
         weighted_est_eqn = prev_weights_prod * est_eqns_dict["est_eqns"]
-        all_est_eqns.append( np.mean(weighted_est_eqn, axis= 0)  )
+        all_est_eqns.append( np.sum(weighted_est_eqn, axis= 0) / len(all_user_ids)  )
         all_est_eqns_full.append( weighted_est_eqn )
 
 
@@ -351,7 +354,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
 
     # Estimating Equation for theta ######################
     theta_est_eqn = form_LS_est_eqn(thetahat, study_df, all_user_ids,
-                                    correction="")
+                                    correction=theta_correction)
         
     # Multiply by weights
     prev_weights_prod = np.prod(all_weights, axis=0)
@@ -371,7 +374,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
 
 
 def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df, 
-                              alg_correction=""):
+                              alg_correction="", theta_correction=""):
 
     all_est_params = []
     for policy_num, curr_policy_dict in enumerate(study_RLalg.all_policies):
@@ -401,7 +404,9 @@ def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df,
     stacked_est_dict = get_stacked_estimating_function(all_est_params, 
                                                   beta_dim, theta_dim, 
                                                   study_RLalg, study_df,
-                                                  return_full=True)
+                                                  return_full=True,
+                                            alg_correction=alg_correction,
+                                            theta_correction=theta_correction)
     cat_est_eqn = np.hstack( stacked_est_dict['all_est_eqn'] )
     stacked_raw_meat = np.einsum('ij,ik->jk', cat_est_eqn, cat_est_eqn)
     n_unique = cat_est_eqn.shape[0]
@@ -460,13 +465,14 @@ else:
     
 
 if args.dataset_type == 'oralytics':
-    exp_str = '{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}'.format(
-            args.dataset_type, args.RL_alg, args.T, args.n, 
-            args.recruit_n, args.decisions_between_updates, args.steepness)
+    exp_str = '{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}'.format(
+            args.dataset_type, args.RL_alg, args.T, args.n,
+            args.recruit_n, args.decisions_between_updates, args.steepness, args.action_centering)
 else:
-    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}'.format(
-            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr)
-     
+    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
+            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr,
+            args.action_centering)
+
 # Load Data
 all_folder_path = os.path.join(args.save_dir, "simulated_data/{}".format(exp_str))
 
@@ -538,8 +544,12 @@ for i in range(1,args.N+1):
     adaptive_sandwich_dict = get_adaptive_sandwich_new(est_val_dict, 
                                                        study_RLalg, study_df)
    
-    exit(0)
-    #import ipdb; ipdb.set_trace()
+    adaptive_sandwich_dict_HC3 = get_adaptive_sandwich_new(est_val_dict, 
+                                                       study_RLalg, study_df,
+                                                       theta_correction="HC3")
+
+    all_adaptive_sandwich[i-1] = adaptive_sandwich_dict['adaptive_sandwich']
+    all_adaptive_sandwich_HC3[i-1] = adaptive_sandwich_dict_HC3['adaptive_sandwich']
     
     if args.debug:
     #if True:

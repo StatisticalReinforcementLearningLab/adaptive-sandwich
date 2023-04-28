@@ -267,12 +267,13 @@ else:
 
 print("Running simulations...")
 if args.dataset_type == 'oralytics':
-    exp_str = '{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}'.format(
+    exp_str = '{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}'.format(
             args.dataset_type, args.RL_alg, args.T, args.n, 
-            args.recruit_n, args.decisions_between_updates, args.steepness)
+            args.recruit_n, args.decisions_between_updates, args.steepness, args.action_centering)
 else:
-    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}'.format(
-            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr)
+    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
+            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr,
+            args.action_centering)
 
 simulation_data_path = os.path.join(args.save_dir, "simulated_data")
 if not os.path.isdir(simulation_data_path):

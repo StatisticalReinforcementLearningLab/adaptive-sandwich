@@ -133,7 +133,7 @@ class SmoothPosteriorSampling:
             return clip(self.args, raw_probs)
         
         probs = self.get_action_probs_inner(curr_timestep_data, 
-                            est_params = self.all_policies[-1]["est_params"], 
+                            beta_est = self.all_policies[-1]["est_params"], 
                             n_users = self.all_policies[-1]["n_users"],
                             check_post_var = post_var)
         
@@ -141,7 +141,7 @@ class SmoothPosteriorSampling:
 
 
     
-    def get_action_probs_inner(self, curr_timestep_data, est_params, n_users, 
+    def get_action_probs_inner(self, curr_timestep_data, beta_est, n_users, 
                                check_post_var=None):
         user_states = curr_timestep_data[self.state_feats]
         treat_states = user_states[self.treat_feats].to_numpy()
@@ -152,8 +152,8 @@ class SmoothPosteriorSampling:
         else:
             state_dim = len(self.state_feats) + len(self.treat_feats)
         
-        post_mean = est_params[:state_dim]
-        post_V_pieces = est_params[state_dim:]
+        post_mean = beta_est[:state_dim]
+        post_V_pieces = beta_est[state_dim:]
         post_V = symmetric_fill_utri(post_V_pieces, post_mean.shape[0])
         post_var = np.linalg.inv( post_V * n_users )
 
@@ -204,7 +204,8 @@ class SmoothPosteriorSampling:
 
 
     def get_est_eqns(self, beta_params, data_sofar, all_user_ids, 
-                     return_ave_only=False, action1probs=None):
+                     return_ave_only=False, action1probs=None,
+                     correction=""):
         """
         Get estimating equations for policy parameters for one update
         """
@@ -242,7 +243,7 @@ class SmoothPosteriorSampling:
         est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids,
                                       beta_params, avail_vec, all_user_ids,
                                       prior_dict = prior_dict,
-                                      correction = "")
+                                      correction = correction)
 
         if return_ave_only:
             return np.sum(est_eqn_dict['est_eqns'], axis=0) / len(user_ids)

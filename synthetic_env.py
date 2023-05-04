@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import scipy
 
+from least_squares_helper import get_utri, symmetric_fill_utri
+from helper_functions import PRECISION
 
 def get_entry_last_times(args):
     # Compute entry / last decision times compared to calendar for each user
@@ -16,6 +18,27 @@ def get_entry_last_times(args):
         # Vector of last decision times for all
     return entry_times, last_times
 
+
+def make_base_study_df(args, all_cols=['user_id', 'user_t', 'policy_last_t', 'policy_num', 'last_t',
+            'entry_t', 'calendar_t']):
+    entry_times, last_times = get_entry_last_times(args)
+
+    df_fill = np.zeros( (args.n*args.T, len(all_cols)) )
+    df_fill.fill(np.nan)
+    study_df = pd.DataFrame(df_fill, columns=all_cols)
+   
+    study_df['user_id'] = np.repeat( np.arange(1,args.n+1), args.T)
+    study_df['user_t'] = np.tile( np.arange(1,args.T+1), args.n)
+    study_df['policy_last_t'] = np.tile(np.nan, args.T*args.n)
+    study_df['policy_num'] = np.tile(np.nan, args.T*args.n)
+    study_df['last_t'] = np.repeat(last_times, args.T)
+    study_df['entry_t'] = np.repeat(entry_times, args.T)
+    study_df['calendar_t'] = study_df['entry_t']+study_df['user_t']-1
+    
+    study_df = study_df.reset_index().drop(columns='index')
+    return study_df
+    
+        
 
 def load_synthetic_env(paramf_path="./synthetic_env_params/delayed_effects.txt"):
     """
@@ -106,7 +129,9 @@ class SyntheticEnv:
             state_vals = np.vstack( [state_vals, padding] )
         elif total_users_next_timestep < len(current_users):
             state_vals = state_vals[-total_users_next_timestep:]
-        
+       
+        if PRECISION is not None:
+            state_vals = np.around(state_vals,PRECISION)
         study_df.loc[ study_df['calendar_t'] == t+1, state_names ] = state_vals
       
         return study_df
@@ -125,10 +150,20 @@ class SyntheticEnv:
         reward_means = np.matmul(gen_covariates, params)
         rewards = reward_means + self.reward_noise[ curr_timestep_data.index.to_numpy() ]
 
+        if PRECISION is not None:
+            rewards = np.around(rewards, PRECISION)
         return rewards
 
 
     def make_empty_study_df(self, args, user_df):
+        base_cols = ['user_id', 'user_t', 'policy_last_t', 'policy_num', 'last_t', 
+                'entry_t', 'calendar_t', 'action1prob', 'intercept', 'action', 'reward',]
+        study_df = make_base_study_df(args, 
+                all_cols = base_cols + [ x for x in self.gen_feats if x not in base_cols ])
+        entry_times, last_times = get_entry_last_times(args)
+        self.calendar_T = max(last_times)
+        
+        """
         entry_times, last_times = get_entry_last_times(args)
         self.calendar_T = max(last_times)
         base_cols = ['user_id', 'user_t', 'policy_last_t', 'policy_num', 'last_t', 
@@ -149,12 +184,19 @@ class SyntheticEnv:
         study_df['calendar_t'] = study_df['entry_t']+study_df['user_t']-1
         
         study_df = study_df.reset_index().drop(columns='index')
+        """
         
         # initialize values
+        study_df['intercept'] = 1
         zero_col = [ x for x in self.gen_feats if x not in base_cols ]
         study_df.loc[ study_df['calendar_t'] == 1, zero_col ] = 0
         #study_df.loc[ study_df['calendar_t'] == 1, 'past_reward' ] = 0
-        initial_past_rewards = self.rng.normal(0,0.1, size=args.n)
+        #initial_past_rewards = self.rng.normal(0,0.1, size=args.n)
+        if PRECISION is not None:
+            initial_past_rewards = np.around(
+                    self.rng.normal(0,0.5, size=args.n),PRECISION)
+        else:
+            initial_past_rewards = self.rng.normal(0,0.5, size=args.n)
         study_df.loc[ study_df['user_t'] == 1, 'past_reward' ] = \
                 initial_past_rewards
 

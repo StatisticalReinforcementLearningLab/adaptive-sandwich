@@ -78,81 +78,6 @@ class SmoothPosteriorSampling:
         
    
     def update_alg(self, new_data, t, all_prev_data=None):
-        # Do a batch update
-        rewards = all_prev_data['reward'].to_numpy().reshape(-1,1)
-        actions = all_prev_data['action'].to_numpy().reshape(-1,1)
-        action1prob = all_prev_data['action1prob'].to_numpy().reshape(-1,1)
-        if self.action_centering:
-            design = np.concatenate( [ all_prev_data[self.state_feats],
-                        action1prob * all_prev_data[self.treat_feats],
-                        (actions-action1prob) * all_prev_data[self.treat_feats] ], axis=1 )
-        else:
-            design = np.concatenate( [ all_prev_data[self.state_feats], 
-                        actions * all_prev_data[self.treat_feats] ], axis=1 )
-        
-        # Only include available data
-        if self.args.dataset_type == 'heartsteps':
-            avail_bool = all_prev_data['availability'].astype('bool')
-            rewards_avail = rewards[ avail_bool ]
-            design_avail = design[ avail_bool ]
-            user_id_avail = all_prev_data['user_id'][avail_bool].to_numpy() 
-        else:
-            rewards_avail = rewards
-            design_avail = design
-            user_id_avail = all_prev_data['user_id'].to_numpy() 
-
-        alg_dict = {
-            "policy_last_t": t-1,
-            "new_data" : new_data,  # data used to get updated est_params
-            "all_prev_data": all_prev_data,
-            "design" : design_avail,
-            "total_obs" : self.all_policies[-1]['total_obs'] + len(new_data),
-            "prior_mean": self.prior_mean,
-            "prior_var": self.prior_var,
-        }
-
-
-        RX = rewards_avail * design_avail
-        XX = np.einsum( 'ij,ik->jk', design_avail, design_avail )
-        inv_post_var = XX + np.linalg.inv( self.prior_var )
-        post_var = np.linalg.inv( inv_post_var )
-        prior_adj = np.matmul( np.linalg.inv(self.prior_var), self.prior_mean )
-        post_mean = np.matmul( post_var, np.sum(RX, axis=0) + prior_adj )
-
-        col_names = self.state_feats+['action:'+x for x in self.treat_feats]
-        all_user_id_set = set( all_prev_data['user_id'].to_numpy() ) 
-        V_matrix = XX / len(all_user_id_set)
-        
-        # reconstruct posterior variance
-        alg_dict["all_user_id"] = all_user_id_set
-        alg_dict["n_users"] = len(all_user_id_set)
-        alg_dict["post_mean"] = post_mean
-        alg_dict["post_var"] = post_var
-        alg_dict["col_names"] = col_names
-        alg_dict["V_matrix"] = V_matrix
-        alg_dict["XX"] = XX
-        alg_dict["intercept_val"] = V_matrix[0][0]
-        
-        V_suffvec = var2suffvec(self, V_matrix)
-        #varmatrix = suffvec2var(self, post_V_params)
-        #post_V_params = get_utri(post_V)
-        
-        est_params = np.hstack( [ post_mean, V_suffvec ] )
-        alg_dict["est_params"] = est_params
-
-        self.all_policies.append(alg_dict)
-
-        """
-        RX_tmp = RX
-        XX_tmp = XX
-        inv_post_var_tmp = inv_post_var
-        post_var_tmp = post_var
-        post_mean_tmp = post_mean
-
-        # print(post_var_tmp == new_post_var); print(post_mean_tmp == new_post_mean)
-        # print(XX_tmp == new_XX) 
-    
-        print("split")
 
         # update algorithm with new data
         actions = new_data['action'].to_numpy().reshape(-1,1)
@@ -163,19 +88,52 @@ class SmoothPosteriorSampling:
                         action1prob * new_data[self.treat_feats],
                         (actions-action1prob) * new_data[self.treat_feats] ], axis=1 )
         else:
-            X_vecs = np.concatenate( [ new_data[self.state_feats],
+            X_vecs = np.concatenate( [ new_data[self.state_feats], 
                                 actions * new_data[self.treat_feats] ], axis=1 )
 
-        # Only include available datapost_mean_tmp
+        # Only include available data
         if self.args.dataset_type == 'heartsteps':
             avail_bool = new_data['availability'].astype('bool')
             rewards_avail = rewards[ avail_bool ]
             X_avail = X_vecs[ avail_bool ]
-            user_id_avail = new_data['user_id'][avail_bool].to_numpy()
+            user_id_avail = new_data['user_id'][avail_bool].to_numpy() 
         else:
             rewards_avail = rewards
             X_avail = X_vecs
-            user_id_avail = new_data['user_id'].to_numpy()
+            user_id_avail = new_data['user_id'].to_numpy() 
+     
+        #if self.all_policies[-1]['policy_last_t'] == 0:
+        #    design = X_vecs
+        #else:
+        actions_all = all_prev_data['action'].to_numpy().reshape(-1,1)
+        action1prob_all = all_prev_data['action1prob'].to_numpy().reshape(-1,1)
+        if self.action_centering:
+            design = np.concatenate( [ all_prev_data[self.state_feats],
+                        action1prob_all * all_prev_data[self.treat_feats],
+                        (actions_all-action1prob_all) * all_prev_data[self.treat_feats] ], axis=1 )
+        else:
+            design = np.concatenate( [ all_prev_data[self.state_feats], 
+                        actions_all * all_prev_data[self.treat_feats] ], axis=1 )
+        """
+        prev_design = self.all_policies[-1]['design']
+        design = np.concatenate([prev_design, X_vecs], axis=0)
+        """
+        
+        import ipdb; ipdb.set_trace()
+        # X_vecs == design
+         
+        alg_dict = {
+            "policy_last_t": t-1,
+            "new_data" : new_data,  # data used to get updated est_params
+            "all_prev_data": all_prev_data,
+            "design_new" : X_vecs,
+            "design" : design,
+            "total_obs" : self.all_policies[-1]['total_obs'] + len(new_data),
+            "prior_mean": self.prior_mean,
+            "prior_var": self.prior_var,
+        }
+
+        # TODO: noise variance
 
         post_mean = self.all_policies[-1]["post_mean"]
         inv_post_var = np.linalg.inv( self.all_policies[-1]["post_var"] )
@@ -186,11 +144,38 @@ class SmoothPosteriorSampling:
         new_post_var = np.linalg.inv( new_inv_post_var )
         new_post_mean = np.matmul( new_post_var, new_RX )
         
+        col_names = self.state_feats+['action:'+x for x in self.treat_feats]
+        all_user_id_set = self.all_policies[-1]["all_user_id"].copy()
+        all_user_id_set.update( new_data["user_id"].to_numpy() )
         new_XX = self.all_policies[-1]['XX'] + add_new_XX
         V_matrix = new_XX / len(all_user_id_set)
-        """
 
+        # reconstruct posterior variance
+        #prior_var_inv = np.linalg.inv( self.all_policies[-1]["prior_var"] )
+        #np.linalg.inv( V_matrix * len(all_user_id_set) + prior_var_inv )
+
+        alg_dict["all_user_id"] = all_user_id_set
+        alg_dict["n_users"] = len(all_user_id_set)
+        alg_dict["post_mean"] = new_post_mean
+        alg_dict["post_var"] = new_post_var
+        alg_dict["col_names"] = col_names
+        alg_dict["V_matrix"] = V_matrix
+        alg_dict["XX"] = new_XX
+        alg_dict["intercept_val"] = V_matrix[0][0]
         
+        V_suffvec = var2suffvec(self, V_matrix)
+        #varmatrix = suffvec2var(self, post_V_params)
+        #post_V_params = get_utri(post_V)
+        
+        est_params = np.hstack( [ new_post_mean, V_suffvec ] )
+        alg_dict["est_params"] = est_params
+
+        self.all_policies.append(alg_dict)
+
+        #est_params_df = pd.DataFrame(est_params.reshape(1,-1),
+        #                         columns=self.state_feats+self.treat_feats_action)
+        #alg_dict["est_params"] = est_params_df
+
 
     def get_action_probs(self, curr_timestep_data, filter_keyval):
       
@@ -255,7 +240,6 @@ class SmoothPosteriorSampling:
                                             post_var_treat), treat_states) 
         post_std_user = np.sqrt(post_var_user)
 
-        """
         ########### Form action selection probabilities (Sampling)
         n_tmp = len(post_mean_user)
         #norm_samples = self.rng.normal(loc=0, scale=1, 
@@ -284,8 +268,9 @@ class SmoothPosteriorSampling:
                     scale = np.sqrt(post_var_user[i]) )
             all_action1_probs.append(action1_prob)
         probs = np.array(all_action1_probs)
-        #if PRECISION is not None:
-        #    probs = np.around(probs, PRECISION)
+        """
+        if PRECISION is not None:
+            probs = np.around(probs, PRECISION)
         return probs
 
 
@@ -330,9 +315,9 @@ class SmoothPosteriorSampling:
         # self.all_policies[2]['all_prev_data'].to_numpy() == data_sofar.to_numpy()[:,:-1]
         # self.all_policies[2]['design'] == design
 
-        #tmp = self.all_policies[2]['all_prev_data'].to_numpy()
-        #design2 = np.concatenate( [ tmp[self.state_feats].to_numpy(),
-        #                actions * tmp[self.treat_feats].to_numpy() ], axis=1 )
+        tmp = self.all_policies[2]['all_prev_data'].to_numpy()
+        design2 = np.concatenate( [ tmp[self.state_feats].to_numpy(),
+                        actions * tmp[self.treat_feats].to_numpy() ], axis=1 )
 
         try:
             est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids,

@@ -14,7 +14,6 @@ from scipy import optimize
 import scipy.special
 
 from least_squares_helper import get_est_eqn_LS, fit_WLS
-from debug_helper import get_adaptive_sandwich
 
 def c_vec2string(c_vec):
     return np.array2string( c_vec )[1:-1].replace(" ", ",")
@@ -181,10 +180,7 @@ print(vars(args))
 ###############################################################
 
 def load_data(folder_path):
-    #study_df = pd.read_csv( os.path.join(folder_path, "data.csv") )
-    with open('{}/study_df.pkl'.format(folder_path), 'rb') as f:
-        study_df = pkl.load(f)
-    
+    study_df = pd.read_csv( os.path.join(folder_path, "data.csv") )
     if args.dataset_type == 'synthetic':
         study_df['action_past_reward'] = study_df['past_reward']*study_df['action']
     
@@ -194,14 +190,7 @@ def load_data(folder_path):
     with open('{}/study_RLalg.pkl'.format(folder_path), 'rb') as f:
         study_RLalg = pkl.load(f)
 
-    # OLD STUFF
-    if args.RL_alg == 'sigmoid_LS':
-        with open( os.path.join(folder_path, "out_dict.pkl"), 'rb' ) as file:
-            alg_out_dict = pkl.load( file )
-    else:
-        alg_out_dict = None
-
-    return study_df, study_RLalg, alg_out_dict
+    return study_df, study_RLalg
 
 
 
@@ -222,8 +211,7 @@ def form_LS_estimator(study_df):
     return LS_estimator
 
 
-def form_LS_est_eqn(est_param, study_df, all_user_ids, correction="HC3", 
-                    check=False):
+def form_LS_est_eqn(est_param, study_df, all_user_ids, correction="HC3"):
     if args.dataset_type == 'heartsteps':
         avail_vec = study_df['availability'].to_numpy()
     else:
@@ -234,7 +222,7 @@ def form_LS_est_eqn(est_param, study_df, all_user_ids, correction="HC3",
     present_user_ids = study_df['user_id'].to_numpy()
     LS_dict = get_est_eqn_LS(outcome_vec, design, present_user_ids, 
                              est_param, avail_vec, all_user_ids, 
-                             correction=correction, reconstruct_check=check)
+                             correction=correction)
 
     return LS_dict["est_eqns"]
 
@@ -265,11 +253,9 @@ def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
 # Adaptive Sandwich Variance Estimator ########################
 ###############################################################
 
-@profile
 def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
                                     study_RLalg, study_df, return_full=False,
-                                    alg_correction="", theta_correction="",
-                                    check=False):
+                                    alg_correction="", theta_correction=""):
     all_user_ids = np.unique( study_df['user_id'].to_numpy() )
 
     thetahat = all_beta_params[-theta_dim:]
@@ -298,10 +284,6 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
             # data_sofar = all data used to estimate the policy at time policy_last_t
         assert curr_policy_dict['total_obs'] == len(data_sofar)
             # total number of observations match
-        if args.RL_alg == 'posterior_sampling':
-            intercept_val = curr_policy_dict['intercept_val']
-        else:
-            intercept_val = None
 
         if args.action_centering:
             # Form action selection probabilities
@@ -313,12 +295,9 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
                 prev_policy_data = study_df[ study_df['policy_last_t'] == policy_last_t-1 ]
                 oracle_action1probs = prev_policy_data['action1prob'].to_numpy()
                 tmp_user_ids = np.unique( prev_policy_data['user_id'].to_numpy() )
-
                 action1probs = study_RLalg.get_action_probs_inner(
                         curr_timestep_data = prev_policy_data,
-                        beta_est = prev_beta_est, n_users = len(tmp_user_ids),
-                        intercept_val = intercept_val,
-                        filter_keyval = ('policy_last_t', policy_last_t))
+                        beta_est = prev_beta_est, n_users = len(tmp_user_ids))
                 action1probs_index = prev_policy_data.index.to_numpy()
                 
                 # Combine all action selection probabilities and sort
@@ -332,57 +311,41 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
                                                      data_sofar=data_sofar,
                                                      all_user_ids=all_user_ids,
                                                      action1probs=all_action1probs,
-                                                     correction=alg_correction,
-                                                     check=check,
-                                                     intercept_val=intercept_val)
+                                                     correction=alg_correction)
         else:
             est_eqns_dict = study_RLalg.get_est_eqns(beta_params=beta_est,
                                                      data_sofar=data_sofar,
                                                      all_user_ids=all_user_ids,
-                                                     correction=alg_correction,
-                                                     check=check,
-                                                     intercept_val=intercept_val)
+                                                     correction=alg_correction)
             # we require all RL algorithms to have a function `get_est_eqns` that
                 # forms the estimating equation for policy parameters
 
         # Check estimating equation sums to zero
-        if check:
-            try:
-                tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(all_user_ids)
-                #assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.001 )
-                assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.01 )
-            except:
-                import ipdb; ipdb.set_trace()
+        try:
+            tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(all_user_ids)
+            assert np.mean( np.absolute( tmp_ave_est_eqn ) ) < 0.1
+        except:
+            import ipdb; ipdb.set_trace()
        
-        # Multiply by weights # TODO is there an error here????
+        # Multiply by weights
         prev_weights_prod = np.prod(all_weights, axis=0)
         prev_weights_prod = np.expand_dims(prev_weights_prod, 1)
         weighted_est_eqn = prev_weights_prod * est_eqns_dict["est_eqns"]
-        #weighted_est_eqn = est_eqns_dict["est_eqns"]
         all_est_eqns.append( np.sum(weighted_est_eqn, axis= 0) / len(all_user_ids)  )
         all_est_eqns_full.append( weighted_est_eqn )
-
-        # TODO import ipdb; ipdb.set_trace()
 
 
         # Form weights ################
         curr_policy_decision_data = study_df[ study_df['policy_last_t'] == policy_last_t ]
             # curr_policy_decision_data = all data collected using the policy policy_last_t
 
-        if args.RL_alg == 'posterior_sampling':
-            intercept_val = curr_policy_dict['intercept_val']
-        else:
-            intercept_val = None
         user_pi_weights = study_RLalg.get_weights(curr_policy_decision_data, 
-                                    beta_est, all_user_ids=all_user_ids,
-                                    intercept_val = intercept_val,
-                                    filter_keyval = ('policy_last_t', policy_last_t) )
-        
+                                                  beta_est, all_user_ids=all_user_ids)
+
         # Check that reproduced the action selection probabilities correctly
         try:
-            #assert np.all(user_pi_weights == 1)
-            assert np.all(np.around(user_pi_weights,3) == 1)
-            #assert np.mean(np.absolute(user_pi_weights - 1)) < 0.01
+            #assert np.all(np.around(user_pi_weights,3) == 1)
+            assert np.mean(np.absolute(user_pi_weights - 1)) < 0.01
         except:
             import ipdb; ipdb.set_trace()
 
@@ -391,8 +354,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
 
     # Estimating Equation for theta ######################
     theta_est_eqn = form_LS_est_eqn(thetahat, study_df, all_user_ids,
-                                    correction=theta_correction,
-                                    check=check)
+                                    correction=theta_correction)
         
     # Multiply by weights
     prev_weights_prod = np.prod(all_weights, axis=0)
@@ -410,7 +372,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
 
     return np.concatenate( all_est_eqns )
 
-@profile
+
 def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df, 
                               alg_correction="", theta_correction=""):
 
@@ -444,8 +406,7 @@ def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df,
                                                   study_RLalg, study_df,
                                                   return_full=True,
                                             alg_correction=alg_correction,
-                                            theta_correction=theta_correction,
-                                            check=True)
+                                            theta_correction=theta_correction)
     cat_est_eqn = np.hstack( stacked_est_dict['all_est_eqn'] )
     stacked_raw_meat = np.einsum('ij,ik->jk', cat_est_eqn, cat_est_eqn)
     n_unique = cat_est_eqn.shape[0]
@@ -460,16 +421,6 @@ def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df,
                                         get_stacked_estimating_function,
                                         eps, beta_dim, theta_dim,
                                         study_RLalg, study_df)
-
-    """
-    print(stacked_hessian[:9,:9])
-    print(stacked_hessian[9:18,9:18])
-
-    # TODO: check eigenvalues of this matrix # 2000 for sigmoid
-    import ipdb; ipdb.set_trace()
-    #scipy.linalg.eigvals(stacked_hessian)
-    #np.linalg.cond(stacked_hessian)
-    """
   
     # Form Adaptive Sandwich Variance Estimator ###############
     stacked_hessian_inv = np.linalg.inv(stacked_hessian)
@@ -535,14 +486,13 @@ folder_path = os.path.join(all_folder_path, "exp={}".format(1))
 if args.RL_alg == 'fixed_randomization':
     study_df = load_data(folder_path)
 else:
-    study_df, study_RLalg, alg_out_dict = load_data(folder_path) 
+    study_df, study_RLalg = load_data(folder_path) 
 
 
 all_estimators = init_nan((args.N,dval))
 all_sandwich = init_nan((args.N,dval,dval))
 all_adaptive_sandwich = init_nan((args.N,dval,dval))
 all_adaptive_sandwich_HC3 = init_nan((args.N,dval,dval))
-all_adaptive_sandwich_old = init_nan((args.N,dval,dval))
 
 for i in range(1,args.N+1):
     if i % 100 == 0:
@@ -553,7 +503,7 @@ for i in range(1,args.N+1):
     if args.RL_alg == 'fixed_randomization':
         study_df = load_data(folder_path)
     else:
-        study_df, study_RLalg, alg_out_dict = load_data(folder_path)
+        study_df, study_RLalg = load_data(folder_path)
 
     # Form Estimator #########################################
     LS_estimator = form_LS_estimator(study_df)
@@ -602,24 +552,6 @@ for i in range(1,args.N+1):
     all_adaptive_sandwich[i-1] = adaptive_sandwich
     all_adaptive_sandwich_HC3[i-1] = adaptive_sandwich_dict_HC3['adaptive_sandwich']
 
-    #### OLD STUFF
-    if args.RL_alg == 'sigmoid_LS':
-        num_updates = max( alg_out_dict.keys() )
-        alg_out_dict[num_updates+1] = est_val_dict
-
-        adaptive_sandwich_old, adaptive_sandwich_full_old, eig_dict, bread_stacked_old, stacked_meat_old = \
-                get_adaptive_sandwich(alg_out_dict, args, Teval=num_updates+1)
-        all_adaptive_sandwich_old[i-1] = adaptive_sandwich
-
-    #### Check eigenvalues
-    try:
-        eigvals = scipy.linalg.eigvals( adaptive_sandwich_dict['stacked_hessian'] )
-        assert np.all(np.iscomplex(eigvals) == False)
-        assert np.min(np.absolute(eigvals)) > 0.001
-    except:
-        print("Checking eigenvalues")
-        import ipdb; ipdb.set_trce()
-
     if args.debug:
     #if True:
         print("sandwich")
@@ -627,18 +559,6 @@ for i in range(1,args.N+1):
         
         print("adaptive_sandwich")
         print(adaptive_sandwich)
-   
-        print("adaptive_sandwich HC3")
-        print(adaptive_sandwich_dict_HC3['adaptive_sandwich'])
-   
-        # alg_out_dict[1]['est_eqns_HC3']
-        # est_val_dict['est_eqns_HC3']
-
-        #scipy.linalg.eigvals( adaptive_sandwich_dict['stacked_hessian'][:4,:4] )
-        
-        if args.RL_alg == 'sigmoid_LS':
-            print("adaptive_sandwich_old")
-            print(adaptive_sandwich_old)
         
         import ipdb; ipdb.set_trace()
     
@@ -981,4 +901,3 @@ results_path = os.path.join(all_folder_path, "results.pkl")
 print("\nWriting results to {}".format(results_path))
 with open(results_path, 'wb') as f:
     pkl.dump(results_dict, f)
-

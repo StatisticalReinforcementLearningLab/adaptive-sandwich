@@ -6,7 +6,7 @@ import torch
 
 from least_squares_helper import get_est_eqn_LS
 #from est_eqn_helper import get_est_eqn_LS_tmp
-
+from helper_functions import PRECISION
 
 def clip(args, vals):
     lower_clipped = np.maximum( vals, args.lower_clip )
@@ -28,7 +28,7 @@ class FixedRandomization:
     def update_alg(self, new_data, t):
         raise ValueError("Fixed randomization never updated")
         
-    def get_action_probs(self, curr_timestep_data):
+    def get_action_probs(self, curr_timestep_data, filter_keyval):
         raw_probs = np.ones( curr_timestep_data.shape[0] )*self.args.fixed_action_prob
         return clip(self.args, raw_probs)
     
@@ -153,7 +153,7 @@ class SigmoidLS:
         self.all_policies.append(alg_dict)
 
 
-    def get_action_probs_inner(self, curr_timestep_data, beta_est, n_users):
+    def get_action_probs_inner(self, curr_timestep_data, beta_est, n_users=None, intercept_val=None, filter_keyval=None):
         user_states = curr_timestep_data[self.state_feats]
         
         treat_states = user_states[self.treat_feats].to_numpy()
@@ -162,10 +162,12 @@ class SigmoidLS:
         lin_est = np.matmul(treat_states, treat_params.T)
         raw_probs = scipy.special.expit(lin_est)
         probs = clip(self.args, raw_probs)
+        #if PRECISION is not None:
+        #    probs = np.around(probs, PRECISION)
         return probs.squeeze()
         
 
-    def get_action_probs(self, curr_timestep_data):
+    def get_action_probs(self, curr_timestep_data, filter_keyval):
         
         if np.sum( np.abs( self.all_policies[-1]["XX"] ) ) == 0:
             # check if observed any non-trivial data yet
@@ -179,7 +181,7 @@ class SigmoidLS:
         return probs
 
 
-    def get_est_eqns(self, beta_params, data_sofar, all_user_ids, return_ave_only=False, action1probs=None, correction=""):
+    def get_est_eqns(self, beta_params, data_sofar, all_user_ids, return_ave_only=False, action1probs=None, correction="", check=False, intercept_val=None):
         """
         Get estimating equations for policy parameters for one update
         """
@@ -198,14 +200,15 @@ class SigmoidLS:
         #est_eqn_dict = get_est_eqn_LS_tmp(outcome_vec, design, user_ids, 
         est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids, 
                                       beta_params, avail_vec, all_user_ids,
-                                      correction = correction)
+                                      correction = correction,
+                                      reconstruct_check = check)
 
         if return_ave_only:
             return np.sum(est_eqn_dict['est_eqns'], axis=0) / len(user_ids)
         return est_eqn_dict
 
     
-    def get_weights(self, curr_policy_decision_data, beta_params, all_user_ids):
+    def get_weights(self, curr_policy_decision_data, beta_params, all_user_ids, intercept_val=None, filter_keyval=None):
         """
         Get Radon Nikodym weights for all weights for all decisions made by a given policy update
         """

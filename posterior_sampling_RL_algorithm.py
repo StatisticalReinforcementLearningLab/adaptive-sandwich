@@ -7,6 +7,7 @@ import torch
 
 from basic_RL_algorithms import torch_clip
 from least_squares_helper import get_est_eqn_posterior_sampling
+from helper_functions import PRECISION
 
 """
 TODO

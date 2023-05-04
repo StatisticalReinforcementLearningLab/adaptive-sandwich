@@ -287,6 +287,7 @@ class SmoothPosteriorSampling:
         #    probs = np.around(probs, PRECISION)
         return probs
         """
+        return probs
 
 
     def get_est_eqns(self, beta_params, data_sofar, all_user_ids, 

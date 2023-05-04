@@ -4,13 +4,13 @@
 #SBATCH -t 0-25:00          # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p murphy           # Partition to submit to
 #SBATCH --mem=50G           # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -o jobs_out/april20/T=50_n=100_actionC=1_N=2k_%j.out  # File to which STDOUT will be written, %j inserts jobid
-#SBATCH -e jobs_out/april20/T=50_n=100_actionC=1_N=2k_%j.err  # File to which STDERR will be written, %j inserts jobid
+#SBATCH -o jobs_out/may3/T=50_n=100_actionC=1_N=2k_%j.out  # File to which STDOUT will be written, %j inserts jobid
+#SBATCH -e jobs_out/may3/T=50_n=100_actionC=1_N=2k_%j.err  # File to which STDERR will be written, %j inserts jobid
 
 module load Anaconda3/2020.11
 cd /n/home02/kellywzhang
 
-source activate py36
+source activate py39
 which python
 
 cd /n/home02/kellywzhang/adaptive-sandwich
@@ -47,15 +47,15 @@ n=100
 #n = 1000, 100, 500
 #steepness = 1 2 0.5
 
-save_dir=/n/murphy_lab/lab/kellywzhang/inference_after_pooling/results/april20
+save_dir=/n/murphy_lab/lab/kellywzhang/inference_after_pooling/results/may3
 
-for steepness in 1 2 0.5 5
+#for steepness in 1 2 0.5 5
+for steepness in 1 0.5 5
 do
 
-    for synthetic_mode in 'delayed_1_dosage' 'delayed_5_dosage' 'delayed_2_dosage'
+    for synthetic_mode in 'delayed_1_dosage' 'delayed_5_dosage' #'delayed_2_dosage'
     do
         python RL_Study_Simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --save_dir=$save_dir --action_centering $action_centering
-
 
         python After_Study_Analyses.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --debug 0 --RL_alg $RL_alg --eta $eta --alg_state_feats $alg_state_feats --inference_mode $inference_mode --save_dir=$save_dir --action_centering $action_centering
     done

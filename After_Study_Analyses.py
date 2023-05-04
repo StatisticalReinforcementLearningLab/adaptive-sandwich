@@ -265,7 +265,7 @@ def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
 # Adaptive Sandwich Variance Estimator ########################
 ###############################################################
 
-@profile
+#@profile
 def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
                                     study_RLalg, study_df, return_full=False,
                                     alg_correction="", theta_correction="",
@@ -410,7 +410,7 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
 
     return np.concatenate( all_est_eqns )
 
-@profile
+#@profile
 def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df, 
                               alg_correction="", theta_correction=""):
 

@@ -255,7 +255,6 @@ class SmoothPosteriorSampling:
                                             post_var_treat), treat_states) 
         post_std_user = np.sqrt(post_var_user)
 
-        """
         ########### Form action selection probabilities (Sampling)
         n_tmp = len(post_mean_user)
         #norm_samples = self.rng.normal(loc=0, scale=1, 
@@ -287,6 +286,7 @@ class SmoothPosteriorSampling:
         #if PRECISION is not None:
         #    probs = np.around(probs, PRECISION)
         return probs
+        """
 
 
     def get_est_eqns(self, beta_params, data_sofar, all_user_ids, 

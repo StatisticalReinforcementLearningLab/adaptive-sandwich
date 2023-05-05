@@ -518,9 +518,12 @@ if args.dataset_type == 'oralytics':
             args.dataset_type, args.RL_alg, args.T, args.n,
             args.recruit_n, args.decisions_between_updates, args.steepness, args.action_centering)
 else:
-    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
-            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr,
-            args.action_centering)
+    #exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
+    #        args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr,
+    #        args.action_centering)
+    exp_str = '{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
+            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.recruit_n, args.decisions_between_updates,
+            args.steepness, args.alg_state_feats, args.err_corr, args.action_centering)
 
 # Load Data
 all_folder_path = os.path.join(args.save_dir, "simulated_data/{}".format(exp_str))
@@ -558,7 +561,7 @@ for i in range(1,args.N+1):
     # Form Estimator #########################################
     LS_estimator = form_LS_estimator(study_df)
     all_estimators[i-1] = LS_estimator
-    
+
     # Form Sandwich Var #######################################
     user_ids = study_df['user_id'].to_numpy()
     unique_user_ids = np.unique(user_ids)
@@ -583,6 +586,9 @@ for i in range(1,args.N+1):
         if i == 1:
             policy_param_dict = None
         continue
+
+    # TODO I am here
+    import ipdb; ipdb.set_trace()
 
     # Form Adaptive Sandwich Var ######################################
 
@@ -613,12 +619,29 @@ for i in range(1,args.N+1):
 
     #### Check eigenvalues
     try:
-        eigvals = scipy.linalg.eigvals( adaptive_sandwich_dict['stacked_hessian'] )
-        assert np.all(np.iscomplex(eigvals) == False)
-        assert np.min(np.absolute(eigvals)) > 0.001
+        theta_dim = LS_estimator.shape[0]
+        hessian_betas = adaptive_sandwich_dict['stacked_hessian'][:-theta_dim,:-theta_dim]
+        beta_dim = int( hessian_betas.shape[0] / (args.T-1) )
+        for t in range(args.T-1):
+            start_idx = beta_dim*t
+            end_idx = beta_dim*(t+1)
+            tmp_beta_hessian = adaptive_sandwich_dict['stacked_hessian'][start_idx:end_idx,start_idx:end_idx]
+            eigvals = scipy.linalg.eigvals( tmp_beta_hessian )
+            try:
+                assert np.all(np.iscomplex(eigvals) == False)
+            except:
+                import ipdb; ipdb.set_trace()
+        
+        eigvals2 = scipy.linalg.eigvals( adaptive_sandwich_dict['stacked_hessian'][-theta_dim:,-theta_dim:] )
+
+        #eigvals = scipy.linalg.eigvals( adaptive_sandwich_dict['stacked_hessian'] )
+        #hessian_betas = adaptive_sandwich_dict['stacked_hessian'][:-3,:-3]
+        #eigvals = scipy.linalg.eigvals( hessian_betas + np.eye(hessian_betas.shape[0]) )
+        assert np.all(np.iscomplex(eigvals2) == False)
+        #assert np.min(np.absolute(eigvals)) > 0.001
     except:
         print("Checking eigenvalues")
-        import ipdb; ipdb.set_trce()
+        import ipdb; ipdb.set_trace()
 
     if args.debug:
     #if True:

@@ -143,10 +143,93 @@ class SmoothPosteriorSampling:
         
         self.all_policies.append(alg_dict)
 
+        """
+        print(all_user_id_set)
+        print(set( all_prev_data['user_id'].to_numpy() ))
+        import ipdb; ipdb.set_trace()
+
+        post_mean_hi = post_mean
+        post_var_hi = post_var
+
+        # Do a batch update #######################
+        rewards = all_prev_data['reward'].to_numpy().reshape(-1,1)
+        actions = all_prev_data['action'].to_numpy().reshape(-1,1)
+        action1prob = all_prev_data['action1prob'].to_numpy().reshape(-1,1)
+        if self.action_centering:
+            design = np.concatenate( [ all_prev_data[self.state_feats],
+                        action1prob * all_prev_data[self.treat_feats],
+                        (actions-action1prob) * all_prev_data[self.treat_feats] ], axis=1 )
+        else:
+            design = np.concatenate( [ all_prev_data[self.state_feats], 
+                        actions * all_prev_data[self.treat_feats] ], axis=1 )
+        
+        # Only include available data
+        if self.args.dataset_type == 'heartsteps':
+            avail_bool = all_prev_data['availability'].astype('bool')
+            rewards_avail = rewards[ avail_bool ]
+            design_avail = design[ avail_bool ]
+            user_id_avail = all_prev_data['user_id'][avail_bool].to_numpy() 
+        else:
+            rewards_avail = rewards
+            design_avail = design
+            user_id_avail = all_prev_data['user_id'].to_numpy() 
+
+        alg_dict = {
+            "policy_last_t": t-1,
+            "new_data" : new_data,  # data used to get updated est_params
+            #"all_prev_data": all_prev_data,
+            "design" : design_avail,
+            "total_obs" : self.all_policies[-1]['total_obs'] + len(new_data),
+            "prior_mean": self.prior_mean,
+            "prior_var": self.prior_var,
+        }
+
+        RX = rewards_avail * design_avail
+        XX = np.einsum( 'ij,ik->jk', design_avail, design_avail )
+        inv_post_var = XX + np.linalg.inv( self.prior_var )
+        post_var = np.linalg.inv( inv_post_var )
+        prior_adj = np.matmul( np.linalg.inv(self.prior_var), self.prior_mean )
+        post_mean = np.matmul( post_var, np.sum(RX, axis=0) + prior_adj )
+
+        col_names = self.state_feats+['action:'+x for x in self.treat_feats]
+        all_user_id_set = set( all_prev_data['user_id'].to_numpy() ) 
+        V_matrix = XX / len(all_user_id_set)
+        
+        # reconstruct posterior variance
+        alg_dict["all_user_id"] = all_user_id_set
+        alg_dict["n_users"] = len(all_user_id_set)
+        alg_dict["post_mean"] = post_mean
+        alg_dict["post_var"] = post_var
+        alg_dict["col_names"] = col_names
+        alg_dict["V_matrix"] = V_matrix
+        alg_dict["XX"] = XX
+        alg_dict["RX"] = RX
+        alg_dict["intercept_val"] = V_matrix[0][0]
+        
+        V_suffvec = var2suffvec(self, V_matrix)
+        #varmatrix = suffvec2var(self, post_V_params)
+        #post_V_params = get_utri(post_V)
+        
+        est_params = np.hstack( [ post_mean, V_suffvec ] )
+        alg_dict["est_params"] = est_params
+
+        print(post_mean_hi == post_mean); print(post_var_hi == post_var)
+        import ipdb; ipdb.set_trace()
+        """
+
+        
 
     def get_action_probs(self, curr_timestep_data, filter_keyval):
       
         post_var = self.all_policies[-1]["post_var"]
+        
+        """
+        if np.equal( self.prior_var, post_var ).all():
+            # check if observed any non-trivial data yet
+            raw_probs = np.ones( curr_timestep_data.shape[0] )*self.args.fixed_action_prob
+            return clip(self.args, raw_probs)
+        """
+
         probs = self.get_action_probs_inner(curr_timestep_data, 
                 beta_est = self.all_policies[-1]["est_params"], 
                 n_users = self.all_policies[-1]["n_users"],
@@ -270,14 +353,25 @@ class SmoothPosteriorSampling:
         else:
             avail_vec = np.ones(outcome_vec.shape)
 
-        est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids,
-                                      beta_params, avail_vec, all_user_ids,
-                                      prior_dict = prior_dict,
-                                      correction = correction,
-                                      reconstruct_check = check,
-                                      RL_alg = self,
-                                      intercept_val = intercept_val)
-        
+        # assert self.all_policies[1]['design'] == design
+        # self.all_policies[2]['all_prev_data'].to_numpy() == data_sofar.to_numpy()[:,:-1]
+        # self.all_policies[2]['design'] == design
+
+        #tmp = self.all_policies[2]['all_prev_data'].to_numpy()
+        #design2 = np.concatenate( [ tmp[self.state_feats].to_numpy(),
+        #                actions * tmp[self.treat_feats].to_numpy() ], axis=1 )
+
+        try:
+            est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids,
+                                          beta_params, avail_vec, all_user_ids,
+                                          prior_dict = prior_dict,
+                                          correction = correction,
+                                          reconstruct_check = check,
+                                          RL_alg = self,
+                                          intercept_val = intercept_val)
+        except:
+            import ipdb; ipdb.set_trace()
+
         if return_ave_only:
             return np.sum(est_eqn_dict['est_eqns'], axis=0) / len(user_ids)
         return est_eqn_dict

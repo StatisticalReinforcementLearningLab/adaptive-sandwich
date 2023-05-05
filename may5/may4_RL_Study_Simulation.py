@@ -127,7 +127,7 @@ parser.add_argument('--T', type=int, default=arg_dict['T'],
 parser.add_argument('--recruit_n', type=int, default=arg_dict['recruit_n'],
                     help='Number of users recruited on each recruitment times')
 parser.add_argument('--recruit_t', type=int, default=arg_dict['recruit_t'],
-                    help='Number of updates between recruitment times (minmum 1)')
+                    help='Number of updates between recruitment times')
 parser.add_argument('--allocation_sigma', type=float, default=arg_dict['allocation_sigma'],
                     help='Sigma used in allocation of algorithm')
 parser.add_argument('--noise_var', type=float, default=arg_dict['allocation_sigma'],
@@ -183,7 +183,7 @@ def run_study_simulation(study_env, study_RLalg):
 
     # study_df is a data frame with a record of all data collected in study
     study_df = study_env.make_empty_study_df(args, user_env_data)
-
+    
     # Loop over all decision times ###############################################
     for t in range(1, study_env.calendar_T+1):
 
@@ -206,7 +206,7 @@ def run_study_simulation(study_env, study_RLalg):
 
             if num_avail > 0 and prev_num_users >= args.min_users:
                 # Update Algorithm ##############################################
-                study_RLalg.update_alg(new_update_data, t)
+                study_RLalg.update_alg(new_update_data, t, all_prev_data)
                 #print("update", t)
         
         if args.RL_alg != 'fixed_randomization':
@@ -225,6 +225,49 @@ def run_study_simulation(study_env, study_RLalg):
         # Sample Actions #####################################################
         action_probs = study_RLalg.get_action_probs(curr_timestep_data, 
                                         filter_keyval = ('calendar_t', t) )
+        """
+        curr_timestep_data.to_csv( 'test_curr_timestep_data.csv', 
+            index=False) # compression={'method': None, 
+                         #             'float_precision': 'high'} )
+        with open('test_study_RLalg.pkl', 'wb') as f:
+            pkl.dump(study_RLalg, f)
+
+        curr_timestep_data2 = pd.read_csv( 'test_curr_timestep_data.csv')
+                                          #float_precision="high" )
+        with open('test_study_RLalg.pkl', 'rb') as f:
+            study_RLalg2 = pkl.load(f)
+
+        action_probs2 = study_RLalg2.get_action_probs_inner(
+                curr_timestep_data = curr_timestep_data2,
+                beta_est = study_RLalg2.all_policies[-1]['est_params'], 
+                n_users = args.n,
+                intercept_val = study_RLalg2.all_policies[-1]['intercept_val'],
+                filter_keyval = ('calendar_t', t) )
+
+        #action_probs2 = study_RLalg.get_action_probs_inner(
+        #        curr_timestep_data = curr_timestep_data,
+        #        beta_est = study_RLalg.all_policies[-1]['est_params'], 
+        #        n_users = args.n,
+        #        intercept_val = study_RLalg.all_policies[-1]['intercept_val'],
+        #        filter_keyval = ('calendar_t', t) )
+                #filter_keyval = ('policy_last_t', policy_last_t))
+        
+        #action_probs2 = study_RLalg.get_action_probs(curr_timestep_data, 
+        #                                filter_keyval = ('calendar_t', t) )
+
+        try:
+            assert (action_probs/action_probs2 == 1).all()
+        except:
+            print("yo")
+            action_probs3 = study_RLalg2.get_action_probs_inner(
+                    curr_timestep_data = curr_timestep_data,
+                    beta_est = study_RLalg2.all_policies[-1]['est_params'], 
+                    n_users = args.n,
+                    intercept_val = study_RLalg2.all_policies[-1]['intercept_val'],
+                    filter_keyval = ('calendar_t', t) )
+            print( (action_probs3/action_probs == 1).all() ) 
+            import ipdb; ipdb.set_trace()
+        """
 
         if args.dataset_type == 'heartsteps':
             action_probs *= curr_timestep_data['availability']
@@ -245,21 +288,74 @@ def run_study_simulation(study_env, study_RLalg):
             fill_columns = ['reward', 'action', 'action1prob']
             fill_vals = np.vstack( [rewards, actions, action_probs] ).T
             study_df.loc[ study_df['calendar_t'] == t, fill_columns] = fill_vals
-        
+       
+        """
+        # Check weights are 1
+        if t > 1:
+            new_curr_timestep_data = study_df[ study_df['calendar_t'] == t ]
+            all_user_ids = np.unique( study_df['user_id'].to_numpy() )
+            weights = study_RLalg.get_weights(new_curr_timestep_data,
+                    beta_params = study_RLalg.all_policies[-1]['est_params'],
+                    all_user_ids = all_user_ids,
+                    intercept_val = study_RLalg.all_policies[-1]['intercept_val'])
+        """
+
         if t < study_env.calendar_T:
             # Record data to prepare for state at next decision time
             current_users = study_df[ study_df['calendar_t'] == t ]['user_id']
-            study_df = study_env.update_study_df(study_df, t)
-           
-            #print(study_df[ study_df['calendar_t'] == t+1 ])
-            #print(t)
-       
+            study_df = study_env.update_study_df(study_df, t, rewards, actions, current_users)
 
     if args.RL_alg == 'posterior_sampling':
         # fill in some columns
         study_RLalg.norm_samples_df['policy_last_t'] = study_df['policy_last_t']
         study_RLalg.norm_samples_df['policy_num'] = study_df['policy_num']
 
+    """
+    # TESTING ##############################
+    study_df.to_csv( 'test_data.csv', index=False, compression={'method': None,
+                                      'float_precision': 'high'} )
+    with open('test_study_RLalg.pkl', 'wb') as f:
+        pkl.dump(study_RLalg, f)
+
+    study_df2 = pd.read_csv( 'test_data.csv', float_precision="high")
+    with open('test_study_RLalg.pkl', 'rb') as f:
+        study_RLalg2 = pkl.load(f)
+
+    all_user_ids = np.unique( study_df2['user_id'].to_numpy() )
+    for policy_num, curr_policy_dict in enumerate(study_RLalg2.all_policies):
+        policy_last_t = curr_policy_dict['policy_last_t']
+        if policy_last_t == 0:
+            continue
+        
+        if args.RL_alg == "sigmoid_LS":
+            est_params = curr_policy_dict['est_params'].to_numpy().squeeze()
+        elif args.RL_alg == "posterior_sampling":
+            est_params = curr_policy_dict['est_params']
+        else:
+            raise ValueError("RL algorithm")
+
+        #beta_est = est_list[policy_num-1]
+        beta_est = est_params
+
+        curr_policy_decision_data = study_df2[ study_df2['policy_last_t'] == policy_last_t ]
+            # curr_policy_decision_data = all data collected using the policy policy_last_t
+
+        user_pi_weights = study_RLalg2.get_weights(curr_policy_decision_data,
+                                    beta_est, all_user_ids=all_user_ids,
+                                    intercept_val = curr_policy_dict['intercept_val'],
+                                    filter_keyval = ('policy_last_t', policy_last_t) )
+
+        # Check that reproduced the action selection probabilities correctly
+        try:
+            assert np.all(user_pi_weights == 1)
+            #assert np.all(np.around(user_pi_weights,10) == 1)
+            #assert np.mean(np.absolute(user_pi_weights - 1)) < 0.01
+        except:
+            print("uh oh")
+            import ipdb; ipdb.set_trace()
+
+    import ipdb; ipdb.set_trace()
+    """
     return study_df, study_RLalg
 
 
@@ -286,9 +382,9 @@ if args.dataset_type == 'oralytics':
             args.dataset_type, args.RL_alg, args.T, args.n, 
             args.recruit_n, args.decisions_between_updates, args.steepness, args.action_centering)
 else:
-    exp_str = '{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
-            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.recruit_n, args.decisions_between_updates,
-            args.steepness, args.alg_state_feats, args.err_corr, args.action_centering)
+    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
+            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr,
+            args.action_centering)
 
 simulation_data_path = os.path.join(args.save_dir, "simulated_data")
 if not os.path.isdir(simulation_data_path):
@@ -393,6 +489,7 @@ for i in range(1,args.N+1):
 
     with open('{}/study_RLalg.pkl'.format(folder_path), 'wb') as f:
         pkl.dump(study_RLalg, f)
+
 
 
 

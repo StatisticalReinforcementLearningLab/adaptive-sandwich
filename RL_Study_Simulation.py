@@ -307,7 +307,8 @@ for i in range(1,args.N+1):
             else:
                 total_dim = len(alg_state_feats) + len(alg_treat_feats)
                 prior_mean = np.ones(total_dim)*0.1
-                prior_var = np.eye(total_dim)*2
+                prior_var = np.eye(total_dim)*0.5
+
         else:
             raise ValueError("Invalid prior type: {}".format(args.prior))
         study_RLalg = SmoothPosteriorSampling(args, alg_state_feats, 

@@ -87,7 +87,6 @@ def get_est_eqn_LS(outcome_vec, design, present_user_ids, est_param, avail_vec,
     if not light:
         hessian = - np.einsum( 'ij,ik->jk', design_avail, W_design )
         normalized_hessian = hessian / n_unique #n_users
-        #normalized_inv_hessian = inv_hessian*n_users
 
     # Get estimating equations
     if correction == "HC3":
@@ -134,18 +133,14 @@ def get_est_eqn_LS(outcome_vec, design, present_user_ids, est_param, avail_vec,
    
     raw_est_eqns = residuals_adjust.reshape(-1,1) * W_design
 
-    # TODO check computations here
     if prior_dict is not None:
         ############ Adjustments if there is a prior
         # Posterior mean adjustment
         inv_prior_var = np.linalg.inv( prior_dict["prior_var"] )
-        post_mean_adj = np.matmul(inv_prior_var, est_param-prior_dict["prior_mean"]) / n_users
-        # TODO alg_n_users in constructing probabilities 
-        # TODO check intercept_val reconstruction?
+        post_mean_adj = np.matmul(inv_prior_var, prior_dict["prior_mean"]-est_param) / n_users
 
         # V matrix adjustment
         V_adj = -V_param_raw
-        #V_adj = np.zeros(V_param_raw.shape)
 
         # Combined
         post_adj = np.concatenate([post_mean_adj, V_adj])
@@ -157,7 +152,7 @@ def get_est_eqn_LS(outcome_vec, design, present_user_ids, est_param, avail_vec,
         XXouter_flat = XXouter.reshape((XXouter.shape[0], -1))
        
         suffvec_idx = var2suffvec(RL_alg, V_matrix, return_idx=True)
-        V_param_est_eqn = XXouter_flat[:,suffvec_idx]
+        V_param_est_eqn = XXouter_flat[:,suffvec_idx] 
         
         ########### Concatenate estimating equations
         post_mean_est_eqn = raw_est_eqns / prior_dict["noise_var"]
@@ -179,38 +174,11 @@ def get_est_eqn_LS(outcome_vec, design, present_user_ids, est_param, avail_vec,
         user_ids_grouped = all_user_ids_grouped[sort_idx]
         est_eqn_grouped = all_est_eqn_grouped[sort_idx]
 
-
-    """
-    # Group by / sum over user_id
-    add_users = set(all_user_ids) - unique_user_ids
-    if len(add_users) > 0:
-        all_user_ids_vec = np.concatenate( [[x for x in add_users], present_user_ids] )
-        zeros = np.zeros((len(add_users), raw_est_eqns.shape[1]))
-        raw_est_eqns = np.concatenate( [zeros, raw_est_eqns], axis=0 )
-
-        sort_idx = np.argsort(all_user_ids)
-        all_user_ids_vec = all_user_ids_vec[sort_idx]
-        raw_est_eqns = raw_est_eqns[sort_idx]
-    est_eqns = npi.group_by(all_user_ids_vec).sum(raw_est_eqns)[1]
-    """
-    
-    """
-    est_eqns = []
-    for idx in all_user_ids:
-        if idx in present_user_ids:
-            user_est_eqn = np.sum( raw_est_eqns[ present_user_ids == idx ], axis=0 )
-            if prior_dict is not None:
-                user_est_eqn = user_est_eqn + post_adj
-        else:
-            user_est_eqn = np.zeros( raw_est_eqns.shape[1] )
-        est_eqns.append(user_est_eqn)
-    """
     if reconstruct_check:
         try:
             if correction == "":
                 est_eqn_error = np.absolute( np.array(est_eqn_grouped).mean(axis=0) )
                 assert np.all( np.isclose( est_eqn_error, 0 ) )
-                #assert np.all( np.absolute( np.array(est_eqn_grouped).sum(axis=0) ) < 0.00001 )
             else:
                 assert np.all( np.absolute( np.array(est_eqn_grouped).mean(axis=0) ) < 0.01 )
         except:
@@ -225,8 +193,6 @@ def get_est_eqn_LS(outcome_vec, design, present_user_ids, est_param, avail_vec,
                 "est_eqns" : est_eqn_grouped,
                 "hessian" : hessian,
                 "normalized_hessian" : normalized_hessian,
-                #"inv_hessian" : inv_hessian,
-                #"normalized_inv_hessian" : normalized_inv_hessian,
                 "present_user_ids": present_user_ids,
                 "all_user_ids": user_ids_grouped,
                 "estimator": est_param, 

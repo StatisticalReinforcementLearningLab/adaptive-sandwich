@@ -3,7 +3,6 @@ import pandas as pd
 import scipy
 
 from least_squares_helper import get_utri, symmetric_fill_utri
-from helper_functions import PRECISION
 
 def get_entry_last_times(args):
     # Compute entry / last decision times compared to calendar for each user
@@ -135,8 +134,6 @@ class SyntheticEnv:
                 gen_feats_reward_action_names
 
         
-        if PRECISION is not None:
-            state_vals = np.around(state_vals,PRECISION)
         study_df.loc[ cont_user_next_bool, state_names ] = state_vals
      
         return study_df
@@ -155,8 +152,6 @@ class SyntheticEnv:
         reward_means = np.matmul(gen_covariates, params)
         rewards = reward_means + self.reward_noise[ curr_timestep_data.index.to_numpy() ]
 
-        if PRECISION is not None:
-            rewards = np.around(rewards, PRECISION)
         return rewards
 
 
@@ -172,11 +167,7 @@ class SyntheticEnv:
         study_df['intercept'] = 1
         zero_col = [ x for x in self.gen_feats if x not in base_cols ]
         study_df.loc[ study_df['calendar_t'] == 1, zero_col ] = 0
-        if PRECISION is not None:
-            initial_past_rewards = np.around(
-                    self.rng.normal(0,0.5, size=args.n),PRECISION)
-        else:
-            initial_past_rewards = self.rng.normal(0,0.5, size=args.n)
+        initial_past_rewards = self.rng.normal(0,0.5, size=args.n)
         study_df.loc[ study_df['user_t'] == 1, 'past_reward' ] = \
                 initial_past_rewards
         study_df.loc[ study_df['user_t'] == 1, 'past_action_1' ] = 0

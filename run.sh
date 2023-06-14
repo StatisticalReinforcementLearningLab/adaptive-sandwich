@@ -3,7 +3,7 @@
 # Steepness=0.5,1,2?
 # Sample size=100,500,1000
 
-T=6
+T=25
 decisions_between_updates=2
 recruit_n=25; recruit_t=2
 recruit_n=50; recruit_t=1

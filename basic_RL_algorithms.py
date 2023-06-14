@@ -6,8 +6,7 @@ import torch
 import numpy_indexed as npi
 
 from least_squares_helper import get_est_eqn_LS
-#from est_eqn_helper import get_est_eqn_LS_tmp
-from helper_functions import PRECISION, clip
+from helper_functions import clip
 
 
 class FixedRandomization:

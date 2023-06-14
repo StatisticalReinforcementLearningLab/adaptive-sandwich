@@ -9,6 +9,8 @@ from helper_functions import clip, var2suffvec, suffvec2var, get_utri, symmetric
 from least_squares_helper import get_est_eqn_LS
 from synthetic_env import make_base_study_df
 
+NUM_POSTERIOR_SAMPLES=2000
+
 def generalized_logistic(args, lin_est):
     inner = args.steepness*lin_est/args.allocation_sigma
     raw = scipy.special.expit( inner )
@@ -455,7 +457,6 @@ class SmoothPosteriorSampling:
             all_weights_grouped = weights_grouped
 
         if return_probs:
-            import ipdb; ipdb.set_trace()
             return (all_weights_grouped, prob1_beta)
 
         return all_weights_grouped

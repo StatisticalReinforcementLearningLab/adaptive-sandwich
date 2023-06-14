@@ -1,7 +1,9 @@
 import numpy as np
 
-#PRECISION=None
-PRECISION=5
+def clip(args, vals):
+    lower_clipped = np.maximum( vals, args.lower_clip )
+    clipped = np.minimum( lower_clipped, args.upper_clip )
+    return clipped
 
 def get_utri(matrix, return_idx=False):
     triu_idx = np.triu_indices(matrix.shape[0])
@@ -87,12 +89,6 @@ def var2suffvec(RLalg, varmatrix, return_idx=False):
         for suff_feat in suffvec_names:
             idx = flat_matrix_names.index(suff_feat)
             all_idx.append( idx )
-
-        """
-        print( all_idx )
-        print( suffvec_names )
-        print( [ flat_matrix_names[idx] for idx in all_idx ] )
-        """
 
         if return_idx:
             return all_idx

@@ -17,7 +17,7 @@ def output_variance_pieces(study_df, study_RLalg, args, verbose=False):
 
         # Policy Parameters (solution to estimating equation) ################
         if args.RL_alg == "sigmoid_LS":
-            est_params = curr_policy_dict['est_params']
+            est_params = curr_policy_dict['beta_est']
         elif args.RL_alg == "posterior_sampling":
 
             post_V = curr_policy_dict['post_V']
@@ -26,7 +26,7 @@ def output_variance_pieces(study_df, study_RLalg, args, verbose=False):
 
             est_params = np.hstack( [ curr_policy_dict['post_mean'], post_V_params ] )
 
-        out_dict[policy_num]['est_params'] = est_params
+        out_dict[policy_num]['beta_est'] = est_params
 
         # Estimating Equation and Inverse Hessian (Bread) ####################
         data_sofar = study_df[ study_df['policy_last_t'] < policy_last_t ]
@@ -37,10 +37,10 @@ def output_variance_pieces(study_df, study_RLalg, args, verbose=False):
                                                  all_user_ids=all_user_ids)
             # we require all RL algorithms to have a function `get_est_eqns` that
                 # forms the estimating equation for policy parameters
-
+        
         out_dict[policy_num]['est_eqns'] = est_eqns_dict['est_eqns']
         out_dict[policy_num]['est_eqns_HC3'] = est_eqns_dict['est_eqns_HC3']
-        out_dict[policy_num]['est_eqns_user_ids'] = est_eqns_dict['present_user_ids']
+        out_dict[policy_num]['est_eqns_user_ids'] = est_eqns_dict['all_user_ids']
         out_dict[policy_num]['normalized_hessian'] = est_eqns_dict['normalized_hessian']
 
         # Pi Gradient ########################################################

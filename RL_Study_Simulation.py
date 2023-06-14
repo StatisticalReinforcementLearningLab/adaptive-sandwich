@@ -14,7 +14,6 @@ from debug_helper import output_variance_pieces
 
 from basic_RL_algorithms import FixedRandomization, SigmoidLS
 from smooth_posterior_sampling import SmoothPosteriorSampling
-#from posterior_sampling_RL_algorithm import PosteriorSampling
 
 
 ###############################################################
@@ -73,15 +72,6 @@ elif tmp_args.dataset_type == 'synthetic':
     alg_state_feats = tmp_args.alg_state_feats.split(",")
     alg_treat_feats = tmp_args.alg_state_feats.split(",")
 
-    """
-    past_action_len = 1
-    past_action_cols = ['intercept'] + \
-            ['past_action_{}'.format(i) for i in range(1,past_action_len+1)]
-    past_reward_action_cols = ['past_reward'] + \
-            ['past_action_{}_reward'.format(i) for i in range(1,past_action_len+1)]
-    gen_feats = past_action_cols + past_reward_action_cols
-    """
-   
     # Generation features
     past_action_len = 1
     past_action_cols = ['intercept'] + \
@@ -90,19 +80,6 @@ elif tmp_args.dataset_type == 'synthetic':
             ['past_action_{}_reward'.format(i) for i in range(1,past_action_len+1)]
     gen_feats = past_action_cols + past_reward_action_cols + ['dosage']
    
-    """
-    alg_state_feats = ['intercept']
-    alg_treat_feats = ['intercept']
-
-    past_action_len = 8
-    past_action_cols = ['past_action_{}'.format(i) for i in range(1,past_action_len+1)]
-    past_action_cols.reverse()
-    gen_feats = past_action_cols
-
-    gen_feats = gen_feats
-    gen_feats_reward = ['reward_'+x for x in gen_feats]
-    """
-
     
 elif tmp_args.dataset_type == 'oralytics':
     arg_dict = { "T" : 50, 'recruit_n': tmp_args.n, 'recruit_t': 1, 
@@ -110,14 +87,8 @@ elif tmp_args.dataset_type == 'oralytics':
 
     #allocation_sigma: 163 (truncated brush times); 5.7 (square-root of truncatred brush times)
 
-    #alg_state_feats = ['intercept', 'time_of_day', 'prev_brush', 'prev_message', 'weekend']
-    #alg_treat_feats = ['intercept', 'time_of_day', 'prev_brush', 'prev_message']
-    
     alg_state_feats = ['intercept', 'time_of_day', 'prior_day_brush']
     alg_treat_feats = ['intercept', 'time_of_day', 'prior_day_brush']
-    
-    #alg_state_feats = ['intercept']
-    #alg_treat_feats = ['intercept']
     
 else:
     raise ValueError()
@@ -187,37 +158,16 @@ def run_study_simulation(study_env, study_RLalg):
     # Loop over all decision times ###############################################
     for t in range(1, study_env.calendar_T+1):
 
-        # Check if need to update algorithm #######################################
-        if t > 1 and (t-1) % args.decisions_between_updates == 0 and args.RL_alg != 'fixed_randomization':
-            # check enough avail data and users; if so, update algorithm
-            most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
-            new_obs_bool = np.logical_and( study_df['calendar_t'] < t,
-                                    study_df['calendar_t'] > most_recent_policy_t)
-            new_update_data = study_df[ new_obs_bool ]
-            
-            all_prev_data = study_df[ study_df['calendar_t'] < t ]
-            #print(all_prev_data.shape, new_update_data.shape, t)
-            
-            if args.dataset_type == 'heartsteps':
-                num_avail = np.sum(new_update_data['availability'])
-            else:
-                num_avail = 1
-            prev_num_users = len(study_df[ study_df['calendar_t'] == t-1 ])
-
-            if num_avail > 0 and prev_num_users >= args.min_users:
-                # Update Algorithm ##############################################
-                study_RLalg.update_alg(new_update_data, t)
-                #print("update", t)
-        
         if args.RL_alg != 'fixed_randomization':
             # Update study_df with info on latest policy used to select actions
             study_df.loc[ study_df['calendar_t'] == t, 'policy_last_t'] = \
                                                 study_RLalg.all_policies[-1]["policy_last_t"]
             study_df.loc[ study_df['calendar_t'] == t, 'policy_num'] = \
                                                 len(study_RLalg.all_policies)
+
         else:
             study_df.loc[ study_df['calendar_t'] == t, 'policy_last_t'] = 0
-            study_df.loc[ study_df['calendar_t'] == t, 'policy_num'] = 0
+            study_df.loc[ study_df['calendar_t'] == t, 'policy_num'] = 1
 
         curr_timestep_data = study_df[ study_df['calendar_t'] == t ]
   
@@ -225,7 +175,7 @@ def run_study_simulation(study_env, study_RLalg):
         # Sample Actions #####################################################
         action_probs = study_RLalg.get_action_probs(curr_timestep_data, 
                                         filter_keyval = ('calendar_t', t) )
-
+        
         if args.dataset_type == 'heartsteps':
             action_probs *= curr_timestep_data['availability']
         actions = study_RLalg.rng.binomial(1, action_probs)
@@ -250,15 +200,31 @@ def run_study_simulation(study_env, study_RLalg):
             # Record data to prepare for state at next decision time
             current_users = study_df[ study_df['calendar_t'] == t ]['user_id']
             study_df = study_env.update_study_df(study_df, t)
-           
-            #print(study_df[ study_df['calendar_t'] == t+1 ])
-            #print(t)
-       
+            
+        # Check if need to update algorithm #######################################
+        if t % args.decisions_between_updates == 0 and args.RL_alg != 'fixed_randomization':
+            # check enough avail data and users; if so, update algorithm
+            most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
+            new_obs_bool = np.logical_and( study_df['calendar_t'] <= t,
+                                    study_df['calendar_t'] > most_recent_policy_t)
+            new_update_data = study_df[ new_obs_bool ]
+            all_prev_data = study_df[ study_df['calendar_t'] <= t ]
+            
+            if args.dataset_type == 'heartsteps':
+                num_avail = np.sum(new_update_data['availability'])
+            else:
+                num_avail = 1
+            prev_num_users = len(study_df[ study_df['calendar_t'] == t ])
 
+            if num_avail > 0 and prev_num_users >= args.min_users:
+                # Update Algorithm ##############################################
+                study_RLalg.update_alg(new_update_data, update_last_t = t)
+            
+        
     if args.RL_alg == 'posterior_sampling':
-        # fill in some columns
-        study_RLalg.norm_samples_df['policy_last_t'] = study_df['policy_last_t']
-        study_RLalg.norm_samples_df['policy_num'] = study_df['policy_num']
+        fill_columns = ['policy_last_t', 'policy_num']
+        for col in fill_columns:
+            study_RLalg.norm_samples_df[col] = study_df[col].to_numpy().copy()
 
     return study_df, study_RLalg
 
@@ -393,8 +359,6 @@ for i in range(1,args.N+1):
 
     with open('{}/study_RLalg.pkl'.format(folder_path), 'wb') as f:
         pkl.dump(study_RLalg, f)
-
-
 
     # TODO eventually removeSave Variance Components ##################################################
     if args.RL_alg == 'sigmoid_LS':

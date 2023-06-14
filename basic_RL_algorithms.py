@@ -3,16 +3,11 @@ import pandas as pd
 import scipy.special
 from scipy.linalg import sqrtm
 import torch
+import numpy_indexed as npi
 
 from least_squares_helper import get_est_eqn_LS
 #from est_eqn_helper import get_est_eqn_LS_tmp
-from helper_functions import PRECISION
-
-def clip(args, vals):
-    lower_clipped = np.maximum( vals, args.lower_clip )
-    clipped = np.minimum( lower_clipped, args.upper_clip )
-    return clipped
-
+from helper_functions import PRECISION, clip
 
 
 class FixedRandomization:
@@ -38,19 +33,6 @@ class FixedRandomization:
     def get_est_eqn(self, data_sofar):
         raise ValueError("Fixed randomization no need for \
                                      estimating equation of policy")
-
-
-""""""
-""""""
-""""""
-""""""
-""""""
-""""""
-""""""
-""""""
-""""""
-""""""
-""""""
 
 
 def torch_clip(args, vals):
@@ -94,10 +76,11 @@ class SigmoidLS:
             "policy_last_t": 0,
             "RX" : np.zeros(total_dim),
             "XX" : np.zeros(total_dim),
-            "est_params" : None,
+            "beta_est" : None,
             "new_data" : None, 
             "total_obs" : 0,
-            # data used to get updated est_params
+            "seen_user_id": set(),
+            # data used to get updated beta_est
         }
         self.all_policies = [alg_dict]
         
@@ -105,138 +88,332 @@ class SigmoidLS:
         self.treat_bool = np.array( [True if x in self.treat_feats_action else 
                       False for x in self.state_feats+self.treat_feats_action ] )
         
-   
-    def update_alg(self, new_data, t):
+    def get_states(self, tmp_df):
+        base_states = tmp_df[self.state_feats].to_numpy()
+        treat_states = tmp_df[self.treat_feats].to_numpy()
+        return (base_states, treat_states)
+
+
+    def update_alg(self, new_data, update_last_t):
+        """
+        Update algorithm with new data
+
+        Inputs:
+        - `new_data`: a pandas data frame with new data
+        - `update_last_t`: an integer representing the last calendar time 
+            of data that was used to update the algorithm
+
+        Outputs:
+        - None
+        """
+
         # update algorithm with new data
         actions = new_data['action'].to_numpy().reshape(-1,1)
+        action1probs = new_data['action1prob'].to_numpy().reshape(-1,1)
         rewards = new_data['reward'].to_numpy().reshape(-1,1)
-        X_vecs = np.concatenate( [ new_data[self.state_feats], 
-                            actions * new_data[self.treat_feats] ], axis=1 )
+        base_states, treat_states = self.get_states(new_data)
+        design = np.concatenate( [ base_states, 
+                            actions * treat_states ], axis=1 )
 
         # Only include available data
+        calendar_t = new_data['calendar_t'].to_numpy().reshape(-1,1)
+        user_t = new_data['user_t'].to_numpy().reshape(-1,1)
         if self.args.dataset_type == 'heartsteps':
             avail_bool = new_data['availability'].astype('bool')
             rewards_avail = rewards[ avail_bool ]
-            X_avail = X_vecs[ avail_bool ]
-            user_id_avail = new_data['user_id'][avail_bool].to_numpy() 
+            design_avail = design[ avail_bool ]
+            user_id_avail = new_data['user_id'][avail_bool].to_numpy()
+            calendar_t = calendar_t[avail_bool]
+            user_t = user_t[avail_bool]
         else:
             rewards_avail = rewards
-            X_avail = X_vecs
+            avail_bool = np.ones(rewards.shape)
+            design_avail = design
             user_id_avail = new_data['user_id'].to_numpy() 
         
-        alg_dict = {
-            "policy_last_t": t-1,
-            "new_data" : new_data,  # data used to get updated est_params
-            "design" : X_vecs,
-            "total_obs" : self.all_policies[-1]['total_obs'] + len(new_data)
-        }
-        
-        new_RX = self.all_policies[-1]['RX'] + np.sum(X_avail*rewards_avail, 0)
-        new_XX = self.all_policies[-1]['XX'] + \
-                                np.einsum( 'ij,ik->jk', X_avail, X_avail )
-
-        col_names = self.state_feats+['action:'+x for x in self.treat_feats]
             
-        # Get policy parameters
+        # Get policy estimator
+        new_RX = self.all_policies[-1]['RX'] + \
+                            np.sum(design_avail*rewards_avail, 0)
+        new_XX = self.all_policies[-1]['XX'] + \
+                            np.einsum( 'ij,ik->jk', design_avail, design_avail )
         try:
             inv_XX = np.linalg.inv( new_XX )
         except:
             import ipdb; ipdb.set_trace()
-        est_params = np.matmul(inv_XX, new_RX.reshape(-1))
-        est_params_df = pd.DataFrame(est_params.reshape(1,-1),
-                                 columns=self.state_feats+self.treat_feats_action)
-            
-        alg_dict["RX"] = new_RX
-        alg_dict["XX"] = new_XX
-        alg_dict["est_params"] = est_params_df
+        beta_est = np.matmul(inv_XX, new_RX.reshape(-1))
+       
+        col_names = self.state_feats+['action:'+x for x in self.treat_feats]
+        beta_est_df = pd.DataFrame(beta_est.reshape(1,-1),
+                        columns=self.state_feats+self.treat_feats_action)
+      
+        seen_user_id = self.all_policies[-1]['seen_user_id'].copy()
+        seen_user_id.update(new_data['user_id'].to_numpy())
 
-        self.all_policies.append(alg_dict)
+        # Save Data
+        inc_data = {
+            "reward": rewards.flatten(),
+            "action": actions.flatten(),
+            "action1prob": action1probs.flatten(),
+            "base_states": base_states,
+            "treat_states": treat_states,
+            "avail": avail_bool.flatten(),
+            "user_id": user_id_avail,
+            "calendar_t": calendar_t.flatten(),
+            "user_t": user_t.flatten(),
+            "design" : design,
+        }
+        update_dict = {
+            "policy_last_t": update_last_t,
+            "total_obs" : self.all_policies[-1]['total_obs'] + len(new_data),
+            "RX": new_RX,
+            "XX": new_XX,
+            "beta_est": beta_est_df,
+            "inc_data": inc_data,
+            "seen_user_id": seen_user_id,
+            #"new_data" : new_data,  # data used to get updated beta_est
+        }
+       
+        self.all_policies.append(update_dict)
 
 
-    def get_action_probs_inner(self, curr_timestep_data, beta_est, n_users=None, intercept_val=None, filter_keyval=None):
-        user_states = curr_timestep_data[self.state_feats]
+
+    def get_action_probs_inner(self, beta_est, prob_input_dict):
+        """
+        Form action selection probabilities from raw inputs (used to form importance weights)
+
+        Inputs:
+        - `beta_est`: Algorithm's beta estimators
+        - `prob_input_dict`: Dictionary of other information needed to form action selection probabilities
+            This dictionary should include: 
+                - `treat_states` (matrix where each row is a state vector that interacts with treatment effect model)
         
-        treat_states = user_states[self.treat_feats].to_numpy()
-        treat_params = beta_est[self.treat_bool]
+        Outputs:
+        - Numpy vector of action selection probabilities
+        """
 
-        lin_est = np.matmul(treat_states, treat_params.T)
+        treat_est = beta_est[self.treat_bool]
+        lin_est = np.matmul(prob_input_dict['treat_states'], treat_est.T)
+        
         raw_probs = scipy.special.expit(lin_est)
         probs = clip(self.args, raw_probs)
-        #if PRECISION is not None:
-        #    probs = np.around(probs, PRECISION)
+        
         return probs.squeeze()
         
 
-    def get_action_probs(self, curr_timestep_data, filter_keyval):
+    def get_action_probs(self, curr_timestep_data, filter_keyval=None):
+        """
+        Form action selection probabilities from newly current data (only use when running RL algorithm)
+
+        Inputs:
+        - `curr_timestep_data`: Pandas data frame of current data that can be used to form the states
+        - `filter_keyval`: None (not needed for this algorithm)
+
+        Outputs:
+        - Numpy vector of action selection probabilities
+        """
         
         if np.sum( np.abs( self.all_policies[-1]["XX"] ) ) == 0:
             # check if observed any non-trivial data yet
             raw_probs = np.ones( curr_timestep_data.shape[0] )*self.args.fixed_action_prob
             return clip(self.args, raw_probs)
        
-        est_param_df = self.all_policies[-1]['est_params'].copy() 
-        est_params = est_param_df.to_numpy()
+        beta_est_df = self.all_policies[-1]['beta_est'].copy() 
+        beta_est = beta_est_df.to_numpy()
         
-        probs = self.get_action_probs_inner(curr_timestep_data, est_params.squeeze())
+        treat_states = curr_timestep_data[self.treat_feats].to_numpy()
+
+        prob_input_dict = {
+                'treat_states': treat_states,
+                }
+        probs = self.get_action_probs_inner(beta_est.squeeze(), 
+                                            prob_input_dict)
         return probs
 
 
-    def get_est_eqns(self, beta_params, data_sofar, all_user_ids, return_ave_only=False, action1probs=None, correction="", check=False, intercept_val=None):
+    def get_weights(self, beta_est, collected_data_dict, return_probs=False):
         """
-        Get estimating equations for policy parameters for one update
+        Get Radon Nikodym weights for all weights for all decisions made by a given policy update
+
+        Inputs:
+        - `beta_est`: Algorithm's beta estimators
+        - `collected_data_dict`: Dictionary of other information needed to form weights, specifically, data collected using the policy
+            This dictionary should include: 
+                - `action` (vector where each entry is a binary indicator of what action was taken)
+                - `action1prob` (vector where each entry has the probability of treatment)
+                - `treat_states` (matrix where each row is a state vector that interacts with treatment effect model)
+                - `user_id` (vector of user ids that correspond to which users state/action information is used)
+                - `all_user_id` (set of all user ids in entire study)
+                - `unique_user_id` (set of unique user ids in collected data)
+        - `return_probs`: In addition to weights, also return treatment probabilities
+
+        Outputs:
+        - Vector of Randon Nikodym weights
+        - If `return_probs` is True, also returns a vector of treatment probabilities
         """
-        actions = data_sofar.action.to_numpy().reshape(-1,1)
-        X_vecs = np.concatenate( [ data_sofar[self.state_feats].to_numpy(), 
-                    actions * data_sofar[self.treat_feats].to_numpy() ], axis=1 )
-        outcome_vec = data_sofar.reward.to_numpy()
-        design = X_vecs
+
+        action = collected_data_dict['action']
+        used_prob1 = collected_data_dict['action1prob']
+        used_probA = action*used_prob1 + (1-action)*(1-used_prob1)
+        treat_states = collected_data_dict['treat_states']
         
-        user_ids = data_sofar.user_id.to_numpy()
-        if self.args.dataset_type == 'heartsteps':
-            avail_vec = data_sofar.availability.to_numpy()
+        prob1_beta = self.get_action_probs_inner(beta_est, collected_data_dict)
+        probA_beta = action*prob1_beta + (1-action)*(1-prob1_beta) 
+        weights_subset = probA_beta / used_probA
+        
+        # Group by user id
+        pi_user_ids = collected_data_dict['user_id']
+        user_ids_grouped, weights_grouped = npi.group_by(pi_user_ids).prod(weights_subset)
+
+        add_users = set(collected_data_dict['all_user_id']) - set(pi_user_ids)
+
+        if len(add_users) > 0:
+            all_user_ids_grouped = np.concatenate( [[x for x in add_users], user_ids_grouped] )
+            ones = np.ones((len(add_users)))
+            all_weights_grouped = np.concatenate( [ones, weights_grouped], axis=0 )
+
+            sort_idx = np.argsort(all_user_ids_grouped)
+            all_user_ids_grouped = all_user_ids_grouped[sort_idx]
+            all_weights_grouped = all_weights_grouped[sort_idx]
         else:
-            avail_vec = np.ones(outcome_vec.shape)
-            
-        #est_eqn_dict = get_est_eqn_LS_tmp(outcome_vec, design, user_ids, 
-        est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids, 
-                                      beta_params, avail_vec, all_user_ids,
-                                      correction = correction,
-                                      reconstruct_check = check)
+            all_weights_grouped = weights_grouped
+
+        if return_probs:
+            import ipdb; ipdb.set_trace()
+            return (all_weights_grouped, prob1_beta)
+
+        return all_weights_grouped
+
+    
+    def get_est_eqns(self, beta_est, data_dict, info_dict=None,
+                     return_ave_only=False, correction="", 
+                     check=False, light=False):
+        """
+        Get estimating equations for policy estimators for one update
+
+        Inputs:
+        - `beta_est`: Algorithm's beta estimators
+        - `data_dict`: Dictionary of other information needed to form estimating equations
+            This dictionary should include: 
+                - `action` (vector where each entry is a binary indicator of what action was taken)
+                - `reward` (vector where each entry is a real number reward)
+                - `avail` (vector where each entry is a binary indicator of whether the user was available)
+                - `base_states` (matrix where each row is a state vector that interacts with baseline reward model)
+                - `treat_states` (matrix where each row is a state vector that interacts with treatment effect model)
+                - `design` (design matrix where each row is the concatenation of base_states and action * treat_states)
+                - `user_id` (vector of user ids that correspond to which users state/action information is used)
+                - `all_user_id` (unique set of all user ids in entire study)
+        - `info_dict`: Dictionary that contains additional information about the algorithm that may be necessary
+            For this algorithm, there is no need for this dictionary. It can be None
+        - `return_ave_only`: Returns the estimating equations averaged over the users who have been in the study (we have data for)
+        - `correction`: Type of small sample correction (default is none, other options are HC3, CR3VE, CR2VE)
+        - `check`: Indicator of whether to check the reconstruction of the action selection probabilities
+        - `light`: Indicator of whether to just return a dictionary with estimating equations in it. If it is false, it will return a dictionary with additional information (hessian, present user ids, etc.)
+
+        Outputs:
+        - Dictionary with numpy matrix of estimating equations (dictionary has more information if light=False)
+        """
+
+        actions = data_dict['action'].reshape(-1,1)
+        base_states = data_dict['base_states']
+        treat_states = data_dict['treat_states']
+        outcome_vec = data_dict['reward']
+        avail_vec = data_dict['avail']
+        design = data_dict['design']
+        user_ids = data_dict['user_id']
+        all_user_id = data_dict['all_user_id']
+      
+        try:
+            est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids, 
+                                          beta_est, avail_vec, all_user_id,
+                                          correction = correction,
+                                          reconstruct_check = check,
+                                          light=light)
+        except:
+            import ipdb; ipdb.set_trace()
 
         if return_ave_only:
-            return np.sum(est_eqn_dict['est_eqns'], axis=0) / len(user_ids)
+            return np.sum(est_eqn_dict['est_eqns'], axis=0) / len(all_user_id)
         return est_eqn_dict
 
     
-    def get_weights(self, curr_policy_decision_data, beta_params, all_user_ids, intercept_val=None, filter_keyval=None):
+    def prep_algdata(self):
         """
-        Get Radon Nikodym weights for all weights for all decisions made by a given policy update
+        Preprocess / prepare algorithm data statistics to form adaptive sandwich variance estimate
+
+        Inputs: None
+
+        Outputs: A dictionary with the following keys and values
+        - `alg_estimators`: concatenated vector with algorithm statistics (betahats); vector is of dimension num_updates*beta_dim
+        - `update2esteqn`: dictionary where the keys are update numbers (starts with 1)
+            and the values are dictionaries with the data used in that update, which will be used as the data_dict argument when calling the function study_RLalg.get_est_eqns
+        - `policy2collected`: dictionary where keys are policy numbers (policy 1 is prespecified policy, policy 2 is policy used after first update; total number of policies is number of updates plus 1; do not need key for first policy)
+            value are dictionaries that will be used as the collected_data_dict argument when calling the function study_RLalg.get_weights
+        - `info_dict`: Dictionary with certain algorithm info that doesn't change with updates. It will be used as the `info_dict` argument when calling the function `study_RLalg.get_est_eqns`. This dictionary should include:
+            * `beta_dim`: dimension of algorithm statistics
+            * `all_user_id`: unique set of all user ids in the study
+            * `study_RLalg`: RL algorithm object used to collect data
         """
-        action = curr_policy_decision_data['action'].to_numpy()
-        
-        used_prob1 = curr_policy_decision_data['action1prob'].to_numpy()
-        used_probA = action*used_prob1 + (1-action)*(1-used_prob1)
+        all_user_id = self.all_policies[-1]['seen_user_id']
 
-        prob1_beta = self.get_action_probs_inner(curr_policy_decision_data, beta_params, n_users=None)
-        probA_beta = action*prob1_beta + (1-action)*(1-prob1_beta) 
+        all_estimators = []
+        policy2collected = {}
+        update2esteqn = {}
+        # `self.all_policies` includes a ``final policy'' that updates after the study concludes
+            # and the initial policy
+        for update_num, update_dict in enumerate(self.all_policies):
+            policy_last_t = update_dict['policy_last_t']
+            if policy_last_t == 0:
+                continue
 
-        weights_subset = probA_beta / used_probA
+            # Save Parameters from Policies that were used to select actions
+            if update_num != len(self.all_policies):
+                beta_est = update_dict['beta_est'].to_numpy().squeeze()
+                all_estimators.append(beta_est)
 
-        # cluster by user id 
-        pi_user_ids = curr_policy_decision_data['user_id'].to_numpy()
-        unique_pi_ids = np.unique(pi_user_ids)
-        user_pi_weights = []
-        for idx in all_user_ids:
-            if idx in pi_user_ids:
-                tmp_weight = np.prod( weights_subset[ pi_user_ids == idx ], axis=0 )
-            else:
-                tmp_weight = 1
-            user_pi_weights.append( tmp_weight )
-        user_pi_weights = np.array( user_pi_weights ) 
+                # Cumulative Data for Forming Estimating Functions
+                update2esteqn[update_num] = {}
+                update2esteqn[update_num]['all_user_id'] = all_user_id
+                if update_num == 1:
+                    for key in update_dict['inc_data'].keys():
+                        update2esteqn[update_num][key] = update_dict['inc_data'][key].copy()
+                else:
+                    for key in update_dict['inc_data'].keys():
+                        tmp = update2esteqn[update_num-1][key].copy()
+                        update2esteqn[update_num][key] = \
+                                np.concatenate( [ update_dict['inc_data'][key].copy(), tmp ] , axis=0)
 
-        return user_pi_weights
+            # Collected Data for Forming Weights
+            policy_num = update_num  # policy_num refers to the policy number used to collect the data
+            if policy_num > 1:  # we do not form weights for data prior to the first update
+                tmp_collected = update_dict['inc_data'].copy()
+                tmp_collected['all_user_id'] = all_user_id
+                tmp_collected['user_id'] = tmp_collected['user_id']
+                tmp_collected['unique_user_id'] = set(tmp_collected['user_id'])
+                policy2collected[policy_num] = tmp_collected
+
+        all_estimators = np.hstack(all_estimators)
+        beta_dim = len(beta_est)
+
+        info_dict = {
+                "beta_dim": beta_dim,
+                "all_user_id": all_user_id,
+                "study_RLalg": self,
+                }
+
+        return {
+                'alg_estimators': all_estimators,
+                'update2esteqn': update2esteqn,
+                'policy2collected': policy2collected,
+                'info_dict': info_dict,
+                }
 
 
+
+
+
+
+    # OLDER versions of functions below (useful for checking)
     """"""
     """"""
     """"""
@@ -248,28 +425,28 @@ class SigmoidLS:
     
     def get_pi_gradients(self, curr_timestep_data, curr_policy_dict, verbose=False):
     
-        # Batched parameters
-        est_param_df = curr_policy_dict['est_params'].copy()
-        est_params = est_param_df.to_numpy()
-        est_params_torch = torch.from_numpy( est_params )
-        batch_est_params = est_params_torch.repeat( 
+        # Batched estimators
+        beta_est_df = curr_policy_dict['beta_est'].copy()
+        beta_est = beta_est_df.to_numpy()
+        beta_est_torch = torch.from_numpy( beta_est )
+        batch_beta_est = beta_est_torch.repeat( 
                             (curr_timestep_data.shape[0], 1) )
-        batch_est_params.requires_grad = True
+        batch_beta_est.requires_grad = True
 
         treat_bool = [True if x in self.treat_feats_action else 
-                      False for x in est_param_df.columns ]
-        batch_est_treat = batch_est_params[:,treat_bool]
+                      False for x in beta_est_df.columns ]
+        batch_est_treat = batch_beta_est[:,treat_bool]
         treat_states = curr_timestep_data[self.treat_feats]
 
-        pis = sigmoid_LS_torch(self.args, batch_est_treat, treat_states, 
-                self.allocation_sigma)
+        pis = sigmoid_LS_torch(self.args, batch_est_treat, 
+                               treat_states, self.allocation_sigma)
         actions = curr_timestep_data['action'].to_numpy()
         actions_torch = torch.from_numpy( actions ) 
         pis_A = actions_torch*pis + (1-actions_torch)*(1-pis)
         pis_behavior = torch.from_numpy( torch.clone(pis_A).detach().numpy() )
         weights = pis_A / pis_behavior
         weights.sum().backward()
-        weighted_pi_grad = batch_est_params.grad.numpy()
+        weighted_pi_grad = batch_beta_est.grad.numpy()
         
         # Check that reproduced the action selection probabilities correctly
         assert np.all( np.round( pis.detach().numpy(), 5) / 
@@ -279,7 +456,7 @@ class SigmoidLS:
    
 
     def get_est_eqns_full(self, data_sofar, curr_policy_dict, all_user_ids):
-        est_param = curr_policy_dict['est_params'].to_numpy()
+        beta_est = curr_policy_dict['beta_est'].to_numpy()
 
         actions = data_sofar.action.to_numpy().reshape(-1,1)
         X_vecs = np.concatenate( [ data_sofar[self.state_feats].to_numpy(), 
@@ -295,10 +472,10 @@ class SigmoidLS:
             avail_vec = np.ones(outcome_vec.shape)
             
         est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids, 
-                                      est_param, avail_vec, all_user_ids,
-                                      correction="")
+                                      beta_est, avail_vec, all_user_ids,
+                                      correction="", debug=True)
         est_eqn_dictHC3 = get_est_eqn_LS(outcome_vec, design, user_ids, 
-                                      est_param, avail_vec, all_user_ids,
+                                      beta_est, avail_vec, all_user_ids,
                                       correction="HC3")
         est_eqn_dict["est_eqns_HC3"] = est_eqn_dictHC3["est_eqns"]
 
@@ -309,7 +486,10 @@ class SigmoidLS:
       
         # estimating equation sums to zero
         ave_est_eqn = np.sum(est_eqn_dict["est_eqns"], axis=0)
-        assert np.sum( np.absolute( ave_est_eqn ) ) < 1
+        try:
+            assert np.sum( np.absolute( ave_est_eqn ) ) < 1
+        except:
+            import ipdb; ipdb.set_trace()
         
         # hessians are symmetric
         hessian = np.around(est_eqn_dict['normalized_hessian'], 10)

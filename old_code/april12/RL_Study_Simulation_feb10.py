@@ -1,0 +1,727 @@
+import argparse
+import numpy as np
+import pandas as pd
+import math
+import csv
+import pickle as pkl
+import time
+import json
+import os
+import scipy
+from scipy import optimize
+import scipy.special
+
+from synthetic_env import load_synthetic_env, SyntheticEnv
+from oralytics_env import load_oralytics_env, OralyticsEnv
+
+from basic_RL_algorithms import FixedRandomization, SigmoidLS
+from posterior_sampling_RL_algorithm import PosteriorSampling
+
+
+###############################################################
+# Initialize Simulation Hyperparameters #######################
+###############################################################
+
+parser = argparse.ArgumentParser(description='Generate simulation data')
+parser.add_argument('--dataset_type', type=str, default='synthetic',
+                    choices=['heartsteps', 'synthetic', 'oralytics'])
+parser.add_argument('--verbose', type=int, default=0,
+                    help='Prints helpful info')
+parser.add_argument('--heartsteps_mode', default='medium',
+                    choices=['evalSim', 'realistic', 'medium', 'easy'],
+                    help='Sets default parameter values accordingly')
+parser.add_argument('--synthetic_mode', type=str, default='delayed_effects',
+                    help='File name of synthetic env params')
+parser.add_argument('--RL_alg', default='sigmoid_LS',
+                    choices=["fixed_randomization", "sigmoid_LS", "posterior_sampling"],
+                    help='RL algorithm used to select actions')
+parser.add_argument('--N', type=int, default=10,
+                    help='Number of Monte Carlo repetitions')
+parser.add_argument('--n', type=int, default=90, help='Total number of users')
+parser.add_argument('--upper_clip', type=float, default=0.9,
+                    help='Upper action selection probability constraint')
+parser.add_argument('--lower_clip', type=float, default=0.1,
+                    help='Lower action selection probability constraint')
+parser.add_argument('--fixed_action_prob', type=float, default=0.5,
+                    help='Used if not using learning alg to select actions')
+parser.add_argument('--min_users', type=int, default=25,
+                    help='Min number of users needed to update alg')
+parser.add_argument('--err_corr', default='time_corr',
+                    choices=["time_corr", "independent"],
+                    help='Noise error correlation structure')
+parser.add_argument('--decisions_between_updates', type=int, default=1,
+                    help='Number of decision times beween algorithm updates')
+parser.add_argument('--save_dir', type=str, default=".",
+                    help='Directory to save all results in')
+parser.add_argument('--steepness', type=float, default=10,
+                    help='Allocation steepness')
+parser.add_argument('--alg_state_feats', type=str, default="intercept",
+                    help='Comma separated list of algorithm state features')
+tmp_args = parser.parse_known_args()[0]
+
+if tmp_args.dataset_type == 'heartsteps':
+    raise ValueError("Not implemented")
+elif tmp_args.dataset_type == 'synthetic':
+    arg_dict = { "T" : 2, 'recruit_n': tmp_args.n, 'recruit_t': 1, 
+               "allocation_sigma": 1}
+   
+    # Algorithm state features
+    alg_state_feats = tmp_args.alg_state_feats.split(",")
+    alg_treat_feats = tmp_args.alg_state_feats.split(",")
+
+    """
+    past_action_len = 1
+    past_action_cols = ['intercept'] + \
+            ['past_action_{}'.format(i) for i in range(1,past_action_len+1)]
+    past_reward_action_cols = ['past_reward'] + \
+            ['past_action_{}_reward'.format(i) for i in range(1,past_action_len+1)]
+    gen_feats = past_action_cols + past_reward_action_cols
+    """
+   
+    # Generation features
+    past_action_len = 1
+    past_action_cols = ['intercept'] + \
+            ['past_action_{}'.format(i) for i in range(1,past_action_len+1)]
+    past_reward_action_cols = ['past_reward'] + \
+            ['past_action_{}_reward'.format(i) for i in range(1,past_action_len+1)]
+    gen_feats = past_action_cols + past_reward_action_cols + ['dosage']
+   
+    """
+    alg_state_feats = ['intercept']
+    alg_treat_feats = ['intercept']
+
+    past_action_len = 8
+    past_action_cols = ['past_action_{}'.format(i) for i in range(1,past_action_len+1)]
+    past_action_cols.reverse()
+    gen_feats = past_action_cols
+
+    gen_feats = gen_feats
+    gen_feats_reward = ['reward_'+x for x in gen_feats]
+    """
+
+    
+elif tmp_args.dataset_type == 'oralytics':
+    arg_dict = { "T" : 50, 'recruit_n': tmp_args.n, 'recruit_t': 1, 
+                "allocation_sigma": 1 }
+
+    #allocation_sigma: 163 (truncated brush times); 5.7 (square-root of truncatred brush times)
+
+    #alg_state_feats = ['intercept', 'time_of_day', 'prev_brush', 'prev_message', 'weekend']
+    #alg_treat_feats = ['intercept', 'time_of_day', 'prev_brush', 'prev_message']
+    
+    alg_state_feats = ['intercept', 'time_of_day', 'prior_day_brush']
+    alg_treat_feats = ['intercept', 'time_of_day', 'prior_day_brush']
+    
+    #alg_state_feats = ['intercept']
+    #alg_treat_feats = ['intercept']
+    
+else:
+    raise ValueError()
+
+parser.add_argument('--T', type=int, default=arg_dict['T'],
+                    help='Total number of decision times per user')
+parser.add_argument('--recruit_n', type=int, default=arg_dict['recruit_n'],
+                    help='Number of users recruited on each recruitment times')
+parser.add_argument('--recruit_t', type=int, default=arg_dict['recruit_t'],
+                    help='Number of updates between recruitment times')
+parser.add_argument('--allocation_sigma', type=float, default=arg_dict['allocation_sigma'],
+                    help='Sigma used in allocation of algorithm')
+
+args = parser.parse_args()
+print(vars(args))
+
+assert args.T >= args.decisions_between_updates
+
+
+###############################################################
+# Load Data and Models ########################################
+###############################################################
+
+if args.dataset_type == 'heartsteps':
+    #user_env_data, env_params = load_heartsteps_env()
+    raise ValueError("Not implemented")
+
+elif args.dataset_type == 'synthetic':
+    user_env_data = None
+    paramf_path= "./synthetic_env_params/{}.txt".format(args.synthetic_mode)
+    env_params = load_synthetic_env(paramf_path)
+    if len(env_params.shape) == 2:
+        assert env_params.shape[0] >= args.T
+
+elif args.dataset_type == 'oralytics':
+    paramf_path= "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
+    param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
+    treat_feats = ['intercept', 'time_of_day', 'weekend', 'day_in_study_norm', 'prior_day_brush']
+    
+    user_env_data = {
+        'bern_params' : bern_params,
+        'poisson_params' : poisson_params
+    }
+    
+else:
+    raise ValueError("Invalid Dataset Type")
+
+    
+###############################################################
+# Simulation Functions ########################################
+###############################################################
+
+def run_study_simulation(study_env, study_RLalg):
+    """
+    Goal: Simulates a study with n users
+    Input: Environment object (e.g., instance of HeartstepStudyEnv)
+           RL algorithm object (e.g., instance of SigmoidLS)
+    Output: Dataframe with all collected study data (study_df)
+            Original RL algorithm object (populated with additional data)
+    """
+
+    # study_df is a data frame with a record of all data collected in study
+    study_df = study_env.make_empty_study_df(args, user_env_data)
+    
+    # Loop over all decision times ###############################################
+    for t in range(1, study_env.calendar_T+1):
+
+        # Check if need to update algorithm #######################################
+        if t > 1 and (t-1) % args.decisions_between_updates == 0 and args.RL_alg != 'fixed_randomization':
+            # check enough avail data and users; if so, update algorithm
+            most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
+            new_obs_bool = np.logical_and( study_df['calendar_t'] < t,
+                                    study_df['calendar_t'] > most_recent_policy_t)
+            new_update_data = study_df[ new_obs_bool ]
+            
+            if args.dataset_type == 'heartsteps':
+                num_avail = np.sum(new_update_data['availability'])
+            else:
+                num_avail = 1
+            prev_num_users = len(study_df[ study_df['calendar_t'] == t-1 ])
+
+            if num_avail > 0 and prev_num_users >= args.min_users:
+                # Update Algorithm ##############################################
+                study_RLalg.update_alg(new_update_data, t)
+                #print("update", t)
+        
+        if args.RL_alg != 'fixed_randomization':
+            # Update study_df with info on latest policy used to select actions
+            study_df.loc[ study_df['calendar_t'] == t, 'policy_last_t'] = \
+                                                study_RLalg.all_policies[-1]["policy_last_t"]
+            study_df.loc[ study_df['calendar_t'] == t, 'policy_num'] = \
+                                                len(study_RLalg.all_policies)
+        else:
+            study_df.loc[ study_df['calendar_t'] == t, 'policy_last_t'] = 0
+            study_df.loc[ study_df['calendar_t'] == t, 'policy_num'] = 0
+
+        curr_timestep_data = study_df[ study_df['calendar_t'] == t ]
+  
+        
+        # Sample Actions #####################################################
+        action_probs = study_RLalg.get_action_probs(curr_timestep_data)
+        if args.dataset_type == 'heartsteps':
+            action_probs *= curr_timestep_data['availability']
+        actions = study_RLalg.rng.binomial(1, action_probs)
+        
+        # Sample Rewards #####################################################
+        if args.dataset_type == 'oralytics':
+            rewards, brush_times = study_env.sample_rewards(curr_timestep_data, actions, t)
+        else:
+            rewards = study_env.sample_rewards(curr_timestep_data, actions, t)
+
+        # Record all collected data #######################################
+        if args.dataset_type == 'oralytics':
+            fill_columns = ['reward', 'brush_time', 'action', 'action1prob']
+            fill_vals = np.vstack( [rewards, brush_times, actions, action_probs] ).T
+            study_df.loc[ study_df['calendar_t'] == t, fill_columns] = fill_vals
+        else:
+            fill_columns = ['reward', 'action', 'action1prob']
+            fill_vals = np.vstack( [rewards, actions, action_probs] ).T
+            study_df.loc[ study_df['calendar_t'] == t, fill_columns] = fill_vals
+        
+        if t < study_env.calendar_T:
+            # Record data to prepare for state at next decision time
+            current_users = study_df[ study_df['calendar_t'] == t ]['user_id']
+            study_df = study_env.update_study_df(study_df, t, rewards, actions, current_users)
+
+    return study_df, study_RLalg
+
+
+###############################################################
+# Output Components for Adaptive Sandwich Variance ############
+###############################################################
+
+# input all betas, data --> output stacked, weighted estimating functions
+# processed states, all betas --> 
+
+def output_estimating_functions(study_df, study_RLalg, verbose=False):
+    all_policy_t = [tmp_dict['policy_last_t'] for tmp_dict in study_RLalg.all_policies]
+    all_user_ids = np.unique( study_df['user_id'].to_numpy() )
+    
+    #################################################################
+    # Form stacked estimating function ##############################
+    #################################################################
+    """
+    Input:
+    - Data needed for one alg update
+    - All user ids
+    - Beta est
+
+    Output:
+    - Padded
+    """
+    for policy_num, curr_policy_dict in enumerate(study_RLalg.all_policies):
+        policy_last_t = curr_policy_dict['policy_last_t']
+        if policy_last_t == 0:
+            continue
+
+        est_params = curr_policy_dict['est_params'].to_numpy().squeeze()
+
+        # Form estimating equations ################
+        data_sofar = study_df[ study_df['policy_last_t'] < policy_last_t ]
+            # data_sofar = all data used to estimate the policy at time policy_last_t
+        assert curr_policy_dict['total_obs'] == len(data_sofar)
+            # total number of observations match
+        
+        est_eqns_dict = study_RLalg.get_est_eqns(beta_params=est_params, 
+                                                 data_sofar=data_sofar, 
+                                                 all_user_ids=all_user_ids)
+            # we require all RL algorithms to have a function `get_est_eqns` that
+                # forms the estimating equation for policy parameters
+
+        # Check estimating equation sums to zero
+        ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0)
+        assert np.sum( np.absolute( ave_est_eqn ) ) < 1
+        
+        
+        
+        # Form weights ################
+        curr_policy_decision_data = study_df[ study_df['policy_last_t'] == policy_last_t ]
+            # curr_policy_decision_data = all data collected using the policy policy_last_t
+
+        user_pi_weights = study_RLalg.get_weights(curr_policy_decision_data, est_params, 
+                                all_user_ids=all_user_ids)
+        
+        # Check that reproduced the action selection probabilities correctly
+        assert np.all( user_pi_weights == 1 )
+
+        # TODO try finite differences on just weights to see if we get the same thing..
+        
+
+        # TESTING FD FOR GETTING Hessian
+        eps = np.sqrt(np.finfo(float).eps)
+        normalized_hessian = optimize.approx_fprime(est_params, study_RLalg.get_est_eqns, 
+                                                    eps, data_sofar, all_user_ids, True)
+    
+        est_eqns_dict_oracle = study_RLalg.get_est_eqns_full(data_sofar=data_sofar,
+                                                 curr_policy_dict=curr_policy_dict,
+                                                 all_user_ids=all_user_ids)
+        
+        
+        import ipdb; ipdb.set_trace()
+
+        
+        """just for checking"""
+        est_eqns_dict_oracle = study_RLalg.get_est_eqns_full(data_sofar=data_sofar,
+                                                 curr_policy_dict=curr_policy_dict,
+                                                 all_user_ids=all_user_ids)
+        
+        weighted_pi_grad = study_RLalg.get_pi_gradients(curr_policy_decision_data, 
+                                                        curr_policy_dict, verbose)
+            # we require all RL algorithms to have a function `get_pi_gradients` that
+                # computes the weighted \pi gradients
+        
+        import ipdb; ipdb.set_trace()
+    
+   
+    #################################################################
+    # Process state and estimator data ##############################
+    #################################################################
+    data_dict = {}
+
+    # loop over policy updates
+    for policy_num, curr_policy_dict in enumerate(study_RLalg.all_policies):
+        policy_last_t = curr_policy_dict['policy_last_t']
+        if policy_last_t == 0:
+            continue        
+
+        data_dict[policy_num] = {}
+
+        # Policy Parameters (solution to estimating equation) ################
+        if args.RL_alg == "sigmoid_LS":
+            est_params = curr_policy_dict['est_params']
+        elif args.RL_alg == "posterior_sampling":
+            
+            post_V = curr_policy_dict['post_V']
+            triu_idx = np.triu_indices(post_V.shape[0])
+            post_V_params = post_V[triu_idx]
+            
+            est_params = np.hstack( [ curr_policy_dict['post_mean'], post_V_params ] )
+   
+        data_dict[policy_num]['est_params'] = est_params
+        
+        # State data ####################################################
+        curr_timestep_data = study_df[ study_df['policy_last_t'] == policy_last_t ]
+            # curr_timestep_data = all data collected using the policy at time policy_last_t
+
+        user_states = curr_timestep_data[study_RLalg.state_feats]
+        treat_states = user_states[study_RLalg.treat_feats].to_numpy()
+
+        #data_dict[policy_num]['data_sofar'] = 
+        data_dict[policy_num]['treat_states'] = treat_states
+        data_dict[policy_num]['pi_user_ids'] = curr_timestep_data['user_id'].to_numpy()
+        data_dict[policy_num]['action1prob'] = curr_timestep_data['action1prob'].to_numpy()
+        
+    #################################################################
+    # Form stacked estimating function ##############################
+    #################################################################
+    
+
+    import ipdb; ipdb.set_trace()
+
+
+def output_variance_pieces(study_df, study_RLalg, verbose=False):
+    
+    all_policy_t = [tmp_dict['policy_last_t'] for tmp_dict in study_RLalg.all_policies]
+    all_user_ids = np.unique( study_df['user_id'].to_numpy() )
+    out_dict = {}
+
+    # loop over policy updates
+    for policy_num, curr_policy_dict in enumerate(study_RLalg.all_policies):
+        policy_last_t = curr_policy_dict['policy_last_t']
+        if policy_last_t == 0:
+            continue        
+
+        out_dict[policy_num] = {}
+
+        # Policy Parameters (solution to estimating equation) ################
+        if args.RL_alg == "sigmoid_LS":
+            est_params = curr_policy_dict['est_params']
+        elif args.RL_alg == "posterior_sampling":
+            
+            post_V = curr_policy_dict['post_V']
+            triu_idx = np.triu_indices(post_V.shape[0])
+            post_V_params = post_V[triu_idx]
+            
+            est_params = np.hstack( [ curr_policy_dict['post_mean'], post_V_params ] )
+   
+        out_dict[policy_num]['est_params'] = est_params
+
+        # Estimating Equation and Inverse Hessian (Bread) ####################
+        data_sofar = study_df[ study_df['policy_last_t'] < policy_last_t ]
+            # data_sofar = all data used to estimate the policy at time policy_last_t
+        
+        est_eqns_dict = study_RLalg.get_est_eqns(data_sofar=data_sofar, 
+                                                 curr_policy_dict=curr_policy_dict, 
+                                                 all_user_ids=all_user_ids)
+            # we require all RL algorithms to have a function `get_est_eqns` that
+                # forms the estimating equation for policy parameters
+        
+        out_dict[policy_num]['est_eqns'] = est_eqns_dict['est_eqns']
+        out_dict[policy_num]['est_eqns_HC3'] = est_eqns_dict['est_eqns_HC3']
+        out_dict[policy_num]['est_eqns_user_ids'] = est_eqns_dict['present_user_ids']
+        out_dict[policy_num]['normalized_hessian'] = est_eqns_dict['normalized_hessian']
+
+
+        # Pi Gradient ########################################################
+        curr_timestep_data = study_df[ study_df['policy_last_t'] == policy_last_t ]
+            # curr_timestep_data = all data collected using the policy at time policy_last_t
+        
+        weighted_pi_grad = study_RLalg.get_pi_gradients(curr_timestep_data, 
+                                                        curr_policy_dict, verbose)
+            # we require all RL algorithms to have a function `get_pi_gradients` that
+                # computes the weighted \pi gradients
+        
+        pi_user_ids = curr_timestep_data['user_id'].to_numpy()
+        unique_pi_ids = np.unique(pi_user_ids)
+        user_pi_grads = []
+        for idx in all_user_ids:
+            if idx in pi_user_ids:
+                tmp_grad = np.sum( weighted_pi_grad[ pi_user_ids == idx ], axis=0 )
+            else:
+                tmp_grad = np.zeros( weighted_pi_grad.shape[1] ) 
+            user_pi_grads.append( tmp_grad )
+
+        user_pi_grads = np.vstack(user_pi_grads)
+        
+        out_dict[policy_num]['pi_grads'] = user_pi_grads
+        out_dict[policy_num]['pi_grads_user_ids'] = unique_pi_ids
+
+    return out_dict
+
+
+
+###############################################################
+# Simulate Studies ############################################
+###############################################################
+
+tic = time.perf_counter()
+
+if args.dataset_type == "heartsteps":
+    mode = args.heartsteps_mode
+elif args.dataset_type == "synthetic":
+    mode = args.synthetic_mode
+    #assert args.recruit_n == args.n
+elif args.dataset_type == "oralytics":
+    mode = None
+else:
+    raise ValueError("Invalid dataset type")
+
+print("Running simulations...")
+if args.dataset_type == 'oralytics':
+    exp_str = '{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}'.format(
+            args.dataset_type, args.RL_alg, args.T, args.n, 
+            args.recruit_n, args.decisions_between_updates, args.steepness)
+else:
+    exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}'.format(
+            args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr)
+
+simulation_data_path = os.path.join(args.save_dir, "simulated_data")
+if not os.path.isdir(simulation_data_path):
+    os.mkdir(simulation_data_path)
+all_folder_path = os.path.join(simulation_data_path, exp_str)
+if not os.path.isdir(all_folder_path):
+    os.mkdir(all_folder_path)
+    
+with open(os.path.join(all_folder_path, "args.json"), "w") as f:
+    json.dump(vars(args), f)
+    
+policy_grad_norm = []
+for i in range(1,args.N+1):
+    
+    env_seed = i*5000
+    alg_seed = (args.N+i)*5000
+
+    if i == 10 or i % 25 == 0:
+        toc = time.perf_counter()
+        print(f"{i} ran in {toc - tic:0.4f} seconds")
+
+        
+    # Initialize study environment ############################################
+    if args.dataset_type == "heartsteps":
+        #study_env = HeartstepStudyEnv(args, env_params, gen_feats)
+        raise ValueError("Not implemented")
+    elif args.dataset_type == "synthetic":
+        study_env = SyntheticEnv(args, env_params, env_seed=env_seed, 
+                gen_feats=gen_feats, err_corr=args.err_corr)
+    elif args.dataset_type == "oralytics":
+        study_env = OralyticsEnv(args, param_names, bern_params, 
+                                 poisson_params, env_seed=env_seed)
+    else:
+        raise ValueError("Invalid Dataset Type")
+        
+        
+    # Initialize RL algorithm ###################################################
+    if args.RL_alg == "fixed_randomization":
+        study_RLalg = FixedRandomization(args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed)
+    elif args.RL_alg == "sigmoid_LS":
+        study_RLalg = SigmoidLS(args, alg_state_feats, alg_treat_feats, 
+                                allocation_sigma=args.allocation_sigma, alg_seed=alg_seed,
+                                steepness=args.steepness)
+    elif args.RL_alg == "posterior_sampling":
+        study_RLalg = PosteriorSampling(args, alg_state_feats, alg_treat_feats, 
+                                        alg_seed=alg_seed, steepness=args.steepness)
+    else:
+        raise ValueError("Invalid RL Algorithm Type")
+        
+        
+    # Run Study Simulation #######################################################
+    study_df, study_RLalg = run_study_simulation(study_env, study_RLalg)
+
+    # Print summary statistics
+    if i == 25 and args.RL_alg != 'fixed_randomization':
+        print("\nTotal Update Times: {}".format( len(study_RLalg.all_policies)-1 ) )
+        study_df.action = study_df.action.astype('int')
+        study_df.policy_last_t = study_df.policy_last_t.astype('int')
+        if args.dataset_type == 'heartsteps':
+            study_df.stepcount = (np.exp(study_df.reward)-0.5).astype('int')
+
+    # Make histogram of rewards (available)
+    if i == 0:
+        print(study_df.head())
+        if args.dataset_type == 'heartsteps' and args.mode == 'evalSim':
+            # Make histograms of step counts for real data vs simulated data
+            study_env.make_stepcount_hist(args.env_path, user_env_data, study_df)
+
+    # Save Data #################################################################
+    if args.verbose:
+        print("Saving data...")
+   
+    #if args.dataset_type == 'synthetic':
+        #drop_col = ['reward_past_action_{}'.format(i) for i in range(1,9)]
+        #drop_col2 = ['past_action_{}'.format(i) for i in range(1,9)]
+        #study_df.drop(drop_col+drop_col2, axis=1, inplace=True)
+    
+    folder_path = os.path.join(all_folder_path, "exp={}".format(i))
+    if not os.path.isdir(folder_path):
+        os.mkdir(folder_path)
+    
+    if args.RL_alg != 'fixed_randomization':
+        study_df = study_df.astype({'policy_num': 'int32', 
+                                    "policy_last_t": 'int32', "action": 'int32'})
+    study_df.to_csv( '{}/data.csv'.format(folder_path), index=False )
+
+    
+    # Save Variance Components ################################################## 
+    if args.RL_alg != 'fixed_randomization':
+        #if args.RL_alg == 'posterior_sampling':
+        #    raise ValueError("not implemented yet")
+
+        out_dict = output_estimating_functions(study_df, study_RLalg)
+        out_dict = output_variance_pieces(study_df, study_RLalg)
+        with open('{}/out_dict.pkl'.format(folder_path), 'wb') as file:
+            pkl.dump( out_dict, file )
+
+        policy_grad_norm.append( np.max( np.absolute([ y['pi_grads'] for x, y in out_dict.items() ]) ) )
+    
+    """
+    # ONLY FOR TEST DEBUGGING ###########################################
+    T_df = [ study_df[study_df['calendar_t'] == t] for t in range(1,args.T+1)]
+    
+
+    # ONLY FOR TEST DEBUGGING ###########################################
+    T1_df = study_df[study_df['calendar_t'] == 1]
+    T2_df = study_df[study_df['calendar_t'] == 2]
+    action2 = T2_df['action']
+    action1 = T2_df['past_action_1']
+    action_prevNoAction = ( action2 * (action1 == 0) ) > 0
+    NOT_action_prevNoAction = ( action2 * (action1 == 0) ) == 0
+    
+    print( np.mean(T1_df['reward'] * ( action1 == 1 ) ) )
+    print( np.mean(T1_df['reward'] * ( action1 == 0 ) ) )
+    print( np.mean(T2_df[action_prevNoAction]['reward']) )
+    print( np.mean(T2_df[NOT_action_prevNoAction]['reward']) )
+
+    # Check policy param
+    print("policy params")
+    print("estimated", out_dict[1]['est_params'])
+    print("oracle", np.array([0,0]))
+
+    # Check Bread
+    print("Bread")
+    hessian_alg = out_dict[1]['normalized_hessian']
+    bread_alg = np.linalg.inv( hessian_alg )
+    print( hessian_alg ) 
+    print( np.mean(T1_df['action']) )
+    hessian_star = -np.array([[1, 0.5], [0.5, 0.5]])
+    alg_bread_star = np.linalg.inv( hessian_star )
+    
+    # Check Parameter Meat
+    print("Meat")
+    params1_esteqn = out_dict[1]['est_eqns_HC3'] 
+    params1_esteqn = out_dict[1]['est_eqns'] 
+    meat = np.mean( np.einsum( 'ij,ik->ijk', params1_esteqn, params1_esteqn ), 0 )
+    print(meat)
+    meat_oracle = np.array([[1, 0.5], [0.5, 0.5]])
+    print("oracle", meat_oracle)
+
+    # Check Parameters Sandwich
+    print("Sandwich Alg")
+    print("estimated", np.matmul(bread_alg, 
+        np.matmul(meat, bread_alg) ) )
+    print("oracle", np.matmul(alg_bread_star, 
+        np.matmul(meat_oracle, alg_bread_star) ) )
+
+    # Check pigrad 
+    print("Pigrad")
+    print( out_dict[1]['pi_grads'][:10], "\n", T2_df['action'][:10] )
+    # out_dict[1]['pi_grads'][action1 > 0][:,1] == out_dict[1]['pi_grads'][action1 > 0][0,1]
+
+    # Check Inference for sum of reward
+    print("Inference")
+    reward1 = T1_df['reward'].to_numpy()
+    reward2 = T2_df['reward'].to_numpy()
+    delta = 1
+    thetastar = delta/8
+    thetahat = np.mean( reward1 + reward2 ) / 2
+    variance_star = 1 + 0.25 * ( 9/16*delta*delta + 1 ) + 0.75 * ( 1 + 1 / 16 * delta * delta )
+    print( 'thetastar', thetastar )
+    print( 'theta est', thetahat )
+    print( 'variance est', np.mean( np.square( reward1 + reward2 - 2*thetastar ) ) )
+    print( 'variance est', np.var( reward1 + reward2 ) )
+    print( "variance star", variance_star )
+    # variance under optimal policy
+        # 1 + 0.25 * ( 9/16*1 + 1 ) + 0.75 * ( 1 + 1 / 16 )
+
+    # Check V matrix (expect to be 1/8)
+    pigrads = out_dict[1]['pi_grads']
+    Vest = np.mean( ( reward1 + reward2 - 2*thetahat ).reshape(-1,1) * pigrads, 
+            axis=0 )
+
+    pigrad_star = action2 * 0.5 * args.steepness - (1-action2) * 0.5 * args.steepness
+    Vstar1 = np.mean( ( 0 + action_prevNoAction*delta - 2*thetastar ) * pigrad_star, axis=0 )
+    Vstar = np.array([0, Vstar1])
+    VstarOracle = np.array([0, delta/8*args.steepness])
+
+    print("Vest", Vest)
+    print("Vstar", Vstar)
+    print("Vstar Oracle", VstarOracle)
+
+    # Adaptive meat variance (ORACLE)
+        # Sign matters because has to agree with what sign you get for V
+    inf_meat_oracle = variance_star
+    inf_est_eqn = reward1 + reward2 - 2*thetahat
+    est_inf_meat = np.mean( np.square( inf_est_eqn ) )
+    
+    big_meat_cross = np.mean( params1_esteqn * inf_est_eqn.reshape(-1,1), 0 )
+    big_meat_cross_oracle = np.array([1, 0.5])
+    print("big meat cross")
+    print("estimated", big_meat_cross)
+    print("oracle", big_meat_cross_oracle)
+
+
+    # Stacked estimating equation
+    stack_est_eqn = np.hstack( [ params1_esteqn, inf_est_eqn.reshape(-1,1)] )
+    stacked_meat_est = np.mean( np.einsum('ij,ik->ijk', stack_est_eqn, stack_est_eqn), 0)
+    
+    stacked_meat_toprows = np.hstack( [meat_oracle, big_meat_cross_oracle.reshape(-1,1)] )
+    stacked_meat_lastrow = np.hstack( [big_meat_cross_oracle, inf_meat_oracle ])
+    stacked_meat_oracle = np.vstack( [stacked_meat_toprows, stacked_meat_lastrow.reshape(1,-1)] )
+
+    print("Stacked Meat")
+    print("estimated", stacked_meat_est)
+    print("oracle", stacked_meat_oracle)
+
+    hessian_inf = -2
+    big_hessian_oracle = np.hstack( [ np.vstack([hessian_star, VstarOracle]), 
+        np.hstack([[0,0], [hessian_inf]]).reshape(-1,1) ] )
+    big_bread_oracle = np.linalg.inv( big_hessian_oracle )
+
+    adaptive_sandwich_oracle = np.matmul( big_bread_oracle, np.matmul( stacked_meat_oracle, big_bread_oracle.T ) )
+  
+    hessian_alg = out_dict[1]['normalized_hessian']
+    big_hessian = np.hstack( [ np.vstack([hessian_alg, Vest]), 
+        np.hstack([[0,0], [hessian_inf]]).reshape(-1,1) ] )
+    big_bread = np.linalg.inv( big_hessian ) 
+    
+    adaptive_sandwich = np.matmul( big_bread, np.matmul( stacked_meat_est, big_bread.T ) )
+    
+    big_hessian_oracle_sign = big_hessian_oracle.copy()
+    big_hessian_oracle_sign[2,1] = -big_hessian_oracle_sign[2,1]
+    big_bread_oracle_sign = np.linalg.inv( big_hessian_oracle_sign )
+    adaptive_sandwich_oracle_sign = np.matmul( big_bread_oracle_sign, np.matmul( stacked_meat_oracle, big_bread_oracle_sign.T ) )
+    
+    print("Stacked Bread")
+    print("estimated", big_hessian, "\n", big_bread)
+    print("oracle", big_hessian_oracle, "\n", big_bread_oracle)
+    print("oracle eigenvalues", np.linalg.eig(big_hessian_oracle)[0])
+
+    print("Adaptive sandwich")
+    print("adaptive sandwich oracle", "\n", adaptive_sandwich_oracle)
+    print("adaptive sandwich est", "\n", adaptive_sandwich)
+    print("adaptive sandwich oracle sign", "\n", adaptive_sandwich_oracle_sign)
+
+    # Sandwich Oracle
+    compare_sandwich = 1/hessian_inf * est_inf_meat * 1/hessian_inf
+    compare_sandwich_oracle = 1/hessian_inf * inf_meat_oracle * 1/hessian_inf
+    print("sandwich est", compare_sandwich )
+    print("sandwich oracle", compare_sandwich_oracle)
+
+    import ipdb; ipdb.set_trace()
+    """
+
+
+if args.RL_alg != 'fixed_randomization':
+    print("pigrad")
+    print(policy_grad_norm)
+    print(np.max(policy_grad_norm), np.mean(policy_grad_norm), np.var(policy_grad_norm))
+
+toc = time.perf_counter()
+print(f"Final ran in {toc - tic:0.4f} seconds")
+

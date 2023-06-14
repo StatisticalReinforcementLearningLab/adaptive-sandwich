@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import scipy
 from scipy import optimize
 import scipy.special
+import numpy_indexed as npi
 
 from least_squares_helper import get_est_eqn_LS, fit_WLS
 from debug_helper import get_adaptive_sandwich
@@ -61,6 +62,8 @@ parser.add_argument('--save_dir', type=str, default=".",
                     help='Directory to save all results in')
 parser.add_argument('--debug', type=int, default=0,
                     help='Debug mode')
+parser.add_argument('--redo_analyses', type=int, default=0,
+                    help='Redo any saved analyses')
 parser.add_argument('--steepness', type=float, default=10,
                     help='Allocation steepness')
 parser.add_argument('--action_centering', type=int, default=0,
@@ -78,20 +81,6 @@ elif tmp_args.dataset_type == 'synthetic':
                "allocation_sigma": 1}
     dval_alg = 2*len( tmp_args.alg_state_feats.split(",") )
    
-    """
-    # Inference Objective
-    feature_names = ['intercept', 'past_reward', 'action', 'action_past_reward']
-    outcome_name = 'reward'
-    c_vec_list = [ np.array([0,0,1,0]), np.array([0,0,0,1]) ]
-    dval = 4
-    
-    cvec2name = {
-        c_vec2string(np.array([1,1,1,1])) : "Entire Vector",
-        c_vec2string(np.array([0,0,1,1])) : "Margin Vector",
-        c_vec2string(np.array([0,0,0,1])) : "Moderated Treatment Effect", 
-        c_vec2string(np.array([0,0,1,0])) : "Marginal Treatment Effect", 
-    }
-    """
     if tmp_args.inference_mode == "value":
         # Inference Objective
         feature_names = ['intercept']
@@ -139,16 +128,6 @@ elif tmp_args.dataset_type == 'oralytics':
     feature_names = ['intercept', 'time_of_day', 'prior_day_brush', 'action']
     #feature_names = ['intercept', 'time_of_day', 'weekend', 'prior_day_brush', 'action']
     outcome_name = 'reward'
-    """
-    c_vec_list = [ np.array([1,1,1,1,1]), np.array([0,0,0,0,1]), np.array([0,0,0,1,0]) ]
-    dval = 5
-    
-    cvec2name = {
-        c_vec2string(np.array([1,1,1,1,1])) : "Entire Vector",
-        c_vec2string(np.array([0,0,0,1,0])) : "prior_day_brush",
-        c_vec2string(np.array([0,0,0,0,1])) : "Margin Vector",
-    }
-    """
     stat2name = {
             'hotelling': "Hotelling's t-squared Statistic",
     }
@@ -175,12 +154,22 @@ args = parser.parse_args()
 print(vars(args))
 
 
-
 ###############################################################
 # Load Data ###################################################
 ###############################################################
 
 def load_data(folder_path):
+    """
+    Loads data
+
+    Input
+    - Experiment folder path
+
+    Output
+    - study data pandas dataframe
+    - RL algorithm object
+    - RL algorithm saved output (this is only to ensure compatibility with old code)
+    """
     #study_df = pd.read_csv( os.path.join(folder_path, "data.csv") )
     with open('{}/study_df.pkl'.format(folder_path), 'rb') as f:
         study_df = pkl.load(f)
@@ -211,6 +200,16 @@ def load_data(folder_path):
 
 
 def form_LS_estimator(study_df):
+    """
+    Forms least squares estimator for inference
+
+    Input
+    - Study data pandas dataframe
+    
+    Output
+    - Least squares estimator
+    """
+
     if args.dataset_type == 'heartsteps':
         avail_vec = study_df['availability'].to_numpy()
     else:
@@ -222,8 +221,21 @@ def form_LS_estimator(study_df):
     return LS_estimator
 
 
-def form_LS_est_eqn(est_param, study_df, all_user_ids, correction="HC3", 
+def form_LS_est_eqn(est_param, study_df, all_user_id, correction="HC3", 
                     check=False):
+    """
+    Forms estimating equations for the least squares estimator used for inference
+
+    Input
+    - `est_param`: estimator of the inferential target (thetahat)
+    - `study_df`: study data pandas dataframe
+    - `all_user_id`: Unique set of all user ids in the study
+    - `correction`: Small sample correction (default is HC3; other options are none [use an empty string ''], CR3VE, CR2VE)
+    
+    Output
+    - Least squares estimator estimating equations (matrix of dimension num_users by dim_theta)
+    """
+    
     if args.dataset_type == 'heartsteps':
         avail_vec = study_df['availability'].to_numpy()
     else:
@@ -233,7 +245,7 @@ def form_LS_est_eqn(est_param, study_df, all_user_ids, correction="HC3",
  
     present_user_ids = study_df['user_id'].to_numpy()
     LS_dict = get_est_eqn_LS(outcome_vec, design, present_user_ids, 
-                             est_param, avail_vec, all_user_ids, 
+                             est_param, avail_vec, all_user_id, 
                              correction=correction, reconstruct_check=check)
 
     return LS_dict["est_eqns"]
@@ -245,11 +257,22 @@ def form_LS_est_eqn(est_param, study_df, all_user_ids, correction="HC3",
 
 
 def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
+    """
+    Forms standard sandwich variance estimator for inference (thetahat)
+
+    Input:
+    - `est_eqns`: Estimating equation matrix (matrix of dimension num_users by dim_theta)
+    - `normalized_hessian`: (Hessian matrix of size dim_theta by dim_theta that is normalized by num_users)
+    - `LS_estimator`: Least squares estimator (vector)
+
+    Output:
+    - Sandwich variance estimator matrix (size dim_theta by dim_theta) 
+    """
     n_unique = est_eqns.shape[0]
     
     meat = np.einsum( 'ij,ik->jk', est_eqns, est_eqns )
     meat = meat / n_unique
-    
+
     # degrees of freedom adjustment
     meat = meat * (n_unique-1) / (n_unique - len(LS_estimator)) 
     est_val_dict['meat'] = meat
@@ -265,141 +288,131 @@ def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
 # Adaptive Sandwich Variance Estimator ########################
 ###############################################################
 
+
 #@profile
-def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
-                                    study_RLalg, study_df, return_full=False,
-                                    alg_correction="", theta_correction="",
-                                    check=False):
-    all_user_ids = np.unique( study_df['user_id'].to_numpy() )
+def get_stacked_estimating_function(all_estimators, update2esteqn, policy2collected,
+                                    info_dict, return_full=False, alg_correction="", 
+                                    theta_correction="", check=False):
+    """
+    Form stacked estimating function for both algorithm statistics (betahats) and estimator of interest (thetahat).
+    This is used to form the adaptive sandwich variance.
 
-    thetahat = all_beta_params[-theta_dim:]
+    Inputs:
+    - `all_estimators`: concatenated vector of algorithm statistics (betahats) and estimator of interest (thetahat) of dimension dim_beta*num_updates + dim_theta
+    - `update2esteqn`: dictionary where the keys are update numbers (starts with 1) 
+            and the values are dictionaries with the data used in that update, which will be used as the data_dict argument when calling the function study_RLalg.get_est_eqns
+    - `policy2collected`: dictionary where keys are policy numbers (policy 1 is prespecified policy, policy 2 is policy used after first update; total number of policies is number of updates plus 1; do not need key for first policy)
+        value are dictionaries that will be used as the collected_data_dict argument when calling the function study_RLalg.get_weights
+    
+    - `info_dict`: Dictionary with certain algorithm info that doesn't change with updates. It will be used as the `info_dict` argument when calling the function `study_RLalg.get_est_eqns`. This dictionary should include:
+        - `theta_dim`: dimension of inferential target
+        - `beta_dim`: dimension of algorithm statistics
+        - `all_user_id`: unique set of all user ids in the study
+        - `study_df`: study data pandas dataframe
+        - `study_RLalg`: RL algorithm object used to collect data
+        - `prior_dict`: dictionary of algorithm information including prior (only for posterior sampling algorithm)
+    - `return_full`: Indicator of whether return dictionary with more information; if False just return estimating equation 
+            (dimension num_theta by square matrix of dimension dim_beta*num_updates + dim_theta)
+    - `alg_correction`: Small sample correction for algorithm statistic estimating equation (default is none; other options are HC3, CR3VE, CR2VE)
+    - `theta_correction`: Small sample correction for theta estimating equation (default is none; other options are HC3, CR3VE, CR2VE)
+    - `check`: If true, then check that estimating function sums to near zero and check reconstruction of action selection probabilities
 
-    num_updates = int( len(all_beta_params[:-theta_dim]) / beta_dim )
-    est_list = np.split(all_beta_params[:-theta_dim], num_updates)
+    Outputs:
+    - if return_full is true, return a dictionary with 
+        - `ave_est_eqn`: numpy vector of estimating equation averaged across uses of dimension dim_beta*num_updates + dim_theta
+        - `all_est_eqn`: numpy array of estimating equation of dimension (num_users by dim_beta*num_updates + dim_theta) - grouped by user, summed over time 
+    - if return_full is false return a numpy array `ave_est_eqn`
+    """
+    
+    theta_dim = info_dict['theta_dim']
+    beta_dim = info_dict['beta_dim']
+    all_user_id = info_dict["all_user_id"]
+    
+    thetahat = all_estimators[-theta_dim:]
+    num_updates = int( len(all_estimators[:-theta_dim]) / beta_dim )
+    est_list = np.split(all_estimators[:-theta_dim], num_updates)
     est_list.append( thetahat )
 
-    all_weights = [ np.ones(len(all_user_ids)) ]
+    all_weights = [ np.ones(len( all_user_id )) ]
     all_est_eqns = []
     all_est_eqns_full = []
-  
-    all_action1probs = None
-    all_action1probs_index = None
+ 
+    if args.action_centering:
+        action1prob = update2esteqn[1]['action1prob']
 
-    for policy_num, curr_policy_dict in enumerate(study_RLalg.all_policies):
-        policy_last_t = curr_policy_dict['policy_last_t']
-        if policy_last_t == 0:
+    for update_num, update_dict in enumerate(study_RLalg.all_policies):
+        policy_last_t = update_dict['policy_last_t']
+        if update_num in [0, len(study_RLalg.all_policies)]:
             continue
 
-        prev_beta_est = est_list[policy_num-2]
-        beta_est = est_list[policy_num-1]
+        prev_beta_est = est_list[update_num-2]
+        beta_est = est_list[update_num-1]
         
         # Form estimating equations ################
-        data_sofar = study_df[ study_df['policy_last_t'] < policy_last_t ]
-            # data_sofar = all data used to estimate the policy at time policy_last_t
-        assert curr_policy_dict['total_obs'] == len(data_sofar)
-            # total number of observations match
-        if args.RL_alg == 'posterior_sampling':
-            intercept_val = curr_policy_dict['intercept_val']
-        else:
-            intercept_val = None
-
         if args.action_centering:
-            # Form action selection probabilities
-            if policy_num == 1:
-                action1probs = data_sofar['action1prob'].to_numpy()
-                all_action1probs = action1probs
-                all_action1probs_index = data_sofar.index.to_numpy()
-            else:
-                prev_policy_data = study_df[ study_df['policy_last_t'] == policy_last_t-1 ]
-                oracle_action1probs = prev_policy_data['action1prob'].to_numpy()
-                tmp_user_ids = np.unique( prev_policy_data['user_id'].to_numpy() )
+            if update_num > 1:
+                if check: # check reconstruction of action selection probabilities
+                    og_action1prob = update2esteqn[update_num]['og_action1prob']
+                    assert np.all( action1prob == og_action1prob[:len(action1prob)] )
+                update2esteqn[update_num]['action1prob'][:len(action1prob)] = action1prob
 
-                action1probs = study_RLalg.get_action_probs_inner(
-                        curr_timestep_data = prev_policy_data,
-                        beta_est = prev_beta_est, n_users = len(tmp_user_ids),
-                        intercept_val = intercept_val,
-                        filter_keyval = ('policy_last_t', policy_last_t))
-                action1probs_index = prev_policy_data.index.to_numpy()
-                
-                # Combine all action selection probabilities and sort
-                all_action1probs = np.concatenate( [all_action1probs, action1probs] )
-                all_action1probs_index = np.concatenate( [all_action1probs_index, action1probs_index] )
-                sort_idx = np.argsort(all_action1probs_index)
-                all_action1probs_index = all_action1probs_index[sort_idx]
-                all_action1probs = all_action1probs[sort_idx]
-
-            est_eqns_dict = study_RLalg.get_est_eqns(beta_params=beta_est,
-                                                     data_sofar=data_sofar,
-                                                     all_user_ids=all_user_ids,
-                                                     action1probs=all_action1probs,
-                                                     correction=alg_correction,
-                                                     check=check,
-                                                     intercept_val=intercept_val)
-        else:
-            est_eqns_dict = study_RLalg.get_est_eqns(beta_params=beta_est,
-                                                     data_sofar=data_sofar,
-                                                     all_user_ids=all_user_ids,
-                                                     correction=alg_correction,
-                                                     check=check,
-                                                     intercept_val=intercept_val)
-            # we require all RL algorithms to have a function `get_est_eqns` that
-                # forms the estimating equation for policy parameters
+            
+        # we require all RL algorithms to have a function `get_est_eqns` that
+            # forms the estimating equation for policy parameters
+        est_eqns_dict = study_RLalg.get_est_eqns(beta_est=beta_est,
+                                                 data_dict=update2esteqn[update_num],
+                                                 info_dict=info_dict,
+                                                 correction=alg_correction,
+                                                 check=check,
+                                                 light=True)
 
         # Check estimating equation sums to zero
         if check:
             try:
-                tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(all_user_ids)
+                tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(all_user_id)
                 #assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.001 )
-                assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.01 )
+                assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.001 )
             except:
+                print("Estimating equation sum to zero check failed")
                 import ipdb; ipdb.set_trace()
-       
-        # Multiply by weights # TODO is there an error here????
-        prev_weights_prod = np.prod(all_weights, axis=0)
-        prev_weights_prod = np.expand_dims(prev_weights_prod, 1)
+      
+        # Multiply by weights
+        prev_weights_prod = np.expand_dims( np.prod(all_weights, axis=0), 1 )
         weighted_est_eqn = prev_weights_prod * est_eqns_dict["est_eqns"]
-        #weighted_est_eqn = est_eqns_dict["est_eqns"]
-        all_est_eqns.append( np.sum(weighted_est_eqn, axis= 0) / len(all_user_ids)  )
+        all_est_eqns.append( np.sum(weighted_est_eqn, axis= 0) / len(all_user_id)  )
         all_est_eqns_full.append( weighted_est_eqn )
 
-        # TODO import ipdb; ipdb.set_trace()
-
-
         # Form weights ################
-        curr_policy_decision_data = study_df[ study_df['policy_last_t'] == policy_last_t ]
-            # curr_policy_decision_data = all data collected using the policy policy_last_t
-
-        if args.RL_alg == 'posterior_sampling':
-            intercept_val = curr_policy_dict['intercept_val']
-        else:
-            intercept_val = None
-        user_pi_weights = study_RLalg.get_weights(curr_policy_decision_data, 
-                                    beta_est, all_user_ids=all_user_ids,
-                                    intercept_val = intercept_val,
-                                    filter_keyval = ('policy_last_t', policy_last_t) )
+        if update_num != len(study_RLalg.all_policies)-1:
+            policy_num = update_num + 1 
+                # we consider policy formed after update, and data collected with this policy
+            if args.action_centering:
+                user_pi_weights, action1prob = study_RLalg.get_weights( beta_est, 
+                            collected_data_dict = policy2collected[policy_num],
+                            return_probs = True)
+            else:
+                user_pi_weights = study_RLalg.get_weights( beta_est, 
+                            collected_data_dict = policy2collected[policy_num])
+            all_weights.append( user_pi_weights )
         
-        # Check that reproduced the action selection probabilities correctly
-        try:
-            #assert np.all(user_pi_weights == 1)
-            assert np.all(np.around(user_pi_weights,3) == 1)
-            #assert np.mean(np.absolute(user_pi_weights - 1)) < 0.01
-        except:
-            import ipdb; ipdb.set_trace()
+            # Check that reproduced the action selection probabilities correctly
+            if check:
+                try:
+                    assert np.all(np.around(user_pi_weights,5) == 1)
+                except:
+                    print("Reproducing action selection probabilities check failed")
+                    import ipdb; ipdb.set_trace()
 
-        all_weights.append( user_pi_weights )
-   
 
     # Estimating Equation for theta ######################
-    theta_est_eqn = form_LS_est_eqn(thetahat, study_df, all_user_ids,
-                                    correction=theta_correction,
-                                    check=check)
+    theta_est_eqn = form_LS_est_eqn(thetahat, info_dict['study_df'], all_user_id,
+                                    correction=theta_correction, check=check)
         
     # Multiply by weights
     prev_weights_prod = np.prod(all_weights, axis=0)
     prev_weights_prod = np.expand_dims(prev_weights_prod, 1)
     weighted_est_eqn = prev_weights_prod * theta_est_eqn
     all_est_eqns.append( np.mean(weighted_est_eqn, axis= 0)  )
-    
     all_est_eqns_full.append( weighted_est_eqn )
 
     if return_full:
@@ -407,45 +420,58 @@ def get_stacked_estimating_function(all_beta_params, beta_dim, theta_dim,
                 "ave_est_eqn": np.concatenate( all_est_eqns ),
                 "all_est_eqn": all_est_eqns_full,
                 }
-
     return np.concatenate( all_est_eqns )
+
 
 #@profile
 def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df, 
                               alg_correction="", theta_correction=""):
+    """
+    Form adaptive sandwich variance estimator
 
-    all_est_params = []
-    for policy_num, curr_policy_dict in enumerate(study_RLalg.all_policies):
-        policy_last_t = curr_policy_dict['policy_last_t']
-        if policy_last_t == 0:
-            continue
-        
-        if args.RL_alg == "sigmoid_LS":
-            est_params = curr_policy_dict['est_params'].to_numpy().squeeze()
-        elif args.RL_alg == "posterior_sampling":
-            est_params = curr_policy_dict['est_params']
-        else:
-            raise ValueError("RL algorithm")
+    Inputs:
+    - `all_est_eqn_dict`: dictionary with estimating equation information
+        - `estimator`
+        - ``
+    - `study_RLalg`: RL algorithm object
+    - `study_df`: Study data pandas dataframe
+    - `alg_correction`: Small sample correction for algorithm statistic estimating equation (default is none; other options are HC3, CR3VE, CR2VE)
+    - `theta_correction`: Small sample correction for theta estimating equation (default is none; other options are HC3, CR3VE, CR2VE) 
 
-        all_est_params.append(est_params)
+    Outputs:
+    - dictionary with the following 
+        "stacked_meat": full stacked meat matrix (square matrix of dimension dim_beta*num_updates + dim_theta)
+        "stacked_hessian": stacked hessian matrix (square matrix of dimension dim_beta*num_updates + dim_theta) 
+        "stacked_sandwich": full stacked adaptive sandwich variance estimator (square matrix of dimension dim_beta*num_updates + dim_theta)
+        "adaptive_sandwich": adaptive sandwich variance estimator (dim_theta by dim_theta)
+    """
 
-    # This is new
-    thetahat = all_est_eqn_dict['estimator']
+    alg_stat_dict = study_RLalg.prep_algdata()
+    alg_estimators = alg_stat_dict['alg_estimators']
+    update2esteqn = alg_stat_dict['update2esteqn']
+    policy2collected = alg_stat_dict['policy2collected']
+    info_dict = alg_stat_dict['info_dict']
+
+    # Form estimators
+    thetahat = form_LS_estimator(study_df)
+    all_estimators = np.concatenate([alg_estimators, thetahat])
     theta_dim = len(thetahat)
-    all_est_params.append( thetahat )
-    
-    beta_dim = len(est_params)
-    all_est_params = np.hstack(all_est_params)
-    
-    
+
+    # Add more info to info_dict
+    info_dict['theta_dim'] = theta_dim
+    info_dict['study_df'] = study_df
+
+
     # Form Stacked Meat Estimator ##########################
-    stacked_est_dict = get_stacked_estimating_function(all_est_params, 
-                                                  beta_dim, theta_dim, 
-                                                  study_RLalg, study_df,
-                                                  return_full=True,
-                                            alg_correction=alg_correction,
-                                            theta_correction=theta_correction,
-                                            check=True)
+    stacked_est_dict = get_stacked_estimating_function(all_estimators,
+                                                update2esteqn,
+                                                policy2collected,
+                                                info_dict,
+                                                return_full=True,
+                                                alg_correction=alg_correction,
+                                                theta_correction=theta_correction,
+                                                check=True)
+
     cat_est_eqn = np.hstack( stacked_est_dict['all_est_eqn'] )
     stacked_raw_meat = np.einsum('ij,ik->jk', cat_est_eqn, cat_est_eqn)
     n_unique = cat_est_eqn.shape[0]
@@ -453,24 +479,23 @@ def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df,
     stacked_meat = stacked_raw_meat / n_unique
     stacked_meat = stacked_meat * (n_unique-1) / (n_unique - theta_dim)
 
-
+    if args.debug:
+        print("Adaptive: stacked meat done")
+    
     # Form Stacked Bread Estimator ##########################
     eps = np.sqrt(np.finfo(float).eps)
-    stacked_hessian = optimize.approx_fprime(all_est_params, 
+    tic = time.perf_counter()
+    stacked_hessian = optimize.approx_fprime(all_estimators, 
                                         get_stacked_estimating_function,
-                                        eps, beta_dim, theta_dim,
-                                        study_RLalg, study_df)
+                                        eps, update2esteqn, policy2collected, 
+                                        info_dict)
+    # np.allclose(adaptive_sandwich_dict_HC3['stacked_hessian'], bread_stacked_old, atol=0.004)
+    toc = time.perf_counter()
+    print(f"Downloaded the tutorial in {toc - tic:0.4f} seconds")
+    
+    if args.debug:
+        print("Adaptive: stacked bread done")
 
-    """
-    print(stacked_hessian[:9,:9])
-    print(stacked_hessian[9:18,9:18])
-
-    # TODO: check eigenvalues of this matrix # 2000 for sigmoid
-    import ipdb; ipdb.set_trace()
-    #scipy.linalg.eigvals(stacked_hessian)
-    #np.linalg.cond(stacked_hessian)
-    """
-  
     # Form Adaptive Sandwich Variance Estimator ###############
     stacked_hessian_inv = np.linalg.inv(stacked_hessian)
 
@@ -481,6 +506,8 @@ def get_adaptive_sandwich_new(all_est_eqn_dict, study_RLalg, study_df,
 
     adaptive_sandwich_theta = adaptive_sandwich_stacked[-theta_dim:,-theta_dim:]
 
+    if args.debug:
+        print("Adaptive: function done")
 
     return_dict = {
             "stacked_meat": stacked_meat,
@@ -518,9 +545,6 @@ if args.dataset_type == 'oralytics':
             args.dataset_type, args.RL_alg, args.T, args.n,
             args.recruit_n, args.decisions_between_updates, args.steepness, args.action_centering)
 else:
-    #exp_str = '{}_mode={}_alg={}_T={}_n={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
-    #        args.dataset_type, mode, args.RL_alg, args.T, args.n, args.steepness, args.alg_state_feats, args.err_corr,
-    #        args.action_centering)
     exp_str = '{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
             args.dataset_type, mode, args.RL_alg, args.T, args.n, args.recruit_n, args.decisions_between_updates,
             args.steepness, args.alg_state_feats, args.err_corr, args.action_centering)
@@ -532,8 +556,6 @@ all_folder_path = os.path.join(args.save_dir, "simulated_data/{}".format(exp_str
 inf_feat_names = [x for x in range(len(feature_names))]
 
 # Policy parameters
-all_beta_dict = {}
-
 folder_path = os.path.join(all_folder_path, "exp={}".format(1))
 if args.RL_alg == 'fixed_randomization':
     study_df = load_data(folder_path)
@@ -553,6 +575,26 @@ for i in range(1,args.N+1):
     
     # Load Data #########################################
     folder_path = os.path.join(all_folder_path, "exp={}".format(i))
+    analyses_out_path = '{}/analysis.pkl'.format(folder_path)
+
+    if args.redo_analyses:
+        pass
+    else:
+        # do not redo existing analyses
+        analysis_already = os.path.isfile(analyses_out_path)
+        if analysis_already:
+            # Found that this already is a saved analysis file
+            with open(analyses_out_path, 'rb') as f:
+                exp_analysis_dict = pkl.load(f)
+            
+            all_estimators[i-1] = exp_analysis_dict["LS_estimator"]
+            all_sandwich[i-1] = exp_analysis_dict["sandwich_var"]
+            all_adaptive_sandwich[i-1] = exp_analysis_dict["adaptive_sandwich"]
+            all_adaptive_sandwich_HC3[i-1] = exp_analysis_dict["adaptive_sandwich_HC3"]
+            if args.RL_alg == 'sigmoid_LS':
+                all_adaptive_sandwich_old[i-1] = exp_analysis_dict["adaptive_sandwich_old"]
+            continue
+
     if args.RL_alg == 'fixed_randomization':
         study_df = load_data(folder_path)
     else:
@@ -561,6 +603,9 @@ for i in range(1,args.N+1):
     # Form Estimator #########################################
     LS_estimator = form_LS_estimator(study_df)
     all_estimators[i-1] = LS_estimator
+    
+    if args.debug:
+        print('Empirical Done')
 
     # Form Sandwich Var #######################################
     user_ids = study_df['user_id'].to_numpy()
@@ -583,23 +628,22 @@ for i in range(1,args.N+1):
     all_sandwich[i-1] = sandwich_var
 
     if args.RL_alg == 'fixed_randomization':
-        if i == 1:
-            policy_param_dict = None
         continue
 
-    # TODO I am here
-    import ipdb; ipdb.set_trace()
+    if args.debug:
+        print('Sandwich Done')
+
 
     # Form Adaptive Sandwich Var ######################################
-
-    if args.recruit_n != args.n:
-        raise ValueError("adaptive sandwich variance not implemented for \
-                incremental recruitment yet")
-   
     num_updates = len(study_RLalg.all_policies) - 1
     adaptive_sandwich_dict = get_adaptive_sandwich_new(est_val_dict, 
                                                        study_RLalg, study_df)
+    
+    #if args.recruit_n != args.n:
+    #    raise ValueError("adaptive sandwich variance not implemented for \
+    #            incremental recruitment yet")
    
+  
     adaptive_sandwich_dict_HC3 = get_adaptive_sandwich_new(est_val_dict, 
                                                        study_RLalg, study_df,
                                                        theta_correction="HC3")
@@ -615,7 +659,20 @@ for i in range(1,args.N+1):
 
         adaptive_sandwich_old, adaptive_sandwich_full_old, eig_dict, bread_stacked_old, stacked_meat_old = \
                 get_adaptive_sandwich(alg_out_dict, args, Teval=num_updates+1)
-        all_adaptive_sandwich_old[i-1] = adaptive_sandwich
+        all_adaptive_sandwich_old[i-1] = adaptive_sandwich_old
+
+    ### Some checks on adaptive sandwich varaince
+
+    # 1) Check ``bread'' from sandwich and adaptive sandwich variances
+    theta_dim = len(LS_estimator)
+    theta_bread = est_val_dict['normalized_hessian']
+    theta_bread_adaptive = adaptive_sandwich_dict['stacked_hessian'][-theta_dim:,-theta_dim:]
+    assert np.all( np.isclose(theta_bread, theta_bread_adaptive) )
+    
+    # 2) Check ``meat'' from sandwich and adaptive sandwich variances
+    theta_meat = est_val_dict['meat']
+    theta_meat_adaptive = adaptive_sandwich_dict['stacked_meat'][-theta_dim:,-theta_dim:]
+    assert np.all( np.isclose(theta_meat, theta_meat_adaptive) )
 
     #### Check eigenvalues
     try:
@@ -664,8 +721,20 @@ for i in range(1,args.N+1):
             print(adaptive_sandwich_old)
         
         import ipdb; ipdb.set_trace()
-    
+   
 
+    # Save experimental analysis data
+    exp_analysis_dict = {
+            "LS_estimator": LS_estimator,
+            "sandwich_var": sandwich_var,
+            "adaptive_sandwich": adaptive_sandwich,
+            "adaptive_sandwich_HC3": adaptive_sandwich_dict_HC3['adaptive_sandwich'],
+            "adaptive_sandwich_dict": adaptive_sandwich_dict,
+            }
+    if args.RL_alg == 'sigmoid_LS':
+        exp_analysis_dict["adaptive_sandwich_old"] = adaptive_sandwich_old 
+    with open(analyses_out_path, 'wb') as f:
+        pkl.dump(exp_analysis_dict, f)
 
 
 # Compute Standard and Adaptive Sandwich Variance Estimators ###################
@@ -687,7 +756,7 @@ def process_var_hotelling(results_dict, n, dval, fignum=0, name=""):
             matrix_array = np.expand_dims(results_dict[key]['cov_matrix_normalized'], 0)
             if matrix_array.shape[-1] == 1:
                 matrix_array = matrix_array.reshape(1,1,1)
-        elif key == "beta_param":
+        elif key == "beta_est":
             continue
         else:
             matrix_array = np.array( results_dict[key]['raw_values'] )
@@ -720,22 +789,6 @@ def process_var_hotelling(results_dict, n, dval, fignum=0, name=""):
                 "empirical_cutoff": empirical_cutoff,
                 "hotelling_stat": hotelling_stat,
                 }
-
-    for tmpfignum, key in enumerate(results_dict.keys()):
-        if key == "beta_param":
-            continue
-        # Plotting statistic
-        plt.figure(tmpfignum+fignum*100)
-        plt.hist(hotelling_dict[key]["hotelling_stat"])
-        plt.axvline(x = hotelling_dict[key]["cutoff"], 
-                color = 'b', label = 'cutoff')
-        plt.axvline(x = hotelling_dict[key]["empirical_cutoff"], 
-                color = 'm', label = '95 Percentile')
-        plt.legend()
-        plt.xlim(0, maxX)
-        plt.ylim(0, args.N)
-        plt.title("{}".format( key))
-        plt.savefig( "{}/hotelling_{}_{}.png".format(all_folder_path, key, name) )
 
         
 def process_var(c_vec, results_dict, n, N, fignum=0):

@@ -418,7 +418,7 @@ class SmoothPosteriorSampling:
         - `return_probs`: In addition to weights, also return treatment probabilities
 
         Outputs:
-        - Vector of Randon Nikodym weights
+        - Vector of Radon Nikodym weights
         - If `return_probs` is True, also returns a vector of treatment probabilities
         """
         action = collected_data_dict['action']

@@ -69,7 +69,7 @@ def get_est_eqn_LS(
         check_est_params = fit_WLS(design_avail, outcome_vec, prior_dict)
         try:
             assert np.all(np.isclose(check_est_params, est_param))
-        except:
+        except Exception:
             import ipdb
 
             ipdb.set_trace()
@@ -86,7 +86,7 @@ def get_est_eqn_LS(
 
             try:
                 assert np.all(np.isclose(V_param_reconstruct, V_param_raw))
-            except:
+            except Exception:
                 import ipdb
 
                 ipdb.set_trace()
@@ -200,7 +200,7 @@ def get_est_eqn_LS(
                 assert np.all(
                     np.absolute(np.array(est_eqn_grouped).mean(axis=0)) < 0.01
                 )
-        except:
+        except Exception:
             import ipdb
 
             ipdb.set_trace()

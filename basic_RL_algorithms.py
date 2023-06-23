@@ -142,7 +142,7 @@ class SigmoidLS:
         )
         try:
             inv_XX = np.linalg.inv(new_XX)
-        except:
+        except Exception:
             import ipdb
 
             ipdb.set_trace()
@@ -350,7 +350,7 @@ class SigmoidLS:
                 reconstruct_check=check,
                 light=light,
             )
-        except:
+        except Exception:
             import ipdb
 
             ipdb.set_trace()

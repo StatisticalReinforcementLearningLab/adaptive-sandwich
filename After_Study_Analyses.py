@@ -458,7 +458,7 @@ def get_stacked_estimating_function(
                 )
                 # assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.001 )
                 assert np.all(np.absolute(tmp_ave_est_eqn) < 0.001)
-            except:
+            except Exception:
                 print("Estimating equation sum to zero check failed")
                 import ipdb
 
@@ -490,7 +490,7 @@ def get_stacked_estimating_function(
             if check:
                 try:
                     assert np.all(np.around(user_pi_weights, 5) == 1)
-                except:
+                except Exception:
                     print("Reproducing action selection probabilities check failed")
                     import ipdb
 
@@ -841,7 +841,7 @@ for i in range(1, args.N + 1):
             eigvals = scipy.linalg.eigvals(tmp_beta_hessian)
             try:
                 assert np.all(np.iscomplex(eigvals) == False)
-            except:
+            except Exception:
                 import ipdb
 
                 ipdb.set_trace()
@@ -855,7 +855,7 @@ for i in range(1, args.N + 1):
         # eigvals = scipy.linalg.eigvals( hessian_betas + np.eye(hessian_betas.shape[0]) )
         assert np.all(np.iscomplex(eigvals2) == False)
         # assert np.min(np.absolute(eigvals)) > 0.001
-    except:
+    except Exception:
         print("Checking eigenvalues")
         import ipdb
 

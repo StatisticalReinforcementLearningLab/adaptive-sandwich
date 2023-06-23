@@ -107,8 +107,9 @@ disable=
     # handled by black
     format,
     # We anticipate #3512 where it will become optional
-    fixme,
+    # fixme,
     consider-using-assignment-expr,
+    import-outside-toplevel,
 
 
 [REPORTS]

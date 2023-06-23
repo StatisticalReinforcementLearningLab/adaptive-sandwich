@@ -530,7 +530,7 @@ class SigmoidLS:
         ave_est_eqn = np.sum(est_eqn_dict["est_eqns"], axis=0)
         try:
             assert np.sum(np.absolute(ave_est_eqn)) < 1
-        except:
+        except Exception:
             import ipdb
 
             ipdb.set_trace()

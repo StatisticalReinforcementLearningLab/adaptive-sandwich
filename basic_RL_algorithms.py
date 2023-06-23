@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import scipy.special
-from scipy.linalg import sqrtm
 import torch
 import numpy_indexed as npi
 

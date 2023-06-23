@@ -1,7 +1,4 @@
 import numpy as np
-import pandas as pd
-import scipy.special
-from scipy.linalg import sqrtm
 import numpy_indexed as npi
 
 from helper_functions import var2suffvec, suffvec2var, get_utri, symmetric_fill_utri

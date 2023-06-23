@@ -11,3 +11,14 @@
 - `synthetic_env.py`: synthetic simulation environment
 - `run.sh`: script for running experiments
 
+
+## Setup (if not using conda)
+### Create and activate a virtual environment
+- `python3 -m venv .venv; source /.venv/bin/activate`
+### Adding a package
+- Add to `requirements.txt` with a specific version or no version if you want the latest stable
+- Run `pip freeze > requirements.txt` to lock the versions of your package and all its subpackages
+
+## Running the code
+- `./run.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
+

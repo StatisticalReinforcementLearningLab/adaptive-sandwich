@@ -5,7 +5,7 @@
 
 T=25
 decisions_between_updates=2
-recruit_n=25; recruit_t=2
+# recruit_n=25; recruit_t=2
 recruit_n=50; recruit_t=1
 N=5
 n=50
@@ -17,7 +17,7 @@ synthetic_mode='delayed_1_dosage'
 #synthetic_mode='delayed_effects_large'
 steepness=1
 eta=0
-RL_alg="sigmoid_LS"
+#RL_alg="sigmoid_LS"
 RL_alg="posterior_sampling"
 #RL_alg="fixed_randomization" 
 #err_corr='independent'
@@ -26,7 +26,7 @@ alg_state_feats="intercept,past_reward"
 inference_mode="model"
 action_centering=0
 
-debug=1
+debug=0
 
 python RL_Study_Simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering
 

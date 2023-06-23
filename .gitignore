@@ -6,3 +6,5 @@ synthetic_env_params/.DS_Store
 .DS_Store
 *.lprof
 *.swp
+.venv
+.vscode

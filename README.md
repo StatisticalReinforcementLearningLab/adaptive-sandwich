@@ -22,3 +22,8 @@
 ## Running the code
 - `./run.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
 
+## Linting/Formatting
+
+## TODO
+1. Add precommit hooks
+

@@ -14,7 +14,7 @@ NUM_POSTERIOR_SAMPLES = 2000
 
 def generalized_logistic(args, lin_est):
     inner = args.steepness * lin_est / args.allocation_sigma
-    raw = scipy.special.expit(inner)  # NOQA
+    raw = scipy.special.expit(inner)
     pis = args.lower_clip + (args.upper_clip - args.lower_clip) * raw
     return pis
 

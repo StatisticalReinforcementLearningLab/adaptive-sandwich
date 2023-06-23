@@ -310,7 +310,7 @@ class SmoothPosteriorSampling:
                 assert np.equal(
                     np.around(post_var, 3), np.around(check_post_var, 3)
                 ).all()
-            except:
+            except Exception:
                 import ipdb
 
                 ipdb.set_trace()
@@ -338,7 +338,7 @@ class SmoothPosteriorSampling:
             ] * post_std_user.reshape(n_tmp, -1)
             prob_samples = generalized_logistic(self.args, post_samples)
             probs = np.mean(prob_samples, axis=1)
-        except:
+        except Exception:
             import ipdb
 
             ipdb.set_trace()

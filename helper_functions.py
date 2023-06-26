@@ -70,6 +70,9 @@ def alg2varnames(RLalg):
 
 
 def var2suffvec(RLalg, varmatrix, return_idx=False):
+    # TODO: Add documentation about how this is constructed
+    # grabbing unique values but order is determined by feature list somewhere?
+    # Should we include intercept term or not?
     if RLalg.action_centering:
         varmatrix_flat = get_utri(varmatrix)
 

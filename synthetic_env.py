@@ -117,9 +117,10 @@ class SyntheticEnv:
             study_df["calendar_t"] == t, study_df["user_t"] < self.args.T
         )
 
+        # Remove users who enter at t + 1
         cont_user_next_bool = np.logical_and(
             study_df["calendar_t"] == t + 1, study_df["user_t"] > 1
-        )  # rmv users who enter at t+1
+        )
 
         actions = study_df[cont_user_current_bool]["action"].to_numpy()
         rewards = study_df[cont_user_current_bool]["reward"].to_numpy()

@@ -6,9 +6,7 @@ import time
 import numpy as np
 import scipy
 import scipy.linalg
-import scipy.stats as stats
-import scipy
-from scipy import optimize
+from scipy import stats, optimize
 import scipy.special
 
 from least_squares_helper import get_est_eqn_LS, fit_WLS

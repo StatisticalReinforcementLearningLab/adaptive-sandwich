@@ -44,13 +44,13 @@ def get_est_eqn_LS(
     RL_alg=None,
     intercept_val=None,
     light=False,
-    debug=False,
 ):
     """
     Small Sample Correction Variants: "HC3", "CR3VE", "CR2VE"
     Our original paper used "HC3" adjustment
     """
     if prior_dict is not None:
+        # TODO: Is this a bug?
         est_param_raw = est_param
         state_dim = prior_dict["state_dim"]
         est_param = est_param_raw[:state_dim]
@@ -111,11 +111,12 @@ def get_est_eqn_LS(
         hvals = np.sum(np.einsum("ik,jk->ij", design, inv_hessian) * W_design, 1)
         residuals_adjust = residuals / (1 - hvals)
 
+        # TODO: remove?
         # Degrees of freedom adjustment: pg 24 of https://cran.r-project.org/web/packages/sandwich/sandwich.pdf
         # residuals_adjust *= np.sqrt( (n_users-1) / (n_users - len(est_param)) )
         # residuals_adjust *= np.sqrt( n_users / (n_users - len(est_param)) )
 
-    elif correction in ["CR3VE", "CR2VE"]:
+    elif correction in {"CR3VE", "CR2VE"}:
         # HC3 bias adjustment based on the following resource:
         # http://cameron.econ.ucdavis.edu/research/Cameron_Miller_JHR_2015_February.pdf (pg25)
         inv_hessian = np.linalg.inv(hessian)

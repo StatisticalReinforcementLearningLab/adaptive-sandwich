@@ -26,4 +26,6 @@
 
 ## TODO
 1. Add precommit hooks
+2. Use class inheritance?
+3. Refactor After_Study_Analyses.py to not use global variables
 

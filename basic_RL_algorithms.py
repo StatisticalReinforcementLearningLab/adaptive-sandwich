@@ -508,7 +508,6 @@ class SigmoidLS:
             avail_vec,
             all_user_ids,
             correction="",
-            debug=True,
         )
         est_eqn_dictHC3 = get_est_eqn_LS(
             outcome_vec,

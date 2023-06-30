@@ -1,8 +1,12 @@
+from functools import reduce
+
 import numpy as np
 import pandas as pd
 import scipy.special
 import torch
 import numpy_indexed as npi
+import jax
+from jax import numpy as jnp
 
 from least_squares_helper import get_est_eqn_LS
 from helper_functions import clip
@@ -78,11 +82,14 @@ class SigmoidLS:
             "policy_last_t": 0,
             "RX": np.zeros(total_dim),
             "XX": np.zeros(total_dim),
-            "beta_est": None,
-            "new_data": None,
+            "beta_est": pd.DataFrame(),
+            # TODO: verify changing this to inc_data and {} instead of None is ok. Was inconsistent
+            # before. also changed beta est to empty df
+            # Then standardize this format by making a function that takes all the args
+            # This could possibly be more broad than for sigmoid only.
+            "inc_data": {},
             "total_obs": 0,
             "seen_user_id": set(),
-            # data used to get updated beta_est
         }
         self.all_policies = [alg_dict]
 
@@ -122,6 +129,7 @@ class SigmoidLS:
         # Only include available data
         calendar_t = new_data["calendar_t"].to_numpy().reshape(-1, 1)
         user_t = new_data["user_t"].to_numpy().reshape(-1, 1)
+        # TODO: Can I remove this logic?
         if self.args.dataset_type == "heartsteps":
             avail_bool = new_data["availability"].astype("bool")
             rewards_avail = rewards[avail_bool]
@@ -146,9 +154,8 @@ class SigmoidLS:
             import ipdb
 
             ipdb.set_trace()
-        beta_est = np.matmul(inv_XX, new_RX.reshape(-1))
 
-        col_names = self.state_feats + ["action:" + x for x in self.treat_feats]
+        beta_est = np.matmul(inv_XX, new_RX.reshape(-1))
         beta_est_df = pd.DataFrame(
             beta_est.reshape(1, -1), columns=self.state_feats + self.treat_feats_action
         )
@@ -177,10 +184,86 @@ class SigmoidLS:
             "beta_est": beta_est_df,
             "inc_data": inc_data,
             "seen_user_id": seen_user_id,
-            # "new_data" : new_data,  # data used to get updated beta_est
         }
 
         self.all_policies.append(update_dict)
+
+    def save_phi_gradients(
+        self,
+        all_prev_data,
+        calendar_t,
+    ):
+        # Note that it is possible to reconstruct all the data we need by
+        # stitching together the incremental data in self.all_policies.
+        # However, this is complicated logic, and it seems cleaner to just pass
+        # in all study data here and apply the same transformations that we
+        # apply to the incremental study data during algorithm updates
+
+        # TODO: should be able to stack
+        def compute_loss_for_user(
+            intercept,
+            past_reward,
+            action_intercept,
+            action_past_reward,
+            all_prev_data,
+            user_id,
+        ):
+            columns_of_interest = list(
+                {"action", "reward"} | set(self.state_feats) | set(self.treat_feats)
+            )
+            data_for_user = all_prev_data.loc[
+                all_prev_data.user_id == user_id, columns_of_interest
+            ]
+            # TODO: is to_numpy OK here?
+            actions = data_for_user["action"].to_numpy().reshape(-1, 1)
+            rewards = data_for_user["reward"].to_numpy().reshape(-1, 1)
+            base_states, treat_states = self.get_states(data_for_user)
+
+            beta_0 = jnp.array([intercept, past_reward])
+            beta_1 = jnp.array([action_intercept, action_past_reward])
+
+            return jnp.sum(
+                rewards
+                - jnp.matmul(base_states, beta_0)
+                - jnp.matmul(actions * treat_states, beta_1)
+            )
+
+        # Get the beta estimate saved in the last algorithm update
+        most_recent_beta_est = self.all_policies[-1]["beta_est"]
+
+        gradient_function = jax.grad(compute_loss_for_user, range(4))
+        hessian_function = jax.hessian(compute_loss_for_user, range(4))
+
+        intercept = most_recent_beta_est["intercept"][0]
+        past_reward = most_recent_beta_est["past_reward"][0]
+        action_intercept = most_recent_beta_est["action:intercept"][0]
+        action_past_reward = most_recent_beta_est["action:past_reward"][0]
+
+        # TODO: verify that we don't need hessian for each user, can
+        # differentiate sum of est eqns instead.
+        return {
+            calendar_t: {
+                user_id: {
+                    "gradient": gradient_function(
+                        intercept,
+                        past_reward,
+                        action_intercept,
+                        action_past_reward,
+                        all_prev_data,
+                        user_id,
+                    ),
+                    "hessian": hessian_function(
+                        intercept,
+                        past_reward,
+                        action_intercept,
+                        action_past_reward,
+                        all_prev_data,
+                        user_id,
+                    ),
+                }
+                for user_id in self.all_policies[-1]["seen_user_id"]
+            }
+        }
 
     def get_action_probs_inner(self, beta_est, prob_input_dict):
         """

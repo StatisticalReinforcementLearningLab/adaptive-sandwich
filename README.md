@@ -26,6 +26,6 @@
 
 ## TODO
 1. Add precommit hooks
-2. Use class inheritance?
+2. Use class inheritance for RL algorithms?
 3. Refactor After_Study_Analyses.py to not use global variables
 

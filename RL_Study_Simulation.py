@@ -86,12 +86,14 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         ):
             # check enough avail data and users; if so, update algorithm
             most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
+
+            all_prev_data_bool = study_df["calendar_t"] <= t
             new_obs_bool = np.logical_and(
-                study_df["calendar_t"] <= t,
+                all_prev_data_bool,
                 study_df["calendar_t"] > most_recent_policy_t,
             )
             new_update_data = study_df[new_obs_bool]
-            all_prev_data = study_df[study_df["calendar_t"] <= t]
+            all_prev_data = study_df[all_prev_data_bool]
 
             if args.dataset_type == RLStudyArgs.HEARTSTEPS:
                 num_avail = np.sum(new_update_data["availability"])
@@ -102,6 +104,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             if num_avail > 0 and prev_num_users >= args.min_users:
                 # Update Algorithm ##############################################
                 study_RLalg.update_alg(new_update_data, update_last_t=t)
+                study_RLalg.save_phi_gradients(all_prev_data)
 
     if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
         fill_columns = ["policy_last_t", "policy_num"]

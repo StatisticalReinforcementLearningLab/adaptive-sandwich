@@ -99,6 +99,8 @@ def get_est_eqn_LS(
     unique_user_ids = set(present_user_ids)
     n_unique = len(unique_user_ids)
     n_users = len(all_user_ids)
+    # TODO: Appears setting light and a correction would break things because
+    # hessian variable won't exist
     if not light:
         hessian = -np.einsum("ij,ik->jk", design_avail, W_design)
         normalized_hessian = hessian / n_unique  # n_users
@@ -117,6 +119,7 @@ def get_est_eqn_LS(
         # residuals_adjust *= np.sqrt( n_users / (n_users - len(est_param)) )
 
     elif correction in {"CR3VE", "CR2VE"}:
+        # TODO: comments seem mixed up
         # HC3 bias adjustment based on the following resource:
         # http://cameron.econ.ucdavis.edu/research/Cameron_Miller_JHR_2015_February.pdf (pg25)
         inv_hessian = np.linalg.inv(hessian)

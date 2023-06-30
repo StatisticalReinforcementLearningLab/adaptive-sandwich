@@ -1,3 +1,5 @@
+#!/bin/bash
+set -e
 
 # T=25,50
 # Steepness=0.5,1,2?
@@ -17,8 +19,8 @@ synthetic_mode='delayed_1_dosage'
 #synthetic_mode='delayed_effects_large'
 steepness=1
 eta=0
-#RL_alg="sigmoid_LS"
-RL_alg="posterior_sampling"
+RL_alg="sigmoid_LS"
+#RL_alg="posterior_sampling"
 #RL_alg="fixed_randomization"
 #err_corr='independent'
 err_corr='time_corr'

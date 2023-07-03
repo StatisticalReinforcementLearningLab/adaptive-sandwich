@@ -234,6 +234,8 @@ class SigmoidLS:
         gradient_function = jax.grad(compute_loss_for_user, range(4))
         hessian_function = jax.hessian(compute_loss_for_user, range(4))
 
+        # TODO: make arbitrary size numpy array of params and change args to
+        # inner function
         intercept = most_recent_beta_est["intercept"][0]
         past_reward = most_recent_beta_est["past_reward"][0]
         action_intercept = most_recent_beta_est["action:intercept"][0]

@@ -188,46 +188,6 @@ class SigmoidLS:
 
         self.all_policies.append(update_dict)
 
-    def save_phi_gradients(
-        self,
-        all_prev_data,
-        calendar_t,
-    ):
-        # Note that it is possible to reconstruct all the data we need by
-        # stitching together the incremental data in self.all_policies.
-        # However, this is complicated logic, and it seems cleaner to just pass
-        # in all study data here and apply the same transformations that we
-        # apply to the incremental study data during algorithm updates
-
-        # TODO: should be able to stack
-        def compute_loss_for_user(
-            intercept,
-            past_reward,
-            action_intercept,
-            action_past_reward,
-            all_prev_data,
-            user_id,
-        ):
-            columns_of_interest = list(
-                {"action", "reward"} | set(self.state_feats) | set(self.treat_feats)
-            )
-            data_for_user = all_prev_data.loc[
-                all_prev_data.user_id == user_id, columns_of_interest
-            ]
-            # TODO: is to_numpy OK here?
-            actions = data_for_user["action"].to_numpy().reshape(-1, 1)
-            rewards = data_for_user["reward"].to_numpy().reshape(-1, 1)
-            base_states, treat_states = self.get_states(data_for_user)
-
-            beta_0 = jnp.array([intercept, past_reward])
-            beta_1 = jnp.array([action_intercept, action_past_reward])
-
-            return jnp.sum(
-                rewards
-                - jnp.matmul(base_states, beta_0)
-                - jnp.matmul(actions * treat_states, beta_1)
-            )
-
         # Get the beta estimate saved in the last algorithm update
         most_recent_beta_est = self.all_policies[-1]["beta_est"]
 

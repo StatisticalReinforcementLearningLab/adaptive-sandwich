@@ -189,7 +189,7 @@ class SigmoidLS:
 
         self.all_policies.append(update_dict)
 
-    def calculate_phi_derivatives(
+    def calculate_loss_derivatives(
         self,
         all_prev_data,
         calendar_t,

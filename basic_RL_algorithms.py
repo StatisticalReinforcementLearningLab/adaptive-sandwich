@@ -100,6 +100,7 @@ class SigmoidLS:
                 for x in self.state_feats + self.treat_feats_action
             ]
         )
+        self.algorithm_statistics_by_calendar_t = {}
 
     def get_states(self, tmp_df):
         base_states = tmp_df[self.state_feats].to_numpy()
@@ -188,7 +189,7 @@ class SigmoidLS:
 
         self.all_policies.append(update_dict)
 
-    def save_phi_gradients(
+    def calculate_phi_derivatives(
         self,
         all_prev_data,
         calendar_t,
@@ -234,22 +235,20 @@ class SigmoidLS:
         # TODO: verify that we don't need hessian for each user, can
         # differentiate sum of est eqns instead.
         # Yeah, Hessian calculation per user takes lots of time, probably avoid
-        return {
-            calendar_t: {
-                user_id: {
-                    "gradient": gradient_function(
-                        most_recent_beta_est,
-                        all_prev_data,
-                        user_id,
-                    ),
-                    # "hessian": hessian_function(
-                    #     most_recent_beta_est,
-                    #     all_prev_data,
-                    #     user_id,
-                    # ),
-                }
-                for user_id in self.all_policies[-1]["seen_user_id"]
+        self.algorithm_statistics_by_calendar_t[calendar_t] = {
+            user_id: {
+                "phi_gradient": gradient_function(
+                    most_recent_beta_est,
+                    all_prev_data,
+                    user_id,
+                ),
+                # "hessian": hessian_function(
+                #     most_recent_beta_est,
+                #     all_prev_data,
+                #     user_id,
+                # ),
             }
+            for user_id in self.all_policies[-1]["seen_user_id"]
         }
 
     def get_action_probs_inner(self, beta_est, prob_input_dict):

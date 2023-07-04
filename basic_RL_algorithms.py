@@ -199,12 +199,10 @@ class SigmoidLS:
         # in all study data here and apply the same transformations that we
         # apply to the incremental study data during algorithm updates
 
-        # TODO: should be able to stack
+        # TODO: should be able to stack all users
+        # TODO: *could* extract from inside outer function but it's tedious
         def compute_loss_for_user(
-            intercept,
-            past_reward,
-            action_intercept,
-            action_past_reward,
+            beta_est,
             all_prev_data,
             user_id,
         ):
@@ -214,13 +212,12 @@ class SigmoidLS:
             data_for_user = all_prev_data.loc[
                 all_prev_data.user_id == user_id, columns_of_interest
             ]
-            # TODO: is to_numpy OK here?
             actions = data_for_user["action"].to_numpy().reshape(-1, 1)
             rewards = data_for_user["reward"].to_numpy().reshape(-1, 1)
             base_states, treat_states = self.get_states(data_for_user)
 
-            beta_0 = jnp.array([intercept, past_reward])
-            beta_1 = jnp.array([action_intercept, action_past_reward])
+            beta_0 = beta_est[: base_states.shape[1]]
+            beta_1 = beta_est[base_states.shape[1] :]
 
             return jnp.sum(
                 rewards
@@ -229,39 +226,27 @@ class SigmoidLS:
             )
 
         # Get the beta estimate saved in the last algorithm update
-        most_recent_beta_est = self.all_policies[-1]["beta_est"]
+        most_recent_beta_est = self.all_policies[-1]["beta_est"].to_numpy()[0]
 
-        gradient_function = jax.grad(compute_loss_for_user, range(4))
-        hessian_function = jax.hessian(compute_loss_for_user, range(4))
-
-        # TODO: make arbitrary size numpy array of params and change args to
-        # inner function
-        intercept = most_recent_beta_est["intercept"][0]
-        past_reward = most_recent_beta_est["past_reward"][0]
-        action_intercept = most_recent_beta_est["action:intercept"][0]
-        action_past_reward = most_recent_beta_est["action:past_reward"][0]
+        gradient_function = jax.grad(compute_loss_for_user, 0)
+        hessian_function = jax.hessian(compute_loss_for_user, 0)
 
         # TODO: verify that we don't need hessian for each user, can
         # differentiate sum of est eqns instead.
+        # Yeah, Hessian calculation per user takes lots of time, probably avoid
         return {
             calendar_t: {
                 user_id: {
                     "gradient": gradient_function(
-                        intercept,
-                        past_reward,
-                        action_intercept,
-                        action_past_reward,
+                        most_recent_beta_est,
                         all_prev_data,
                         user_id,
                     ),
-                    "hessian": hessian_function(
-                        intercept,
-                        past_reward,
-                        action_intercept,
-                        action_past_reward,
-                        all_prev_data,
-                        user_id,
-                    ),
+                    # "hessian": hessian_function(
+                    #     most_recent_beta_est,
+                    #     all_prev_data,
+                    #     user_id,
+                    # ),
                 }
                 for user_id in self.all_policies[-1]["seen_user_id"]
             }

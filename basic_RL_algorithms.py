@@ -236,19 +236,20 @@ class SigmoidLS:
         # differentiate sum of est eqns instead.
         # Yeah, Hessian calculation per user takes lots of time, probably avoid
         self.algorithm_statistics_by_calendar_t[calendar_t] = {
-            user_id: {
-                "phi_gradient": gradient_function(
+            "loss_derivative_by_user_id": {
+                user_id: gradient_function(
                     most_recent_beta_est,
                     all_prev_data,
                     user_id,
-                ),
-                # "hessian": hessian_function(
-                #     most_recent_beta_est,
-                #     all_prev_data,
-                #     user_id,
-                # ),
-            }
-            for user_id in self.all_policies[-1]["seen_user_id"]
+                )
+                for user_id in self.all_policies[-1]["seen_user_id"]
+            },
+            "avg_loss_hessian": np.average(
+                [
+                    hessian_function(most_recent_beta_est, all_prev_data, user_id)
+                    for user_id in self.all_policies[-1]["seen_user_id"]
+                ]
+            ),
         }
 
     def get_action_probs_inner(self, beta_est, prob_input_dict):

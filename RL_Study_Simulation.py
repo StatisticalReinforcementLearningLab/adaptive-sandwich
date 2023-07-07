@@ -104,7 +104,9 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             if num_avail > 0 and prev_num_users >= args.min_users:
                 # Update Algorithm ##############################################
                 study_RLalg.update_alg(new_update_data, update_last_t=t)
-                study_RLalg.calculate_loss_derivatives(all_prev_data, calendar_t=t)
+                # TODO: Actually should probably just do this in update_alg, otherwise makes part
+                # of general RL alg contract
+                study_RLalg.calculate_algorithm_statistics(all_prev_data, calendar_t=t)
 
     if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
         fill_columns = ["policy_last_t", "policy_num"]

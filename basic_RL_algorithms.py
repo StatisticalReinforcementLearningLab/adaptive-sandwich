@@ -61,6 +61,7 @@ def sigmoid_LS_torch(args, batch_est_treat, treat_states, allocation_sigma):
     return pis
 
 
+# TODO: RL Alg abstract base class
 class SigmoidLS:
     """
     Sigmoid Least Squares algorithm
@@ -189,6 +190,11 @@ class SigmoidLS:
 
         self.all_policies.append(update_dict)
 
+    def calculate_algorithm_statistics(self, all_prev_data, calendar_t):
+        self.calculate_loss_derivatives(all_prev_data, calendar_t)
+        self.calculate_pi_derivatives(all_prev_data, calendar_t)
+
+    # TODO: Docstring
     def calculate_loss_derivatives(
         self,
         all_prev_data,
@@ -202,6 +208,7 @@ class SigmoidLS:
 
         # TODO: should be able to stack all users
         # TODO: *could* extract from inside outer function but it's tedious
+        # TODO: Docstring
         def compute_loss_for_user(
             beta_est,
             all_prev_data,
@@ -217,6 +224,7 @@ class SigmoidLS:
             rewards = data_for_user["reward"].to_numpy().reshape(-1, 1)
             base_states, treat_states = self.get_states(data_for_user)
 
+            # TODO: use or get rid of self.treat_bool?
             beta_0 = beta_est[: base_states.shape[1]]
             beta_1 = beta_est[base_states.shape[1] :]
 
@@ -227,7 +235,7 @@ class SigmoidLS:
             )
 
         # Get the beta estimate saved in the last algorithm update
-        most_recent_beta_est = self.all_policies[-1]["beta_est"].to_numpy()[0]
+        most_recent_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
         gradient_function = jax.grad(compute_loss_for_user, 0)
         hessian_function = jax.hessian(compute_loss_for_user, 0)
@@ -252,6 +260,52 @@ class SigmoidLS:
             ),
         }
 
+    # TODO: Docstring
+    def calculate_pi_derivatives(self, all_prev_data, calendar_t):
+        treat_states = all_prev_data[self.treat_feats].to_numpy()
+        most_recent_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
+
+        # TODO: Unite with method that does same thing. Needed pure function here
+        # TODO: Docstring
+        def get_action_probs_pure(
+            beta_est,
+            lower_clip,
+            upper_clip,
+            treat_states,
+            all_prev_data,
+            user_id,
+        ):
+            columns_of_interest = list(
+                {"action", "reward"} | set(self.state_feats) | set(self.treat_feats)
+            )
+            most_recent_data_for_user = all_prev_data.loc[
+                all_prev_data.user_id == user_id, columns_of_interest
+            ].iloc[-1, :]
+            base_states, treat_states = self.get_states(most_recent_data_for_user)
+            treat_est = beta_est[len(base_states) :]
+            lin_est = jnp.matmul(treat_states, treat_est)
+
+            raw_probs = jax.scipy.special.expit(lin_est)
+            probs = jnp.clip(raw_probs, lower_clip, upper_clip)
+
+            return probs.squeeze()
+
+        pi_gradient = jax.grad(get_action_probs_pure)
+        # TODO: Shouldn't assume dict already exists for calendar t
+        self.algorithm_statistics_by_calendar_t[calendar_t][
+            "pi_derivative_by_user_id"
+        ] = {
+            user_id: pi_gradient(
+                most_recent_beta_est,
+                self.args.lower_clip,
+                self.args.upper_clip,
+                treat_states,
+                all_prev_data,
+                user_id,
+            )
+            for user_id in self.all_policies[-1]["seen_user_id"]
+        }
+
     def get_action_probs_inner(self, beta_est, prob_input_dict):
         """
         Form action selection probabilities from raw inputs (used to form importance weights)
@@ -267,9 +321,11 @@ class SigmoidLS:
         """
 
         treat_est = beta_est[self.treat_bool]
-        lin_est = np.matmul(prob_input_dict["treat_states"], treat_est.T)
+        lin_est = np.matmul(prob_input_dict["treat_states"], treat_est)
 
         raw_probs = scipy.special.expit(lin_est)
+        # TODO: hiding things in args like this makes code harder to follow
+        # TODO: can use np clip
         probs = clip(self.args, raw_probs)
 
         return probs.squeeze()

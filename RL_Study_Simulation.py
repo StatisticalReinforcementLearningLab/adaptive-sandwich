@@ -1,5 +1,5 @@
 import argparse
-import pickle as pkl
+import cloudpickle as pickle
 import time
 import json
 import os
@@ -18,6 +18,10 @@ from constants import RLStudyArgs
 ###############################################################
 
 
+# TODO: This function probably shouldn't contain if-statements about which RL
+# algorithm is being used.  Come up with generic interface and and abstract class
+# and have instances handle any special behavior properly.  That way, those classes
+# really encapsulate all required logic for a particular RL alg.
 def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     """
     Goal: Simulates a study with n users
@@ -32,15 +36,17 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
     # Loop over all decision times ###############################################
     for t in range(1, study_env.calendar_T + 1):
+        # Update study_df with info on latest policy used to select actions
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            # Update study_df with info on latest policy used to select actions
             study_df.loc[
                 study_df["calendar_t"] == t, "policy_last_t"
             ] = study_RLalg.all_policies[-1]["policy_last_t"]
             study_df.loc[study_df["calendar_t"] == t, "policy_num"] = len(
                 study_RLalg.all_policies
             )
-
+        # TODO: The if logic might also cover this case correctly
+        # If not, it probably should. Would like to not check which RL alg
+        # is being used here, as a test of a healthy abstraction
         else:
             study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = 0
             study_df.loc[study_df["calendar_t"] == t, "policy_num"] = 1
@@ -51,9 +57,9 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         action_probs = study_RLalg.get_action_probs(
             curr_timestep_data, filter_keyval=("calendar_t", t)
         )
-
         if args.dataset_type == RLStudyArgs.HEARTSTEPS:
             action_probs *= curr_timestep_data["availability"]
+
         actions = study_RLalg.rng.binomial(1, action_probs)
 
         # Sample Rewards #####################################################
@@ -76,37 +82,40 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
         if t < study_env.calendar_T:
             # Record data to prepare for state at next decision time
-            current_users = study_df[study_df["calendar_t"] == t]["user_id"]
             study_df = study_env.update_study_df(study_df, t)
+
+        all_prev_data_bool = study_df["calendar_t"] <= t
+        all_prev_data = study_df[all_prev_data_bool]
+
+        # If we are beyond the first algorithm update, start recording
+        # quantities that will be needed to form the "bread" matrix in the end.
+        if t > args.decisions_between_updates:
+            study_RLalg.calculate_pi_and_weight_gradients(all_prev_data, calendar_t=t)
 
         # Check if need to update algorithm #######################################
         if (
             t % args.decisions_between_updates == 0
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
         ):
-            # check enough avail data and users; if so, update algorithm
+            # check enough users; if so, update algorithm
             most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
 
-            all_prev_data_bool = study_df["calendar_t"] <= t
             new_obs_bool = np.logical_and(
                 all_prev_data_bool,
                 study_df["calendar_t"] > most_recent_policy_t,
             )
             new_update_data = study_df[new_obs_bool]
-            all_prev_data = study_df[all_prev_data_bool]
 
-            if args.dataset_type == RLStudyArgs.HEARTSTEPS:
-                num_avail = np.sum(new_update_data["availability"])
-            else:
-                num_avail = 1
             prev_num_users = len(study_df[study_df["calendar_t"] == t])
-
-            if num_avail > 0 and prev_num_users >= args.min_users:
+            if prev_num_users >= args.min_users:
                 # Update Algorithm ##############################################
                 study_RLalg.update_alg(new_update_data, update_last_t=t)
                 # TODO: Actually should probably just do this in update_alg, otherwise makes part
                 # of general RL alg contract
-                study_RLalg.calculate_algorithm_statistics(all_prev_data, calendar_t=t)
+                # TODO: Also if we build the matrix, don't need the loss deriv separately?
+                study_RLalg.calculate_loss_derivatives(all_prev_data, calendar_t=t)
+
+    study_RLalg.construct_upper_left_bread_matrix()
 
     if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
         fill_columns = ["policy_last_t", "policy_num"]
@@ -303,16 +312,16 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
 
         study_df.to_csv(f"{folder_path}/data.csv", index=False)
         with open(f"{folder_path}/study_df.pkl", "wb") as f:
-            pkl.dump(study_df, f)
+            pickle.dump(study_df, f)
 
         with open(f"{folder_path}/study_RLalg.pkl", "wb") as f:
-            pkl.dump(study_RLalg, f)
+            pickle.dump(study_RLalg, f)
 
         # TODO eventually remove Save Variance Components #############################################
         if args.RL_alg == RLStudyArgs.SIGMOID_LS:
             out_dict = output_variance_pieces(study_df, study_RLalg, args)
             with open(f"{folder_path}/out_dict.pkl", "wb") as file:
-                pkl.dump(out_dict, file)
+                pickle.dump(out_dict, file)
 
             policy_grad_norm.append(
                 np.max(np.absolute([y["pi_grads"] for x, y in out_dict.items()]))

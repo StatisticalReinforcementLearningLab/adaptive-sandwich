@@ -1,10 +1,10 @@
 import argparse
-import cloudpickle as pickle
 import time
 import json
 import os
 
 import numpy as np
+import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env, SyntheticEnv
 from oralytics_env import load_oralytics_env, OralyticsEnv

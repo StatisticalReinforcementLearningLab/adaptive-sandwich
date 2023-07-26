@@ -80,6 +80,7 @@ def get_loss(beta_est, base_states, treat_states, actions, rewards):
 
 
 # TODO: RL Alg abstract base class
+# TODO: Switch back to dataclass and put subfunctions in right/consistent place
 class SigmoidLS:
     """
     Sigmoid Least Squares algorithm

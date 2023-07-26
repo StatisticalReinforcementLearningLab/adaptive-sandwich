@@ -20,6 +20,7 @@
 - Run `pip freeze > requirements.txt` to lock the versions of your package and all its subpackages
 
 ## Running the code
+- set PYTHONPATH to the root level of the module
 - `./run.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
 
 ## Linting/Formatting

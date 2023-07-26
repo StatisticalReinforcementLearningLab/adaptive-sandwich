@@ -143,14 +143,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
         paramf_path = "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
         param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
-        # TODO: should these be used?
-        treat_feats = [
-            RLStudyArgs.INTERCEPT,
-            RLStudyArgs.TIME_OF_DAY,
-            RLStudyArgs.WEEKEND,
-            RLStudyArgs.DAY_IN_STUDY_NORM,
-            RLStudyArgs.PRIOR_DAY_BRUSH,
-        ]
 
         user_env_data = {"bern_params": bern_params, "poisson_params": poisson_params}
 
@@ -237,6 +229,8 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             raise ValueError("Invalid Dataset Type")
 
         # Initialize RL algorithm ###################################################
+        # TODO: Do not pass args object to these. Extract what's needed.
+        # Unless that's needed for general interface? Argument groups could help.
         if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION:
             study_RLalg = FixedRandomization(
                 args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed
@@ -500,7 +494,7 @@ def main():
         "--recruit_t",
         type=int,
         default=arg_dict[RLStudyArgs.RECRUIT_T],
-        help="Number of updates between recruitment times (minmum 1)",
+        help="Number of updates between recruitment times (minimum 1)",
     )
     parser.add_argument(
         "--allocation_sigma",
@@ -516,7 +510,7 @@ def main():
     )
 
     args = parser.parse_args()
-    print(vars(args))
+    print(args)
 
     assert args.T >= args.decisions_between_updates
 

@@ -165,51 +165,6 @@ class SigmoidLS:
     def get_weight_gradient(self, *args, **kwargs):
         return jax.grad(self.get_radon_nikodym_weight, 0)(*args, **kwargs)
 
-    # # TODO: Generalize for action centering/etc
-    # # Note this needs jacrev instead of grad to differentiate
-    # def get_est_eqn_stack(self, all_betas):
-    #     beta_dim = len(self.state_feats) + len(self.treat_feats)
-
-    #     # List of times that were the first applicable time for some update
-    #     update_times = [
-    #         t
-    #         for t in self.algorithm_statistics_by_calendar_t
-    #         if "loss_gradients_by_user_id" in self.algorithm_statistics_by_calendar_t[t]
-    #     ]
-    #     all_users = self.all_policies[-1]["seen_user_id"]
-    #     stack = jnp.zeros(len(update_times))
-    #     # TODO: Examine whether using all inc data vs just new sometimes is problematic
-    #     for update_idx, policy in enumerate(self.all_policies[1:]):
-    #         entry = jnp.zeros((1, beta_dim))
-    #         for user_id in all_users:
-    #             weight_product = 1
-    #             if update_idx > 0:  # Yes, this could be written without the > 0
-    #                 for calendar_t in range(
-    #                     update_times[0],
-    #                     update_times[update_idx],
-    #                 ):
-    #                     weight_product *= self.get_radon_nikodym_weight(
-    #                         all_betas[update_idx - 1],
-    #                         beta_target=policy["beta_est"],
-    #                         lower_clip=self.args.lower_clip,
-    #                         upper_clip=self.args.upper_clip,
-    #                         treat_states=self.get_user_states(
-    #                             policy["inc_data"], user_id, calendar_t
-    #                         )["treat_states"][-1],
-    #                         action=self.get_user_actions(policy["inc_data"], user_id)[
-    #                             -1
-    #                         ].item(),
-    #                     )
-    #             entry += weight_product * self.get_loss_gradient(
-    #                 all_betas[update_idx - 1],
-    #                 **self.get_user_states(policy["inc_data"], user_id),
-    #                 actions=self.get_user_actions(policy["inc_data"], user_id),
-    #                 rewards=self.get_user_rewards(policy["inc_data"], user_id)
-    #             )
-    #         stack[update_idx, :] = entry
-
-    #     return stack / len(all_users)
-
     # TODO: Docstring
     def get_states(self, tmp_df):
         base_states = tmp_df[self.state_feats].to_numpy()

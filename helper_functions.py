@@ -131,27 +131,3 @@ def suffvec2var(RLalg, suffvec, intercept_val):
     assert np.allclose(varmatrix, varmatrix.T)
 
     return varmatrix
-
-
-# TODO: Unite with method that does same thing. Needed pure function here
-# TODO: Docstring
-def get_action_prob_pure(beta_est, lower_clip, upper_clip, treat_states):
-    treat_est = beta_est[-len(treat_states) :]
-    lin_est = jnp.matmul(treat_states, treat_est)
-
-    raw_prob = jax.scipy.special.expit(lin_est)
-    prob = jnp.clip(raw_prob, lower_clip, upper_clip)
-
-    return prob[()]
-
-
-def get_radon_nikodym_weight(
-    beta, beta_target, lower_clip, upper_clip, treat_states, action
-):
-    common_args = [lower_clip, upper_clip, treat_states]
-
-    pi_beta = get_action_prob_pure(beta, *common_args)[()]
-    pi_beta_target = get_action_prob_pure(beta_target, *common_args)[()]
-    return conditional_x_or_one_minus_x(pi_beta, action) / conditional_x_or_one_minus_x(
-        pi_beta_target, action
-    )

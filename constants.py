@@ -26,6 +26,7 @@ class RLStudyArgs:
 
     # Algorithm state features
     INTERCEPT = "intercept"
+    PAST_REWARD = "past_reward"
     TIME_OF_DAY = "time_of_day"
     PRIOR_DAY_BRUSH = "prior_day_brush"
     WEEKEND = "weekend"

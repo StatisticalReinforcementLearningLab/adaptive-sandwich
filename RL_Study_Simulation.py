@@ -87,7 +87,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         all_prev_data_bool = study_df["calendar_t"] <= t
         all_prev_data = study_df[all_prev_data_bool]
 
-        # If we are beyond the first algorithm update, start recording
+        # If we are beyond the initial policy, start recording
         # quantities that will be needed to form the "bread" matrix in the end.
         if t > args.decisions_between_updates:
             study_RLalg.calculate_pi_and_weight_gradients(all_prev_data, calendar_t=t)
@@ -415,7 +415,7 @@ def main():
         "--alg_state_feats",
         type=str,
         default=RLStudyArgs.INTERCEPT,
-        help="Comma separated list of algorithm state features",
+        help="Comma-separated list of algorithm state features",
     )
     parser.add_argument(
         "--action_centering",

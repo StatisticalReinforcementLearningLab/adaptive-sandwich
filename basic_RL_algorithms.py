@@ -1,3 +1,7 @@
+"""
+Implementations of several RL algorithms that may be used in study simulations.
+"""
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -10,8 +14,7 @@ from jax import numpy as jnp
 
 import least_squares_helper
 from helper_functions import (
-    get_action_prob_pure,
-    get_radon_nikodym_weight,
+    conditional_x_or_one_minus_x,
     clip,
 )
 
@@ -65,20 +68,6 @@ def sigmoid_LS_torch(args, batch_est_treat, treat_states, allocation_sigma):
     return pis
 
 
-# TODO: should be able to stack all users
-# TODO: Docstring
-def get_loss(beta_est, base_states, treat_states, actions, rewards):
-    # TODO: use or get rid of self.treat_bool?
-    beta_0 = beta_est[: base_states.shape[1]]
-    beta_1 = beta_est[base_states.shape[1] :]
-
-    return jnp.sum(
-        rewards
-        - jnp.matmul(base_states, beta_0)
-        - jnp.matmul(actions * treat_states, beta_1)
-    )
-
-
 # TODO: RL Alg abstract base class
 # TODO: Switch back to dataclass and put subfunctions in right/consistent place
 class SigmoidLS:
@@ -125,16 +114,101 @@ class SigmoidLS:
         self.upper_left_bread_matrix = None
         self.algorithm_statistics_by_calendar_t = {}
 
-        # TODO: These functions should belong to the class somehow
+    # TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
+    # Update Update: We can differentiate for all users at once with jacrev.
+    # TODO: Docstring
+    # TODO: Verify that the self is not problematic
+    def get_loss(self, beta_est, base_states, treat_states, actions, rewards):
+        beta_0 = beta_est[: base_states.shape[1]]
+        beta_1 = beta_est[base_states.shape[1] :]
 
-        self.get_loss_gradient = jax.grad(get_loss, 0)
-        self.get_loss_hessian = jax.hessian(get_loss, 0)
+        return jnp.sum(
+            rewards
+            - jnp.matmul(base_states, beta_0)
+            - jnp.matmul(actions * treat_states, beta_1)
+        )
 
-        self.get_action_prob_pure = get_action_prob_pure
-        self.get_pi_gradient = jax.grad(get_action_prob_pure, 0)
+    def get_loss_gradient(self, *args, **kwargs):
+        return jax.grad(self.get_loss, 0)(*args, **kwargs)
 
-        self.get_radon_nikodym_weight = get_radon_nikodym_weight
-        self.get_weight_gradient = jax.grad(get_radon_nikodym_weight, 0)
+    def get_loss_hessian(self, *args, **kwargs):
+        return jax.hessian(self.get_loss, 0)(*args, **kwargs)
+
+    # TODO: Unite with method that does same thing. Needed pure function here
+    # TODO: Docstring
+    # TODO: Differentiating including the clip is interesting
+    # See https://arxiv.org/pdf/2006.06903.pdf
+    def get_action_prob_pure(self, beta_est, lower_clip, upper_clip, treat_states):
+        treat_est = beta_est[-len(treat_states) :]
+        lin_est = jnp.matmul(treat_states, treat_est)
+
+        raw_prob = jax.scipy.special.expit(lin_est)
+        prob = jnp.clip(raw_prob, lower_clip, upper_clip)
+
+        return prob[()]
+
+    def get_pi_gradient(self, *args, **kwargs):
+        return jax.grad(self.get_action_prob_pure, 0)(*args, **kwargs)
+
+    # TODO: Docstring
+    def get_radon_nikodym_weight(
+        self, beta, beta_target, lower_clip, upper_clip, treat_states, action
+    ):
+        common_args = [lower_clip, upper_clip, treat_states]
+
+        pi_beta = self.get_action_prob_pure(beta, *common_args)[()]
+        pi_beta_target = self.get_action_prob_pure(beta_target, *common_args)[()]
+        return conditional_x_or_one_minus_x(
+            pi_beta, action
+        ) / conditional_x_or_one_minus_x(pi_beta_target, action)
+
+    def get_weight_gradient(self, *args, **kwargs):
+        return jax.grad(self.get_radon_nikodym_weight, 0)(*args, **kwargs)
+
+    # # TODO: Generalize for action centering/etc
+    # # Note this needs jacrev instead of grad to differentiate
+    # def get_est_eqn_stack(self, all_betas):
+    #     beta_dim = len(self.state_feats) + len(self.treat_feats)
+
+    #     # List of times that were the first applicable time for some update
+    #     update_times = [
+    #         t
+    #         for t in self.algorithm_statistics_by_calendar_t
+    #         if "loss_gradients_by_user_id" in self.algorithm_statistics_by_calendar_t[t]
+    #     ]
+    #     all_users = self.all_policies[-1]["seen_user_id"]
+    #     stack = jnp.zeros(len(update_times))
+    #     # TODO: Examine whether using all inc data vs just new sometimes is problematic
+    #     for update_idx, policy in enumerate(self.all_policies[1:]):
+    #         entry = jnp.zeros((1, beta_dim))
+    #         for user_id in all_users:
+    #             weight_product = 1
+    #             if update_idx > 0:  # Yes, this could be written without the > 0
+    #                 for calendar_t in range(
+    #                     update_times[0],
+    #                     update_times[update_idx],
+    #                 ):
+    #                     weight_product *= self.get_radon_nikodym_weight(
+    #                         all_betas[update_idx - 1],
+    #                         beta_target=policy["beta_est"],
+    #                         lower_clip=self.args.lower_clip,
+    #                         upper_clip=self.args.upper_clip,
+    #                         treat_states=self.get_user_states(
+    #                             policy["inc_data"], user_id, calendar_t
+    #                         )["treat_states"][-1],
+    #                         action=self.get_user_actions(policy["inc_data"], user_id)[
+    #                             -1
+    #                         ].item(),
+    #                     )
+    #             entry += weight_product * self.get_loss_gradient(
+    #                 all_betas[update_idx - 1],
+    #                 **self.get_user_states(policy["inc_data"], user_id),
+    #                 actions=self.get_user_actions(policy["inc_data"], user_id),
+    #                 rewards=self.get_user_rewards(policy["inc_data"], user_id)
+    #             )
+    #         stack[update_idx, :] = entry
+
+    #     return stack / len(all_users)
 
     # TODO: Docstring
     def get_states(self, tmp_df):
@@ -236,9 +310,12 @@ class SigmoidLS:
         # Because we perform algorithm updates at the *end* of a timestep, the
         # first timestep they apply to is one more than the time of the update.
         # Hence we add 1 here for notational consistency with the paper.
+
+        # TODO: Note that we don't need the loss gradient for the first update
+        # time... include anyway?
         first_applicable_time = calendar_t + 1
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
-            "loss_gradient_by_user_id"
+            "loss_gradients_by_user_id"
         ] = {
             user_id: self.get_loss_gradient(
                 curr_beta_est,
@@ -272,38 +349,66 @@ class SigmoidLS:
     def get_user_df(self, study_df, user_id):
         return study_df.loc[study_df.user_id == user_id]
 
-    # TODO: Docstring
-    # TOOD: These functions should perhaps be outside this class, or in base
-    def get_user_states(self, study_df, user_id, calendar_t=None):
+    # TODO: These functions should perhaps be outside this class, or in base
+    def get_user_states(self, study_df, user_id):
+        """
+        Extract just the rewards for the given user in the given study_df as a
+        numpy (column) vector.
+
+        Optionally specify a specific calendar time at which to do so.
+        """
         user_df = study_df.loc[study_df.user_id == user_id]
-        if calendar_t:
-            user_df = user_df.loc[study_df.calendar_t == calendar_t]
         base_states, treat_states = self.get_states(user_df)
 
         return {"base_states": base_states, "treat_states": treat_states}
 
-    # TODO: Docstring
     def get_user_actions(self, study_df, user_id):
+        """
+        Extract just the actions for the given user in the given study_df as a
+        numpy (column) vector.
+        """
         return (
             study_df.loc[study_df.user_id == user_id]["action"]
             .to_numpy()
             .reshape(-1, 1)
         )
 
-    # TODO: Docstring
     def get_user_rewards(self, study_df, user_id):
+        """
+        Extract just the rewards for the given user in the given study_df as a
+        numpy (column) vector.
+        """
         return (
             study_df.loc[study_df.user_id == user_id]["reward"]
             .to_numpy()
             .reshape(-1, 1)
         )
 
-    # TODO: Docstring
-    def calculate_pi_and_weight_gradients(self, new_data, calendar_t):
+    # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
+    # calculate correctly for any t captured in  data provided. Also a little
+    # weird that only the data at calendar_t is needed but we pass in more data.
+
+    def calculate_pi_and_weight_gradients(self, current_data, calendar_t):
         """
-        Note that this should happen for every decision time after the first
-        update
+        For all users, compute the gradient with respect to beta of both the pi function
+        (which takes an action and state and gives the probability of selecting the action)
+        and the Radon-Nikodym weight (derived from pi functions as described in the paper)
+        for the current time, evaluated at the most recent beta.
+
+        Note that we take the *latest* states and actions from current_data, and assume that
+        corresponds to both the most recent beta estimated and the supplied calendar_t.
+
+        The data is saved in `self.algorithm_statistics_by_calendar_t` under the current time.
+
+        Inputs:
+        - `current_data`: a pandas data frame with study data. Note that only the data
+        at calendar_t is needed.
+        - `calendar_t`: the current calendar time
+
+        Outputs:
+        - None
         """
+
         curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
@@ -313,14 +418,13 @@ class SigmoidLS:
                 curr_beta_est,
                 lower_clip=self.args.lower_clip,
                 upper_clip=self.args.upper_clip,
-                treat_states=self.get_user_states(new_data, user_id, calendar_t)[
+                treat_states=self.get_user_states(current_data, user_id)[
                     "treat_states"
                 ][-1],
             )
-            # TODO: This might not be the appropriate way to get all users
-            # in an incremental recruitment scenario
             for user_id in self.all_policies[-1]["seen_user_id"]
         }
+
         self.algorithm_statistics_by_calendar_t[calendar_t][
             "weight_gradients_by_user_id"
         ] = {
@@ -329,83 +433,78 @@ class SigmoidLS:
                 beta_target=curr_beta_est,
                 lower_clip=self.args.lower_clip,
                 upper_clip=self.args.upper_clip,
-                treat_states=self.get_user_states(new_data, user_id, calendar_t)[
+                treat_states=self.get_user_states(current_data, user_id)[
                     "treat_states"
                 ][-1],
-                # TODO: Debug this
-                action=self.get_user_actions(new_data, user_id)[-1].item(),
+                action=self.get_user_actions(current_data, user_id)[-1].item(),
             )
-            # TODO: This might not be the appropriate way to get all users
-            # in an incremental recruitment scenario
             for user_id in self.all_policies[-1]["seen_user_id"]
         }
 
-    # TODO: Try doing this with JAX actually? probably less error-prone
     # TODO: Docstring
     def construct_upper_left_bread_matrix(self):
-        # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract two from the
-        # two from the number of policies because there is an initial policy and a final policy
-        # updated after the algorithm completes.
-        num_updates = len(self.all_policies) - 2
+        # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract one from the
+        # two from the number of policies because there is an initial policy.
+        # TODO: exclude final policy?
+        num_updates = len(self.all_policies) - 1
         beta_dim = len(self.state_feats) + len(self.treat_feats)
         total_dim = beta_dim * num_updates
         output_matrix = np.zeros((total_dim, total_dim))
 
-        decs_btw_updates = self.args.decisions_between_updates
+        # List of times that were the first applicable time for some update
+        # TODO: could create incrementally as a more fundamental object
+        update_times = [
+            t
+            for t in self.algorithm_statistics_by_calendar_t
+            if "loss_gradients_by_user_id" in self.algorithm_statistics_by_calendar_t[t]
+        ]
 
-        update_num = 0
-        # This loop iterates over all times for which we recorded statistics sequentially,
-        # piecing together the desired matrix incrementally.  Skip the last update.
-        for calendar_t, t_stats_dict in list(
-            self.algorithm_statistics_by_calendar_t.items()
-        )[:-1]:
-            # Only process times that are immediately after an update
-            if not (calendar_t % decs_btw_updates == 1):
-                continue
+        num_users = len(self.all_policies[-1]["seen_user_id"])
 
-            update_num += 1
-            # Do this dynamically to perhaps anticipate incremental recruitment
-            num_users = len(t_stats_dict["loss_gradient_by_user_id"])
+        # This loop iterates over all times that were the first applicable time
+        # for a non-initial policy, which we call update times. Take care
+        # to note that update_idx starts at 0.
+        for update_idx, update_t in enumerate(update_times):
+            t_stats_dict = self.algorithm_statistics_by_calendar_t[update_t]
 
             # This loop creates the non-diagonal terms for the current update
-            # Do not process the final update
-            for i in range(update_num - 1):
+            # TODO: Should I process the final update.
+            for i in range(update_idx):
                 running_entry_holder = np.zeros((beta_dim, beta_dim))
 
                 # This loop calculates the per-user quantities that will be
                 # averaged for the final matrix entries
                 for user_id, loss_gradient in t_stats_dict[
-                    "loss_gradient_by_user_id"
+                    "loss_gradients_by_user_id"
                 ].items():
                     weight_gradient_sum = np.zeros(beta_dim)
 
-                    # This loop iterates over all decision times in slices
-                    # according to what was used for each update
+                    # This loop iterates over decision times in slices
+                    # according to what was used for each update to collect the
+                    # right weight gradients
                     for t in range(
-                        decs_btw_updates + 1 + decs_btw_updates * i,
-                        decs_btw_updates + 1 + decs_btw_updates * (i + 1),
+                        update_times[i],
+                        update_times[i + 1],
                     ):
                         weight_gradient_sum += self.algorithm_statistics_by_calendar_t[
                             t
                         ]["weight_gradients_by_user_id"][user_id]
 
-                    # TODO: Make sure this is the right multiplication form
-                    running_entry_holder += np.matmul(
-                        weight_gradient_sum.reshape(-1, 1),
-                        loss_gradient.reshape(1, -1),
-                    )
+                    running_entry_holder += np.outer(loss_gradient, weight_gradient_sum)
+
+                    # TODO: if we have action-centering, there will be an additional hessian
+                    # type term added here.
                 output_matrix[
-                    (update_num - 1) * beta_dim : update_num * beta_dim,
+                    (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
                     i * beta_dim : (i + 1) * beta_dim,
                 ] = (
                     running_entry_holder / num_users
                 )
 
-            # Add the diagonal entry
-            # TODO: Get the shape and location right
+            # Add the diagonal hessian entry (which is already an average)
             output_matrix[
-                (update_num - 1) * beta_dim : update_num * beta_dim,
-                (update_num - 1) * beta_dim : update_num * beta_dim,
+                (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
+                (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
             ] = t_stats_dict["avg_loss_hessian"]
 
         self.upper_left_bread_matrix = output_matrix

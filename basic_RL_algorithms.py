@@ -117,15 +117,18 @@ class SigmoidLS:
     # TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
     # Update Update: We can differentiate for all users at once with jacrev.
     # TODO: Docstring
-    # TODO: Verify that the self is not problematic
+    # TODO: Unite with update_alg logic somehow?
     def get_loss(self, beta_est, base_states, treat_states, actions, rewards):
-        beta_0 = beta_est[: base_states.shape[1]]
-        beta_1 = beta_est[base_states.shape[1] :]
+        beta_0 = beta_est[: base_states.shape[1]].reshape(-1, 1)
+        beta_1 = beta_est[base_states.shape[1] :].reshape(-1, 1)
 
         return jnp.sum(
-            rewards
-            - jnp.matmul(base_states, beta_0)
-            - jnp.matmul(actions * treat_states, beta_1)
+            (
+                rewards
+                - jnp.matmul(base_states, beta_0)
+                - jnp.matmul(actions * treat_states, beta_1)
+            )
+            ** 2
         )
 
     def get_loss_gradient(self, *args, **kwargs):
@@ -134,16 +137,21 @@ class SigmoidLS:
     def get_loss_hessian(self, *args, **kwargs):
         return jax.hessian(self.get_loss, 0)(*args, **kwargs)
 
-    # TODO: Unite with method that does same thing. Needed pure function here
+    # TODO: Unite with method that does same thing. Needed pure function here.
+    # Might need to use jacrev to do so
     # TODO: Docstring
     # TODO: Differentiating including the clip is interesting
     # See https://arxiv.org/pdf/2006.06903.pdf
-    def get_action_prob_pure(self, beta_est, lower_clip, upper_clip, treat_states):
+    def get_action_prob_pure(
+        self, beta_est, lower_clip, upper_clip, treat_states, action=1
+    ):
         treat_est = beta_est[-len(treat_states) :]
         lin_est = jnp.matmul(treat_states, treat_est)
 
         raw_prob = jax.scipy.special.expit(lin_est)
-        prob = jnp.clip(raw_prob, lower_clip, upper_clip)
+        prob = conditional_x_or_one_minus_x(
+            jnp.clip(raw_prob, lower_clip, upper_clip), action
+        )
 
         return prob[()]
 
@@ -260,7 +268,7 @@ class SigmoidLS:
 
         # TODO: verify that we don't need hessian for each user, can
         # differentiate sum of est eqns instead.
-        # Yeah, Hessian calculation per user takes lots of time, probably avoid
+        # Yeah, Hessian calculation per user takes lots of time, probably avoid.
 
         # Because we perform algorithm updates at the *end* of a timestep, the
         # first timestep they apply to is one more than the time of the update.
@@ -268,7 +276,16 @@ class SigmoidLS:
 
         # TODO: Note that we don't need the loss gradient for the first update
         # time... include anyway?
+        # TODO: Will calculate things for T + 1 if the final time is 0 mod
+        # decisions between updates.  Doesn't seem quite right
         first_applicable_time = calendar_t + 1
+        user_id = 1
+        self.get_loss(
+            curr_beta_est,
+            **self.get_user_states(all_prev_data, user_id),
+            actions=self.get_user_actions(all_prev_data, user_id),
+            rewards=self.get_user_rewards(all_prev_data, user_id)
+        )
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {
@@ -340,9 +357,8 @@ class SigmoidLS:
         )
 
     # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
-    # calculate correctly for any t captured in  data provided. Also a little
+    # calculate correctly for any t captured in data provided. Also a little
     # weird that only the data at calendar_t is needed but we pass in more data.
-
     def calculate_pi_and_weight_gradients(self, current_data, calendar_t):
         """
         For all users, compute the gradient with respect to beta of both the pi function
@@ -363,6 +379,7 @@ class SigmoidLS:
         Outputs:
         - None
         """
+        assert calendar_t == np.max(current_data["calendar_t"])
 
         curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
@@ -376,6 +393,7 @@ class SigmoidLS:
                 treat_states=self.get_user_states(current_data, user_id)[
                     "treat_states"
                 ][-1],
+                action=self.get_user_actions(current_data, user_id)[-1].item(),
             )
             for user_id in self.all_policies[-1]["seen_user_id"]
         }

@@ -160,7 +160,6 @@ class TestSigmoidLS_T3_n2:
             },
         )
 
-    # TODO: test multiple times
     def test_calculate_pi_and_weight_gradients_zero_action_low_clip(self):
         """
         User 1 takes no action, meaning negative gradient case, and User 2
@@ -293,12 +292,12 @@ class TestSigmoidLS_T3_n2:
             },
             6: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([1.0] * 4, dtype="float32"),
-                    2: np.array([1.0] * 4, dtype="float32"),
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
-                    1: np.array([1.0] * 4, dtype="float32"),
-                    2: np.array([1.0] * 4, dtype="float32"),
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
                 },
             },
         }

@@ -116,8 +116,8 @@ class TestSigmoidLS_T3_n2:
         At time 3, User 1 takes a positive action, meaning positive gradient case, and User 2
         gets clipped at .9, meaning zero gradient.
 
-        In addition, a study df derived from the time 3 study frame is passed in for time
-        2 (the df doesn't build incrementally from time 2 to 3 but that's fine) to test
+        In addition, a study df derived from the time 3 study df is passed in for time
+        2 (the df doesn't build incrementally from time 2 to 3 but that's fine) simply to test
         that each of the results goes to the correct key.
         """
         self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_3, 2)
@@ -130,8 +130,6 @@ class TestSigmoidLS_T3_n2:
                     # predictable results.
                     "pi_gradients_by_user_id": {
                         1: np.array([0, 0, 0.19661194, -0.19661194], dtype="float32"),
-                        # Note that these are all zeros because this probability is clipped
-                        # TODO: Is this okay?
                         2: np.array([0, 0, 0.19661194, -0.19661194], dtype="float32"),
                     },
                     "weight_gradients_by_user_id": {
@@ -246,8 +244,6 @@ class TestSigmoidLS_T3_n2:
             ),
         )
 
-    # TODO: I think there would actually be a key for 7. Consult with Kelly
-    # about this final update
     def test_construct_upper_left_bread_matrix_2_decs_btwn_updates(self):
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
             3: {

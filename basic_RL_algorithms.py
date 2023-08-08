@@ -418,14 +418,12 @@ class SigmoidLS:
     def construct_upper_left_bread_matrix(self):
         # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract one from the
         # two from the number of policies because there is an initial policy.
-        # TODO: exclude final policy?
         num_updates = len(self.all_policies) - 1
         beta_dim = len(self.state_feats) + len(self.treat_feats)
         total_dim = beta_dim * num_updates
         output_matrix = np.zeros((total_dim, total_dim))
 
         # List of times that were the first applicable time for some update
-        # TODO: could create incrementally as a more fundamental object
         update_times = [
             t
             for t in self.algorithm_statistics_by_calendar_t
@@ -441,7 +439,6 @@ class SigmoidLS:
             t_stats_dict = self.algorithm_statistics_by_calendar_t[update_t]
 
             # This loop creates the non-diagonal terms for the current update
-            # TODO: Should I process the final update.
             for i in range(update_idx):
                 running_entry_holder = np.zeros((beta_dim, beta_dim))
 
@@ -466,7 +463,9 @@ class SigmoidLS:
                     running_entry_holder += np.outer(loss_gradient, weight_gradient_sum)
 
                     # TODO: if we have action-centering, there will be an additional hessian
-                    # type term added here.
+                    # type term added here. Update: way to implement is to differentiate wrt
+                    # all betas each update and always add extra terms here. If 0, so be it, but
+                    # things like action centering will just work.
                 output_matrix[
                     (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
                     i * beta_dim : (i + 1) * beta_dim,

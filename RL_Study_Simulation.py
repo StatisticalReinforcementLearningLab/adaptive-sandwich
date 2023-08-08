@@ -94,7 +94,8 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
         # Check if need to update algorithm #######################################
         if (
-            t % args.decisions_between_updates == 0
+            t < study_env.calendar_T
+            and t % args.decisions_between_updates == 0
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
         ):
             # check enough users; if so, update algorithm

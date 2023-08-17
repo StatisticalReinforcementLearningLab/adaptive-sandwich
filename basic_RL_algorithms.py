@@ -16,6 +16,8 @@ import least_squares_helper
 from helper_functions import (
     conditional_x_or_one_minus_x,
     clip,
+    get_user_actions,
+    get_user_rewards,
 )
 
 
@@ -86,13 +88,13 @@ class SigmoidLS:
         self.steepness = steepness
 
         self.rng = np.random.default_rng(self.alg_seed)
-        total_dim = len(self.state_feats) + len(self.treat_feats)
+        self.beta_dim = len(self.state_feats) + len(self.treat_feats)
         # Set an initial policy
         self.all_policies = [
             {
                 "policy_last_t": 0,
-                "RX": np.zeros(total_dim),
-                "XX": np.zeros(total_dim),
+                "RX": np.zeros(self.beta_dim),
+                "XX": np.zeros(self.beta_dim),
                 "beta_est": pd.DataFrame(),
                 # TODO: verify changing this to inc_data and {} instead of None is ok. Was inconsistent
                 # before. also changed beta est to empty df
@@ -111,7 +113,7 @@ class SigmoidLS:
                 for x in self.state_feats + self.treat_feats_action
             ]
         )
-        self.upper_left_bread_matrix = None
+        self.upper_left_bread_inverse = None
         self.algorithm_statistics_by_calendar_t = {}
 
     # TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
@@ -253,6 +255,7 @@ class SigmoidLS:
         self.all_policies.append(update_dict)
 
     # TODO: Docstring
+    # TODO: probably cleaner to pass in current beta estimate
     def calculate_loss_derivatives(
         self,
         all_prev_data,
@@ -276,30 +279,20 @@ class SigmoidLS:
 
         # TODO: Note that we don't need the loss gradient for the first update
         # time... include anyway?
-        # TODO: Will calculate things for T + 1 if the final time is 0 mod
-        # decisions between updates.  Doesn't seem quite right
         first_applicable_time = calendar_t + 1
-        user_id = 1
-        self.get_loss(
-            curr_beta_est,
-            **self.get_user_states(all_prev_data, user_id),
-            actions=self.get_user_actions(all_prev_data, user_id),
-            rewards=self.get_user_rewards(all_prev_data, user_id)
-        )
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {
             user_id: self.get_loss_gradient(
                 curr_beta_est,
-                **self.get_user_states(all_prev_data, user_id),
-                actions=self.get_user_actions(all_prev_data, user_id),
-                rewards=self.get_user_rewards(all_prev_data, user_id)
+                *self.get_user_states(all_prev_data, user_id),
+                actions=get_user_actions(all_prev_data, user_id),
+                rewards=get_user_rewards(all_prev_data, user_id)
             )
             for user_id in self.all_policies[-1]["seen_user_id"]
         }
 
-        # TODO: Does average work the way I want here? no it does not. I think
-        # fixed that but probably get rid of the comprehension
+        # TODO: Maybe get rid of the comprehension for readability
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = sum(
@@ -307,9 +300,9 @@ class SigmoidLS:
                 np.array(
                     self.get_loss_hessian(
                         curr_beta_est,
-                        **self.get_user_states(all_prev_data, user_id),
-                        actions=self.get_user_actions(all_prev_data, user_id),
-                        rewards=self.get_user_rewards(all_prev_data, user_id)
+                        *self.get_user_states(all_prev_data, user_id),
+                        actions=get_user_actions(all_prev_data, user_id),
+                        rewards=get_user_rewards(all_prev_data, user_id)
                     )
                 )
                 for user_id in self.all_policies[-1]["seen_user_id"]
@@ -318,10 +311,6 @@ class SigmoidLS:
             self.all_policies[-1]["seen_user_id"]
         )
 
-    def get_user_df(self, study_df, user_id):
-        return study_df.loc[study_df.user_id == user_id]
-
-    # TODO: These functions should perhaps be outside this class, or in base
     def get_user_states(self, study_df, user_id):
         """
         Extract just the rewards for the given user in the given study_df as a
@@ -330,35 +319,12 @@ class SigmoidLS:
         Optionally specify a specific calendar time at which to do so.
         """
         user_df = study_df.loc[study_df.user_id == user_id]
-        base_states, treat_states = self.get_states(user_df)
-
-        return {"base_states": base_states, "treat_states": treat_states}
-
-    def get_user_actions(self, study_df, user_id):
-        """
-        Extract just the actions for the given user in the given study_df as a
-        numpy (column) vector.
-        """
-        return (
-            study_df.loc[study_df.user_id == user_id]["action"]
-            .to_numpy()
-            .reshape(-1, 1)
-        )
-
-    def get_user_rewards(self, study_df, user_id):
-        """
-        Extract just the rewards for the given user in the given study_df as a
-        numpy (column) vector.
-        """
-        return (
-            study_df.loc[study_df.user_id == user_id]["reward"]
-            .to_numpy()
-            .reshape(-1, 1)
-        )
+        return self.get_states(user_df)
 
     # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
     # calculate correctly for any t captured in data provided. Also a little
     # weird that only the data at calendar_t is needed but we pass in more data.
+    # TODO: Probably cleaner to pass in current theta estimate
     def calculate_pi_and_weight_gradients(self, current_data, calendar_t):
         """
         For all users, compute the gradient with respect to beta of both the pi function
@@ -370,6 +336,7 @@ class SigmoidLS:
         corresponds to both the most recent beta estimated and the supplied calendar_t.
 
         The data is saved in `self.algorithm_statistics_by_calendar_t` under the current time.
+        See the keys below.
 
         Inputs:
         - `current_data`: a pandas data frame with study data. Note that only the data
@@ -390,10 +357,8 @@ class SigmoidLS:
                 curr_beta_est,
                 lower_clip=self.args.lower_clip,
                 upper_clip=self.args.upper_clip,
-                treat_states=self.get_user_states(current_data, user_id)[
-                    "treat_states"
-                ][-1],
-                action=self.get_user_actions(current_data, user_id)[-1].item(),
+                treat_states=self.get_user_states(current_data, user_id)[1][-1],
+                action=get_user_actions(current_data, user_id)[-1].item(),
             )
             for user_id in self.all_policies[-1]["seen_user_id"]
         }
@@ -406,28 +371,29 @@ class SigmoidLS:
                 beta_target=curr_beta_est,
                 lower_clip=self.args.lower_clip,
                 upper_clip=self.args.upper_clip,
-                treat_states=self.get_user_states(current_data, user_id)[
-                    "treat_states"
-                ][-1],
-                action=self.get_user_actions(current_data, user_id)[-1].item(),
+                treat_states=self.get_user_states(current_data, user_id)[1][-1],
+                action=get_user_actions(current_data, user_id)[-1].item(),
             )
             for user_id in self.all_policies[-1]["seen_user_id"]
         }
 
     # TODO: Docstring
-    def construct_upper_left_bread_matrix(self):
-        # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract one from the
-        # two from the number of policies because there is an initial policy.
+    # TODO: Use np.block to reduce need for indexing
+    def construct_upper_left_bread_inverse(self):
+        # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract
+        # one from the number of policies  to find the number of updates because there is an
+        # initial placeholder policy.
         num_updates = len(self.all_policies) - 1
         beta_dim = len(self.state_feats) + len(self.treat_feats)
-        total_dim = beta_dim * num_updates
-        output_matrix = np.zeros((total_dim, total_dim))
+        overall_dim = beta_dim * num_updates
+        output_matrix = np.zeros((overall_dim, overall_dim))
 
         # List of times that were the first applicable time for some update
+        # TODO: sort to not rely on insertion order?
         update_times = [
             t
-            for t in self.algorithm_statistics_by_calendar_t
-            if "loss_gradients_by_user_id" in self.algorithm_statistics_by_calendar_t[t]
+            for t, value in self.algorithm_statistics_by_calendar_t.items()
+            if "loss_gradients_by_user_id" in value
         ]
 
         num_users = len(self.all_policies[-1]["seen_user_id"])
@@ -435,10 +401,12 @@ class SigmoidLS:
         # This loop iterates over all times that were the first applicable time
         # for a non-initial policy, which we call update times. Take care
         # to note that update_idx starts at 0.
+        # Think of each iteration of this loop as creating a (block) row of the matrix
         for update_idx, update_t in enumerate(update_times):
             t_stats_dict = self.algorithm_statistics_by_calendar_t[update_t]
 
             # This loop creates the non-diagonal terms for the current update
+            # Think of each iteration of this loop as creating one term in the current (block) row
             for i in range(update_idx):
                 running_entry_holder = np.zeros((beta_dim, beta_dim))
 
@@ -479,7 +447,7 @@ class SigmoidLS:
                 (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
             ] = t_stats_dict["avg_loss_hessian"]
 
-        self.upper_left_bread_matrix = output_matrix
+        self.upper_left_bread_inverse = output_matrix
 
     def get_action_probs_inner(self, beta_est, prob_input_dict):
         """

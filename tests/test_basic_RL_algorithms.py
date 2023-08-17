@@ -190,7 +190,7 @@ class TestSigmoidLS_T3_n2:
         )
 
     # TODO: Test extra hessian term for action centering
-    def test_construct_upper_left_bread_matrix_update_every_decision(self):
+    def test_construct_upper_left_bread_inverse_update_every_decision(self):
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
             2: {
                 "pi_gradients_by_user_id": {
@@ -223,9 +223,9 @@ class TestSigmoidLS_T3_n2:
                 "avg_loss_hessian": np.ones((4, 4)),
             },
         }
-        self.sigmoid_1.construct_upper_left_bread_matrix()
+        self.sigmoid_1.construct_upper_left_bread_inverse()
         np.testing.assert_equal(
-            self.sigmoid_1.upper_left_bread_matrix,
+            self.sigmoid_1.upper_left_bread_inverse,
             # Note that this was constructed manually by inserting the correct
             # diagonal blocks and then averaging outer products of the
             # appropriate things in the above algorithm statistics dict
@@ -244,7 +244,7 @@ class TestSigmoidLS_T3_n2:
             ),
         )
 
-    def test_construct_upper_left_bread_matrix_2_decs_btwn_updates(self):
+    def test_construct_upper_left_bread_inverse_2_decs_btwn_updates(self):
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
             3: {
                 "pi_gradients_by_user_id": {
@@ -297,9 +297,9 @@ class TestSigmoidLS_T3_n2:
                 },
             },
         }
-        self.sigmoid_1.construct_upper_left_bread_matrix()
+        self.sigmoid_1.construct_upper_left_bread_inverse()
         np.testing.assert_equal(
-            self.sigmoid_1.upper_left_bread_matrix,
+            self.sigmoid_1.upper_left_bread_inverse,
             # Note that this was constructed manually by inserting the correct
             # diagonal blocks and then summing weight gradients and averaging outer
             # products of appropriate things in the above algorithm statistics dict

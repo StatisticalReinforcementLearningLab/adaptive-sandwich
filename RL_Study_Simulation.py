@@ -116,7 +116,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                 # TODO: Also if we build the matrix, don't need the loss deriv separately?
                 study_RLalg.calculate_loss_derivatives(all_prev_data, calendar_t=t)
 
-    study_RLalg.construct_upper_left_bread_matrix()
+    study_RLalg.construct_upper_left_bread_inverse()
 
     if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
         fill_columns = ["policy_last_t", "policy_num"]
@@ -511,6 +511,7 @@ def main():
     )
 
     args = parser.parse_args()
+    print("Args provided to RL_Study_Simulation.py")
     print(args)
 
     assert args.T >= args.decisions_between_updates

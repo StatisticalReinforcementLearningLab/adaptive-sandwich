@@ -79,6 +79,8 @@ def get_loss(theta_est, base_states, treat_states, actions, rewards, action1prob
 
 
 get_loss_gradient = jax.grad(get_loss)
+# TODO: jacrev thinks len(args) == 3, so it's very possible this is not the correct param to differentiate wrt
+get_loss_gradient_derivatives_wrt_pi = jax.jacrev(get_loss_gradient, 5)
 get_loss_hessian = jax.hessian(get_loss)
 
 
@@ -175,8 +177,6 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
     """
     Extract just the rewards for the given user in the given study_df as a
     numpy (column) vector.
-
-    Optionally specify a specific calendar time at which to do so.
     """
     user_df = study_df.loc[study_df.user_id == user_id]
     base_states = user_df[state_feats].to_numpy()
@@ -184,6 +184,10 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
     return (base_states, treat_states)
 
 
+# TODO: Handle get_loss_gradient generic interface.  Probably need some function that just takes a
+# study df, state feats, treat feats, and theta est
+# TODO: Also think about how to specify whether to treat something as action probabilities
+# TODO: idk if beta dim should be included in here
 def form_bread_matrix(
     upper_left_bread_inverse,
     study_df,
@@ -197,16 +201,56 @@ def form_bread_matrix(
     existing_rows = upper_left_bread_inverse.shape[0]
     user_ids = study_df.user_id.unique()
 
-    max_t = study_df.calendar_t.max()
     # This is useful for sweeping through the decision times between updates
     # but also those after the final update
+    max_t = study_df.calendar_t.max()
     update_times_and_upper_limit = (
         update_times if update_times[-1] == max_t + 1 else update_times + [max_t + 1]
     )
 
     theta_dim = len(theta_est)
 
-    # pylint: disable=consider-using-enumerate
+    # Begin by creating a few convenience data structures for the mixed theta/beta derivatives
+    # that are most easily created for may decision times at once, whereas the following loop is
+    # over update times.  We will pull appropriate quantities from here during iterations of the
+    # loop.
+
+    # This computes derivatives of the theta estimating equation wrt the action probabilities
+    # vector, which importantly has an element for *every* decision time.  We will later do the
+    # work to multiply these by pi derivatives with respect to beta, thus getting the quantities
+    # we really want via the chain rule, and also summing terms that correspond to the same betas
+    # behind the scenes.
+    # Note that JAX treats positional args as keyword args if they are supplied with name=val
+    # syntax.  Supplying these arg names is a good practice for readability, but has
+    # unexpected consequences in this case. Just noting this here because it was tricky to debug.
+    mixed_theta_beta_loss_derivatives_by_user_id = {
+        user_id: get_loss_gradient_derivatives_wrt_pi(
+            theta_est,
+            *get_user_states(study_df, state_feats, treat_feats, user_id),
+            get_user_actions(study_df, user_id),
+            get_user_rewards(study_df, user_id),
+            get_user_action1probs(study_df, user_id),
+        ).squeeze()
+        for user_id in user_ids
+    }
+    # TODO: Handle missing data?
+    # This simply collects the pi derivatives with respect to betas for each
+    # user, reorganizing existing data from the RL side. The one complication
+    # is that we add some padding of zeros for decision times before the first
+    # update to be in correspondence with the above data structure
+    pi_derivatives_by_user_id = {
+        user_id: np.pad(
+            np.array(
+                [
+                    t_stats_dict["pi_gradients_by_user_id"][user_id]
+                    for t_stats_dict in algo_stats_dict.values()
+                ]
+            ),
+            pad_width=((update_times[0] - 1, 0), (0, 0)),
+        )
+        for user_id in user_ids
+    }
+
     # Think of each iteration of this loop as creating one term in the final (block) row
     bottom_left_row_blocks = []
     for i in range(len(update_times)):
@@ -215,13 +259,18 @@ def form_bread_matrix(
         # This loop calculates the per-user quantities that will be
         # averaged for the final matrix entries
         for user_id in user_ids:
+            # 1. We first form the outer product of the estimating equation for theta
+            # and the sum of the weight gradients with respect to beta for the
+            # corresponding decision times
+
             theta_loss_gradient = get_loss_gradient(
                 theta_est,
                 *get_user_states(study_df, state_feats, treat_feats, user_id),
-                actions=get_user_actions(study_df, user_id),
-                rewards=get_user_rewards(study_df, user_id),
-                action1probs=get_user_action1probs(study_df, user_id),
+                get_user_actions(study_df, user_id),
+                get_user_rewards(study_df, user_id),
+                get_user_action1probs(study_df, user_id),
             )
+
             weight_gradient_sum = np.zeros(beta_dim)
 
             # This loop iterates over decision times in slices between updates
@@ -236,9 +285,40 @@ def form_bread_matrix(
 
             running_entry_holder += np.outer(theta_loss_gradient, weight_gradient_sum)
 
-            # TODO: Figure out how to add mixed derivative term here.
-            # Hard because need actual pi functions to use jax, otherwise need to construct from pi gradients
-            # But these have implications for the statistician's interface
+            # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece
+            # is a bit intricate; we only have the the theta loss function as a function of the pis,
+            #  and the  *values* of the pi derivatives wrt to betas available here, since the actual
+            #  pi functions are the domain of the RL side. The loss function also gets an action
+            # probability for all decision times, not knowing which correspond to the
+            # same betas behind the scenes, so our tasks are to
+            # 1. multiply these theta + pi derivatives for each relevant decision
+            #    time by the corresponding pi + beta derivative
+            # 2. sum together the products from the previous step that actually
+            #    correspond to the same betas
+            # The loop we are currently in is doing this for just the bucket of decision
+            # times currently under consideration.
+
+            # Multiply just the appropriate segments of the precomputed
+            # mixed theta pi loss derivative matrix for the given user and
+            # the precollected pi beta derivative matrix for the user. These
+            # segments are simply those that correspond to all the decision times
+            # in the current slice between updates under consideration.
+            # TODO: Check with Kelly about this implementation
+            lower_t = update_times_and_upper_limit[i]
+            upper_t = update_times_and_upper_limit[i + 1]
+            mixed_theta_pi_loss_derivative = np.matmul(
+                mixed_theta_beta_loss_derivatives_by_user_id[user_id][
+                    :,
+                    lower_t:upper_t,
+                ],
+                pi_derivatives_by_user_id[user_id][
+                    lower_t:upper_t,
+                    :,
+                ],
+            )
+
+            running_entry_holder += mixed_theta_pi_loss_derivative
+
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
 
     bottom_right_hessian = sum(
@@ -247,8 +327,8 @@ def form_bread_matrix(
                 get_loss_hessian(
                     theta_est,
                     *get_user_states(study_df, state_feats, treat_feats, user_id),
-                    actions=get_user_actions(study_df, user_id),
-                    rewards=get_user_rewards(study_df, user_id),
+                    get_user_actions(study_df, user_id),
+                    get_user_rewards(study_df, user_id),
                 )
             )
             for user_id in user_ids

@@ -315,8 +315,6 @@ class SigmoidLS:
         """
         Extract just the rewards for the given user in the given study_df as a
         numpy (column) vector.
-
-        Optionally specify a specific calendar time at which to do so.
         """
         user_df = study_df.loc[study_df.user_id == user_id]
         return self.get_states(user_df)

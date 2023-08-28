@@ -5,9 +5,7 @@ import os
 import jax
 from jax import numpy as jnp
 import numpy as np
-
-from least_squares_helper import get_est_eqn_LS, fit_WLS
-from debug_helper import get_adaptive_sandwich
+from sklearn.linear_model import LinearRegression
 
 from helper_functions import get_user_actions, get_user_rewards, get_user_action1probs
 
@@ -51,13 +49,7 @@ def load_data(args, folder_path):
     return study_df, study_RLalg, alg_out_dict
 
 
-# TODO: think about the mixed derivative. If we want to actually differentiate to get it, we
-# need to actually plug in betas to get action1probs here, so that we can differentiate with
-# respect to beta. But there are major questions about how to specify this interface to users.
-# If they refer to an action probability, it needs to be translated into the actual function
-# to get action probabilities from the RL side.  This points to an option to toggle action centering,
-# rather than just allowing it to be directly specified in the model.
-# Also if we require actual pi functions, that can only really happen if initial after study side is in python
+# TODO: Think about interface here.  User should probably specify model, we create loss from it
 def get_loss(theta_est, base_states, treat_states, actions, rewards, action1probs=None):
     theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
@@ -79,7 +71,6 @@ def get_loss(theta_est, base_states, treat_states, actions, rewards, action1prob
 
 
 get_loss_gradient = jax.grad(get_loss)
-# TODO: jacrev thinks len(args) == 3, so it's very possible this is not the correct param to differentiate wrt
 get_loss_gradient_derivatives_wrt_pi = jax.jacrev(get_loss_gradient, 5)
 get_loss_hessian = jax.hessian(get_loss)
 
@@ -104,9 +95,11 @@ def analyze_dataset(dataset_num, args, folder_template):
         if "loss_gradients_by_user_id" in value
     ]
 
-    theta_est = estimate_theta(study_df)
+    # TODO: state features should not be the same as RL alg for full generality
+    theta_est = estimate_theta(
+        study_df, study_RLalg.state_feats, study_RLalg.treat_feats
+    )
 
-    # TODO: what about when theta and beta have different dimensions?
     # TODO: state features should not be the same as RL alg for full generality
     bread_matrix = form_bread_matrix(
         study_RLalg.upper_left_bread_inverse,
@@ -135,10 +128,27 @@ def analyze_dataset(dataset_num, args, folder_template):
 
 # TODO: Implement. Using loss function would be nice (seems possible with some
 # scipy least squares functions)
-def estimate_theta(study_df):
-    return np.array([1.0, 2, 3, 4])
+# def estimate_theta(study_df):
+#     return np.array([1.0, 2, 3, 4])
 
 
+# TODO: Think about user interface.  Do they give whole estimate theta function? or simply a model
+# spec and we do the fitting within some framework
+# TODO: Should we specify the format of study df or allow flexibility?
+def estimate_theta(study_df, state_feats, treat_feats):
+    # Note that the intercept is included in the features already (col of 1s)
+    linear_model = LinearRegression(fit_intercept=False)
+    trimmed_df = study_df[state_feats].copy()
+    for feat in treat_feats:
+        trimmed_df[f"action:{feat}"] = study_df[feat] * (
+            study_df["action"] - study_df["action1prob"]
+        )
+    linear_model.fit(trimmed_df, study_df["reward"])
+
+    return linear_model.coef_
+
+
+# TODO: doc string
 def form_meat_matrix(
     study_df,
     theta_est,
@@ -173,6 +183,7 @@ def form_meat_matrix(
     return np.outer(average_meat_vector, average_meat_vector)
 
 
+# TODO: Doc string
 def get_user_states(study_df, state_feats, treat_feats, user_id):
     """
     Extract just the rewards for the given user in the given study_df as a
@@ -188,6 +199,7 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
 # study df, state feats, treat feats, and theta est
 # TODO: Also think about how to specify whether to treat something as action probabilities
 # TODO: idk if beta dim should be included in here
+# TODO: doc string
 def form_bread_matrix(
     upper_left_bread_inverse,
     study_df,
@@ -202,7 +214,7 @@ def form_bread_matrix(
     user_ids = study_df.user_id.unique()
 
     # This is useful for sweeping through the decision times between updates
-    # but also those after the final update
+    # but critically also those after the final update
     max_t = study_df.calendar_t.max()
     update_times_and_upper_limit = (
         update_times if update_times[-1] == max_t + 1 else update_times + [max_t + 1]
@@ -218,12 +230,12 @@ def form_bread_matrix(
     # This computes derivatives of the theta estimating equation wrt the action probabilities
     # vector, which importantly has an element for *every* decision time.  We will later do the
     # work to multiply these by pi derivatives with respect to beta, thus getting the quantities
-    # we really want via the chain rule, and also summing terms that correspond to the same betas
+    # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
     # Note that JAX treats positional args as keyword args if they are supplied with name=val
     # syntax.  Supplying these arg names is a good practice for readability, but has
-    # unexpected consequences in this case. Just noting this here because it was tricky to debug.
-    mixed_theta_beta_loss_derivatives_by_user_id = {
+    # unexpected consequences in this case. Just noting this because it was tricky to debug here.
+    mixed_theta_pi_loss_derivatives_by_user_id = {
         user_id: get_loss_gradient_derivatives_wrt_pi(
             theta_est,
             *get_user_states(study_df, state_feats, treat_feats, user_id),
@@ -237,7 +249,7 @@ def form_bread_matrix(
     # This simply collects the pi derivatives with respect to betas for each
     # user, reorganizing existing data from the RL side. The one complication
     # is that we add some padding of zeros for decision times before the first
-    # update to be in correspondence with the above data structure
+    # update to be in correspondence with the above data structure.
     pi_derivatives_by_user_id = {
         user_id: np.pad(
             np.array(
@@ -254,6 +266,8 @@ def form_bread_matrix(
     # Think of each iteration of this loop as creating one term in the final (block) row
     bottom_left_row_blocks = []
     for i in range(len(update_times)):
+        lower_t = update_times_and_upper_limit[i]
+        upper_t = update_times_and_upper_limit[i + 1]
         running_entry_holder = np.zeros((theta_dim, theta_dim))
 
         # This loop calculates the per-user quantities that will be
@@ -275,10 +289,7 @@ def form_bread_matrix(
 
             # This loop iterates over decision times in slices between updates
             # to collect the right weight gradients
-            for t in range(
-                update_times_and_upper_limit[i],
-                update_times_and_upper_limit[i + 1],
-            ):
+            for t in range(lower_t, upper_t):
                 weight_gradient_sum += algo_stats_dict[t][
                     "weight_gradients_by_user_id"
                 ][user_id]
@@ -286,11 +297,11 @@ def form_bread_matrix(
             running_entry_holder += np.outer(theta_loss_gradient, weight_gradient_sum)
 
             # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece
-            # is a bit intricate; we only have the the theta loss function as a function of the pis,
+            # is a bit intricate; we only have the the theta loss function in terms of the pis,
             #  and the  *values* of the pi derivatives wrt to betas available here, since the actual
             #  pi functions are the domain of the RL side. The loss function also gets an action
-            # probability for all decision times, not knowing which correspond to the
-            # same betas behind the scenes, so our tasks are to
+            # probability for all decision times, not knowing which correspond to which
+            # betas behind the scenes, so our tasks are to
             # 1. multiply these theta + pi derivatives for each relevant decision
             #    time by the corresponding pi + beta derivative
             # 2. sum together the products from the previous step that actually
@@ -303,11 +314,8 @@ def form_bread_matrix(
             # the precollected pi beta derivative matrix for the user. These
             # segments are simply those that correspond to all the decision times
             # in the current slice between updates under consideration.
-            # TODO: Check with Kelly about this implementation
-            lower_t = update_times_and_upper_limit[i]
-            upper_t = update_times_and_upper_limit[i + 1]
             mixed_theta_pi_loss_derivative = np.matmul(
-                mixed_theta_beta_loss_derivatives_by_user_id[user_id][
+                mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,
                     lower_t:upper_t,
                 ],

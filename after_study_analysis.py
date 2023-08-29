@@ -56,7 +56,7 @@ def get_loss(theta_est, base_states, treat_states, actions, rewards, action1prob
 
     # Perform action centering if given action probabilities
     if action1probs is not None:
-        # TODO: deal with types more cleanly
+        # TODO: deal with types more cleanly?
         actions = actions.astype(jnp.float64)
         actions -= action1probs
 
@@ -308,6 +308,7 @@ def form_bread_matrix(
             # the precollected pi beta derivative matrix for the user. These
             # segments are simply those that correspond to all the decision times
             # in the current slice between updates under consideration.
+            # TODO: *Only* do this when action centering or otherwise using pis
             mixed_theta_pi_loss_derivative = np.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,
@@ -324,17 +325,15 @@ def form_bread_matrix(
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
 
     bottom_right_hessian = sum(
-        (
-            np.array(
-                get_loss_hessian(
-                    theta_est,
-                    *get_user_states(study_df, state_feats, treat_feats, user_id),
-                    get_user_actions(study_df, user_id),
-                    get_user_rewards(study_df, user_id),
-                )
+        np.array(
+            get_loss_hessian(
+                theta_est,
+                *get_user_states(study_df, state_feats, treat_feats, user_id),
+                get_user_actions(study_df, user_id),
+                get_user_rewards(study_df, user_id),
             )
-            for user_id in user_ids
         )
+        for user_id in user_ids
     ) / len(user_ids)
 
     return np.block(

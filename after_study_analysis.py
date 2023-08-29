@@ -126,12 +126,6 @@ def analyze_dataset(dataset_num, args, folder_template):
     print(variance)
 
 
-# TODO: Implement. Using loss function would be nice (seems possible with some
-# scipy least squares functions)
-# def estimate_theta(study_df):
-#     return np.array([1.0, 2, 3, 4])
-
-
 # TODO: Think about user interface.  Do they give whole estimate theta function? or simply a model
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?

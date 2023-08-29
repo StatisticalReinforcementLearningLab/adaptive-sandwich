@@ -296,17 +296,15 @@ class SigmoidLS:
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = sum(
-            [
-                np.array(
-                    self.get_loss_hessian(
-                        curr_beta_est,
-                        *self.get_user_states(all_prev_data, user_id),
-                        actions=get_user_actions(all_prev_data, user_id),
-                        rewards=get_user_rewards(all_prev_data, user_id)
-                    )
+            np.array(
+                self.get_loss_hessian(
+                    curr_beta_est,
+                    *self.get_user_states(all_prev_data, user_id),
+                    actions=get_user_actions(all_prev_data, user_id),
+                    rewards=get_user_rewards(all_prev_data, user_id)
                 )
-                for user_id in self.all_policies[-1]["seen_user_id"]
-            ]
+            )
+            for user_id in self.all_policies[-1]["seen_user_id"]
         ) / len(
             self.all_policies[-1]["seen_user_id"]
         )

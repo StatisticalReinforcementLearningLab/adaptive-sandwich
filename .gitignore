@@ -8,4 +8,5 @@ synthetic_env_params/.DS_Store
 *.swp
 .venv
 .vscode
-.code-workspace
+adaptive-sandwich.code-workspace
+

@@ -176,7 +176,6 @@ class TestSigmoidLS_T3_n2:
                     "pi_gradients_by_user_id": {
                         1: np.array([0, 0, -0.19661194, 0.19661194], dtype="float32"),
                         # Note that these are all zeros because this probability is clipped
-                        # TODO: Is this okay?
                         2: np.array([0, 0, 0, 0], dtype="float32"),
                     },
                     # derived using pi and pi gradients from above (two derivative cases depending
@@ -345,6 +344,7 @@ class TestSigmoidLS_T3_n2:
         )
 
     # TODO: Should integrate next two functions with actual algorithm logic before testing
+    # UPDATE: No I shouldn't. Don't need to put that effort in for sample
     def test_get_loss(self):
         pass
 

@@ -153,11 +153,10 @@ def form_meat_matrix(
     algo_stats_dict,
 ):
     user_ids = study_df.user_id.unique()
-    running_meat_vector = np.zeros((beta_dim * (len(update_times) + 1), 1)).astype(
-        "float64"
-    )
+    num_rows_cols = beta_dim * len(update_times) + len(theta_est)
+    running_meat_matrix = np.zeros((num_rows_cols, num_rows_cols)).astype("float64")
     for user_id in user_ids:
-        running_meat_vector += np.concatenate(
+        user_meat_vector = np.concatenate(
             [
                 algo_stats_dict[t]["loss_gradients_by_user_id"][user_id]
                 for t in update_times
@@ -172,9 +171,9 @@ def form_meat_matrix(
                 )
             ],
         ).reshape(-1, 1)
+        running_meat_matrix += np.outer(user_meat_vector, user_meat_vector)
 
-    average_meat_vector = running_meat_vector / len(user_ids)
-    return np.outer(average_meat_vector, average_meat_vector)
+    return running_meat_matrix / len(user_ids)
 
 
 # TODO: Doc string
@@ -217,13 +216,13 @@ def form_bread_matrix(
     theta_dim = len(theta_est)
 
     # Begin by creating a few convenience data structures for the mixed theta/beta derivatives
-    # that are most easily created for may decision times at once, whereas the following loop is
+    # that are most easily created for many decision times at once, whereas the following loop is
     # over update times.  We will pull appropriate quantities from here during iterations of the
     # loop.
 
     # This computes derivatives of the theta estimating equation wrt the action probabilities
     # vector, which importantly has an element for *every* decision time.  We will later do the
-    # work to multiply these by pi derivatives with respect to beta, thus getting the quantities
+    # work to multiply these by derivatives of pi with respect to beta, thus getting the quantities
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
     # Note that JAX treats positional args as keyword args if they are supplied with name=val
@@ -290,14 +289,15 @@ def form_bread_matrix(
 
             running_entry_holder += np.outer(theta_loss_gradient, weight_gradient_sum)
 
+            # TODO: I think we now will be getting the actual pi functions... maybe this can be simplified?
             # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece
             # is a bit intricate; we only have the the theta loss function in terms of the pis,
-            #  and the  *values* of the pi derivatives wrt to betas available here, since the actual
-            #  pi functions are the domain of the RL side. The loss function also gets an action
+            # and the  *values* of the pi derivatives wrt to betas available here, since the actual
+            # pi functions are the domain of the RL side. The loss function also gets an action
             # probability for all decision times, not knowing which correspond to which
             # betas behind the scenes, so our tasks are to
-            # 1. multiply these theta + pi derivatives for each relevant decision
-            #    time by the corresponding pi + beta derivative
+            # 1. multiply these theta derivatives wrt pi for each relevant decision
+            #    time by the corresponding pi derivative wrt beta
             # 2. sum together the products from the previous step that actually
             #    correspond to the same betas
             # The loop we are currently in is doing this for just the bucket of decision

@@ -1,13 +1,13 @@
 import argparse
-import pickle as pkl
 import os
+import pickle as pkl
 
 import jax
-from jax import numpy as jnp
 import numpy as np
+from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 
-from helper_functions import get_user_actions, get_user_rewards, get_user_action1probs
+from helper_functions import get_user_action1probs, get_user_actions, get_user_rewards
 
 
 def c_vec2string(c_vec):
@@ -225,7 +225,7 @@ def form_bread_matrix(
     # work to multiply these by derivatives of pi with respect to beta, thus getting the quantities
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
-    # Note that JAX treats positional args as keyword args if they are supplied with name=val
+    # Note that JAX treats positional args as keyword args if they are *supplied* with name=val
     # syntax.  Supplying these arg names is a good practice for readability, but has
     # unexpected consequences in this case. Just noting this because it was tricky to debug here.
     mixed_theta_pi_loss_derivatives_by_user_id = {

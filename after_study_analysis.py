@@ -101,7 +101,7 @@ def analyze_dataset(dataset_num, args, folder_template):
     )
 
     # TODO: state features should not be the same as RL alg for full generality
-    bread_matrix = form_bread_matrix(
+    bread_matrix = form_bread_inverse_matrix(
         study_RLalg.upper_left_bread_inverse,
         study_df,
         study_RLalg.algorithm_statistics_by_calendar_t,
@@ -193,7 +193,7 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
 # TODO: Also think about how to specify whether to treat something as action probabilities
 # TODO: idk if beta dim should be included in here
 # TODO: doc string
-def form_bread_matrix(
+def form_bread_inverse_matrix(
     upper_left_bread_inverse,
     study_df,
     algo_stats_dict,
@@ -225,6 +225,7 @@ def form_bread_matrix(
     # work to multiply these by derivatives of pi with respect to beta, thus getting the quantities
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
+    # NOTE THAT COLUMN INDEX i CORRESPONDS TO DECISION TIME i+1!
     # Note that JAX treats positional args as keyword args if they are *supplied* with name=val
     # syntax.  Supplying these arg names is a good practice for readability, but has
     # unexpected consequences in this case. Just noting this because it was tricky to debug here.
@@ -239,10 +240,12 @@ def form_bread_matrix(
         for user_id in user_ids
     }
     # TODO: Handle missing data?
-    # This simply collects the pi derivatives with respect to betas for each
-    # user, reorganizing existing data from the RL side. The one complication
-    # is that we add some padding of zeros for decision times before the first
-    # update to be in correspondence with the above data structure.
+    # This simply collects the pi derivatives with respect to betas for all
+    # decision times for each user, reorganizing existing data from the RL side.
+    # The one complication is that we add some padding of zeros for decision
+    # times before the first update to be in correspondence with the above data
+    # structure.
+    # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
         user_id: np.pad(
             np.array(
@@ -309,13 +312,15 @@ def form_bread_matrix(
             # segments are simply those that correspond to all the decision times
             # in the current slice between updates under consideration.
             # TODO: *Only* do this when action centering or otherwise using pis
+            # NOTE THAT OUR HELPER DATA STRUCTURES ARE 0-INDEXED, SO WE SUBTRACT
+            # 1 FROM OUR TIME BOUNDS.
             mixed_theta_pi_loss_derivative = np.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,
-                    lower_t:upper_t,
+                    lower_t - 1 : upper_t - 1,
                 ],
                 pi_derivatives_by_user_id[user_id][
-                    lower_t:upper_t,
+                    lower_t - 1 : upper_t - 1,
                     :,
                 ],
             )
@@ -331,6 +336,7 @@ def form_bread_matrix(
                 *get_user_states(study_df, state_feats, treat_feats, user_id),
                 get_user_actions(study_df, user_id),
                 get_user_rewards(study_df, user_id),
+                get_user_action1probs(study_df, user_id),
             )
         )
         for user_id in user_ids

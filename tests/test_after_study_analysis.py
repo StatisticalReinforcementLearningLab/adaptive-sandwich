@@ -148,8 +148,6 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
         },
     }
 
-    ##### Start of code just for test case creation purposes
-
     # These were computed in the test for the meat matrix!
     user_1_psi = np.array([11.0, 17.5, 7.25, 8.125])
     user_2_psi = np.array([31.9999979, 33.799998, 29.23999823, 28.6999982])
@@ -305,8 +303,6 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
     )
     theta_hessian = (user_1_hessian + user_2_hessian) / 2
 
-    ##### End of code just for test case creation purposes
-
     upper_left_bread_inverse = np.array(
         [
             [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
@@ -343,7 +339,315 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
     )
 
 
+# TODO: Modify to make one small part not just double the previous test,
+# to fully exercise the piecing together of pi derivative logic
 def test_form_bread_inverse_matrix_2_decisions_between_updates():
+    study_df = pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2],
+            "calendar_t": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+            ],
+            "action": [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+            "reward": [1.0, 1, -1, -1, 0, 0, 1, 1, 0, 0, 1, 1],
+            "intercept": [1.0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "past_reward": [0.0, 0, 1, 1, -1, -1, 1, 1, 1, 1, 0, 0],
+            "action1prob": [
+                0.25,
+                0.25,
+                0.5,
+                0.5,
+                0.75,
+                0.75,
+                0.1,
+                0.1,
+                0.2,
+                0.2,
+                0.3,
+                0.3,
+            ],
+        }
+    )
+
+    theta_est = np.array([1.0, 2, 3, 4])
+    state_feats = treat_feats = ["intercept", "past_reward"]
+    update_times = [3, 5]
+    beta_dim = 4
+    algo_stats_dict = {
+        3: {
+            "pi_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([0] * 4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([2, 3, 4, 5], dtype="float32"),
+                2: np.array([0] * 4, dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * -1,
+        },
+        4: {
+            "pi_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([0] * 4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([2, 3, 4, 5], dtype="float32"),
+                2: np.array([0] * 4, dtype="float32"),
+            },
+        },
+        5: {
+            "pi_gradients_by_user_id": {
+                1: np.array([1, 1, 1, 1], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([1, 1, 1, 1], dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * 1,
+        },
+        6: {
+            "pi_gradients_by_user_id": {
+                1: np.array([1, 1, 1, 1], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([1, 1, 1, 1], dtype="float32"),
+            },
+        },
+    }
+
+    # These are two times what was computed in the test for the meat matrix,
+    # since we just doubled up data in the study df for this test
+    user_1_psi = 2 * np.array([11.0, 17.5, 7.25, 8.125])
+    user_2_psi = 2 * np.array([31.9999979, 33.799998, 29.23999823, 28.6999982])
+
+    # Again multiply by 2 to account for sum of two time steps set up to have
+    # same data.
+    # The psi is doubled above, meaning these are blown up by four
+    # relative to the above test!
+    user_1_block_1_non_cross_term_contribution = 2 * np.outer(
+        user_1_psi, np.array([2, 3, 4, 5])
+    )
+    user_2_block_1_non_cross_term_contribution = 2 * np.outer(
+        user_2_psi, np.array([0, 0, 0, 0])
+    )
+    block_1_non_cross_term = (
+        user_1_block_1_non_cross_term_contribution
+        + user_2_block_1_non_cross_term_contribution
+    ) / 2
+
+    theta_1 = np.array([3, 4])
+
+    # Again multiply by 2 to account for sum of two time steps set up to have
+    # same data.
+    user_1_state_3_4 = np.array([1, 1])
+    user_1_block_1_cross_term_derivative_wrt_pi = 2 * (
+        -2
+        * np.dot(theta_1, user_1_state_3_4)
+        * np.array([1, 1, (1 - 0.5) * 1, ((1 - 0.5)) * 1])
+        + (-15 * np.array([0, 0, 1, 1]))
+    )
+    user_1_block_1_cross_term_contribution = np.outer(
+        user_1_block_1_cross_term_derivative_wrt_pi, np.array([1, 2, 3, 4])
+    )
+
+    block_1_cross_term = user_1_block_1_cross_term_contribution / 2
+
+    block_1 = block_1_non_cross_term + block_1_cross_term
+
+    user_1_block_2_non_cross_term_contribution = 2 * np.outer(
+        user_1_psi, np.array([1, 2, 3, 4])
+    )
+    user_2_block_2_non_cross_term_contribution = 2 * np.outer(
+        user_2_psi, np.array([1, 1, 1, 1])
+    )
+
+    block_2_non_cross_term = (
+        user_1_block_2_non_cross_term_contribution
+        + user_2_block_2_non_cross_term_contribution
+    ) / 2
+
+    theta_1 = np.array([3, 4])
+
+    user_1_state_4_5 = np.array([1, -1])
+
+    user_1_block_2_cross_term_contribution = 2 * (
+        -2
+        * np.dot(theta_1, user_1_state_4_5)
+        * np.outer(
+            np.array([1, -1, (1 - 0.75) * 1, (1 - 0.75) * -1]), np.array([1, 1, 1, 1])
+        )
+        + np.outer(
+            2.5 * np.array([0, 0, 1, -1]),
+            np.array([1, 1, 1, 1]),
+        )
+    )
+
+    user_2_state_4_5 = np.array([1, 0])
+    user_2_block_2_cross_term_contribution = 2 * (
+        -2
+        * np.dot(theta_1, user_2_state_4_5)
+        * np.outer(
+            np.array([1, 0, (0 - 0.3) * 1, (0 - 0.3) * 0]), np.array([2, 3, 4, 5])
+        )
+        + np.outer(
+            1.8000001 * np.array([0, 0, 1, 0]),
+            np.array([2, 3, 4, 5]),
+        )
+    )
+
+    block_2_cross_term = (
+        user_1_block_2_cross_term_contribution + user_2_block_2_cross_term_contribution
+    ) / 2
+
+    block_2 = block_2_non_cross_term + block_2_cross_term
+
+    # 2 x the calculation for the previous test because of the way we doubled up
+    # data in the study df
+    user_1_hessian = (
+        2
+        * 2
+        * (
+            np.block(
+                [
+                    [
+                        np.outer(np.array([1, 0]), np.array([1, 0])),
+                        -0.25 * np.outer(np.array([1, 0]), np.array([1, 0])),
+                    ],
+                    [
+                        -0.25 * np.outer(np.array([1, 0]), np.array([1, 0])),
+                        (-0.25) ** 2 * np.outer(np.array([1, 0]), np.array([1, 0])),
+                    ],
+                ]
+            )
+            + np.block(
+                [
+                    [
+                        np.outer(np.array([1, 1]), np.array([1, 1])),
+                        0.5 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                    ],
+                    [
+                        0.5 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                        (0.5) ** 2 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                    ],
+                ]
+            )
+            + np.block(
+                [
+                    [
+                        np.outer(np.array([1, -1]), np.array([1, -1])),
+                        0.25 * np.outer(np.array([1, -1]), np.array([1, -1])),
+                    ],
+                    [
+                        0.25 * np.outer(np.array([1, -1]), np.array([1, -1])),
+                        (0.25) ** 2 * np.outer(np.array([1, -1]), np.array([1, -1])),
+                    ],
+                ]
+            )
+        )
+    )
+
+    # 2 x the calculation for the previous test because of the way we doubled up
+    # data in the study df here
+    user_2_hessian = (
+        2
+        * 2
+        * (
+            np.block(
+                [
+                    [
+                        np.outer(np.array([1, 1]), np.array([1, 1])),
+                        0.9 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                    ],
+                    [
+                        0.9 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                        (0.9) ** 2 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                    ],
+                ]
+            )
+            + np.block(
+                [
+                    [
+                        np.outer(np.array([1, 1]), np.array([1, 1])),
+                        0.8 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                    ],
+                    [
+                        0.8 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                        (0.8) ** 2 * np.outer(np.array([1, 1]), np.array([1, 1])),
+                    ],
+                ]
+            )
+            + np.block(
+                [
+                    [
+                        np.outer(np.array([1, 0]), np.array([1, 0])),
+                        -0.3 * np.outer(np.array([1, 0]), np.array([1, 0])),
+                    ],
+                    [
+                        -0.3 * np.outer(np.array([1, 0]), np.array([1, 0])),
+                        (-0.3) ** 2 * np.outer(np.array([1, 0]), np.array([1, 0])),
+                    ],
+                ]
+            )
+        )
+    )
+    theta_hessian = (user_1_hessian + user_2_hessian) / 2
+
+    upper_left_bread_inverse = np.array(
+        [
+            [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+            [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+            [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+            [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+            [08.0, 11.0, 14.0, 17.0, 1.0, 1.0, 1.0, 1.0],
+            [13.0, 18.0, 23.0, 28.0, 1.0, 1.0, 1.0, 1.0],
+            [18.0, 25.0, 32.0, 39.0, 1.0, 1.0, 1.0, 1.0],
+            [23.0, 32.0, 41.0, 50.0, 1.0, 1.0, 1.0, 1.0],
+        ],
+        dtype="float32",
+    )
+
+    expected_bread_inverse = np.block(
+        [
+            [upper_left_bread_inverse, np.zeros((8, 4))],
+            [block_1, block_2, theta_hessian],
+        ]
+    )
+    np.testing.assert_allclose(
+        after_study_analysis.form_bread_inverse_matrix(
+            upper_left_bread_inverse,
+            study_df,
+            algo_stats_dict,
+            update_times,
+            state_feats,
+            treat_feats,
+            beta_dim,
+            theta_est,
+        ),
+        expected_bread_inverse,
+        rtol=1e-05,
+    )
 
 
 def test_analyze_dataset():

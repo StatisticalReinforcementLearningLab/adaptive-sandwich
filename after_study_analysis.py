@@ -193,6 +193,7 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
 # TODO: Also think about how to specify whether to treat something as action probabilities
 # TODO: idk if beta dim should be included in here
 # TODO: doc string
+# TODO: Why am I passing in update times again? Can I just derive from study df?
 def form_bread_inverse_matrix(
     upper_left_bread_inverse,
     study_df,

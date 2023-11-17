@@ -1,52 +1,13 @@
-import argparse
 import os
-import pickle as pkl
+import pickle
 
+import click
 import jax
 import numpy as np
 from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 
 from helper_functions import get_user_action1probs, get_user_actions, get_user_rewards
-
-
-def c_vec2string(c_vec):
-    return np.array2string(c_vec)[1:-1].replace(" ", ",")
-
-
-def load_data(args, folder_path):
-    """
-    Loads data
-
-    Input
-    - Experiment folder path
-
-    Output
-    - study data pandas dataframe
-    - RL algorithm object
-    - RL algorithm saved output (this is only to ensure compatibility with old code)
-    """
-    # study_df = pd.read_csv( os.path.join(folder_path, "data.csv") )
-    with open(f"{folder_path}/study_df.pkl", "rb") as f:
-        study_df = pkl.load(f)
-
-    if args.dataset_type == "synthetic":
-        study_df["action_past_reward"] = study_df["past_reward"] * study_df["action"]
-
-    if args.RL_alg == "fixed_randomization":
-        return study_df
-
-    with open(f"{folder_path}/study_RLalg.pkl", "rb") as f:
-        study_RLalg = pkl.load(f)
-
-    # OLD STUFF
-    if args.RL_alg == "sigmoid_LS":
-        with open(os.path.join(folder_path, "out_dict.pkl"), "rb") as file:
-            alg_out_dict = pkl.load(file)
-    else:
-        alg_out_dict = None
-
-    return study_df, study_RLalg, alg_out_dict
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
@@ -75,25 +36,30 @@ get_loss_gradient_derivatives_wrt_pi = jax.jacrev(get_loss_gradient, 5)
 get_loss_hessian = jax.hessian(get_loss)
 
 
-def analyze_dataset(dataset_num, args, folder_template):
-    # TODO: Not sure why this would be 100
-    if dataset_num % 100 == 0:
-        print(f"dataset num {dataset_num}")
-
-    # Load Data #########################################
-    folder_path = os.path.join(folder_template, f"exp={dataset_num}")
-    if args.RL_alg == "fixed_randomization":
-        study_df = load_data(args, folder_path)
-    else:
-        study_df, study_RLalg, alg_out_dict = load_data(args, folder_path)
+# TODO: Add redo analysis option?
+@click.command()
+@click.option(
+    "--study_dataframe_pickle",
+    type=click.File("rb"),
+    help="Pickled pandas dataframe in correct format (see contract/readme)",
+)
+# TODO: Eventually this will just be like the algo statistics object and
+# anything else we need after parsing by intermediate package.
+@click.option("--rl_algorithm_object_pickle", type=click.File("rb"))
+def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
+    study_df = pickle.load(study_dataframe_pickle)
+    study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
     # List of times that were the first applicable time for some update
-    # TODO: sort to not rely on insertion order?
-    update_times = [
-        t
-        for t, value in study_RLalg.algorithm_statistics_by_calendar_t.items()
-        if "loss_gradients_by_user_id" in value
-    ]
+    # Sorting shouldn't be necessary, as insertion order should be chronological
+    # but we do it just in case.
+    update_times = sorted(
+        [
+            t
+            for t, value in study_RLalg.algorithm_statistics_by_calendar_t.items()
+            if "loss_gradients_by_user_id" in value
+        ]
+    )
 
     # TODO: state features should not be the same as RL alg for full generality
     theta_est = estimate_theta(
@@ -122,7 +88,8 @@ def analyze_dataset(dataset_num, args, folder_template):
         study_RLalg.algorithm_statistics_by_calendar_t,
     )
 
-    variance = np.linalg.multi_dot([bread_matrix, meat_matrix, bread_matrix.T])
+    variance = bread_matrix @ meat_matrix @ bread_matrix.T
+
     print(variance)
 
 
@@ -194,6 +161,7 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
 # TODO: idk if beta dim should be included in here
 # TODO: doc string
 # TODO: Why am I passing in update times again? Can I just derive from study df?
+# TODO: Do the three checks in the existing after study file
 def form_bread_inverse_matrix(
     upper_left_bread_inverse,
     study_df,
@@ -227,8 +195,8 @@ def form_bread_inverse_matrix(
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
     # NOTE THAT COLUMN INDEX i CORRESPONDS TO DECISION TIME i+1!
-    # Note that JAX treats positional args as keyword args if they are *supplied* with name=val
-    # syntax.  Supplying these arg names is a good practice for readability, but has
+    # NOTE that JAX treats positional args as keyword args if they are *supplied* with name=val
+    # syntax.  So though supplying these arg names is a good practice for readability, but has
     # unexpected consequences in this case. Just noting this because it was tricky to debug here.
     mixed_theta_pi_loss_derivatives_by_user_id = {
         user_id: get_loss_gradient_derivatives_wrt_pi(
@@ -357,274 +325,5 @@ def form_bread_inverse_matrix(
     )
 
 
-def main():
-    # TODO: Nearly all args should be removed.
-    # TODO: Should take its input data location as an argument
-    ###############################################################
-    # Initialize Hyperparameters ##################################
-    ###############################################################
-
-    parser = argparse.ArgumentParser(description="Analyze data")
-    # TODO: Perhaps omit next three and specify model in a cleaner way
-    parser.add_argument(
-        "--dataset_type",
-        type=str,
-        default="synthetic",
-        choices=["heartsteps", "synthetic", "oralytics"],
-    )
-    parser.add_argument("--verbose", type=int, default=0, help="Prints helpful info")
-    parser.add_argument(
-        "--heartsteps_mode",
-        default="medium",
-        choices=["evalSim", "realistic", "medium", "easy"],
-        help="Sets default parameter values accordingly",
-    )
-    parser.add_argument(
-        "--inference_mode",
-        default="value",
-        choices=["value", "model"],
-        help="Sets default parameter values accordingly",
-    )
-    parser.add_argument(
-        "--synthetic_mode",
-        type=str,
-        default="delayed_effects",
-        help="File name of synthetic env params",
-    )
-    # TODO: Fixed rand not crticial for anything, just a useful test
-    parser.add_argument(
-        "--RL_alg",
-        default="sigmoid_LS",
-        choices=["fixed_randomization", "sigmoid_LS", "posterior_sampling"],
-        help="RL algorithm used to select actions",
-    )
-    # TODO: Probably remove, simulation part
-    parser.add_argument(
-        "--err_corr",
-        default="time_corr",
-        choices=["time_corr", "independent"],
-        help="Noise error correlation structure",
-    )
-    parser.add_argument(
-        "--N", type=int, default=10, help="Number of Monte Carlo repetitions"
-    )
-    parser.add_argument("--n", type=int, default=90, help="Total number of users")
-    parser.add_argument(
-        "--eta", type=float, default=0, help="Regularization of alg bread matrix"
-    )
-    parser.add_argument(
-        "--upper_clip",
-        type=float,
-        default=0.9,
-        help="Upper action selection probability constraint",
-    )
-    parser.add_argument(
-        "--lower_clip",
-        type=float,
-        default=0.1,
-        help="Lower action selection probability constraint",
-    )
-    parser.add_argument(
-        "--fixed_action_prob",
-        type=float,
-        default=0.5,
-        help="Used if not using learning alg to select actions",
-    )
-    parser.add_argument(
-        "--min_users",
-        type=int,
-        default=25,
-        help="Min number of users needed to update alg",
-    )
-    parser.add_argument(
-        "--decisions_between_updates",
-        type=int,
-        default=1,
-        help="Number of decision times beween algorithm updates",
-    )
-    parser.add_argument(
-        "--save_dir", type=str, default=".", help="Directory to save all results in"
-    )
-    parser.add_argument("--debug", type=int, default=0, help="Debug mode")
-    parser.add_argument(
-        "--redo_analyses", type=int, default=0, help="Redo any saved analyses"
-    )
-    parser.add_argument(
-        "--steepness", type=float, default=10, help="Allocation steepness"
-    )
-    # TODO: Possibly just encode in description of model
-    parser.add_argument(
-        "--action_centering",
-        type=int,
-        default=0,
-        help="Whether posterior sampling algorithm uses action centering",
-    )
-    parser.add_argument(
-        "--alg_state_feats",
-        type=str,
-        default="intercept",
-        help="Comma separated list of algorithm state features",
-    )
-    tmp_args = parser.parse_known_args()[0]
-
-    print(tmp_args)
-
-    ############################################################################
-    # Construct inference targets according to dataset type and inference mode
-    ############################################################################
-    arg_dict = feature_names = outcome_name = c_vec_list = dval = cvec2name = None
-    stat2name = {
-        "hotelling": "Hotelling's t-squared Statistic",
-    }
-
-    if tmp_args.dataset_type == "synthetic":
-        arg_dict = {
-            "T": 2,
-            "recruit_n": tmp_args.n,
-            "recruit_t": 1,
-            "allocation_sigma": 1,
-        }
-
-        if tmp_args.inference_mode == "value":
-            # Inference Objective
-            feature_names = ["intercept"]
-            outcome_name = "reward"
-            c_vec_list = [np.array([1])]
-            dval = 1
-
-            cvec2name = {
-                c_vec2string(np.array([1])): "Entire Vector",
-            }
-        # TODO: Can I remove this? It's not a supported option currently
-        elif tmp_args.inference_mode == "model_simple":
-            # Inference Objective
-            feature_names = ["intercept", "action"]
-            outcome_name = "reward"
-            c_vec_list = [np.array([1, 1]), np.array([0, 1])]
-            dval = 2
-
-            cvec2name = {
-                c_vec2string(np.array([1, 1])): "Entire Vector",
-                c_vec2string(np.array([0, 1])): "Treatment Effect",
-            }
-        elif tmp_args.inference_mode == "model":
-            # Inference Objective
-            feature_names = ["intercept", "past_reward", "action"]
-            outcome_name = "reward"
-            c_vec_list = [np.array([1, 1, 1]), np.array([0, 0, 1])]
-            dval = 3
-
-            cvec2name = {
-                c_vec2string(np.array([1, 1, 1])): "Entire Vector",
-                c_vec2string(np.array([0, 0, 1])): "Treatment Effect",
-            }
-        else:
-            raise ValueError("invalid inference mode")
-
-    elif tmp_args.dataset_type == "oralytics":
-        arg_dict = {
-            "T": 50,
-            "recruit_n": tmp_args.n,
-            "recruit_t": 1,
-            "allocation_sigma": 5.7,
-        }
-        # allocation_sigma: 163 (truncated brush times); 5.7 (square-root of truncatred brush times)
-
-        # Inference Objective
-        feature_names = ["intercept", "time_of_day", "prior_day_brush", "action"]
-        # feature_names = ['intercept', 'time_of_day', 'weekend', 'prior_day_brush', 'action']
-        outcome_name = "reward"
-
-        c_vec_list = [
-            np.array([1, 1, 1, 1]),
-            np.array([0, 0, 0, 1]),
-            np.array([0, 0, 1, 0]),
-        ]
-        dval = 4
-
-        cvec2name = {
-            c_vec2string(np.array([1, 1, 1, 1])): "Entire Vector",
-            c_vec2string(np.array([0, 0, 1, 0])): "prior_day_brush",
-            c_vec2string(np.array([0, 0, 0, 1])): "Margin Vector",
-        }
-    else:
-        raise ValueError("Dataset type not supported")
-
-    parser.add_argument(
-        "--T",
-        type=int,
-        default=arg_dict["T"],
-        help="Total number of decision times per user",
-    )
-    parser.add_argument(
-        "--recruit_n",
-        type=int,
-        default=arg_dict["recruit_n"],
-        help="Number of users recruited on each recruitment times",
-    )
-    parser.add_argument(
-        "--recruit_t",
-        type=int,
-        default=arg_dict["recruit_t"],
-        help="Number of updates between recruitment times",
-    )
-    parser.add_argument(
-        "--allocation_sigma",
-        type=float,
-        default=arg_dict["allocation_sigma"],
-        help="Sigma used in allocation of algorithm",
-    )
-
-    args = parser.parse_args()
-    print(vars(args))
-
-    analyze_experiments_and_output_results(
-        args, feature_names, outcome_name, c_vec_list, dval
-    )
-
-
-def analyze_experiments_and_output_results(
-    args, feature_names, outcome_name, c_vec_list, dval
-):
-    mode = None
-    if args.dataset_type == "heartsteps":
-        mode = args.heartsteps_mode
-    elif args.dataset_type == "synthetic":
-        mode = args.synthetic_mode
-
-    # TODO: Need to write generic code for this and do it on both RL side and here
-    if args.dataset_type == "oralytics":
-        exp_str = "{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}".format(
-            args.dataset_type,
-            args.RL_alg,
-            args.T,
-            args.n,
-            args.recruit_n,
-            args.decisions_between_updates,
-            args.steepness,
-            args.action_centering,
-        )
-    else:
-        exp_str = "{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}".format(
-            args.dataset_type,
-            mode,
-            args.RL_alg,
-            args.T,
-            args.n,
-            args.recruit_n,
-            args.decisions_between_updates,
-            args.steepness,
-            args.alg_state_feats,
-            args.err_corr,
-            args.action_centering,
-        )
-
-    # Load Data
-    folder_template = os.path.join(args.save_dir, f"simulated_data/{exp_str}")
-    # TODO: Probably real use case won't really have multiple datasets
-    for i in range(1, args.N + 1):
-        analyze_dataset(i, args, folder_template)
-
-
 if __name__ == "__main__":
-    main()
+    analyze_dataset()  # pylint: disable=no-value-for-parameter

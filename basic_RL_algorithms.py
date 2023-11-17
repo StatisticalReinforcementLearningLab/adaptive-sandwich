@@ -85,6 +85,8 @@ class SigmoidLS:
         self.treat_feats = treat_feats
         self.alg_seed = alg_seed
         self.allocation_sigma = allocation_sigma
+        # TODO: For simulation, make steepness so that curve becomes flat to reduce amount of
+        # adaptivity when wanting adaptive sandwich to match classical
         self.steepness = steepness
 
         self.rng = np.random.default_rng(self.alg_seed)
@@ -674,7 +676,8 @@ class SigmoidLS:
                         )
 
             # Collected Data for Forming Weights
-            policy_num = update_num  # policy_num refers to the policy number used to collect the data
+            # policy_num refers to the policy number used to collect the data
+            policy_num = update_num
             if (
                 policy_num > 1
             ):  # we do not form weights for data prior to the first update

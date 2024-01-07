@@ -1,5 +1,5 @@
 class RLStudyArgs:
-    """Simple container for centralizing the strings used to the RL a"""
+    """Simple container for centralizing the strings used by the RL algorithm"""
 
     # Dataset Type
     HEARTSTEPS = "heartsteps"

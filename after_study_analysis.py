@@ -87,7 +87,10 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
         study_RLalg.algorithm_statistics_by_calendar_t,
     )
 
+    # TODO: Theta variance is just lower right hand block of this
     variance = bread_matrix @ meat_matrix @ bread_matrix.T
+
+    breakpoint()
 
     print(variance)
 
@@ -109,6 +112,7 @@ def estimate_theta(study_df, state_feats, treat_feats):
 
 
 # TODO: doc string
+# TODO: rewrite as einsum
 def form_meat_matrix(
     study_df,
     theta_est,
@@ -322,6 +326,32 @@ def form_bread_inverse_matrix(
             ],
         ]
     )
+
+
+def get_classical_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
+    """
+    Forms standard sandwich variance estimator for inference (thetahat)
+
+    Input:
+    - `est_eqns`: Estimating equation matrix (matrix of dimension num_users by dim_theta)
+    - `normalized_hessian`: (Hessian matrix of size dim_theta by dim_theta that is normalized by num_users)
+    - `LS_estimator`: Least squares estimator (vector)
+
+    Output:
+    - Sandwich variance estimator matrix (size dim_theta by dim_theta)
+    """
+    n_unique = est_eqns.shape[0]
+
+    meat = np.einsum("ij,ik->jk", est_eqns, est_eqns)
+    meat = meat / n_unique
+
+    # degrees of freedom adjustment
+    meat = meat * (n_unique - 1) / (n_unique - len(LS_estimator))
+
+    inv_hessian = np.linalg.inv(normalized_hessian)
+    sandwich_var = (inv_hessian @ meat @ inv_hessian) / n_unique
+
+    return sandwich_var
 
 
 if __name__ == "__main__":

@@ -134,50 +134,13 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     if args.dataset_type == RLStudyArgs.HEARTSTEPS:
         raise NotImplementedError()
 
-    elif args.dataset_type == RLStudyArgs.SYNTHETIC:
+    if args.dataset_type == RLStudyArgs.SYNTHETIC:
+        mode = args.synthetic_mode
         user_env_data = None
-        paramf_path = f"./synthetic_env_params/{args.synthetic_mode}.txt"
+        paramf_path = f"./synthetic_env_params/{mode}.txt"
         env_params = load_synthetic_env(paramf_path)
         if len(env_params.shape) == 2:
             assert env_params.shape[0] >= args.T
-
-    elif args.dataset_type == RLStudyArgs.ORALYTICS:
-        paramf_path = "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
-        param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
-
-        user_env_data = {"bern_params": bern_params, "poisson_params": poisson_params}
-
-    else:
-        raise ValueError("Invalid Dataset Type")
-
-    ###############################################################
-    # Simulate Studies ############################################
-    ###############################################################
-
-    tic = time.perf_counter()
-
-    if args.dataset_type == RLStudyArgs.HEARTSTEPS:
-        mode = args.heartsteps_mode
-    elif args.dataset_type == RLStudyArgs.SYNTHETIC:
-        mode = args.synthetic_mode
-    elif args.dataset_type == RLStudyArgs.ORALYTICS:
-        mode = None
-    else:
-        raise ValueError("Invalid dataset type")
-
-    print("Running simulations...")
-    if args.dataset_type == RLStudyArgs.ORALYTICS:
-        exp_str = "{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}".format(
-            args.dataset_type,
-            args.RL_alg,
-            args.T,
-            args.n,
-            args.recruit_n,
-            args.decisions_between_updates,
-            args.steepness,
-            args.action_centering,
-        )
-    else:
         exp_str = "{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}".format(
             args.dataset_type,
             mode,
@@ -192,6 +155,32 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             args.action_centering,
         )
 
+    elif args.dataset_type == RLStudyArgs.ORALYTICS:
+        mode = None
+        paramf_path = "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
+        param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
+        user_env_data = {"bern_params": bern_params, "poisson_params": poisson_params}
+        exp_str = "{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}".format(
+            args.dataset_type,
+            args.RL_alg,
+            args.T,
+            args.n,
+            args.recruit_n,
+            args.decisions_between_updates,
+            args.steepness,
+            args.action_centering,
+        )
+
+    else:
+        raise ValueError("Invalid Dataset Type")
+
+    ###############################################################
+    # Simulate Studies ############################################
+    ###############################################################
+
+    tic = time.perf_counter()
+
+    print("Running simulations...")
     simulation_data_path = os.path.join(args.save_dir, "simulated_data")
     if not os.path.isdir(simulation_data_path):
         os.mkdir(simulation_data_path)
@@ -212,9 +201,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             print(f"{i} ran in {toc - tic:0.4f} seconds")
 
         # Initialize study environment ############################################
-        if args.dataset_type == RLStudyArgs.HEARTSTEPS:
-            raise NotImplementedError()
-        elif args.dataset_type == RLStudyArgs.SYNTHETIC:
+        if args.dataset_type == RLStudyArgs.SYNTHETIC:
             study_env = SyntheticEnv(
                 args,
                 env_params,
@@ -230,8 +217,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             raise ValueError("Invalid Dataset Type")
 
         # Initialize RL algorithm ###################################################
-        # TODO: Do not pass args object to these. Extract what's needed.
-        # Unless that's needed for general interface? Argument groups could help.
         if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION:
             study_RLalg = FixedRandomization(
                 args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed
@@ -436,7 +421,7 @@ def main():
     if tmp_args.dataset_type == RLStudyArgs.HEARTSTEPS:
         raise NotImplementedError()
     elif tmp_args.dataset_type == RLStudyArgs.SYNTHETIC:
-        arg_dict = {
+        default_arg_dict = {
             RLStudyArgs.T: 2,
             RLStudyArgs.RECRUIT_N: tmp_args.n,
             RLStudyArgs.RECRUIT_T: 1,
@@ -459,7 +444,7 @@ def main():
         gen_feats = past_action_cols + past_reward_action_cols + ["dosage"]
 
     elif tmp_args.dataset_type == RLStudyArgs.ORALYTICS:
-        arg_dict = {
+        default_arg_dict = {
             RLStudyArgs.T: 50,
             RLStudyArgs.RECRUIT_N: tmp_args.n,
             RLStudyArgs.RECRUIT_T: 1,
@@ -482,36 +467,36 @@ def main():
     parser.add_argument(
         "--T",
         type=int,
-        default=arg_dict[RLStudyArgs.T],
+        default=default_arg_dict[RLStudyArgs.T],
         help="Total number of decision times per user",
     )
     parser.add_argument(
         "--recruit_n",
         type=int,
-        default=arg_dict[RLStudyArgs.RECRUIT_N],
+        default=default_arg_dict[RLStudyArgs.RECRUIT_N],
         help="Number of users recruited on each recruitment times",
     )
     parser.add_argument(
         "--recruit_t",
         type=int,
-        default=arg_dict[RLStudyArgs.RECRUIT_T],
+        default=default_arg_dict[RLStudyArgs.RECRUIT_T],
         help="Number of updates between recruitment times (minimum 1)",
     )
     parser.add_argument(
         "--allocation_sigma",
         type=float,
-        default=arg_dict[RLStudyArgs.ALLOCATION_SIGMA],
+        default=default_arg_dict[RLStudyArgs.ALLOCATION_SIGMA],
         help="Sigma used in allocation of algorithm",
     )
     parser.add_argument(
         "--noise_var",
         type=float,
-        default=arg_dict[RLStudyArgs.ALLOCATION_SIGMA],
+        default=default_arg_dict[RLStudyArgs.NOISE_VAR],
         help="Posterior sampling noise variance",
     )
 
     args = parser.parse_args()
-    print("Args provided to RL_Study_Simulation.py")
+    print("Args provided to RL_Study_Simulation.py:")
     print(args)
 
     assert args.T >= args.decisions_between_updates

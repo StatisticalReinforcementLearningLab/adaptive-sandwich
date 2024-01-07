@@ -27,6 +27,4 @@
 
 ## TODO
 1. Add precommit hooks (one of which should handle pip freeze)
-2. Use class inheritance for RL algorithms?
-3. Refactor After_Study_Analyses.py to not use global variables
 

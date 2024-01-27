@@ -1,4 +1,4 @@
-# Adaptive Sandwich Variance Package
+# lifejacket: Save your standard errors from pooling in RL
 
 - `After_Study_Analyses.py`: main code for after study analyses
 - `RL_Study_Simulation.py`: main code for running RL algorithm experiements

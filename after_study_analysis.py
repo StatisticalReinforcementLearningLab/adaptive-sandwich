@@ -1,4 +1,5 @@
 import pickle
+import os
 
 import click
 import jax
@@ -35,20 +36,133 @@ get_loss_gradient_derivatives_wrt_pi = jax.jacrev(get_loss_gradient, 5)
 get_loss_hessian = jax.hessian(get_loss)
 
 
-# TODO: Add redo analysis option?
-@click.command()
+@click.group()
+def cli():
+    pass
+
+
+# TODO: Eventually these commands will just take like the algo statistics object and
+# anything else we need after parsing by intermediate package.
+@cli.command()
+@click.option(
+    "--input_folder",
+    type=click.Path(exists=True),
+    help="A parent folder containing a series of subfolders with the required files",
+    required=True,
+)
+@click.option(
+    "--study_dataframe_pickle_filename",
+    help="The name of the pickled pandas dataframe in each folder",
+    required=True,
+)
+@click.option(
+    "--rl_algorithm_object_pickle_filename",
+    help="The name of the pickled RL algorithm in each folder",
+    required=True,
+)
+def analyze_multiple_datasets_and_compare_to_empirical_variance(
+    input_folder,
+    study_dataframe_pickle_filename,
+    rl_algorithm_object_pickle_filename,
+):
+    """
+    For each of the supplied input_folders, extract the pickled study dataframe
+    and RL algorithm object using the supplied filenames. Analyze each
+    dataset and compute the empirical variance to compare with the mean adaptive
+    sandwich variance.
+    """
+    theta_estimates = []
+    adaptive_sandwich_var_estimates = []
+    i = 0
+    for subfolder in os.listdir(input_folder):
+        # We care about folders, not files
+        if os.path.isfile(os.path.join(input_folder, subfolder)):
+            continue
+
+        # Check to make sure each subfolder contains the two required files
+        contains_study_df = False
+        contains_rl_alg = False
+
+        for filename in os.listdir(os.path.join(input_folder, subfolder)):
+            # Skip other files
+            if filename not in {
+                study_dataframe_pickle_filename,
+                rl_algorithm_object_pickle_filename,
+            }:
+                continue
+
+            # Check that objects at these paths are actually files (not folders)
+            f = os.path.join(input_folder, subfolder, filename)
+            if not os.path.isfile(f):
+                raise RuntimeError(f"Required path {f} exists but it is not a file")
+
+            # Record when we've found files of each type
+            if filename == study_dataframe_pickle_filename:
+                contains_study_df = True
+            elif filename == rl_algorithm_object_pickle_filename:
+                contains_rl_alg = True
+
+            if contains_study_df and contains_rl_alg:
+                break
+        else:
+            raise RuntimeError(
+                f"Folder {subfolder} did not contain at least one the required files {study_dataframe_pickle_filename} and {rl_algorithm_object_pickle_filename}"
+            )
+
+        # If we got here, both required files were found. Analyze this dataset.
+        with open(
+            os.path.join(input_folder, subfolder, study_dataframe_pickle_filename),
+            "+rb",
+        ) as study_dataframe_pickle:
+            with open(
+                os.path.join(
+                    input_folder, subfolder, rl_algorithm_object_pickle_filename
+                ),
+                "+rb",
+            ) as rl_algorithm_object_pickle:
+                study_df = pickle.load(study_dataframe_pickle)
+                study_RLalg = pickle.load(rl_algorithm_object_pickle)
+
+                theta_est, adaptive_sandwich_var = analyze_dataset_inner(
+                    study_df, study_RLalg
+                )
+                theta_estimates.append(theta_est)
+                adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
+
+    theta_estimates = np.array(theta_estimates)
+    adaptive_sandwich_var_estimates = np.array(adaptive_sandwich_var_estimates)
+
+    empirical_var_normalized = np.cov(theta_estimates.T, ddof=0)
+    # TODO: normalize? or multiply above by n? Need to find right comparison
+    mean_adaptive_sandwich_var_estimate = np.mean(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+
+    print(empirical_var_normalized, mean_adaptive_sandwich_var_estimate)
+
+
+# TODO: ADD redo analysis toggle?
+@cli.command()
 @click.option(
     "--study_dataframe_pickle",
     type=click.File("rb"),
     help="Pickled pandas dataframe in correct format (see contract/readme)",
+    required=True,
 )
-# TODO: Eventually this will just be like the algo statistics object and
-# anything else we need after parsing by intermediate package.
-@click.option("--rl_algorithm_object_pickle", type=click.File("rb"))
+@click.option(
+    "--rl_algorithm_object_pickle",
+    type=click.File("rb"),
+    help="Pickled RL algorithm object in correct format (see contract/readme)",
+    required=True,
+)
 def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
     study_df = pickle.load(study_dataframe_pickle)
     study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
+    print(analyze_dataset_inner(study_df, study_RLalg))
+
+
+def analyze_dataset_inner(study_df, study_RLalg):
     # List of times that were the first applicable time for some update
     # Sorting shouldn't be necessary, as insertion order should be chronological
     # but we do it just in case.
@@ -90,9 +204,7 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
     # TODO: Theta variance is just lower right hand block of this
     variance = bread_matrix @ meat_matrix @ bread_matrix.T
 
-    breakpoint()
-
-    print(variance)
+    return theta_est, variance[-len(theta_est) :, -len(theta_est) :]
 
 
 # TODO: Think about user interface.  Do they give whole estimate theta function? or simply a model
@@ -199,7 +311,7 @@ def form_bread_inverse_matrix(
     # behind the scenes.
     # NOTE THAT COLUMN INDEX i CORRESPONDS TO DECISION TIME i+1!
     # NOTE that JAX treats positional args as keyword args if they are *supplied* with name=val
-    # syntax.  So though supplying these arg names is a good practice for readability, but has
+    # syntax.  So though supplying these arg names is a good practice for readability, it has
     # unexpected consequences in this case. Just noting this because it was tricky to debug here.
     mixed_theta_pi_loss_derivatives_by_user_id = {
         user_id: get_loss_gradient_derivatives_wrt_pi(
@@ -355,4 +467,4 @@ def get_classical_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
 
 
 if __name__ == "__main__":
-    analyze_dataset()  # pylint: disable=no-value-for-parameter
+    cli()  # pylint: disable=no-value-for-parameter

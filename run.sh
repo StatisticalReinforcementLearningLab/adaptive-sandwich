@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
+set -x
 
 T=25
 decisions_between_updates=2
 # recruit_n=25; recruit_t=2
 recruit_n=50; recruit_t=1
-N=2
 n=50
 min_users=1
 synthetic_mode='delayed_1_dosage'
@@ -21,22 +21,17 @@ RL_alg="sigmoid_LS"
 #err_corr='independent'
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-inference_mode="model"
 action_centering=0
 #TODO: not used currently but maybe should be
 debug=0
 redo_analyses=1
 
-# Simulate an RL study with the supplied arguments
-python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering
+# Simulate an RL study with the supplied arguments.  (We do just one repetition)
+python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering
 
 # Create a convenience variable that holds the output folder for the last script
 output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
 
 # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
 # and do after-study analysis
-for i in $(seq 1 $N)
-do
-   echo $i
-   python after_study_analysis.py --study_dataframe_pickle="${output_folder}/exp=${i}/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=${i}/study_RLalg.pkl"
-done
+python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${output_folder}/exp=1/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=${i}/study_RLalg.pkl"

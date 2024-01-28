@@ -297,16 +297,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         with open(f"{folder_path}/study_RLalg.pkl", "wb") as f:
             pickle.dump(study_RLalg, f)
 
-        # TODO eventually remove Save Variance Components #############################################
-        if args.RL_alg == RLStudyArgs.SIGMOID_LS:
-            out_dict = output_variance_pieces(study_df, study_RLalg, args)
-            with open(f"{folder_path}/out_dict.pkl", "wb") as file:
-                pickle.dump(out_dict, file)
-
-            policy_grad_norm.append(
-                np.max(np.absolute([y["pi_grads"] for x, y in out_dict.items()]))
-            )
-
     toc = time.perf_counter()
     print(f"Final ran in {toc - tic:0.4f} seconds")
 

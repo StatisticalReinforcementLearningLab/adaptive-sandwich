@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH -n 4                # Number of cores
-#SBATCH -N 1                # Ensure that all cores are on one machine
-#SBATCH -t 0-25:00          # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH -p murphy           # Partition to submit to
-#SBATCH --mem=50G           # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -o slurm.%N.%j.out # STDOUT
-#SBATCH -e slurm.%N.%j.err # STDERR
-#SBATCH --mail-type=END                                    #This command would send an email when the job ends.
-#SBATCH --mail-type=FAIL                                   #This command would send an email when the job ends.
-#SBATCH --mail-user=nowellclosser@g.harvard.edu            #Email to which notifications will be sent
+#SBATCH -n 4                                      # Number of cores
+#SBATCH -N 1                                      # Ensure that all cores are on one machine
+#SBATCH -t 0-25:00                                # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH -p murphy                                 # Partition to submit to
+#SBATCH --mem=50G                                 # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -o slurm.%N.%j.out                        # STDOUT
+#SBATCH -e slurm.%N.%j.err                        # STDERR
+#SBATCH --mail-type=END                           # This command would send an email when the job ends.
+#SBATCH --mail-type=FAIL                          # This command would send an email when the job ends.
+#SBATCH --mail-user=nowellclosser@g.harvard.edu   # Email to which notifications will be sent
 
 # Stop on nonzero exit codes and use of undefined variables
 set -eu
@@ -19,14 +19,14 @@ module load Mambaforge/22.11.1-fasrc01
 cd ~
 
 # Make virtualenv if necessary, and then activate it
-if test -d venv; then
+if ! test -d venv; then
   python3 -m venv venv
 fi
 source venv/bin/activate
 
 # Now install all requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
-pip install --no-index -r requirements.txt
+pip install -r requirements.txt
 
 # T=25,50
 # Steepness=0.5,1,2?
@@ -61,7 +61,7 @@ n=100
 #steepness = 1 2 0.5
 
 #TODO: use this in after study analysis
-now = $(printf "%(%F_%H%M%S)T")
+now=$(printf "%(%F_%H%M%S)T")
 save_dir="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${now}"
 mkdir -p $save_dir
 
@@ -79,7 +79,7 @@ do
 
         # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
         # and do after-study analysis
-        python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl" --save_dir=$save_dir
+        python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
     done
 
 done

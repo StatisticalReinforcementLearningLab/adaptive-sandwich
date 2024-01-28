@@ -4,8 +4,11 @@
 #SBATCH -t 0-25:00          # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p murphy           # Partition to submit to
 #SBATCH --mem=50G           # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -o jobs_out/may3/T=50_n=100_actionC=1_N=2k_%j.out  # File to which STDOUT will be written, %j inserts jobid
-#SBATCH -e jobs_out/may3/T=50_n=100_actionC=1_N=2k_%j.err  # File to which STDERR will be written, %j inserts jobid
+#SBATCH -o slurm.%N.%j.out # STDOUT
+#SBATCH -e slurm.%N.%j.err # STDERR
+#SBATCH --mail-type=END                                    #This command would send an email when the job ends.
+#SBATCH --mail-type=FAIL                                   #This command would send an email when the job ends.
+#SBATCH --mail-user=nowellclosser@g.harvard.edu            #Email to which notifications will be sent
 
 # Stop on nonzero exit codes and use of undefined variables
 set -eu

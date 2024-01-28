@@ -9,4 +9,5 @@ synthetic_env_params/.DS_Store
 .venv
 .vscode
 adaptive-sandwich.code-workspace
+.deploy.sh
 

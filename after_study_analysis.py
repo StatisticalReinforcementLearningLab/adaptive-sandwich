@@ -1,5 +1,6 @@
 import pickle
 import os
+import logging
 
 import click
 import jax
@@ -7,7 +8,21 @@ import numpy as np
 from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 
-from helper_functions import get_user_action1probs, get_user_actions, get_user_rewards
+from helper_functions import (
+    get_user_action1probs,
+    get_user_actions,
+    get_user_rewards,
+    invert_matrix_and_check_conditioning,
+)
+
+
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.DEBUG,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
@@ -73,12 +88,14 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
     """
     theta_estimates = []
     adaptive_sandwich_var_estimates = []
-    i = 0
+    classical_sandwich_var_estimates = []
+
     for subfolder in os.listdir(input_folder):
         # We care about folders, not files
         if os.path.isfile(os.path.join(input_folder, subfolder)):
             continue
 
+        logger.info("Processing folder %s", subfolder)
         # Check to make sure each subfolder contains the two required files
         contains_study_df = False
         contains_rl_alg = False
@@ -109,6 +126,7 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
                 f"Folder {subfolder} did not contain at least one the required files {study_dataframe_pickle_filename} and {rl_algorithm_object_pickle_filename}"
             )
 
+        logger.info("Contains required files, let's proceed to analysis")
         # If we got here, both required files were found. Analyze this dataset.
         with open(
             os.path.join(input_folder, subfolder, study_dataframe_pickle_filename),
@@ -123,22 +141,39 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
                 study_df = pickle.load(study_dataframe_pickle)
                 study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
-                theta_est, adaptive_sandwich_var = analyze_dataset_inner(
-                    study_df, study_RLalg
-                )
+                (
+                    theta_est,
+                    adaptive_sandwich_var,
+                    classical_sandwich_var,
+                ) = analyze_dataset_inner(study_df, study_RLalg)
                 theta_estimates.append(theta_est)
                 adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
+                classical_sandwich_var_estimates.append(classical_sandwich_var)
 
     theta_estimates = np.array(theta_estimates)
     adaptive_sandwich_var_estimates = np.array(adaptive_sandwich_var_estimates)
+    classical_sandwich_var_estimates = np.array(classical_sandwich_var_estimates)
 
+    theta_estimate = np.mean(theta_estimates, axis=0)
     empirical_var_normalized = np.cov(theta_estimates.T, ddof=0)
-    # TODO: normalize? or multiply above by n? Need to find right comparison
     mean_adaptive_sandwich_var_estimate = np.mean(
         adaptive_sandwich_var_estimates, axis=0
     )
+    mean_classical_sandwich_var_estimate = np.mean(
+        classical_sandwich_var_estimates, axis=0
+    )
 
-    print(empirical_var_normalized, mean_adaptive_sandwich_var_estimate)
+    logger.info("Parameter estimate:\n %s", theta_estimate)
+    logger.info("Empirical variance:\n %s", empirical_var_normalized)
+    logger.info(
+        "Adaptive sandwich variance estimate:\n %s", mean_adaptive_sandwich_var_estimate
+    )
+    logger.info(
+        "Classical sandwich variance estimate:\n %s",
+        mean_classical_sandwich_var_estimate,
+    )
+
+    # TODO: Save results to sensible output directory, perhaps where input data is.
 
 
 # TODO: ADD redo analysis toggle?
@@ -159,7 +194,17 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
     study_df = pickle.load(study_dataframe_pickle)
     study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
-    print(analyze_dataset_inner(study_df, study_RLalg))
+    theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
+        analyze_dataset_inner(study_df, study_RLalg)
+    )
+
+    logger.info("Parameter estimate:\n %s", theta_est)
+    logger.info(
+        "Adaptive sandwich variance estimate:\n %s", adaptive_sandwich_var_estimate
+    )
+    logger.info(
+        "Classical sandwich variance estimate:\n %s", classical_sandwich_var_estimate
+    )
 
 
 def analyze_dataset_inner(study_df, study_RLalg):
@@ -175,12 +220,17 @@ def analyze_dataset_inner(study_df, study_RLalg):
     )
 
     # TODO: state features should not be the same as RL alg for full generality
+    # Estimate the inferential target using the supplied study data.
+    logger.info("Forming theta estimate...")
     theta_est = estimate_theta(
         study_df, study_RLalg.state_feats, study_RLalg.treat_feats
     )
 
+    logger.info("Forming adaptive sandwich variance estimator...")
+
     # TODO: state features should not be the same as RL alg for full generality
-    bread_matrix = form_bread_inverse_matrix(
+    logger.info("Forming adaptive bread inverse and inverting...")
+    joint_bread_inverse_matrix = form_bread_inverse_matrix(
         study_RLalg.upper_left_bread_inverse,
         study_df,
         study_RLalg.algorithm_statistics_by_calendar_t,
@@ -190,8 +240,12 @@ def analyze_dataset_inner(study_df, study_RLalg):
         study_RLalg.beta_dim,
         theta_est,
     )
+    joint_bread_matrix = invert_matrix_and_check_conditioning(
+        joint_bread_inverse_matrix
+    )
 
-    meat_matrix = form_meat_matrix(
+    logger.info("Forming adaptive meat...")
+    joint_meat_matrix = form_meat_matrix(
         study_df,
         theta_est,
         study_RLalg.state_feats,
@@ -201,15 +255,27 @@ def analyze_dataset_inner(study_df, study_RLalg):
         study_RLalg.algorithm_statistics_by_calendar_t,
     )
 
-    # TODO: Theta variance is just lower right hand block of this
-    variance = bread_matrix @ meat_matrix @ bread_matrix.T
-
-    return theta_est, variance[-len(theta_est) :, -len(theta_est) :]
+    logger.info("Combining sandwich ingredients")
+    joint_adaptive_variance = (
+        joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
+    )
+    logger.info("Finished forming adaptive sandwich variance estimator.")
+    return (
+        theta_est,
+        joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
+        get_classical_sandwich_var(
+            study_df,
+            theta_est,
+            study_RLalg.state_feats,
+            study_RLalg.treat_feats,
+        ),
+    )
 
 
 # TODO: Think about user interface.  Do they give whole estimate theta function? or simply a model
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?
+# TODO: doc string
 def estimate_theta(study_df, state_feats, treat_feats):
     # Note that the intercept is included in the features already (col of 1s)
     linear_model = LinearRegression(fit_intercept=False)
@@ -376,10 +442,9 @@ def form_bread_inverse_matrix(
 
             running_entry_holder += np.outer(theta_loss_gradient, weight_gradient_sum)
 
-            # TODO: I think we now will be getting the actual pi functions... maybe this can be simplified?
             # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece
-            # is a bit intricate; we only have the the theta loss function in terms of the pis,
-            # and the  *values* of the pi derivatives wrt to betas available here, since the actual
+            # is a bit intricate; we only have the theta loss function in terms of the pis,
+            # and the *values* of the pi derivatives wrt to betas available here, since the actual
             # pi functions are the domain of the RL side. The loss function also gets an action
             # probability for all decision times, not knowing which correspond to which
             # betas behind the scenes, so our tasks are to
@@ -440,31 +505,72 @@ def form_bread_inverse_matrix(
     )
 
 
-def get_classical_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
+# TODO: Needs tests
+# TODO: Complete docstring
+# TODO: Don't recompute things already computed for adaptive sandwich (or vice versa)
+def get_classical_sandwich_var(
+    study_df,
+    theta_est,
+    state_feats,
+    treat_feats,
+):
     """
     Forms standard sandwich variance estimator for inference (thetahat)
 
     Input:
-    - `est_eqns`: Estimating equation matrix (matrix of dimension num_users by dim_theta)
-    - `normalized_hessian`: (Hessian matrix of size dim_theta by dim_theta that is normalized by num_users)
-    - `LS_estimator`: Least squares estimator (vector)
 
     Output:
     - Sandwich variance estimator matrix (size dim_theta by dim_theta)
     """
-    n_unique = est_eqns.shape[0]
 
-    meat = np.einsum("ij,ik->jk", est_eqns, est_eqns)
-    meat = meat / n_unique
+    logger.info("Forming classical sandwich variance estimator")
+    user_ids = study_df.user_id.unique()
+    num_users = len(user_ids)
+
+    logger.info("Forming classical meat")
+    num_rows_cols = len(theta_est)
+    running_meat_matrix = np.zeros((num_rows_cols, num_rows_cols)).astype("float64")
+    for user_id in user_ids:
+        user_meat_vector = get_loss_gradient(
+            theta_est,
+            *get_user_states(study_df, state_feats, treat_feats, user_id),
+            actions=get_user_actions(study_df, user_id),
+            rewards=get_user_rewards(study_df, user_id),
+            action1probs=get_user_action1probs(study_df, user_id),
+        ).reshape(-1, 1)
+        running_meat_matrix += np.outer(user_meat_vector, user_meat_vector)
+
+    meat = running_meat_matrix / num_users
+
+    logger.info("Forming classical bread inverse")
+    normalized_hessian = (
+        sum(
+            np.array(
+                get_loss_hessian(
+                    theta_est,
+                    *get_user_states(study_df, state_feats, treat_feats, user_id),
+                    get_user_actions(study_df, user_id),
+                    get_user_rewards(study_df, user_id),
+                    get_user_action1probs(study_df, user_id),
+                )
+            )
+            for user_id in user_ids
+        )
+        / num_users
+    )
 
     # degrees of freedom adjustment
-    meat = meat * (n_unique - 1) / (n_unique - len(LS_estimator))
+    # TODO: Provide reference
+    meat = meat * (num_users - 1) / (num_users - len(theta_est))
 
-    inv_hessian = np.linalg.inv(normalized_hessian)
-    sandwich_var = (inv_hessian @ meat @ inv_hessian) / n_unique
+    logger.info("Inverting classical bread and combining ingredients")
+    inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)
+    sandwich_var = (inv_hessian @ meat @ inv_hessian) / num_users
+
+    logger.info("Finished forming classical sandwich variance estimator")
 
     return sandwich_var
 
 
 if __name__ == "__main__":
-    cli()  # pylint: disable=no-value-for-parameter
+    cli()

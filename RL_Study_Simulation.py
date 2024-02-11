@@ -8,7 +8,6 @@ import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env, SyntheticEnv
 from oralytics_env import load_oralytics_env, OralyticsEnv
-from debug_helper import output_variance_pieces
 from basic_RL_algorithms import FixedRandomization, SigmoidLS
 from smooth_posterior_sampling import SmoothPosteriorSampling
 from constants import RLStudyArgs
@@ -38,9 +37,9 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     for t in range(1, study_env.calendar_T + 1):
         # Update study_df with info on latest policy used to select actions
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df.loc[
-                study_df["calendar_t"] == t, "policy_last_t"
-            ] = study_RLalg.all_policies[-1]["policy_last_t"]
+            study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = (
+                study_RLalg.all_policies[-1]["policy_last_t"]
+            )
             study_df.loc[study_df["calendar_t"] == t, "policy_num"] = len(
                 study_RLalg.all_policies
             )
@@ -191,7 +190,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     with open(os.path.join(all_folder_path, "args.json"), "w") as f:
         json.dump(vars(args), f)
 
-    policy_grad_norm = []
     for i in range(1, args.N + 1):
         env_seed = i * 5000
         alg_seed = (args.N + i) * 5000
@@ -262,20 +260,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         study_df, study_RLalg = run_study_simulation(
             args, study_env, study_RLalg, user_env_data
         )
-
-        # Print summary statistics
-        if i == 25 and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            print(f"\nTotal Update Times: {len(study_RLalg.all_policies) - 1}")
-            study_df.action = study_df.action.astype("int")
-            study_df.policy_last_t = study_df.policy_last_t.astype("int")
-            if args.dataset_type == RLStudyArgs.HEARTSTEPS:
-                study_df.stepcount = (np.exp(study_df.reward) - 0.5).astype("int")
-
-        # Make histogram of rewards (available)
-        if i == 0:
-            print(study_df.head())
-            # TODO: For heartsteps evalsim mode we may want to make step count
-            # histograms here
 
         # Save Data #################################################################
         if args.verbose:

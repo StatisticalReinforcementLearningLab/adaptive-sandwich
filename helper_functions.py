@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 
@@ -157,3 +159,13 @@ def get_user_rewards(study_df, user_id):
 
 def get_user_action1probs(study_df, user_id):
     return get_user_column(study_df, user_id, column_name="action1prob")
+
+
+def invert_matrix_and_check_conditioning(matrix, condition_num_threshold=10**3):
+    condition_number = np.linalg.cond(matrix)
+    if condition_number > condition_num_threshold:
+        warnings.warn(
+            f"You are inverting a matrix with a large condition number: {condition_number}"
+        )
+
+    return np.linalg.inv(matrix)

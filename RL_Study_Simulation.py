@@ -200,9 +200,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         env_seed = i * 5000
         alg_seed = (args.N + i) * 5000
 
-        if i == 10 or i % 25 == 0:
-            toc = time.perf_counter()
-            print(f"{i} ran in {toc - tic:0.4f} seconds")
+        toc = time.perf_counter()
+        if i > 1:
+            print(f"Simulation {i-1} of {args.N} ran in {toc - tic:0.4f} seconds")
 
         # Initialize study environment ############################################
         if args.dataset_type == RLStudyArgs.SYNTHETIC:
@@ -293,7 +293,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     if args.profile:
         pr.disable()
         stats = Stats(pr)
-        stats.sort_stats("cumtime").print_stats(20)
+        stats.sort_stats("cumtime").print_stats(50)
 
 
 def main():

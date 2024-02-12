@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
+# TODO: Cache but functools cache doesn't work
 def get_loss(theta_est, base_states, treat_states, actions, rewards, action1probs=None):
     theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
@@ -176,15 +177,13 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
         classical_sandwich_var_estimates, axis=0
     )
 
-    print("\nParameter estimate:\n %s", theta_estimate)
-    print("\nEmpirical variance:\n %s", empirical_var_normalized)
+    print(f"\nParameter estimate:\n{theta_estimate}")
+    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
     print(
-        "\nAdaptive sandwich variance estimate:\n %s",
-        mean_adaptive_sandwich_var_estimate,
+        f"\nAdaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
     )
     print(
-        "\nClassical sandwich variance estimate:\n %s\n",
-        mean_classical_sandwich_var_estimate,
+        f"\nClassical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
     )
 
     # TODO: Save results to sensible output directory, perhaps where input data is.
@@ -192,7 +191,7 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
     if profile:
         pr.disable()
         stats = Stats(pr)
-        stats.sort_stats("cumtime").print_stats(20)
+        stats.sort_stats("cumtime").print_stats(50)
 
 
 # TODO: ADD redo analysis toggle?
@@ -234,20 +233,22 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle, profile)
         analyze_dataset_inner(study_df, study_RLalg)
     )
 
-    print("\nParameter estimate:\n %s", theta_est)
-    print("\nAdaptive sandwich variance estimate:\n %s", adaptive_sandwich_var_estimate)
+    print(f"\nParameter estimate:\n {theta_est}")
+    print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
     print(
-        "\nClassical sandwich variance estimate:\n %s\n",
-        classical_sandwich_var_estimate,
+        f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
     )
 
     if profile:
         pr.disable()
         stats = Stats(pr)
-        stats.sort_stats("cumtime").print_stats(10)
+        stats.sort_stats("cumtime").print_stats(50)
 
 
+# TODO: docstring
+# TODO: Collect all jax things and then einsum away?
 def analyze_dataset_inner(study_df, study_RLalg):
+
     # List of times that were the first applicable time for some update
     # Sorting shouldn't be necessary, as insertion order should be chronological
     # but we do it just in case.
@@ -343,6 +344,7 @@ def form_meat_matrix(
     user_ids = study_df.user_id.unique()
     num_rows_cols = beta_dim * len(update_times) + len(theta_est)
     running_meat_matrix = np.zeros((num_rows_cols, num_rows_cols)).astype("float64")
+    estimating_function_sum = np.zeros((num_rows_cols, 1))
     for user_id in user_ids:
         user_meat_vector = np.concatenate(
             [
@@ -360,6 +362,11 @@ def form_meat_matrix(
             ],
         ).reshape(-1, 1)
         running_meat_matrix += np.outer(user_meat_vector, user_meat_vector)
+        estimating_function_sum += user_meat_vector
+
+    # TODO: The check for the beta gradients should probably be upstream at the
+    # time of reformatting the RL data in the intermediate stage.
+    assert np.allclose(estimating_function_sum, np.zeros(num_rows_cols), rtol=1e-03)
 
     return running_meat_matrix / len(user_ids)
 
@@ -567,7 +574,7 @@ def get_classical_sandwich_var(
     user_ids = study_df.user_id.unique()
     num_users = len(user_ids)
 
-    logger.info("Forming classical meat")
+    logger.info("Forming classical meat.")
     num_rows_cols = len(theta_est)
     running_meat_matrix = np.zeros((num_rows_cols, num_rows_cols)).astype("float64")
     for user_id in user_ids:

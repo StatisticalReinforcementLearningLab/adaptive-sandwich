@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -n 4                                      # Number of cores
 #SBATCH -N 1                                      # Ensure that all cores are on one machine
-#SBATCH -t 0-2:00                                 # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH -t 0-10:00                                 # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p serial_requeue                         # Partition to submit to
 #SBATCH --mem=20G                                 # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o slurm.%N.%j.out                        # STDOUT
@@ -37,12 +37,13 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed
 # Steepness=0.5,1,2?
 # Sample size=100,500,1000
 
-T=10
-N=50
+#TODO: Remove single-letter parameters in favor of descriptive names
+T=25
+N=100
 recruit_t=1
 decisions_between_updates=2
 min_users=1
-# TODO: All commented out options should probably just be in the python script documentation
+#TODO: All commented out options should probably just be in the python script documentation
 #synthetic_mode='delayed_1_dosage'
 #synthetic_mode='delayed_01_5_dosage'
 #synthetic_mode='test_1_1_T2'
@@ -74,8 +75,8 @@ do
     for synthetic_mode in 'delayed_1_dosage'
     do
         # Simulate an RL study with the supplied arguments.  (We do just one repetition)
-        echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning RL simulation for steepness $steepness and $synthetic_mode synthetic_mode.
-        python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
+        echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning RL simulation for steepness $steepness and synthetic_mode $synthetic_mode.
+        python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir --profile
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished RL simulation.
 
         # Create a convenience variable that holds the output folder for the last script
@@ -84,7 +85,7 @@ do
         # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
         # and do after-study analysis
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning after-study analysis.
-        python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
+        python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl" --profile
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished after-study analysis.
     done
 done

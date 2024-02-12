@@ -1,6 +1,8 @@
 import pickle
 import os
 import logging
+import cProfile
+from pstats import Stats
 
 import click
 import jax
@@ -8,18 +10,12 @@ import numpy as np
 from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 
+
 from helper_functions import (
     get_user_action1probs,
     get_user_actions,
     get_user_rewards,
     invert_matrix_and_check_conditioning,
-)
-
-
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.DEBUG,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,10 +71,17 @@ def cli():
     help="The name of the pickled RL algorithm in each folder",
     required=True,
 )
+@click.option(
+    "--profile",
+    default=False,
+    is_flag=True,
+    help="If supplied, the important computations will be profiled with summary output shown",
+)
 def analyze_multiple_datasets_and_compare_to_empirical_variance(
     input_folder,
     study_dataframe_pickle_filename,
     rl_algorithm_object_pickle_filename,
+    profile,
 ):
     """
     For each of the supplied input_folders, extract the pickled study dataframe
@@ -86,6 +89,16 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
     dataset and compute the empirical variance to compare with the mean adaptive
     sandwich variance.
     """
+    if profile:
+        pr = cProfile.Profile()
+        pr.enable()
+
+    logging.basicConfig(
+        format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d:%H:%M:%S",
+        level=logging.INFO,
+    )
+
     theta_estimates = []
     adaptive_sandwich_var_estimates = []
     classical_sandwich_var_estimates = []
@@ -163,17 +176,23 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
         classical_sandwich_var_estimates, axis=0
     )
 
-    logger.info("Parameter estimate:\n %s", theta_estimate)
-    logger.info("Empirical variance:\n %s", empirical_var_normalized)
-    logger.info(
-        "Adaptive sandwich variance estimate:\n %s", mean_adaptive_sandwich_var_estimate
+    print("\nParameter estimate:\n %s", theta_estimate)
+    print("\nEmpirical variance:\n %s", empirical_var_normalized)
+    print(
+        "\nAdaptive sandwich variance estimate:\n %s",
+        mean_adaptive_sandwich_var_estimate,
     )
-    logger.info(
-        "Classical sandwich variance estimate:\n %s",
+    print(
+        "\nClassical sandwich variance estimate:\n %s\n",
         mean_classical_sandwich_var_estimate,
     )
 
     # TODO: Save results to sensible output directory, perhaps where input data is.
+
+    if profile:
+        pr.disable()
+        stats = Stats(pr)
+        stats.sort_stats("cumtime").print_stats(20)
 
 
 # TODO: ADD redo analysis toggle?
@@ -190,7 +209,24 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
     help="Pickled RL algorithm object in correct format (see contract/readme)",
     required=True,
 )
-def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
+@click.option(
+    "--profile",
+    default=False,
+    is_flag=True,
+    help="If supplied, the important computations will be profiled with summary output shown",
+)
+def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle, profile):
+
+    logging.basicConfig(
+        format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d:%H:%M:%S",
+        level=logging.INFO,
+    )
+
+    if profile:
+        pr = cProfile.Profile()
+        pr.enable()
+
     study_df = pickle.load(study_dataframe_pickle)
     study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
@@ -198,13 +234,17 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle):
         analyze_dataset_inner(study_df, study_RLalg)
     )
 
-    logger.info("Parameter estimate:\n %s", theta_est)
-    logger.info(
-        "Adaptive sandwich variance estimate:\n %s", adaptive_sandwich_var_estimate
+    print("\nParameter estimate:\n %s", theta_est)
+    print("\nAdaptive sandwich variance estimate:\n %s", adaptive_sandwich_var_estimate)
+    print(
+        "\nClassical sandwich variance estimate:\n %s\n",
+        classical_sandwich_var_estimate,
     )
-    logger.info(
-        "Classical sandwich variance estimate:\n %s", classical_sandwich_var_estimate
-    )
+
+    if profile:
+        pr.disable()
+        stats = Stats(pr)
+        stats.sort_stats("cumtime").print_stats(10)
 
 
 def analyze_dataset_inner(study_df, study_RLalg):
@@ -221,15 +261,15 @@ def analyze_dataset_inner(study_df, study_RLalg):
 
     # TODO: state features should not be the same as RL alg for full generality
     # Estimate the inferential target using the supplied study data.
-    logger.info("Forming theta estimate...")
+    logger.info("Forming theta estimate.")
     theta_est = estimate_theta(
         study_df, study_RLalg.state_feats, study_RLalg.treat_feats
     )
 
-    logger.info("Forming adaptive sandwich variance estimator...")
+    logger.info("Forming adaptive sandwich variance estimator.")
 
     # TODO: state features should not be the same as RL alg for full generality
-    logger.info("Forming adaptive bread inverse and inverting...")
+    logger.info("Forming adaptive bread inverse and inverting.")
     joint_bread_inverse_matrix = form_bread_inverse_matrix(
         study_RLalg.upper_left_bread_inverse,
         study_df,
@@ -244,7 +284,7 @@ def analyze_dataset_inner(study_df, study_RLalg):
         joint_bread_inverse_matrix
     )
 
-    logger.info("Forming adaptive meat...")
+    logger.info("Forming adaptive meat.")
     joint_meat_matrix = form_meat_matrix(
         study_df,
         theta_est,
@@ -255,7 +295,7 @@ def analyze_dataset_inner(study_df, study_RLalg):
         study_RLalg.algorithm_statistics_by_calendar_t,
     )
 
-    logger.info("Combining sandwich ingredients")
+    logger.info("Combining sandwich ingredients.")
     joint_adaptive_variance = (
         joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
     )
@@ -523,7 +563,7 @@ def get_classical_sandwich_var(
     - Sandwich variance estimator matrix (size dim_theta by dim_theta)
     """
 
-    logger.info("Forming classical sandwich variance estimator")
+    logger.info("Forming classical sandwich variance estimator.")
     user_ids = study_df.user_id.unique()
     num_users = len(user_ids)
 
@@ -542,7 +582,7 @@ def get_classical_sandwich_var(
 
     meat = running_meat_matrix / num_users
 
-    logger.info("Forming classical bread inverse")
+    logger.info("Forming classical bread inverse.")
     normalized_hessian = (
         sum(
             np.array(
@@ -563,11 +603,11 @@ def get_classical_sandwich_var(
     # TODO: Provide reference
     meat = meat * (num_users - 1) / (num_users - len(theta_est))
 
-    logger.info("Inverting classical bread and combining ingredients")
+    logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)
     sandwich_var = (inv_hessian @ meat @ inv_hessian) / num_users
 
-    logger.info("Finished forming classical sandwich variance estimator")
+    logger.info("Finished forming classical sandwich variance estimator.")
 
     return sandwich_var
 

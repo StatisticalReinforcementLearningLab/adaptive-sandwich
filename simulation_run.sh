@@ -75,7 +75,7 @@ do
     do
         # Simulate an RL study with the supplied arguments.  (We do just one repetition)
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning RL simulation for steepness $steepness and $synthetic_mode synthetic_mode.
-        python -m cProfile -s time rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
+        python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished RL simulation.
 
         # Create a convenience variable that holds the output folder for the last script
@@ -84,7 +84,7 @@ do
         # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
         # and do after-study analysis
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning after-study analysis.
-        python -m cProfile -s time after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
+        python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
         echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished after-study analysis.
     done
 done

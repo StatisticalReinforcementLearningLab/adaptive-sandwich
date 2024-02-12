@@ -2,6 +2,8 @@ import argparse
 import time
 import json
 import os
+import cProfile
+from pstats import Stats
 
 import numpy as np
 import cloudpickle as pickle
@@ -129,6 +131,10 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     ###############################################################
     # Load Data and Models ########################################
     ###############################################################
+
+    if args.profile:
+        pr = cProfile.Profile()
+        pr.enable()
 
     if args.dataset_type == RLStudyArgs.HEARTSTEPS:
         raise NotImplementedError()
@@ -284,6 +290,11 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     toc = time.perf_counter()
     print(f"Final ran in {toc - tic:0.4f} seconds")
 
+    if args.profile:
+        pr.disable()
+        stats = Stats(pr)
+        stats.sort_stats("cumtime").print_stats(20)
+
 
 def main():
     ###############################################################
@@ -389,6 +400,11 @@ def main():
         default=RLStudyArgs.NAIVE,
         choices=[RLStudyArgs.NAIVE, RLStudyArgs.ORALYTICS],
         help="Prior for posterior sampling algorithm",
+    )
+    parser.add_argument(
+        "--profile",
+        action=argparse.BooleanOptionalAction,
+        help="If supplied, the important computations will be profiled with summary output shown",
     )
     tmp_args = parser.parse_known_args()[0]
 

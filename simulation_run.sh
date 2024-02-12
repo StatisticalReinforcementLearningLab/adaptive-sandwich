@@ -38,10 +38,10 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed
 # Sample size=100,500,1000
 
 #TODO: Remove single-letter parameters in favor of descriptive names
-T=25
-N=100
+T=3
+N=1000
 recruit_t=1
-decisions_between_updates=2
+decisions_between_updates=1
 min_users=1
 #TODO: All commented out options should probably just be in the python script documentation
 #synthetic_mode='delayed_1_dosage'

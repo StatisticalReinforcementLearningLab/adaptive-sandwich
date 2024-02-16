@@ -10,6 +10,7 @@ import torch
 import numpy_indexed as npi
 import jax
 from jax import numpy as jnp
+import numpy as np
 
 import least_squares_helper
 from helper_functions import (
@@ -27,7 +28,7 @@ class FixedRandomization:
 
     def __init__(self, args, state_feats, treat_feats, alg_seed):
         self.args = args
-        self.rng = jnp.random.default_rng(alg_seed)
+        self.rng = np.random.default_rng(alg_seed)
         self.state_feats = state_feats
         self.treat_feats = treat_feats
 
@@ -88,7 +89,7 @@ class SigmoidLS:
         # adaptivity when wanting adaptive sandwich to match classical
         self.steepness = steepness
 
-        self.rng = jnp.random.default_rng(self.alg_seed)
+        self.rng = np.random.default_rng(self.alg_seed)
         self.beta_dim = len(self.state_feats) + len(self.treat_feats)
         # Set an initial policy
         self.all_policies = [
@@ -143,7 +144,6 @@ class SigmoidLS:
     # TODO: Unite with method that does same thing. Needed pure function here.
     # Might need to use jacrev to do so
     # TODO: Docstring
-    # TODO: Differentiating including the clip is interesting
     # See https://arxiv.org/pdf/2006.06903.pdf
     def get_action_prob_pure(
         self, beta_est, lower_clip, upper_clip, treat_states, action=1

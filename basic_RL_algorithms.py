@@ -343,7 +343,7 @@ class SigmoidLS:
         Outputs:
         - None
         """
-        assert calendar_t == jnp.max(current_data["calendar_t"])
+        assert calendar_t == jnp.max(current_data["calendar_t"].to_numpy())
 
         curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
@@ -433,18 +433,16 @@ class SigmoidLS:
                     # type term added here. Update: way to implement is to differentiate wrt
                     # all betas each update and always add extra terms here. If 0, so be it, but
                     # things like action centering will just work.
-                output_matrix[
+                output_matrix = output_matrix.at[
                     (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
                     i * beta_dim : (i + 1) * beta_dim,
-                ] = (
-                    running_entry_holder / num_users
-                )
+                ].set(running_entry_holder / num_users)
 
             # Add the diagonal hessian entry (which is already an average)
-            output_matrix[
+            output_matrix = output_matrix.at[
                 (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
                 (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
-            ] = t_stats_dict["avg_loss_hessian"]
+            ].set(t_stats_dict["avg_loss_hessian"])
 
         self.upper_left_bread_inverse = output_matrix
 

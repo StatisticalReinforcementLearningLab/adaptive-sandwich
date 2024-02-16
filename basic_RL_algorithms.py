@@ -4,7 +4,6 @@ Implementations of several RL algorithms that may be used in study simulations.
 
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 import scipy.special
 import torch
@@ -28,7 +27,7 @@ class FixedRandomization:
 
     def __init__(self, args, state_feats, treat_feats, alg_seed):
         self.args = args
-        self.rng = np.random.default_rng(alg_seed)
+        self.rng = jnp.random.default_rng(alg_seed)
         self.state_feats = state_feats
         self.treat_feats = treat_feats
 
@@ -36,7 +35,7 @@ class FixedRandomization:
         raise ValueError("Fixed randomization never updated")
 
     def get_action_probs(self, curr_timestep_data, filter_keyval):
-        raw_probs = np.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
+        raw_probs = jnp.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
         return clip(self.args, raw_probs)
 
     def get_pi_gradients(self, user_states):
@@ -89,14 +88,14 @@ class SigmoidLS:
         # adaptivity when wanting adaptive sandwich to match classical
         self.steepness = steepness
 
-        self.rng = np.random.default_rng(self.alg_seed)
+        self.rng = jnp.random.default_rng(self.alg_seed)
         self.beta_dim = len(self.state_feats) + len(self.treat_feats)
         # Set an initial policy
         self.all_policies = [
             {
                 "policy_last_t": 0,
-                "RX": np.zeros(self.beta_dim),
-                "XX": np.zeros(self.beta_dim),
+                "RX": jnp.zeros(self.beta_dim),
+                "XX": jnp.zeros(self.beta_dim),
                 "beta_est": pd.DataFrame(),
                 # TODO: verify changing this to inc_data and {} instead of None is ok. Was inconsistent
                 # before. also changed beta est to empty df
@@ -109,7 +108,7 @@ class SigmoidLS:
         ]
 
         self.treat_feats_action = ["action:" + x for x in self.treat_feats]
-        self.treat_bool = np.array(
+        self.treat_bool = jnp.array(
             [
                 x in self.treat_feats_action
                 for x in self.state_feats + self.treat_feats_action
@@ -201,29 +200,29 @@ class SigmoidLS:
         action1probs = new_data["action1prob"].to_numpy().reshape(-1, 1)
         rewards = new_data["reward"].to_numpy().reshape(-1, 1)
         base_states, treat_states = self.get_states(new_data)
-        design = np.concatenate([base_states, actions * treat_states], axis=1)
+        design = jnp.concatenate([base_states, actions * treat_states], axis=1)
 
         # Only include available data
         calendar_t = new_data["calendar_t"].to_numpy().reshape(-1, 1)
         user_t = new_data["user_t"].to_numpy().reshape(-1, 1)
         rewards_avail = rewards
-        avail_bool = np.ones(rewards.shape)
+        avail_bool = jnp.ones(rewards.shape)
         design_avail = design
         user_id_avail = new_data["user_id"].to_numpy()
 
         # Get policy estimator
-        new_RX = self.all_policies[-1]["RX"] + np.sum(design_avail * rewards_avail, 0)
-        new_XX = self.all_policies[-1]["XX"] + np.einsum(
+        new_RX = self.all_policies[-1]["RX"] + jnp.sum(design_avail * rewards_avail, 0)
+        new_XX = self.all_policies[-1]["XX"] + jnp.einsum(
             "ij,ik->jk", design_avail, design_avail
         )
         try:
-            inv_XX = np.linalg.inv(new_XX)
+            inv_XX = jnp.linalg.inv(new_XX)
         except Exception:
             import ipdb
 
             ipdb.set_trace()
 
-        beta_est = np.matmul(inv_XX, new_RX.reshape(-1))
+        beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1))
         beta_est_df = pd.DataFrame(
             beta_est.reshape(1, -1), columns=self.state_feats + self.treat_feats_action
         )
@@ -298,7 +297,7 @@ class SigmoidLS:
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = sum(
-            np.array(
+            jnp.array(
                 self.get_loss_hessian(
                     curr_beta_est,
                     *self.get_user_states(all_prev_data, user_id),
@@ -344,7 +343,7 @@ class SigmoidLS:
         Outputs:
         - None
         """
-        assert calendar_t == np.max(current_data["calendar_t"])
+        assert calendar_t == jnp.max(current_data["calendar_t"])
 
         curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
@@ -376,7 +375,7 @@ class SigmoidLS:
         }
 
     # TODO: Docstring
-    # TODO: Use np.block to reduce need for indexing
+    # TODO: Use jnp.block to reduce need for indexing
     def construct_upper_left_bread_inverse(self):
         # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract
         # one from the number of policies  to find the number of updates because there is an
@@ -384,7 +383,7 @@ class SigmoidLS:
         num_updates = len(self.all_policies) - 1
         beta_dim = len(self.state_feats) + len(self.treat_feats)
         overall_dim = beta_dim * num_updates
-        output_matrix = np.zeros((overall_dim, overall_dim))
+        output_matrix = jnp.zeros((overall_dim, overall_dim))
 
         # List of times that were the first applicable time for some update
         # TODO: sort to not rely on insertion order?
@@ -406,14 +405,14 @@ class SigmoidLS:
             # This loop creates the non-diagonal terms for the current update
             # Think of each iteration of this loop as creating one term in the current (block) row
             for i in range(update_idx):
-                running_entry_holder = np.zeros((beta_dim, beta_dim))
+                running_entry_holder = jnp.zeros((beta_dim, beta_dim))
 
                 # This loop calculates the per-user quantities that will be
                 # averaged for the final matrix entries
                 for user_id, loss_gradient in t_stats_dict[
                     "loss_gradients_by_user_id"
                 ].items():
-                    weight_gradient_sum = np.zeros(beta_dim)
+                    weight_gradient_sum = jnp.zeros(beta_dim)
 
                     # This loop iterates over decision times in slices
                     # according to what was used for each update to collect the
@@ -426,7 +425,9 @@ class SigmoidLS:
                             t
                         ]["weight_gradients_by_user_id"][user_id]
 
-                    running_entry_holder += np.outer(loss_gradient, weight_gradient_sum)
+                    running_entry_holder += jnp.outer(
+                        loss_gradient, weight_gradient_sum
+                    )
 
                     # TODO: if we have action-centering, there will be an additional hessian
                     # type term added here. Update: way to implement is to differentiate wrt
@@ -462,7 +463,7 @@ class SigmoidLS:
         """
 
         treat_est = beta_est[self.treat_bool]
-        lin_est = np.matmul(prob_input_dict["treat_states"], treat_est)
+        lin_est = jnp.matmul(prob_input_dict["treat_states"], treat_est)
 
         raw_probs = scipy.special.expit(lin_est)
         # TODO: hiding things in args like this makes code harder to follow
@@ -483,10 +484,10 @@ class SigmoidLS:
         - Numpy vector of action selection probabilities
         """
 
-        if np.sum(np.abs(self.all_policies[-1]["XX"])) == 0:
+        if jnp.sum(jnp.abs(self.all_policies[-1]["XX"])) == 0:
             # check if observed any non-trivial data yet
             raw_probs = (
-                np.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
+                jnp.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
             )
             return clip(self.args, raw_probs)
 
@@ -540,13 +541,13 @@ class SigmoidLS:
         add_users = set(collected_data_dict["all_user_id"]) - set(pi_user_ids)
 
         if len(add_users) > 0:
-            all_user_ids_grouped = np.concatenate(
+            all_user_ids_grouped = jnp.concatenate(
                 [[x for x in add_users], user_ids_grouped]
             )
-            ones = np.ones((len(add_users)))
-            all_weights_grouped = np.concatenate([ones, weights_grouped], axis=0)
+            ones = jnp.ones((len(add_users)))
+            all_weights_grouped = jnp.concatenate([ones, weights_grouped], axis=0)
 
-            sort_idx = np.argsort(all_user_ids_grouped)
+            sort_idx = jnp.argsort(all_user_ids_grouped)
             all_user_ids_grouped = all_user_ids_grouped[sort_idx]
             all_weights_grouped = all_weights_grouped[sort_idx]
         else:
@@ -623,7 +624,7 @@ class SigmoidLS:
             ipdb.set_trace()
 
         if return_ave_only:
-            return np.sum(est_eqn_dict["est_eqns"], axis=0) / len(all_user_id)
+            return jnp.sum(est_eqn_dict["est_eqns"], axis=0) / len(all_user_id)
         return est_eqn_dict
 
     def prep_algdata(self):
@@ -671,7 +672,7 @@ class SigmoidLS:
                 else:
                     for key in update_dict["inc_data"].keys():
                         tmp = update2esteqn[update_num - 1][key].copy()
-                        update2esteqn[update_num][key] = np.concatenate(
+                        update2esteqn[update_num][key] = jnp.concatenate(
                             [update_dict["inc_data"][key].copy(), tmp], axis=0
                         )
 
@@ -687,7 +688,7 @@ class SigmoidLS:
                 tmp_collected["unique_user_id"] = set(tmp_collected["user_id"])
                 policy2collected[policy_num] = tmp_collected
 
-        all_estimators = np.hstack(all_estimators)
+        all_estimators = jnp.hstack(all_estimators)
         beta_dim = len(beta_est)
 
         info_dict = {
@@ -739,9 +740,9 @@ class SigmoidLS:
         weighted_pi_grad = batch_beta_est.grad.numpy()
 
         # Check that reproduced the action selection probabilities correctly
-        assert np.all(
-            np.round(pis.detach().numpy(), 5)
-            / np.round(curr_timestep_data["action1prob"], 5)
+        assert jnp.all(
+            jnp.round(pis.detach().numpy(), 5)
+            / jnp.round(curr_timestep_data["action1prob"], 5)
             == 1
         )
 
@@ -751,7 +752,7 @@ class SigmoidLS:
         beta_est = curr_policy_dict["beta_est"].to_numpy()
 
         actions = data_sofar.action.to_numpy().reshape(-1, 1)
-        X_vecs = np.concatenate(
+        X_vecs = jnp.concatenate(
             [
                 data_sofar[self.state_feats].to_numpy(),
                 actions * data_sofar[self.treat_feats].to_numpy(),
@@ -766,7 +767,7 @@ class SigmoidLS:
         if self.args.dataset_type == "heartsteps":
             avail_vec = data_sofar.availability.to_numpy()
         else:
-            avail_vec = np.ones(outcome_vec.shape)
+            avail_vec = jnp.ones(outcome_vec.shape)
 
         est_eqn_dict = least_squares_helper.get_est_eqn_LS(
             outcome_vec,
@@ -794,16 +795,16 @@ class SigmoidLS:
         assert curr_policy_dict["total_obs"] == len(data_sofar)
 
         # estimating equation sums to zero
-        ave_est_eqn = np.sum(est_eqn_dict["est_eqns"], axis=0)
+        ave_est_eqn = jnp.sum(est_eqn_dict["est_eqns"], axis=0)
         try:
-            assert np.sum(np.absolute(ave_est_eqn)) < 1
+            assert jnp.sum(jnp.abs(ave_est_eqn)) < 1
         except Exception:
             import ipdb
 
             ipdb.set_trace()
 
         # hessians are symmetric
-        hessian = np.around(est_eqn_dict["normalized_hessian"], 10)
-        assert np.all(hessian == hessian.T)
+        hessian = jnp.around(est_eqn_dict["normalized_hessian"], 10)
+        assert jnp.all(hessian == hessian.T)
 
         return est_eqn_dict

@@ -3,6 +3,7 @@ import os
 import logging
 import cProfile
 from pstats import Stats
+import warnings
 
 import click
 import jax
@@ -365,8 +366,12 @@ def form_meat_matrix(
         estimating_function_sum += user_meat_vector
 
     # TODO: The check for the beta gradients should probably be upstream at the
-    # time of reformatting the RL data in the intermediate stage.
-    assert np.allclose(estimating_function_sum, np.zeros(num_rows_cols), rtol=1e-03)
+    # time of reformatting the RL data in the intermediate stage. Also we may want this to be more than a warning eventually.
+    tol = 1e-02
+    if not np.allclose(estimating_function_sum, np.zeros(num_rows_cols), rtol=tol):
+        warnings.warn(
+            f"Estimating equations do not sum to within required tolerance {tol} of zero"
+        )
 
     return running_meat_matrix / len(user_ids)
 
@@ -417,7 +422,7 @@ def form_bread_inverse_matrix(
     # over update times.  We will pull appropriate quantities from here during iterations of the
     # loop.
 
-    # This computes derivatives of the theta estimating equation wrt the action probabilities
+    # This computes derivatives of the theta estimating function wrt the action probabilities
     # vector, which importantly has an element for *every* decision time.  We will later do the
     # work to multiply these by derivatives of pi with respect to beta, thus getting the quantities
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas

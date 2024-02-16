@@ -3,11 +3,11 @@ set -eu
 
 echo "$(date +"%Y-%m-%d %T") run.sh: Beginning simulation."
 
-T=25
+T=3
 decisions_between_updates=2
 # recruit_n=25; recruit_t=2
 recruit_n=50; recruit_t=1
-n=50
+n=100
 min_users=1
 synthetic_mode='delayed_1_dosage'
 #synthetic_mode='delayed_1_dosage'

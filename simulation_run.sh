@@ -16,8 +16,9 @@ set -eu
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning simulation.
 
 # Load Python 3.10, among other things
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Loading mamba module.
+echo $(date +"%Y-%m-%d %T") simulation_run.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01
+module load cuda/12.2.0-fasrc01
 
 # Make virtualenv if necessary, and then activate it
 cd ~
@@ -30,7 +31,7 @@ source venv/bin/activate
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: Making sure Python requirements are installed.
-pip install -r requirements.txt
+pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed.
 
 # T=25,50

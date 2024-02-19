@@ -366,7 +366,8 @@ def form_meat_matrix(
         estimating_function_sum += user_meat_vector
 
     # TODO: The check for the beta gradients should probably be upstream at the
-    # time of reformatting the RL data in the intermediate stage. Also we may want this to be more than a warning eventually.
+    # time of reformatting the RL data in the intermediate stage. Also we may want
+    # this to be more than a warning eventually.
     tol = 1e-02
     if not np.allclose(estimating_function_sum, np.zeros(num_rows_cols), rtol=tol):
         warnings.warn(
@@ -379,8 +380,8 @@ def form_meat_matrix(
 # TODO: Doc string
 def get_user_states(study_df, state_feats, treat_feats, user_id):
     """
-    Extract just the rewards for the given user in the given study_df as a
-    numpy (column) vector.
+    Extract just the states for the given user in the given study_df as a
+    tuple of numpy (column) vectors.
     """
     user_df = study_df.loc[study_df.user_id == user_id]
     base_states = user_df[state_feats].to_numpy()

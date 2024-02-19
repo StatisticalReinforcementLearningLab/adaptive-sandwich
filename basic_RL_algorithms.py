@@ -85,8 +85,7 @@ class SigmoidLS:
         self.treat_feats = treat_feats
         self.alg_seed = alg_seed
         self.allocation_sigma = allocation_sigma
-        # TODO: For simulation, make steepness so that curve becomes flat to reduce amount of
-        # adaptivity when wanting adaptive sandwich to match classical
+        # Note that steepness = 0 removes learning adaptivity, with action probabilities of .5
         self.steepness = steepness
 
         self.rng = np.random.default_rng(self.alg_seed)
@@ -321,7 +320,7 @@ class SigmoidLS:
     # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
     # calculate correctly for any t captured in data provided. Also a little
     # weird that only the data at calendar_t is needed but we pass in more data.
-    # TODO: Probably cleaner to pass in current theta estimate
+    # TODO: Probably cleaner to pass in current beta estimate
     def calculate_pi_and_weight_gradients(self, current_data, calendar_t):
         """
         For all users, compute the gradient with respect to beta of both the pi function

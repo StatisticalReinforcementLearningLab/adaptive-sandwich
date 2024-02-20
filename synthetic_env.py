@@ -159,6 +159,7 @@ class SyntheticEnv:
 
         return study_df
 
+    # TODO: This doesn't work with n = 1
     def sample_rewards(self, curr_timestep_data, actions, t):
         """Generate "random" rewards from saved noise"""
         main_covariates = curr_timestep_data[self.gen_feats]

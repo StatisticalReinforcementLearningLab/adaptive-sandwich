@@ -2,8 +2,6 @@
 Implementations of several RL algorithms that may be used in study simulations.
 """
 
-from dataclasses import dataclass
-
 import pandas as pd
 import scipy.special
 import torch
@@ -122,23 +120,61 @@ class SigmoidLS:
     # TODO: Docstring
     # TODO: Unite with update_alg logic somehow?
     def get_loss(self, beta_est, base_states, treat_states, actions, rewards):
-        beta_0 = beta_est[: base_states.shape[1]].reshape(-1, 1)
-        beta_1 = beta_est[base_states.shape[1] :].reshape(-1, 1)
+        beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)
+        beta_1_est = beta_est[base_states.shape[1] :].reshape(-1, 1)
 
-        return jnp.sum(
+        return jnp.einsum(
+            "ij->",
             (
                 rewards
-                - jnp.matmul(base_states, beta_0)
-                - jnp.matmul(actions * treat_states, beta_1)
+                - jnp.einsum("ij,jk->ik", base_states, beta_0_est)
+                - jnp.einsum("ij,jk->ik", actions * treat_states, beta_1_est)
             )
-            ** 2
+            ** 2,
         )
 
-    def get_loss_gradient(self, *args, **kwargs):
-        return jax.grad(self.get_loss, 0)(*args, **kwargs)
+    # Consider jitting
+    # For the loss gradients, we can form the sum of all users values and differentiate that with one
+    # call. Instead, this alternative structure which generalizes to the pi function case.
+    def get_loss_gradients_batched(
+        self,
+        beta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+    ):
+        return jax.vmap(
+            fun=jax.grad(self.get_loss),
+            in_axes=(None, 2, 2, 2, 2),
+            out_axes=0,
+        )(
+            beta_est,
+            batched_base_states_tensor,
+            batched_treat_states_tensor,
+            actions_batch,
+            rewards_batch,
+        )
 
-    def get_loss_hessian(self, *args, **kwargs):
-        return jax.hessian(self.get_loss, 0)(*args, **kwargs)
+    def get_loss_hessians_batched(
+        self,
+        beta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+    ):
+        return jax.vmap(
+            fun=jax.hessian(self.get_loss),
+            in_axes=(None, 2, 2, 2, 2),
+            out_axes=0,
+        )(
+            beta_est,
+            batched_base_states_tensor,
+            batched_treat_states_tensor,
+            actions_batch,
+            rewards_batch,
+        )
 
     # TODO: Unite with method that does same thing. Needed pure function here.
     # Might need to use jacrev to do so
@@ -157,6 +193,26 @@ class SigmoidLS:
 
         return prob[()]
 
+    def get_pi_gradients_batched(
+        self,
+        beta_est,
+        lower_clip,
+        upper_clip,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+    ):
+        return jax.vmap(
+            fun=jax.grad(self.get_action_prob_pure),
+            in_axes=(None, None, None, 0, 0),
+            out_axes=0,
+        )(
+            beta_est,
+            lower_clip,
+            upper_clip,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+        )
+
     def get_pi_gradient(self, *args, **kwargs):
         return jax.grad(self.get_action_prob_pure, 0)(*args, **kwargs)
 
@@ -172,15 +228,54 @@ class SigmoidLS:
             pi_beta, action
         ) / conditional_x_or_one_minus_x(pi_beta_target, action)
 
-    def get_weight_gradient(self, *args, **kwargs):
-        return jax.grad(self.get_radon_nikodym_weight, 0)(*args, **kwargs)
+    def get_weight_gradients_batched(
+        self,
+        beta_est,
+        target_beta,
+        lower_clip,
+        upper_clip,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+    ):
+        return jax.vmap(
+            fun=jax.grad(self.get_radon_nikodym_weight),
+            in_axes=(None, None, None, None, 0, 0),
+            out_axes=0,
+        )(
+            beta_est,
+            target_beta,
+            lower_clip,
+            upper_clip,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+        )
 
     # TODO: Docstring
-    def get_states(self, tmp_df):
-        base_states = tmp_df[self.state_feats].to_numpy()
-        treat_states = tmp_df[self.treat_feats].to_numpy()
+    def get_base_states(self, df):
+        base_states = df[self.state_feats].to_numpy()
+        return jnp.array(base_states)
+
+    def get_treat_states(self, df):
+        treat_states = df[self.treat_feats].to_numpy()
+        return jnp.array(treat_states)
+
+    # TODO: Allow general reward column names
+    def get_rewards(self, df):
+        rewards = df["reward"].to_numpy().reshape(-1, 1)
+        return jnp.array(rewards)
+
+    # TODO: Allow general action column names
+    def get_actions(self, df):
+        actions = df["action"].to_numpy().reshape(-1, 1)
+        return jnp.array(actions)
+
+    # TODO: Docstring
+    def get_states(self, df):
+        base_states = df[self.state_feats].to_numpy()
+        treat_states = df[self.treat_feats].to_numpy()
         return (base_states, treat_states)
 
+    # TODO: Make sure correct while debugging simulations
     def update_alg(self, new_data, update_last_t):
         """
         Update algorithm with new data
@@ -256,6 +351,7 @@ class SigmoidLS:
 
     # TODO: Docstring
     # TODO: probably cleaner to pass in current beta estimate
+    # TODO: JIT whole function? or just gradient and hessian batch functions
     def calculate_loss_derivatives(
         self,
         all_prev_data,
@@ -280,34 +376,56 @@ class SigmoidLS:
         # TODO: Note that we don't need the loss gradient for the first update
         # time... include anyway?
         first_applicable_time = calendar_t + 1
+
+        # Typically not necessary, but just be safe...
+        # TODO: Only if grouping by user id in numpy
+        # all_prev_data.sort_values(by=["user_id", "calendar_t"])
+
+        # Do this pandas filtering only once. Also consider doing it in numpy?
+        # Or just do everything in matrix form somehow?
+        # https://stackoverflow.com/questions/31863083/python-split-numpy-array-based-on-values-in-the-array
+        batched_base_states_list = []
+        batched_treat_states_list = []
+        batched_rewards_list = []
+        batched_actions_list = []
+
+        for user_id in self.all_policies[-1]["seen_user_id"]:
+            filtered_user_data = all_prev_data.loc[all_prev_data.user_id == user_id]
+            batched_base_states_list.append(self.get_base_states(filtered_user_data))
+            batched_treat_states_list.append(self.get_treat_states(filtered_user_data))
+            batched_actions_list.append(self.get_actions(filtered_user_data))
+            batched_rewards_list.append(self.get_rewards(filtered_user_data))
+
+        # TODO: dstack breaks with incremental recruitment
+        batched_base_states_tensor = jnp.dstack(batched_base_states_list)
+        batched_treat_states_tensor = jnp.dstack(batched_treat_states_list)
+        batched_actions_tensor = jnp.dstack(batched_actions_list)
+        batched_rewards_tensor = jnp.dstack(batched_rewards_list)
+
+        gradients = self.get_loss_gradients_batched(
+            curr_beta_est,
+            batched_base_states_tensor,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+            batched_rewards_tensor,
+        )
+        hessians = self.get_loss_hessians_batched(
+            curr_beta_est,
+            batched_base_states_tensor,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+            batched_rewards_tensor,
+        )
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {
-            user_id: self.get_loss_gradient(
-                curr_beta_est,
-                *self.get_user_states(all_prev_data, user_id),
-                actions=get_user_actions(all_prev_data, user_id),
-                rewards=get_user_rewards(all_prev_data, user_id)
-            )
-            for user_id in self.all_policies[-1]["seen_user_id"]
+            user_id: gradients[i]
+            for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
         }
 
-        # TODO: Maybe get rid of the comprehension for readability
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
-        ] = sum(
-            jnp.array(
-                self.get_loss_hessian(
-                    curr_beta_est,
-                    *self.get_user_states(all_prev_data, user_id),
-                    actions=get_user_actions(all_prev_data, user_id),
-                    rewards=get_user_rewards(all_prev_data, user_id)
-                )
-            )
-            for user_id in self.all_policies[-1]["seen_user_id"]
-        ) / len(
-            self.all_policies[-1]["seen_user_id"]
-        )
+        ] = jnp.mean(hessians, axis=0)
 
     def get_user_states(self, study_df, user_id):
         """
@@ -346,35 +464,55 @@ class SigmoidLS:
 
         curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
+        batched_treat_states_list = []
+        batched_actions_list = []
+
+        for user_id in self.all_policies[-1]["seen_user_id"]:
+            filtered_user_data = current_data.loc[current_data.user_id == user_id]
+            batched_treat_states_list.append(
+                self.get_treat_states(filtered_user_data)[-1]
+            )
+            batched_actions_list.append(self.get_actions(filtered_user_data)[-1].item())
+
+        # TODO: stack may break with incremental recruitment
+        batched_treat_states_tensor = jnp.vstack(batched_treat_states_list)
+        batched_actions_tensor = jnp.array(batched_actions_list)
+
+        pi_gradients = self.get_pi_gradients_batched(
+            curr_beta_est,
+            self.args.lower_clip,
+            self.args.upper_clip,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+        )
+
+        weight_gradients = self.get_weight_gradients_batched(
+            curr_beta_est,
+            curr_beta_est,
+            self.args.lower_clip,
+            self.args.upper_clip,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+        )
+
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "pi_gradients_by_user_id"
         ] = {
-            user_id: self.get_pi_gradient(
-                curr_beta_est,
-                lower_clip=self.args.lower_clip,
-                upper_clip=self.args.upper_clip,
-                treat_states=self.get_user_states(current_data, user_id)[1][-1],
-                action=get_user_actions(current_data, user_id)[-1].item(),
-            )
-            for user_id in self.all_policies[-1]["seen_user_id"]
+            user_id: pi_gradients[i]
+            for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
         }
 
-        self.algorithm_statistics_by_calendar_t[calendar_t][
+        self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "weight_gradients_by_user_id"
         ] = {
-            user_id: self.get_weight_gradient(
-                curr_beta_est,
-                beta_target=curr_beta_est,
-                lower_clip=self.args.lower_clip,
-                upper_clip=self.args.upper_clip,
-                treat_states=self.get_user_states(current_data, user_id)[1][-1],
-                action=get_user_actions(current_data, user_id)[-1].item(),
-            )
-            for user_id in self.all_policies[-1]["seen_user_id"]
+            user_id: weight_gradients[i]
+            for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
         }
 
     # TODO: Docstring
     # TODO: Use jnp.block to reduce need for indexing
+    # TODO: JIT this function?? update times would need to be adjusted (pass them in actually)
+    # Make sure jitting makes sense across simulations in terms of common args
     def construct_upper_left_bread_inverse(self):
         # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract
         # one from the number of policies  to find the number of updates because there is an

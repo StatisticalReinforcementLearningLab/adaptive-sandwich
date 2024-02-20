@@ -342,6 +342,9 @@ class TestSigmoidLS_T3_n2:
             },
         )
 
+    # TODO: Add test of loss derivatives with multiple updates? Had a case that
+    # only broke on multiple updates...
+
     # TODO: Should integrate next two functions with actual algorithm logic before testing
     # UPDATE: No I shouldn't. Don't need to put that effort in for sample
     def test_get_loss(self):

@@ -386,8 +386,8 @@ class SigmoidLS:
         # https://stackoverflow.com/questions/31863083/python-split-numpy-array-based-on-values-in-the-array
         batched_base_states_list = []
         batched_treat_states_list = []
-        batched_rewards_list = []
         batched_actions_list = []
+        batched_rewards_list = []
 
         for user_id in self.all_policies[-1]["seen_user_id"]:
             filtered_user_data = all_prev_data.loc[all_prev_data.user_id == user_id]
@@ -426,14 +426,6 @@ class SigmoidLS:
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = jnp.mean(hessians, axis=0)
-
-    def get_user_states(self, study_df, user_id):
-        """
-        Extract just the rewards for the given user in the given study_df as a
-        numpy (column) vector.
-        """
-        user_df = study_df.loc[study_df.user_id == user_id]
-        return self.get_states(user_df)
 
     # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
     # calculate correctly for any t captured in data provided. Also a little

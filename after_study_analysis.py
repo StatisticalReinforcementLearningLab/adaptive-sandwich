@@ -23,16 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
-# TODO: Cache but functools cache doesn't work
-def get_loss(theta_est, base_states, treat_states, actions, rewards, action1probs=None):
+# TODO: Deal with actionprobs being optional.
+def get_loss_action_centering(
+    theta_est, base_states, treat_states, actions, rewards, action1probs
+):
     theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
 
-    # Perform action centering if given action probabilities
-    if action1probs is not None:
-        # TODO: deal with types more cleanly?
-        actions = actions.astype(jnp.float64)
-        actions -= action1probs
+    # Perform action centering
+    # TODO: deal with types more cleanly?
+    actions = actions.astype(jnp.float32)
+    actions -= action1probs
 
     return jnp.sum(
         (
@@ -44,9 +45,78 @@ def get_loss(theta_est, base_states, treat_states, actions, rewards, action1prob
     )
 
 
-get_loss_gradient = jax.grad(get_loss)
+# Consider jitting
+# For the loss gradients, we can form the sum of all users values and differentiate that with one
+# call. Instead, this alternative structure which generalizes to the pi function case.
+def get_loss_gradients_batched(
+    theta_est,
+    batched_base_states_tensor,
+    batched_treat_states_tensor,
+    actions_batch,
+    rewards_batch,
+    action1probs_batch,
+):
+    return jax.vmap(
+        fun=jax.grad(get_loss_action_centering),
+        in_axes=(None, 2, 2, 2, 2, 2),
+        out_axes=0,
+    )(
+        theta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+        action1probs_batch,
+    )
+
+
+def get_loss_hessians_batched(
+    theta_est,
+    batched_base_states_tensor,
+    batched_treat_states_tensor,
+    actions_batch,
+    rewards_batch,
+    action1probs_batch,
+):
+    return jax.vmap(
+        fun=jax.hessian(get_loss_action_centering),
+        in_axes=(None, 2, 2, 2, 2, 2),
+        out_axes=0,
+    )(
+        theta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+        action1probs_batch,
+    )
+
+
+def get_loss_gradient_derivatives_wrt_pi_batched(
+    theta_est,
+    batched_base_states_tensor,
+    batched_treat_states_tensor,
+    actions_batch,
+    rewards_batch,
+    action1probs_batch,
+):
+    return jax.vmap(
+        fun=jax.jacrev(jax.grad(get_loss_action_centering), 5),
+        in_axes=(None, 2, 2, 2, 2, 2),
+        out_axes=0,
+    )(
+        theta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+        action1probs_batch,
+    )
+
+
+get_loss_gradient = jax.grad(get_loss_action_centering)
 get_loss_gradient_derivatives_wrt_pi = jax.jacrev(get_loss_gradient, 5)
-get_loss_hessian = jax.hessian(get_loss)
+get_loss_hessian = jax.hessian(get_loss_action_centering)
 
 
 @click.group()
@@ -270,17 +340,28 @@ def analyze_dataset_inner(study_df, study_RLalg):
 
     logger.info("Forming adaptive sandwich variance estimator.")
 
+    logger.info("Calculating all derivatives needed with JAX")
+    user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+        collect_derivatives(
+            study_df, study_RLalg.state_feats, study_RLalg.treat_feats, theta_est
+        )
+    )
+
     # TODO: state features should not be the same as RL alg for full generality
     logger.info("Forming adaptive bread inverse and inverting.")
+    max_t = study_df.calendar_t.max()
+    theta_dim = len(theta_est)
     joint_bread_inverse_matrix = form_bread_inverse_matrix(
         study_RLalg.upper_left_bread_inverse,
-        study_df,
+        max_t,
         study_RLalg.algorithm_statistics_by_calendar_t,
         update_times,
-        study_RLalg.state_feats,
-        study_RLalg.treat_feats,
         study_RLalg.beta_dim,
-        theta_est,
+        theta_dim,
+        user_ids,
+        loss_gradients,
+        loss_hessians,
+        loss_gradient_pi_derivatives,
     )
     joint_bread_matrix = invert_matrix_and_check_conditioning(
         joint_bread_inverse_matrix
@@ -288,13 +369,12 @@ def analyze_dataset_inner(study_df, study_RLalg):
 
     logger.info("Forming adaptive meat.")
     joint_meat_matrix = form_meat_matrix(
-        study_df,
-        theta_est,
-        study_RLalg.state_feats,
-        study_RLalg.treat_feats,
+        theta_dim,
         update_times,
         study_RLalg.beta_dim,
         study_RLalg.algorithm_statistics_by_calendar_t,
+        user_ids,
+        loss_gradients,
     )
 
     logger.info("Combining sandwich ingredients.")
@@ -305,12 +385,7 @@ def analyze_dataset_inner(study_df, study_RLalg):
     return (
         theta_est,
         joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
-        get_classical_sandwich_var(
-            study_df,
-            theta_est,
-            study_RLalg.state_feats,
-            study_RLalg.treat_feats,
-        ),
+        get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
     )
 
 
@@ -331,36 +406,83 @@ def estimate_theta(study_df, state_feats, treat_feats):
     return linear_model.coef_
 
 
+# TODO: Just use dicts keyed on user id...
+def collect_derivatives(study_df, state_feats, treat_feats, theta_est):
+    batched_base_states_list = []
+    batched_treat_states_list = []
+    batched_actions_list = []
+    batched_rewards_list = []
+    batched_action1probs_list = []
+
+    user_ids = study_df.user_id.unique()
+    for user_id in user_ids:
+        filtered_user_data = study_df.loc[study_df.user_id == user_id]
+        batched_base_states_list.append(
+            get_base_states(filtered_user_data, state_feats)
+        )
+        batched_treat_states_list.append(
+            get_treat_states(filtered_user_data, treat_feats)
+        )
+        batched_actions_list.append(get_actions(filtered_user_data))
+        batched_rewards_list.append(get_rewards(filtered_user_data))
+        batched_action1probs_list.append(get_action1probs(filtered_user_data))
+
+    # TODO: dstack breaks with incremental recruitment
+    batched_base_states_tensor = jnp.dstack(batched_base_states_list)
+    batched_treat_states_tensor = jnp.dstack(batched_treat_states_list)
+    batched_actions_tensor = jnp.dstack(batched_actions_list)
+    batched_rewards_tensor = jnp.dstack(batched_rewards_list)
+    batched_action1probs_tensor = jnp.dstack(batched_action1probs_list)
+
+    loss_gradients = get_loss_gradients_batched(
+        theta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+        batched_rewards_tensor,
+        batched_action1probs_tensor,
+    )
+
+    loss_hessians = get_loss_hessians_batched(
+        theta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+        batched_rewards_tensor,
+        batched_action1probs_tensor,
+    )
+
+    loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
+        theta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+        batched_rewards_tensor,
+        batched_action1probs_tensor,
+    )
+
+    return user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives
+
+
+ESTIMATING_FUNCTION_SUM_TOL = 1e-02
+
+
 # TODO: doc string
 # TODO: rewrite as einsum
 def form_meat_matrix(
-    study_df,
-    theta_est,
-    state_feats,
-    treat_feats,
-    update_times,
-    beta_dim,
-    algo_stats_dict,
+    theta_dim, update_times, beta_dim, algo_stats_dict, user_ids, loss_gradients
 ):
-    user_ids = study_df.user_id.unique()
-    num_rows_cols = beta_dim * len(update_times) + len(theta_est)
-    running_meat_matrix = np.zeros((num_rows_cols, num_rows_cols)).astype("float64")
-    estimating_function_sum = np.zeros((num_rows_cols, 1))
-    for user_id in user_ids:
+    num_rows_cols = beta_dim * len(update_times) + theta_dim
+    running_meat_matrix = jnp.zeros((num_rows_cols, num_rows_cols)).astype(jnp.float32)
+    estimating_function_sum = jnp.zeros((num_rows_cols, 1))
+
+    for i, user_id in enumerate(user_ids):
         user_meat_vector = np.concatenate(
             [
                 algo_stats_dict[t]["loss_gradients_by_user_id"][user_id]
                 for t in update_times
             ]
-            + [
-                get_loss_gradient(
-                    theta_est,
-                    *get_user_states(study_df, state_feats, treat_feats, user_id),
-                    actions=get_user_actions(study_df, user_id),
-                    rewards=get_user_rewards(study_df, user_id),
-                    action1probs=get_user_action1probs(study_df, user_id),
-                )
-            ],
+            + [loss_gradients[i]],
         ).reshape(-1, 1)
         running_meat_matrix += np.outer(user_meat_vector, user_meat_vector)
         estimating_function_sum += user_meat_vector
@@ -368,13 +490,45 @@ def form_meat_matrix(
     # TODO: The check for the beta gradients should probably be upstream at the
     # time of reformatting the RL data in the intermediate stage. Also we may want
     # this to be more than a warning eventually.
-    tol = 1e-02
-    if not np.allclose(estimating_function_sum, np.zeros(num_rows_cols), rtol=tol):
+    if not np.allclose(
+        estimating_function_sum,
+        np.zeros(num_rows_cols),
+        rtol=ESTIMATING_FUNCTION_SUM_TOL,
+    ):
         warnings.warn(
-            f"Estimating equations do not sum to within required tolerance {tol} of zero"
+            f"Estimating functions with estimate plugged in do not sum to within required tolerance {ESTIMATING_FUNCTION_SUM_TOL} of zero"
         )
 
     return running_meat_matrix / len(user_ids)
+
+
+# TODO: Docstring
+def get_base_states(df, state_feats):
+    base_states = df[state_feats].to_numpy()
+    return jnp.array(base_states)
+
+
+def get_treat_states(df, treat_feats):
+    treat_states = df[treat_feats].to_numpy()
+    return jnp.array(treat_states)
+
+
+# TODO: Allow general reward column names
+def get_rewards(df):
+    rewards = df["reward"].to_numpy().reshape(-1, 1)
+    return jnp.array(rewards)
+
+
+# TODO: Allow general action column names
+def get_actions(df):
+    actions = df["action"].to_numpy().reshape(-1, 1)
+    return jnp.array(actions)
+
+
+# TODO: Allow general action column names
+def get_action1probs(df):
+    action1probs = df["action1prob"].to_numpy().reshape(-1, 1)
+    return jnp.array(action1probs)
 
 
 # TODO: Doc string
@@ -398,25 +552,23 @@ def get_user_states(study_df, state_feats, treat_feats, user_id):
 # TODO: Do the three checks in the existing after study file
 def form_bread_inverse_matrix(
     upper_left_bread_inverse,
-    study_df,
+    max_t,
     algo_stats_dict,
     update_times,
-    state_feats,
-    treat_feats,
     beta_dim,
-    theta_est,
+    theta_dim,
+    user_ids,
+    loss_gradients,
+    loss_hessians,
+    loss_gradient_derivatives_wrt_pi,
 ):
     existing_rows = upper_left_bread_inverse.shape[0]
-    user_ids = study_df.user_id.unique()
 
     # This is useful for sweeping through the decision times between updates
     # but critically also those after the final update
-    max_t = study_df.calendar_t.max()
     update_times_and_upper_limit = (
         update_times if update_times[-1] == max_t + 1 else update_times + [max_t + 1]
     )
-
-    theta_dim = len(theta_est)
 
     # Begin by creating a few convenience data structures for the mixed theta/beta derivatives
     # that are most easily created for many decision times at once, whereas the following loop is
@@ -433,14 +585,8 @@ def form_bread_inverse_matrix(
     # syntax.  So though supplying these arg names is a good practice for readability, it has
     # unexpected consequences in this case. Just noting this because it was tricky to debug here.
     mixed_theta_pi_loss_derivatives_by_user_id = {
-        user_id: get_loss_gradient_derivatives_wrt_pi(
-            theta_est,
-            *get_user_states(study_df, state_feats, treat_feats, user_id),
-            get_user_actions(study_df, user_id),
-            get_user_rewards(study_df, user_id),
-            get_user_action1probs(study_df, user_id),
-        ).squeeze()
-        for user_id in user_ids
+        user_id: loss_gradient_derivatives_wrt_pi[i].squeeze()
+        for i, user_id in enumerate(user_ids)
     }
     # TODO: Handle missing data?
     # This simply collects the pi derivatives with respect to betas for all
@@ -471,18 +617,12 @@ def form_bread_inverse_matrix(
 
         # This loop calculates the per-user quantities that will be
         # averaged for the final matrix entries
-        for user_id in user_ids:
+        for i, user_id in enumerate(user_ids):
             # 1. We first form the outer product of the estimating equation for theta
             # and the sum of the weight gradients with respect to beta for the
             # corresponding decision times
 
-            theta_loss_gradient = get_loss_gradient(
-                theta_est,
-                *get_user_states(study_df, state_feats, treat_feats, user_id),
-                get_user_actions(study_df, user_id),
-                get_user_rewards(study_df, user_id),
-                get_user_action1probs(study_df, user_id),
-            )
+            theta_loss_gradient = loss_gradients[i]
 
             weight_gradient_sum = np.zeros(beta_dim)
 
@@ -516,7 +656,7 @@ def form_bread_inverse_matrix(
             # TODO: *Only* do this when action centering or otherwise using pis
             # NOTE THAT OUR HELPER DATA STRUCTURES ARE 0-INDEXED, SO WE SUBTRACT
             # 1 FROM OUR TIME BOUNDS.
-            mixed_theta_pi_loss_derivative = np.matmul(
+            mixed_theta_beta_loss_derivative = np.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,
                     lower_t - 1 : upper_t - 1,
@@ -527,22 +667,11 @@ def form_bread_inverse_matrix(
                 ],
             )
 
-            running_entry_holder += mixed_theta_pi_loss_derivative
+            running_entry_holder += mixed_theta_beta_loss_derivative
 
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
 
-    bottom_right_hessian = sum(
-        np.array(
-            get_loss_hessian(
-                theta_est,
-                *get_user_states(study_df, state_feats, treat_feats, user_id),
-                get_user_actions(study_df, user_id),
-                get_user_rewards(study_df, user_id),
-                get_user_action1probs(study_df, user_id),
-            )
-        )
-        for user_id in user_ids
-    ) / len(user_ids)
+    bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
 
     return np.block(
         [
@@ -561,12 +690,7 @@ def form_bread_inverse_matrix(
 # TODO: Needs tests
 # TODO: Complete docstring
 # TODO: Don't recompute things already computed for adaptive sandwich (or vice versa)
-def get_classical_sandwich_var(
-    study_df,
-    theta_est,
-    state_feats,
-    treat_feats,
-):
+def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
     """
     Forms standard sandwich variance estimator for inference (thetahat)
 
@@ -577,44 +701,22 @@ def get_classical_sandwich_var(
     """
 
     logger.info("Forming classical sandwich variance estimator.")
-    user_ids = study_df.user_id.unique()
-    num_users = len(user_ids)
+    num_users = len(loss_gradients)
 
     logger.info("Forming classical meat.")
-    num_rows_cols = len(theta_est)
-    running_meat_matrix = np.zeros((num_rows_cols, num_rows_cols)).astype("float64")
-    for user_id in user_ids:
-        user_meat_vector = get_loss_gradient(
-            theta_est,
-            *get_user_states(study_df, state_feats, treat_feats, user_id),
-            actions=get_user_actions(study_df, user_id),
-            rewards=get_user_rewards(study_df, user_id),
-            action1probs=get_user_action1probs(study_df, user_id),
-        ).reshape(-1, 1)
+    running_meat_matrix = np.zeros((theta_dim, theta_dim)).astype(jnp.float32)
+    for loss_gradient in loss_gradients:
+        user_meat_vector = loss_gradient.reshape(-1, 1)
         running_meat_matrix += np.outer(user_meat_vector, user_meat_vector)
 
     meat = running_meat_matrix / num_users
 
     logger.info("Forming classical bread inverse.")
-    normalized_hessian = (
-        sum(
-            np.array(
-                get_loss_hessian(
-                    theta_est,
-                    *get_user_states(study_df, state_feats, treat_feats, user_id),
-                    get_user_actions(study_df, user_id),
-                    get_user_rewards(study_df, user_id),
-                    get_user_action1probs(study_df, user_id),
-                )
-            )
-            for user_id in user_ids
-        )
-        / num_users
-    )
+    normalized_hessian = np.mean(loss_hessians, axis=0)
 
     # degrees of freedom adjustment
     # TODO: Provide reference
-    meat = meat * (num_users - 1) / (num_users - len(theta_est))
+    meat = meat * (num_users - 1) / (num_users - theta_dim)
 
     logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)

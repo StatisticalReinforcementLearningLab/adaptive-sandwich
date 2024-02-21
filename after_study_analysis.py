@@ -12,12 +12,7 @@ from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 
 
-from helper_functions import (
-    get_user_action1probs,
-    get_user_actions,
-    get_user_rewards,
-    invert_matrix_and_check_conditioning,
-)
+from helper_functions import invert_matrix_and_check_conditioning
 
 logger = logging.getLogger(__name__)
 
@@ -496,7 +491,7 @@ def form_meat_matrix(
         rtol=ESTIMATING_FUNCTION_SUM_TOL,
     ):
         warnings.warn(
-            f"Estimating functions with estimate plugged in do not sum to within required tolerance {ESTIMATING_FUNCTION_SUM_TOL} of zero"
+            f"Estimating functions with estimate plugged in do not sum to within required tolerance {ESTIMATING_FUNCTION_SUM_TOL} of zero: {estimating_function_sum}"
         )
 
     return running_meat_matrix / len(user_ids)

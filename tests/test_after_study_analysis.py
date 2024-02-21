@@ -8,6 +8,12 @@ def test_estimate_theta():
     pass
 
 
+# Note that the testing of collect_derivatives is implicit here, as it's
+# called along the way in each of the below tests.  This reflects the fact that
+# the tests were originally constructed before it existed and it just reorganizes
+# the same data.  That being said, a direct unit test would be nice to add.
+
+
 def test_form_meat_matrix():
     study_df = pd.DataFrame(
         {
@@ -78,16 +84,18 @@ def test_form_meat_matrix():
 
     expected_meat_matrix = (user_1_meat_contribution + user_2_meat_contribution) / 2
 
+    user_ids, loss_gradients, _, _ = after_study_analysis.collect_derivatives(
+        study_df, state_feats, treat_feats, theta_est
+    )
     # Correct to 5 decimal places is perfectly sufficient
     np.testing.assert_allclose(
         after_study_analysis.form_meat_matrix(
-            study_df,
-            theta_est,
-            state_feats,
-            treat_feats,
+            len(theta_est),
             update_times,
             beta_dim,
             algo_stats_dict,
+            user_ids,
+            loss_gradients,
         ),
         expected_meat_matrix,
         rtol=1e-05,
@@ -323,16 +331,24 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
             [block_1, block_2, theta_hessian],
         ]
     )
+
+    user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+        after_study_analysis.collect_derivatives(
+            study_df, state_feats, treat_feats, theta_est
+        )
+    )
     np.testing.assert_allclose(
         after_study_analysis.form_bread_inverse_matrix(
             upper_left_bread_inverse,
-            study_df,
+            study_df.calendar_t.max(),
             algo_stats_dict,
             update_times,
-            state_feats,
-            treat_feats,
             beta_dim,
-            theta_est,
+            len(theta_est),
+            user_ids,
+            loss_gradients,
+            loss_hessians,
+            loss_gradient_pi_derivatives,
         ),
         expected_bread_inverse,
         rtol=1e-05,
@@ -634,16 +650,23 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
             [block_1, block_2, theta_hessian],
         ]
     )
+    user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+        after_study_analysis.collect_derivatives(
+            study_df, state_feats, treat_feats, theta_est
+        )
+    )
     np.testing.assert_allclose(
         after_study_analysis.form_bread_inverse_matrix(
             upper_left_bread_inverse,
-            study_df,
+            study_df.calendar_t.max(),
             algo_stats_dict,
             update_times,
-            state_feats,
-            treat_feats,
             beta_dim,
-            theta_est,
+            len(theta_est),
+            user_ids,
+            loss_gradients,
+            loss_hessians,
+            loss_gradient_pi_derivatives,
         ),
         expected_bread_inverse,
         rtol=1e-05,

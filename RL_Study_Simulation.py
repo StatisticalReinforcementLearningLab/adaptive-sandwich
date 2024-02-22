@@ -4,6 +4,7 @@ import json
 import os
 import cProfile
 from pstats import Stats
+import logging
 
 import numpy as np
 import cloudpickle as pickle
@@ -13,6 +14,8 @@ from oralytics_env import load_oralytics_env, OralyticsEnv
 from basic_RL_algorithms import FixedRandomization, SigmoidLS
 from smooth_posterior_sampling import SmoothPosteriorSampling
 from constants import RLStudyArgs
+
+logger = logging.getLogger(__name__)
 
 ###############################################################
 # Simulation Functions ########################################
@@ -32,11 +35,13 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             Original RL algorithm object (populated with additional data)
     """
 
+    logger.info("Beginning single simulation, in Python code.")
     # study_df is a data frame with a record of all data collected in study
     study_df = study_env.make_empty_study_df(args, user_env_data)
 
     # Loop over all decision times ###############################################
     for t in range(1, study_env.calendar_T + 1):
+        logger.info("Processing decision time %s.", t)
         # Update study_df with info on latest policy used to select actions
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
             study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = (
@@ -55,6 +60,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         curr_timestep_data = study_df[study_df["calendar_t"] == t]
 
         # Sample Actions #####################################################
+        logger.info("Sampling actions for time %s.", t)
         action_probs = study_RLalg.get_action_probs(
             curr_timestep_data, filter_keyval=("calendar_t", t)
         )
@@ -64,6 +70,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         actions = study_RLalg.rng.binomial(1, action_probs)
 
         # Sample Rewards #####################################################
+        logger.info("Sampling rewards for time %s.", t)
         if args.dataset_type == RLStudyArgs.ORALYTICS:
             rewards, brush_times = study_env.sample_rewards(
                 curr_timestep_data, actions, t
@@ -82,6 +89,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             study_df.loc[study_df["calendar_t"] == t, fill_columns] = fill_vals
 
         if t < study_env.calendar_T:
+            logger.info("Updating study df for time %s.", t)
             # Record data to prepare for state at next decision time
             study_df = study_env.update_study_df(study_df, t)
 
@@ -91,6 +99,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # If we are beyond the initial policy, start recording
         # quantities that will be needed to form the "bread" matrix in the end.
         if t > args.decisions_between_updates:
+            logger.info("Calculating pi and weight gradients for time %s.", t)
             study_RLalg.calculate_pi_and_weight_gradients(all_prev_data, calendar_t=t)
 
         # Check if need to update algorithm #######################################
@@ -111,12 +120,18 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             prev_num_users = len(study_df[study_df["calendar_t"] == t])
             if prev_num_users >= args.min_users:
                 # Update Algorithm ##############################################
+                logger.info("Updating algorithm parameters for time %s.", t)
                 study_RLalg.update_alg(new_update_data, update_last_t=t)
                 # TODO: Actually should probably just do this in update_alg, otherwise makes part
                 # of general RL alg contract
                 # TODO: Also if we build the matrix, don't need the loss deriv separately?
+                logger.info(
+                    "Calculate loss gradients per user and average hessian for time %s.",
+                    t,
+                )
                 study_RLalg.calculate_loss_derivatives(all_prev_data, calendar_t=t)
 
+    logger.info("Constructing upper left bread inverse matrix")
     study_RLalg.construct_upper_left_bread_inverse()
 
     if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
@@ -139,6 +154,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     if args.dataset_type == RLStudyArgs.HEARTSTEPS:
         raise NotImplementedError()
 
+    logging.info("Loading environment...")
     if args.dataset_type == RLStudyArgs.SYNTHETIC:
         mode = args.synthetic_mode
         user_env_data = None
@@ -183,8 +199,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     # Simulate Studies ############################################
     ###############################################################
 
-    tic = time.perf_counter()
-
     print("Running simulations...")
     simulation_data_path = os.path.join(args.save_dir, "simulated_data")
     if not os.path.isdir(simulation_data_path):
@@ -193,16 +207,21 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     if not os.path.isdir(all_folder_path):
         os.mkdir(all_folder_path)
 
+    print("Dumping arguments to json file...")
     with open(os.path.join(all_folder_path, "args.json"), "w") as f:
         json.dump(vars(args), f)
+
+    tic = time.perf_counter()
+    toc1 = tic
 
     for i in range(1, args.N + 1):
         env_seed = i * 5000
         alg_seed = (args.N + i) * 5000
 
-        toc = time.perf_counter()
+        toc2 = time.perf_counter()
         if i > 1:
-            print(f"Simulation {i-1} of {args.N} ran in {toc - tic:0.4f} seconds")
+            print(f"Simulation {i-1} of {args.N} ran in {toc2 - toc1:0.4f} seconds")
+        toc1 = toc2
 
         # Initialize study environment ############################################
         if args.dataset_type == RLStudyArgs.SYNTHETIC:
@@ -268,8 +287,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         )
 
         # Save Data #################################################################
-        if args.verbose:
-            print("Saving data...")
+        logging.info("Saving data...")
 
         folder_path = os.path.join(all_folder_path, f"exp={i}")
         if not os.path.isdir(folder_path):
@@ -287,8 +305,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         with open(f"{folder_path}/study_RLalg.pkl", "wb") as f:
             pickle.dump(study_RLalg, f)
 
-    toc = time.perf_counter()
-    print(f"Final ran in {toc - tic:0.4f} seconds")
+    print(f"All simulations ran in {time.perf_counter() - tic:0.4f} seconds")
 
     if args.profile:
         pr.disable()
@@ -300,7 +317,7 @@ def main():
     ###############################################################
     # Initialize Simulation Hyperparameters #######################
     ###############################################################
-
+    logging.info("Parsing arguments.")
     parser = argparse.ArgumentParser(description="Generate simulation data")
     parser.add_argument(
         "--dataset_type",

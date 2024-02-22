@@ -9,14 +9,15 @@ import numpy_indexed as npi
 import jax
 from jax import numpy as jnp
 import numpy as np
+import logging
 
 import least_squares_helper
 from helper_functions import (
     conditional_x_or_one_minus_x,
     clip,
-    get_user_actions,
-    get_user_rewards,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FixedRandomization:
@@ -357,6 +358,7 @@ class SigmoidLS:
         all_prev_data,
         calendar_t,
     ):
+        logger.info("Calculating loss gradients and hessians with respect to beta.")
         # Note that it is possible to reconstruct all the data we need by
         # stitching together the incremental data in self.all_policies.
         # However, this is complicated logic, and it seems cleaner to just pass
@@ -389,6 +391,7 @@ class SigmoidLS:
         batched_actions_list = []
         batched_rewards_list = []
 
+        logger.info("Collecting batched input data as lists.")
         for user_id in self.all_policies[-1]["seen_user_id"]:
             filtered_user_data = all_prev_data.loc[all_prev_data.user_id == user_id]
             batched_base_states_list.append(self.get_base_states(filtered_user_data))
@@ -397,11 +400,13 @@ class SigmoidLS:
             batched_rewards_list.append(self.get_rewards(filtered_user_data))
 
         # TODO: dstack breaks with incremental recruitment
+        logger.info("Reforming batched data lists into tensors.")
         batched_base_states_tensor = jnp.dstack(batched_base_states_list)
         batched_treat_states_tensor = jnp.dstack(batched_treat_states_list)
         batched_actions_tensor = jnp.dstack(batched_actions_list)
         batched_rewards_tensor = jnp.dstack(batched_rewards_list)
 
+        logger.info("Forming loss gradients with respect to beta.")
         gradients = self.get_loss_gradients_batched(
             curr_beta_est,
             batched_base_states_tensor,
@@ -409,6 +414,7 @@ class SigmoidLS:
             batched_actions_tensor,
             batched_rewards_tensor,
         )
+        logger.info("Forming loss hessians with respect to beta")
         hessians = self.get_loss_hessians_batched(
             curr_beta_est,
             batched_base_states_tensor,
@@ -416,6 +422,7 @@ class SigmoidLS:
             batched_actions_tensor,
             batched_rewards_tensor,
         )
+        logger.info("Collecting loss gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {
@@ -423,6 +430,7 @@ class SigmoidLS:
             for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
         }
 
+        logger.info("Forming average hessian and storing in algorithm stats dictionary")
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = jnp.mean(hessians, axis=0)
@@ -452,6 +460,8 @@ class SigmoidLS:
         Outputs:
         - None
         """
+
+        logger.info("Calculating pi and weight gradients with respect to beta.")
         assert calendar_t == jnp.max(current_data["calendar_t"].to_numpy())
 
         curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
@@ -459,6 +469,7 @@ class SigmoidLS:
         batched_treat_states_list = []
         batched_actions_list = []
 
+        logger.info("Collecting batched input data as lists.")
         for user_id in self.all_policies[-1]["seen_user_id"]:
             filtered_user_data = current_data.loc[current_data.user_id == user_id]
             batched_treat_states_list.append(
@@ -467,9 +478,11 @@ class SigmoidLS:
             batched_actions_list.append(self.get_actions(filtered_user_data)[-1].item())
 
         # TODO: stack may break with incremental recruitment
+        logger.info("Reforming batched data lists into tensors.")
         batched_treat_states_tensor = jnp.vstack(batched_treat_states_list)
         batched_actions_tensor = jnp.array(batched_actions_list)
 
+        logger.info("Forming pi gradients with respect to beta.")
         pi_gradients = self.get_pi_gradients_batched(
             curr_beta_est,
             self.args.lower_clip,
@@ -478,6 +491,7 @@ class SigmoidLS:
             batched_actions_tensor,
         )
 
+        logger.info("Forming weight gradients with respect to beta.")
         weight_gradients = self.get_weight_gradients_batched(
             curr_beta_est,
             curr_beta_est,
@@ -487,6 +501,7 @@ class SigmoidLS:
             batched_actions_tensor,
         )
 
+        logger.info("Collecting pi gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "pi_gradients_by_user_id"
         ] = {
@@ -494,6 +509,7 @@ class SigmoidLS:
             for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
         }
 
+        logger.info("Collecting weight gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "weight_gradients_by_user_id"
         ] = {
@@ -506,6 +522,7 @@ class SigmoidLS:
     # TODO: JIT this function?? update times would need to be adjusted (pass them in actually)
     # Make sure jitting makes sense across simulations in terms of common args
     def construct_upper_left_bread_inverse(self):
+        logger.info("Constructing upper left bread inverse.")
         # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract
         # one from the number of policies  to find the number of updates because there is an
         # initial placeholder policy.
@@ -529,15 +546,20 @@ class SigmoidLS:
         # to note that update_idx starts at 0.
         # Think of each iteration of this loop as creating a (block) row of the matrix
         for update_idx, update_t in enumerate(update_times):
+            logger.info("Processing update time %s.", t)
             t_stats_dict = self.algorithm_statistics_by_calendar_t[update_t]
 
             # This loop creates the non-diagonal terms for the current update
             # Think of each iteration of this loop as creating one term in the current (block) row
+            logger.info("Creating the non-diagonal terms for the current update.")
             for i in range(update_idx):
                 running_entry_holder = jnp.zeros((beta_dim, beta_dim))
 
                 # This loop calculates the per-user quantities that will be
                 # averaged for the final matrix entries
+                logger.info(
+                    "Stitching together loss and weight gradients across all users."
+                )
                 for user_id, loss_gradient in t_stats_dict[
                     "loss_gradients_by_user_id"
                 ].items():

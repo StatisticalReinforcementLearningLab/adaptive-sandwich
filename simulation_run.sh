@@ -39,8 +39,8 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed
 # Sample size=100,500,1000
 
 #TODO: Remove single-letter parameters in favor of descriptive names
-T=3
-N=100
+T=25
+N=1000
 recruit_t=1
 decisions_between_updates=1
 min_users=1

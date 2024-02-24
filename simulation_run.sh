@@ -56,7 +56,6 @@ while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:c:-: OPT; do
     a  | action_centering )             needs_arg; action_centering="$OPTARG" ;;
     s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
-    c  | recruit_t )                    needs_arg; recruit_t="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac

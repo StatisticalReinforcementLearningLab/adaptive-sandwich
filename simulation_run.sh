@@ -13,6 +13,56 @@
 # Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
 
+echo $(date +"%Y-%m-%d %T") simulation_run.sh: Parsing options.
+
+die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+# Defaults. Overridden if supplied.
+T=3
+N=100
+recruit_t=1
+decisions_between_updates=1
+recruit_n=100
+n=100
+min_users=1
+RL_alg="sigmoid_LS"
+err_corr='time_corr'
+alg_state_feats="intercept,past_reward"
+action_centering=1
+steepness=0.0  # Note that the ".0" is critical because of the way the filenames below are formed
+synthetic_mode="delayed_1_dosage"
+
+# Parse single-char options as directly supported by getopts, but allow long-form
+# under - option.  The :'s signify that arguments are required for these options.
+while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:c:-: OPT; do
+  # support long options: https://stackoverflow.com/a/28466267/519360
+  if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
+    OPT="${OPTARG%%=*}"       # extract long option name
+    OPTARG="${OPTARG#$OPT}"   # extract long option argument (may be empty)
+    OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+  fi
+  case "$OPT" in
+    T  | max_time )                     needs_arg; T="$OPTARG" ;;
+    t  | recruit_t )                    needs_arg; recruit_t="$OPTARG" ;;
+    N  | num_simulations )              needs_arg; N="$OPTARG" ;;
+    n  | num_users )                    needs_arg; n="$OPTARG" ;;
+    u  | recruit_n )                    needs_arg; recruit_n="$OPTARG" ;;
+    d  | decisions_between_updates )    needs_arg; decisions_between_updates="$OPTARG" ;;
+    m  | min_users )                    needs_arg; min_users="$OPTARG" ;;
+    r  | RL_alg )                       needs_arg; RL_alg="$OPTARG" ;;
+    e  | err_corr )                     needs_arg; err_corr="$OPTARG" ;;
+    f  | alg_state_feats )              needs_arg; alg_state_feats="$OPTARG" ;;
+    a  | action_centering )             needs_arg; action_centering="$OPTARG" ;;
+    s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
+    y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
+    c  | recruit_t )                    needs_arg; recruit_t="$OPTARG" ;;
+    \? )                                exit 2 ;;  # bad short option (error reported via getopts)
+    * )                                 die "Illegal option --$OPT" ;; # bad long option
+  esac
+done
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning simulation.
 
 # Load Python 3.10, among other things
@@ -34,60 +84,24 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: Making sure Python requirements a
 pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed.
 
-# T=25,50
-# Steepness=0.5,1,2?
-# Sample size=100,500,1000
-
-#TODO: Remove single-letter parameters in favor of descriptive names
-T=25
-N=1000
-recruit_t=1
-decisions_between_updates=1
-min_users=1
-#TODO: All commented out options should probably just be in the python script documentation
-#synthetic_mode='delayed_1_dosage'
-#synthetic_mode='delayed_01_5_dosage'
-#synthetic_mode='test_1_1_T2'
-#synthetic_mode='delayed_effects_large'
-RL_alg="sigmoid_LS"
-# RL_alg="posterior_sampling"
-#RL_alg="fixed_randomization"
-#err_corr='independent'
-err_corr='time_corr'
-alg_state_feats="intercept,past_reward"
-action_centering=1
-
-recruit_n=100
-n=100
-#synthetic_mode='delayed_1_dosage'
-#steepness=5
-
-#n = 1000, 100, 500
-#steepness = 1 2 0.5
-
 #TODO: use this in after study analysis. Actually shouldn't need? Just put alongside inputs
 now=$(printf "%(%F_%H-%M-%S)T")
 save_dir="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${now}"
 mkdir -p "$save_dir"
 
-# Note that the ".0" is critical because of the way the filenames below are formed
-for steepness in 0.0
-do
-    for synthetic_mode in 'delayed_1_dosage'
-    do
-        # Simulate an RL study with the supplied arguments.  (We do just one repetition)
-        echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning RL simulation for steepness $steepness and synthetic_mode $synthetic_mode.
-        python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
-        echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished RL simulation.
+# Simulate an RL study with the supplied arguments.  (We do just one repetition)
+echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning RL simulation for steepness $steepness and synthetic_mode $synthetic_mode.
+python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
+echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished RL simulation.
 
-        # Create a convenience variable that holds the output folder for the last script
-        output_folder="${save_dir}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
+# Create a convenience variable that holds the output folder for the last script
+output_folder="${save_dir}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
 
-        # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
-        # and do after-study analysis
-        echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning after-study analysis.
-        python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
-        echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished after-study analysis.
+# Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
+# and do after-study analysis
+echo $(date +"%Y-%m-%d %T") simulation_run.sh: Beginning after-study analysis.
+python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
+echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished after-study analysis.
     done
 done
 

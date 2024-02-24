@@ -15,6 +15,11 @@ from sklearn.linear_model import LinearRegression
 from helper_functions import invert_matrix_and_check_conditioning
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
@@ -487,8 +492,9 @@ def form_meat_matrix(
     # this to be more than a warning eventually.
     if not np.allclose(
         estimating_function_sum,
-        np.zeros(num_rows_cols),
+        np.zeros((num_rows_cols, 1)),
         rtol=ESTIMATING_FUNCTION_SUM_TOL,
+        atol=ESTIMATING_FUNCTION_SUM_TOL,
     ):
         warnings.warn(
             f"Estimating functions with estimate plugged in do not sum to within required tolerance {ESTIMATING_FUNCTION_SUM_TOL} of zero: {estimating_function_sum}"

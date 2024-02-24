@@ -16,6 +16,11 @@ from smooth_posterior_sampling import SmoothPosteriorSampling
 from constants import RLStudyArgs
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
 
 ###############################################################
 # Simulation Functions ########################################
@@ -198,8 +203,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     ###############################################################
     # Simulate Studies ############################################
     ###############################################################
-
-    print("Running simulations...")
     simulation_data_path = os.path.join(args.save_dir, "simulated_data")
     if not os.path.isdir(simulation_data_path):
         os.mkdir(simulation_data_path)
@@ -207,20 +210,23 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     if not os.path.isdir(all_folder_path):
         os.mkdir(all_folder_path)
 
-    print("Dumping arguments to json file...")
+    logger.info("Dumping arguments to json file...")
     with open(os.path.join(all_folder_path, "args.json"), "w") as f:
         json.dump(vars(args), f)
 
     tic = time.perf_counter()
     toc1 = tic
 
+    logger.info("Running simulations...")
     for i in range(1, args.N + 1):
         env_seed = i * 5000
         alg_seed = (args.N + i) * 5000
 
         toc2 = time.perf_counter()
         if i > 1:
-            print(f"Simulation {i-1} of {args.N} ran in {toc2 - toc1:0.4f} seconds")
+            logger.info(
+                f"Simulation {i-1} of {args.N} ran in {toc2 - toc1:0.4f} seconds"
+            )
         toc1 = toc2
 
         # Initialize study environment ############################################

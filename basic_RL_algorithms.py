@@ -2,6 +2,8 @@
 Implementations of several RL algorithms that may be used in study simulations.
 """
 
+import logging
+
 import pandas as pd
 import scipy.special
 import torch
@@ -9,7 +11,6 @@ import numpy_indexed as npi
 import jax
 from jax import numpy as jnp
 import numpy as np
-import logging
 
 import least_squares_helper
 from helper_functions import (
@@ -18,6 +19,11 @@ from helper_functions import (
 )
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
 
 
 class FixedRandomization:
@@ -546,7 +552,7 @@ class SigmoidLS:
         # to note that update_idx starts at 0.
         # Think of each iteration of this loop as creating a (block) row of the matrix
         for update_idx, update_t in enumerate(update_times):
-            logger.info("Processing update time %s.", t)
+            logger.info("Processing update time %s.", update_t)
             t_stats_dict = self.algorithm_statistics_by_calendar_t[update_t]
 
             # This loop creates the non-diagonal terms for the current update
@@ -557,9 +563,6 @@ class SigmoidLS:
 
                 # This loop calculates the per-user quantities that will be
                 # averaged for the final matrix entries
-                logger.info(
-                    "Stitching together loss and weight gradients across all users."
-                )
                 for user_id, loss_gradient in t_stats_dict[
                     "loss_gradients_by_user_id"
                 ].items():

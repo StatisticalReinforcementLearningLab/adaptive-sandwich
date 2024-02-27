@@ -75,6 +75,151 @@ def sigmoid_LS_torch(args, batch_est_treat, treat_states, allocation_sigma):
     return pis
 
 
+# TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
+# Update Update: We can differentiate for all users at once with jacrev.
+# TODO: Unite with update_alg logic somehow?
+# TODO: Docstring
+@jax.jit
+def get_loss(beta_est, base_states, treat_states, actions, rewards):
+    beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)
+    beta_1_est = beta_est[base_states.shape[1] :].reshape(-1, 1)
+
+    return jnp.einsum(
+        "ij->",
+        (
+            rewards
+            - jnp.einsum("ij,jk->ik", base_states, beta_0_est)
+            - jnp.einsum("ij,jk->ik", actions * treat_states, beta_1_est)
+        )
+        ** 2,
+    )
+
+
+# Consider jitting
+# For the loss gradients, we can form the sum of all users values and differentiate that with one
+# call. Instead, this alternative structure which generalizes to the pi function case.
+# TODO: Docstring
+@jax.jit
+def get_loss_gradients_batched(
+    beta_est,
+    batched_base_states_tensor,
+    batched_treat_states_tensor,
+    actions_batch,
+    rewards_batch,
+):
+    return jax.vmap(
+        fun=jax.grad(get_loss),
+        in_axes=(None, 2, 2, 2, 2),
+        out_axes=0,
+    )(
+        beta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+    )
+
+
+# TODO: Docstring
+@jax.jit
+def get_loss_hessians_batched(
+    beta_est,
+    batched_base_states_tensor,
+    batched_treat_states_tensor,
+    actions_batch,
+    rewards_batch,
+):
+    return jax.vmap(
+        fun=jax.hessian(get_loss),
+        in_axes=(None, 2, 2, 2, 2),
+        out_axes=0,
+    )(
+        beta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+    )
+
+
+# TODO: Unite with method that does same thing. Needed pure function here.
+# Might need to use jacrev to do so
+# TODO: Docstring
+# See https://arxiv.org/pdf/2006.06903.pdf
+# TODO: Docstring
+@jax.jit
+def get_action_prob_pure(beta_est, lower_clip, upper_clip, treat_states, action=1):
+    treat_est = beta_est[-len(treat_states) :]
+    lin_est = jnp.matmul(treat_states, treat_est)
+
+    raw_prob = jax.scipy.special.expit(lin_est)
+    prob = conditional_x_or_one_minus_x(
+        jnp.clip(raw_prob, lower_clip, upper_clip), action
+    )
+
+    return prob[()]
+
+
+# TODO: Docstring
+@jax.jit
+def get_pi_gradients_batched(
+    beta_est,
+    lower_clip,
+    upper_clip,
+    batched_treat_states_tensor,
+    batched_actions_tensor,
+):
+    return jax.vmap(
+        fun=jax.grad(get_action_prob_pure),
+        in_axes=(None, None, None, 0, 0),
+        out_axes=0,
+    )(
+        beta_est,
+        lower_clip,
+        upper_clip,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+    )
+
+
+# TODO: Docstring
+@jax.jit
+def get_radon_nikodym_weight(
+    beta, beta_target, lower_clip, upper_clip, treat_states, action
+):
+    common_args = [lower_clip, upper_clip, treat_states]
+
+    pi_beta = get_action_prob_pure(beta, *common_args)[()]
+    pi_beta_target = get_action_prob_pure(beta_target, *common_args)[()]
+    return conditional_x_or_one_minus_x(pi_beta, action) / conditional_x_or_one_minus_x(
+        pi_beta_target, action
+    )
+
+
+# TODO: Docstring
+@jax.jit
+def get_weight_gradients_batched(
+    beta_est,
+    target_beta,
+    lower_clip,
+    upper_clip,
+    batched_treat_states_tensor,
+    batched_actions_tensor,
+):
+    return jax.vmap(
+        fun=jax.grad(get_radon_nikodym_weight),
+        in_axes=(None, None, None, None, 0, 0),
+        out_axes=0,
+    )(
+        beta_est,
+        target_beta,
+        lower_clip,
+        upper_clip,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+    )
+
+
 # TODO: RL Alg abstract base class
 # TODO: Switch back to dataclass and put subfunctions in right/consistent place
 class SigmoidLS:
@@ -121,141 +266,6 @@ class SigmoidLS:
         )
         self.upper_left_bread_inverse = None
         self.algorithm_statistics_by_calendar_t = {}
-
-    # TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
-    # Update Update: We can differentiate for all users at once with jacrev.
-    # TODO: Docstring
-    # TODO: Unite with update_alg logic somehow?
-    def get_loss(self, beta_est, base_states, treat_states, actions, rewards):
-        beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)
-        beta_1_est = beta_est[base_states.shape[1] :].reshape(-1, 1)
-
-        return jnp.einsum(
-            "ij->",
-            (
-                rewards
-                - jnp.einsum("ij,jk->ik", base_states, beta_0_est)
-                - jnp.einsum("ij,jk->ik", actions * treat_states, beta_1_est)
-            )
-            ** 2,
-        )
-
-    # Consider jitting
-    # For the loss gradients, we can form the sum of all users values and differentiate that with one
-    # call. Instead, this alternative structure which generalizes to the pi function case.
-    def get_loss_gradients_batched(
-        self,
-        beta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        actions_batch,
-        rewards_batch,
-    ):
-        return jax.vmap(
-            fun=jax.grad(self.get_loss),
-            in_axes=(None, 2, 2, 2, 2),
-            out_axes=0,
-        )(
-            beta_est,
-            batched_base_states_tensor,
-            batched_treat_states_tensor,
-            actions_batch,
-            rewards_batch,
-        )
-
-    def get_loss_hessians_batched(
-        self,
-        beta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        actions_batch,
-        rewards_batch,
-    ):
-        return jax.vmap(
-            fun=jax.hessian(self.get_loss),
-            in_axes=(None, 2, 2, 2, 2),
-            out_axes=0,
-        )(
-            beta_est,
-            batched_base_states_tensor,
-            batched_treat_states_tensor,
-            actions_batch,
-            rewards_batch,
-        )
-
-    # TODO: Unite with method that does same thing. Needed pure function here.
-    # Might need to use jacrev to do so
-    # TODO: Docstring
-    # See https://arxiv.org/pdf/2006.06903.pdf
-    def get_action_prob_pure(
-        self, beta_est, lower_clip, upper_clip, treat_states, action=1
-    ):
-        treat_est = beta_est[-len(treat_states) :]
-        lin_est = jnp.matmul(treat_states, treat_est)
-
-        raw_prob = jax.scipy.special.expit(lin_est)
-        prob = conditional_x_or_one_minus_x(
-            jnp.clip(raw_prob, lower_clip, upper_clip), action
-        )
-
-        return prob[()]
-
-    def get_pi_gradients_batched(
-        self,
-        beta_est,
-        lower_clip,
-        upper_clip,
-        batched_treat_states_tensor,
-        batched_actions_tensor,
-    ):
-        return jax.vmap(
-            fun=jax.grad(self.get_action_prob_pure),
-            in_axes=(None, None, None, 0, 0),
-            out_axes=0,
-        )(
-            beta_est,
-            lower_clip,
-            upper_clip,
-            batched_treat_states_tensor,
-            batched_actions_tensor,
-        )
-
-    def get_pi_gradient(self, *args, **kwargs):
-        return jax.grad(self.get_action_prob_pure, 0)(*args, **kwargs)
-
-    # TODO: Docstring
-    def get_radon_nikodym_weight(
-        self, beta, beta_target, lower_clip, upper_clip, treat_states, action
-    ):
-        common_args = [lower_clip, upper_clip, treat_states]
-
-        pi_beta = self.get_action_prob_pure(beta, *common_args)[()]
-        pi_beta_target = self.get_action_prob_pure(beta_target, *common_args)[()]
-        return conditional_x_or_one_minus_x(
-            pi_beta, action
-        ) / conditional_x_or_one_minus_x(pi_beta_target, action)
-
-    def get_weight_gradients_batched(
-        self,
-        beta_est,
-        target_beta,
-        lower_clip,
-        upper_clip,
-        batched_treat_states_tensor,
-        batched_actions_tensor,
-    ):
-        return jax.vmap(
-            fun=jax.grad(self.get_radon_nikodym_weight),
-            in_axes=(None, None, None, None, 0, 0),
-            out_axes=0,
-        )(
-            beta_est,
-            target_beta,
-            lower_clip,
-            upper_clip,
-            batched_treat_states_tensor,
-            batched_actions_tensor,
-        )
 
     # TODO: Docstring
     def get_base_states(self, df):
@@ -413,7 +423,7 @@ class SigmoidLS:
         batched_rewards_tensor = jnp.dstack(batched_rewards_list)
 
         logger.info("Forming loss gradients with respect to beta.")
-        gradients = self.get_loss_gradients_batched(
+        gradients = get_loss_gradients_batched(
             curr_beta_est,
             batched_base_states_tensor,
             batched_treat_states_tensor,
@@ -421,7 +431,7 @@ class SigmoidLS:
             batched_rewards_tensor,
         )
         logger.info("Forming loss hessians with respect to beta")
-        hessians = self.get_loss_hessians_batched(
+        hessians = get_loss_hessians_batched(
             curr_beta_est,
             batched_base_states_tensor,
             batched_treat_states_tensor,
@@ -489,7 +499,7 @@ class SigmoidLS:
         batched_actions_tensor = jnp.array(batched_actions_list)
 
         logger.info("Forming pi gradients with respect to beta.")
-        pi_gradients = self.get_pi_gradients_batched(
+        pi_gradients = get_pi_gradients_batched(
             curr_beta_est,
             self.args.lower_clip,
             self.args.upper_clip,
@@ -498,7 +508,7 @@ class SigmoidLS:
         )
 
         logger.info("Forming weight gradients with respect to beta.")
-        weight_gradients = self.get_weight_gradients_batched(
+        weight_gradients = get_weight_gradients_batched(
             curr_beta_est,
             curr_beta_est,
             self.args.lower_clip,

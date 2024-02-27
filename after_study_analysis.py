@@ -24,6 +24,7 @@ logging.basicConfig(
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
 # TODO: Deal with actionprobs being optional.
+@jax.jit
 def get_loss_action_centering(
     theta_est, base_states, treat_states, actions, rewards, action1probs
 ):
@@ -48,6 +49,7 @@ def get_loss_action_centering(
 # Consider jitting
 # For the loss gradients, we can form the sum of all users values and differentiate that with one
 # call. Instead, this alternative structure which generalizes to the pi function case.
+@jax.jit
 def get_loss_gradients_batched(
     theta_est,
     batched_base_states_tensor,
@@ -70,6 +72,7 @@ def get_loss_gradients_batched(
     )
 
 
+@jax.jit
 def get_loss_hessians_batched(
     theta_est,
     batched_base_states_tensor,
@@ -92,6 +95,7 @@ def get_loss_hessians_batched(
     )
 
 
+@jax.jit
 def get_loss_gradient_derivatives_wrt_pi_batched(
     theta_est,
     batched_base_states_tensor,
@@ -112,11 +116,6 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
         rewards_batch,
         action1probs_batch,
     )
-
-
-get_loss_gradient = jax.grad(get_loss_action_centering)
-get_loss_gradient_derivatives_wrt_pi = jax.jacrev(get_loss_gradient, 5)
-get_loss_hessian = jax.hessian(get_loss_action_centering)
 
 
 @click.group()
@@ -477,22 +476,22 @@ def form_meat_matrix(
     estimating_function_sum = jnp.zeros((num_rows_cols, 1))
 
     for i, user_id in enumerate(user_ids):
-        user_meat_vector = np.concatenate(
+        user_meat_vector = jnp.concatenate(
             [
                 algo_stats_dict[t]["loss_gradients_by_user_id"][user_id]
                 for t in update_times
             ]
             + [loss_gradients[i]],
         ).reshape(-1, 1)
-        running_meat_matrix += np.outer(user_meat_vector, user_meat_vector)
+        running_meat_matrix += jnp.outer(user_meat_vector, user_meat_vector)
         estimating_function_sum += user_meat_vector
 
     # TODO: The check for the beta gradients should probably be upstream at the
     # time of reformatting the RL data in the intermediate stage. Also we may want
     # this to be more than a warning eventually.
-    if not np.allclose(
+    if not jnp.allclose(
         estimating_function_sum,
-        np.zeros((num_rows_cols, 1)),
+        jnp.zeros((num_rows_cols, 1)),
         rtol=ESTIMATING_FUNCTION_SUM_TOL,
         atol=ESTIMATING_FUNCTION_SUM_TOL,
     ):
@@ -597,8 +596,8 @@ def form_bread_inverse_matrix(
     # structure.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
-        user_id: np.pad(
-            np.array(
+        user_id: jnp.pad(
+            jnp.array(
                 [
                     t_stats_dict["pi_gradients_by_user_id"][user_id]
                     for t_stats_dict in algo_stats_dict.values()
@@ -614,7 +613,7 @@ def form_bread_inverse_matrix(
     for i in range(len(update_times)):
         lower_t = update_times_and_upper_limit[i]
         upper_t = update_times_and_upper_limit[i + 1]
-        running_entry_holder = np.zeros((theta_dim, theta_dim))
+        running_entry_holder = jnp.zeros((theta_dim, theta_dim))
 
         # This loop calculates the per-user quantities that will be
         # averaged for the final matrix entries
@@ -625,7 +624,7 @@ def form_bread_inverse_matrix(
 
             theta_loss_gradient = loss_gradients[i]
 
-            weight_gradient_sum = np.zeros(beta_dim)
+            weight_gradient_sum = jnp.zeros(beta_dim)
 
             # This loop iterates over decision times in slices between updates
             # to collect the right weight gradients

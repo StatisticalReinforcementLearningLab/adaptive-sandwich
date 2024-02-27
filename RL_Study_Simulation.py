@@ -216,6 +216,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
 
     tic = time.perf_counter()
     toc1 = tic
+    toc2 = None
 
     logger.info("Running simulations...")
     for i in range(1, args.N + 1):
@@ -311,6 +312,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         with open(f"{folder_path}/study_RLalg.pkl", "wb") as f:
             pickle.dump(study_RLalg, f)
 
+    logger.info(
+        f"Simulation {args.N} of {args.N} ran in {time.perf_counter() - toc2:0.4f} seconds"
+    )
     print(f"All simulations ran in {time.perf_counter() - tic:0.4f} seconds")
 
     if args.profile:

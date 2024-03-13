@@ -131,19 +131,23 @@ def cli():
     help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
     required=True,
 )
-def collect_existing_analyses(input_glob, analysis_pickle_filename):
+def collect_existing_analyses(input_glob):
 
     theta_estimates = []
     adaptive_sandwich_var_estimates = []
     classical_sandwich_var_estimates = []
     for filename in glob.glob(input_glob):
-        with open(os.path.join(filename, analysis_pickle_filename)) as f:
+        with open(filename, "rb") as f:
+            analysis_dict = pickle.load(f)
             (
                 theta_est,
                 adaptive_sandwich_var,
                 classical_sandwich_var,
-            ) = pickle.load(f)
-
+            ) = (
+                analysis_dict["theta_est"],
+                analysis_dict["adaptive_sandwich_var_estimate"],
+                analysis_dict["classical_sandwich_var_estimate"],
+            )
             theta_estimates.append(theta_est)
             adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
             classical_sandwich_var_estimates.append(classical_sandwich_var)

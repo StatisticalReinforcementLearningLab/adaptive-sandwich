@@ -18,7 +18,7 @@
 # Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
 
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Parsing options.
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Parsing options.
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -45,28 +45,27 @@ if [ -z "$input_glob" ]; then
 fi
 
 # Load Python 3.10, among other things
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Loading mamba and CUDA modules.
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Loading mamba module.
 module load Mambaforge/22.11.1-fasrc01
-module load cuda/12.2.0-fasrc01
 
 # Make virtualenv if necessary, and then activate it
 cd ~
 if ! test -d venv; then
-  echo $(date +"%Y-%m-%d %T") simulation_run.sh: Creating venv, as it did not exist.
+  echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Creating venv, as it did not exist.
   python3 -m venv venv
 fi
 source venv/bin/activate
 
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Making sure Python requirements are installed.
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Making sure Python requirements are installed.
 pip install -r simulation_requirements.txt
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed.
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requirements installed.
 
 # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
 # and do after-study analysis
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Collecting pre-existing after-study analyses.
-python after_study_analysis.py collect_existing_analyses --input_glob="${input_glob}"
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished combining after-study analyses.
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
+python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}"
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.
 
-echo $(date +"%Y-%m-%d %T") simulation_run.sh: Simulation complete.
+echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Analysis complete.

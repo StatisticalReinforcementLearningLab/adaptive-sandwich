@@ -27,6 +27,35 @@ action_centering=0
 debug=0
 redo_analyses=1
 
+# Parse single-char options as directly supported by getopts, but allow long-form
+# under - option.  The :'s signify that arguments are required for these options.
+while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:-: OPT; do
+  # support long options: https://stackoverflow.com/a/28466267/519360
+  if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
+    OPT="${OPTARG%%=*}"       # extract long option name
+    OPTARG="${OPTARG#$OPT}"   # extract long option argument (may be empty)
+    OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+  fi
+  case "$OPT" in
+    T  | max_time )                     needs_arg; T="$OPTARG" ;;
+    t  | recruit_t )                    needs_arg; recruit_t="$OPTARG" ;;
+    N  | num_simulations )              needs_arg; N="$OPTARG" ;;
+    n  | num_users )                    needs_arg; n="$OPTARG" ;;
+    u  | recruit_n )                    needs_arg; recruit_n="$OPTARG" ;;
+    d  | decisions_between_updates )    needs_arg; decisions_between_updates="$OPTARG" ;;
+    m  | min_users )                    needs_arg; min_users="$OPTARG" ;;
+    r  | RL_alg )                       needs_arg; RL_alg="$OPTARG" ;;
+    e  | err_corr )                     needs_arg; err_corr="$OPTARG" ;;
+    f  | alg_state_feats )              needs_arg; alg_state_feats="$OPTARG" ;;
+    a  | action_centering )             needs_arg; action_centering="$OPTARG" ;;
+    s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
+    y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
+    \? )                                exit 2 ;;  # bad short option (error reported via getopts)
+    * )                                 die "Illegal option --$OPT" ;; # bad long option
+  esac
+done
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run.sh: Beginning RL study simulation."
 python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering

@@ -3,12 +3,18 @@
 #SBATCH -N 1                                      # Ensure that all cores are on one machine
 #SBATCH -t 0-10:00                                # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p gpu_requeue                            # Partition to submit to
+#SBATCH --gres=gpu:1                              # Request a GPU
 #SBATCH --mem=20G                                 # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o slurm.%N.%j.out                        # STDOUT
 #SBATCH -e slurm.%N.%j.err                        # STDERR
 #SBATCH --mail-type=END                           # This command would send an email when the job ends.
 #SBATCH --mail-type=FAIL                          # This command would send an email when the job ends.
 #SBATCH --mail-user=nowellclosser@g.harvard.edu   # Email to which notifications will be sent
+
+# Note that this script can be run interactively or with sbatch.  The above parameters should make sbatch
+# get a GPU, and the below parameters can be used to change the simulation parameters. # If running
+# interactively, one can start the session with something like the following:
+# salloc -p gpu_test -t 0-02:00 --mem 16000 --gres=gpu:1 -n 8 -N 1
 
 # Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
@@ -35,7 +41,7 @@ synthetic_mode="delayed_1_dosage"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:c:-: OPT; do
+while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -81,7 +87,6 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: Making sure Python requirements a
 pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed.
 
-#TODO: use this in after study analysis. Actually shouldn't need? Just put alongside inputs
 now=$(printf "%(%F_%H-%M-%S)T")
 save_dir="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${now}"
 mkdir -p "$save_dir"

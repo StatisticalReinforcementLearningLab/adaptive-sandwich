@@ -4,6 +4,8 @@ import logging
 import cProfile
 from pstats import Stats
 import warnings
+import pathlib
+import glob
 
 import click
 import jax
@@ -123,8 +125,56 @@ def cli():
     pass
 
 
+@cli.command()
+@click.option(
+    "--input_glob",
+    help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
+    required=True,
+)
+def collect_existing_analyses(input_glob, analysis_pickle_filename):
+
+    theta_estimates = []
+    adaptive_sandwich_var_estimates = []
+    classical_sandwich_var_estimates = []
+    for filename in glob.glob(input_glob):
+        with open(os.path.join(filename, analysis_pickle_filename)) as f:
+            (
+                theta_est,
+                adaptive_sandwich_var,
+                classical_sandwich_var,
+            ) = pickle.load(f)
+
+            theta_estimates.append(theta_est)
+            adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
+            classical_sandwich_var_estimates.append(classical_sandwich_var)
+
+    theta_estimates = np.array(theta_estimates)
+    adaptive_sandwich_var_estimates = np.array(adaptive_sandwich_var_estimates)
+    classical_sandwich_var_estimates = np.array(classical_sandwich_var_estimates)
+
+    theta_estimate = np.mean(theta_estimates, axis=0)
+    empirical_var_normalized = np.cov(theta_estimates.T, ddof=0)
+    mean_adaptive_sandwich_var_estimate = np.mean(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+    mean_classical_sandwich_var_estimate = np.mean(
+        classical_sandwich_var_estimates, axis=0
+    )
+
+    print(f"\nParameter estimate:\n{theta_estimate}")
+    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
+    print(
+        f"\nAdaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
+    )
+
+
 # TODO: Eventually these commands will just take like the algo statistics object and
 # anything else we need after parsing by intermediate package.
+# TODO: This command should handle saving the pickled objects eventually if it
+# sticks around.
 @cli.command()
 @click.option(
     "--input_folder",
@@ -210,7 +260,7 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
                 f"Folder {subfolder} did not contain at least one the required files {study_dataframe_pickle_filename} and {rl_algorithm_object_pickle_filename}"
             )
 
-        logger.info("Contains required files, let's proceed to analysis")
+        logger.info("Contains required files, let's proceed to analysis.")
         # If we got here, both required files were found. Analyze this dataset.
         with open(
             os.path.join(input_folder, subfolder, study_dataframe_pickle_filename),
@@ -230,6 +280,7 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
                     adaptive_sandwich_var,
                     classical_sandwich_var,
                 ) = analyze_dataset_inner(study_df, study_RLalg)
+
                 theta_estimates.append(theta_est)
                 adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
                 classical_sandwich_var_estimates.append(classical_sandwich_var)
@@ -296,12 +347,26 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle, profile)
         pr = cProfile.Profile()
         pr.enable()
 
+    # Load study data
     study_df = pickle.load(study_dataframe_pickle)
     study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
+    # Analyze data
     theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
         analyze_dataset_inner(study_df, study_RLalg)
     )
+
+    # Write analysis results to same directory as input files
+    folder_path = pathlib.Path(study_dataframe_pickle.name).parent.resolve()
+    with open(f"{folder_path}/analysis.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "theta_est": theta_est,
+                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+            },
+            f,
+        )
 
     print(f"\nParameter estimate:\n {theta_est}")
     print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
@@ -633,7 +698,7 @@ def form_bread_inverse_matrix(
                     "weight_gradients_by_user_id"
                 ][user_id]
 
-            running_entry_holder += np.outer(theta_loss_gradient, weight_gradient_sum)
+            running_entry_holder += jnp.outer(theta_loss_gradient, weight_gradient_sum)
 
             # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece
             # is a bit intricate; we only have the theta loss function in terms of the pis,
@@ -656,7 +721,7 @@ def form_bread_inverse_matrix(
             # TODO: *Only* do this when action centering or otherwise using pis
             # NOTE THAT OUR HELPER DATA STRUCTURES ARE 0-INDEXED, SO WE SUBTRACT
             # 1 FROM OUR TIME BOUNDS.
-            mixed_theta_beta_loss_derivative = np.matmul(
+            mixed_theta_beta_loss_derivative = jnp.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,
                     lower_t - 1 : upper_t - 1,
@@ -673,14 +738,14 @@ def form_bread_inverse_matrix(
 
     bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
 
-    return np.block(
+    return jnp.block(
         [
             [
                 upper_left_bread_inverse,
-                np.zeros((existing_rows, theta_dim)),
+                jnp.zeros((existing_rows, theta_dim)),
             ],
             [
-                np.block(bottom_left_row_blocks),
+                jnp.block(bottom_left_row_blocks),
                 bottom_right_hessian,
             ],
         ]

@@ -1,16 +1,22 @@
 #!/bin/bash
 #SBATCH -n 4                                      # Number of cores
 #SBATCH -N 1                                      # Ensure that all cores are on one machine
-#SBATCH -t 0-10:00                                # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH -p gpu_requeue                            # Partition to submit to
+#SBATCH -t 0-0:15                                 # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH --mem=20G                                 # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -p gpu_requeue                            # Target Partition
+#SBATCH --gres=gpu:1                              # Request a GPU
 #SBATCH -o slurm.%N.%A.%a.out                     # STDOUT
 #SBATCH -e slurm.%N.%A.%a.err                     # STDERR
 #SBATCH --mail-type=END                           # This command would send an email when the job ends.
 #SBATCH --mail-type=FAIL                          # This command would send an email when the job ends.
 #SBATCH --mail-user=nowellclosser@g.harvard.edu   # Email to which notifications will be sent
 
-# Note this script is to be run with
+# Note this script is to be run with something like the following command:
+# sbatch --array=[0-999] simulation_run_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
+
+# TODO: To analyze, run simulation_collect_analyses.sh as described in the
+# output of one of the simulation runs.
+
 # Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
 
@@ -38,7 +44,7 @@ synthetic_mode="delayed_1_dosage"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:c:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:l:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -58,11 +64,16 @@ while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:c:-: OPT; do
     a  | action_centering )             needs_arg; action_centering="$OPTARG" ;;
     s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
+    l  | simulation_parent_label )      needs_arg; simulation_parent_label="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
+if [ -z "$input_folder" ]; then
+        die('Missing simulation parent label arg')
+fi
 
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: Loading mamba and CUDA modules.
@@ -83,9 +94,13 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: Making sure Python requirements a
 pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: All Python requirements installed.
 
-#TODO: use this in after study analysis. Actually shouldn't need? Just put alongside inputs
-now=$(printf "%(%F_%H-%M-%S)T")
-save_dir="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${now}/${SLURM_ARRAY_TASK_ID}"
+save_dir_prefix="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${simulation_parent_label}"
+
+if test -d save_dir_prefix; then
+  die('Output directory already exists. Please supply a unique label, perhaps a datetime.')
+fi"
+save_dir="${save_dir_prefix}/${SLURM_ARRAY_TASK_ID}"
+save_dir_glob="${save_dir_prefix}/*"
 mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
@@ -95,6 +110,7 @@ echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
 output_folder="${save_dir}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
+output_folder_glob="${save_dir_glob}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
 
 # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
 # and do after-study analysis
@@ -103,3 +119,4 @@ python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${outpu
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run.sh: Simulation complete.
+echo "$(date +"%Y-%m-%d %T") simulation_run.sh: When all jobs have completed, you may collect and summarize the analyses with ./simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"

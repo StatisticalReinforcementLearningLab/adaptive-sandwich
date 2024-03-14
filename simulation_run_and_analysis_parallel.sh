@@ -64,16 +64,11 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:l:-: OPT; do
     a  | action_centering )             needs_arg; action_centering="$OPTARG" ;;
     s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
-    l  | simulation_parent_label )      needs_arg; simulation_parent_label="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
-
-if [ -z "$simulation_parent_label" ]; then
-        die 'Missing simulation parent label arg'
-fi
 
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Loading mamba and CUDA modules.
@@ -94,7 +89,7 @@ echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Making sure
 pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: All Python requirements installed.
 
-save_dir_prefix="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${simulation_parent_label}"
+save_dir_prefix="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
 
 if test -d save_dir_prefix; then
   die 'Output directory already exists. Please supply a unique label, perhaps a datetime.'

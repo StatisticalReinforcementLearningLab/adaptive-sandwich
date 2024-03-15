@@ -162,13 +162,14 @@ class TestSigmoidLS_T3_n2:
         User 1 takes no action, meaning negative gradient case, and User 2
         gets clipped at .1, meaning zero gradient.
         """
+        breakpoint()
         self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_2, 3)
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {
                 3: {
                     # Derived by setting a breakpoint in calculate_pi_and_weight_gradients and calling
-                    # self.get_action_prob_pure(curr_beta_est, self.args.lower_clip, self.args.upper_clip, self.get_user_states(current_data, user_id)["treat_states" ][-1])
+                    # self.get_action_prob_pure(curr_beta_est, self.args.lower_clip, self.args.upper_clip, self.args.steepness, self.get_user_states(current_data, user_id)["treat_states" ][-1])
                     # for each user, then plugging into explicit formula.
                     # prob is 0.26894143 for user 1, .9 for user 2
                     # Negative of previous test because zero action

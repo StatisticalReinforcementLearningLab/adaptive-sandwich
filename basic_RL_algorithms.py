@@ -148,11 +148,13 @@ def get_loss_hessians_batched(
 # See https://arxiv.org/pdf/2006.06903.pdf
 # TODO: Docstring
 @jax.jit
-def get_action_prob_pure(beta_est, lower_clip, upper_clip, treat_states, action=1):
+def get_action_prob_pure(
+    beta_est, lower_clip, steepness, upper_clip, treat_states, action=1
+):
     treat_est = beta_est[-len(treat_states) :]
     lin_est = jnp.matmul(treat_states, treat_est)
 
-    raw_prob = jax.scipy.special.expit(lin_est)
+    raw_prob = jax.scipy.special.expit(1.0 * lin_est)
     prob = conditional_x_or_one_minus_x(
         jnp.clip(raw_prob, lower_clip, upper_clip), action
     )
@@ -166,17 +168,19 @@ def get_pi_gradients_batched(
     beta_est,
     lower_clip,
     upper_clip,
+    steepness,
     batched_treat_states_tensor,
     batched_actions_tensor,
 ):
     return jax.vmap(
         fun=jax.grad(get_action_prob_pure),
-        in_axes=(None, None, None, 0, 0),
+        in_axes=(None, None, None, None, 0, 0),
         out_axes=0,
     )(
         beta_est,
         lower_clip,
         upper_clip,
+        steepness,
         batched_treat_states_tensor,
         batched_actions_tensor,
     )
@@ -185,9 +189,9 @@ def get_pi_gradients_batched(
 # TODO: Docstring
 @jax.jit
 def get_radon_nikodym_weight(
-    beta, beta_target, lower_clip, upper_clip, treat_states, action
+    beta, beta_target, lower_clip, steepness, upper_clip, treat_states, action
 ):
-    common_args = [lower_clip, upper_clip, treat_states]
+    common_args = [lower_clip, upper_clip, steepness, treat_states]
 
     pi_beta = get_action_prob_pure(beta, *common_args)[()]
     pi_beta_target = get_action_prob_pure(beta_target, *common_args)[()]
@@ -203,18 +207,20 @@ def get_weight_gradients_batched(
     target_beta,
     lower_clip,
     upper_clip,
+    steepness,
     batched_treat_states_tensor,
     batched_actions_tensor,
 ):
     return jax.vmap(
         fun=jax.grad(get_radon_nikodym_weight),
-        in_axes=(None, None, None, None, 0, 0),
+        in_axes=(None, None, None, None, None, 0, 0),
         out_axes=0,
     )(
         beta_est,
         target_beta,
         lower_clip,
         upper_clip,
+        steepness,
         batched_treat_states_tensor,
         batched_actions_tensor,
     )
@@ -235,7 +241,7 @@ class SigmoidLS:
         self.treat_feats = treat_feats
         self.alg_seed = alg_seed
         self.allocation_sigma = allocation_sigma
-        # Note that steepness = 0 removes learning adaptivity, with action probabilities of .5
+        # Note that steepness = 0 should remove learning adaptivity, with action probabilities of .5
         self.steepness = steepness
 
         self.rng = np.random.default_rng(self.alg_seed)
@@ -503,6 +509,7 @@ class SigmoidLS:
             curr_beta_est,
             self.args.lower_clip,
             self.args.upper_clip,
+            self.args.steepness,
             batched_treat_states_tensor,
             batched_actions_tensor,
         )
@@ -513,6 +520,7 @@ class SigmoidLS:
             curr_beta_est,
             self.args.lower_clip,
             self.args.upper_clip,
+            self.args.steepness,
             batched_treat_states_tensor,
             batched_actions_tensor,
         )
@@ -627,7 +635,7 @@ class SigmoidLS:
         treat_est = beta_est[self.treat_bool]
         lin_est = jnp.matmul(prob_input_dict["treat_states"], treat_est)
 
-        raw_probs = scipy.special.expit(lin_est)
+        raw_probs = scipy.special.expit(self.args.steepness * lin_est)
         # TODO: hiding things in args like this makes code harder to follow
         # TODO: can use np clip
         probs = clip(self.args, raw_probs)

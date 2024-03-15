@@ -12,9 +12,9 @@
 #SBATCH --mail-user=nowellclosser@g.harvard.edu   # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
-# sbatch --array=[0-999] simulation_run_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
+# sbatch --array=[0-99] simulation_run_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
 
-# TODO: To analyze, run simulation_collect_analyses.sh as described in the
+# To analyze, run simulation_collect_analyses.sh as described in the
 # output of one of the simulation runs.
 
 # Stop on nonzero exit codes and use of undefined variables, and print all commands

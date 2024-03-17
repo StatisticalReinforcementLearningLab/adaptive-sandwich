@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH -n 4                                      # Number of cores
-#SBATCH -N 1                                      # Ensure that all cores are on one machine
-#SBATCH -t 0-0:15                                 # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH --mem=20G                                 # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -p gpu_requeue                            # Target Partition
-#SBATCH --gres=gpu:1                              # Request a GPU
-#SBATCH -o slurm.%N.%A.%a.out                     # STDOUT
-#SBATCH -e slurm.%N.%A.%a.err                     # STDERR
-#SBATCH --mail-type=END                           # This command would send an email when the job ends.
-#SBATCH --mail-type=FAIL                          # This command would send an email when the job ends.
-#SBATCH --mail-user=nowellclosser@g.harvard.edu   # Email to which notifications will be sent
+#SBATCH -n 4                                                                 # Number of cores
+#SBATCH -N 1                                                                 # Ensure that all cores are on one machine
+#SBATCH -t 0-0:15                                                            # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH --mem=20G                                                            # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -p gpu_requeue                                                       # Target Partition
+#SBATCH --gres=gpu:1                                                         # Request a GPU
+#SBATCH -o /n/holyscratch01/murphy_lab/Lab/nclosser/%A/slurm.%N.%A.%a.out    # STDOUT
+#SBATCH -e /n/holyscratch01/murphy_lab/Lab/nclosser/%A/slurm.%N.%A.%a.out    # STDERR
+#SBATCH --mail-type=END                                                      # This command would send an email when the job ends.
+#SBATCH --mail-type=FAIL                                                     # This command would send an email when the job ends.
+#SBATCH --mail-user=nowellclosser@g.harvard.edu                              # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
 # sbatch --array=[0-99] simulation_run_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
@@ -27,7 +27,6 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Defaults. Overridden if supplied.
 T=3
-N=100
 recruit_t=1
 decisions_between_updates=1
 recruit_n=100
@@ -114,4 +113,4 @@ python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${outpu
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with ./simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"
+echo "$(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"

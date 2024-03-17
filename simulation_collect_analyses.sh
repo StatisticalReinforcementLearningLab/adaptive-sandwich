@@ -1,20 +1,3 @@
-#!/bin/bash
-#SBATCH -n 4                                      # Number of cores
-#SBATCH -N 1                                      # Ensure that all cores are on one machine
-#SBATCH -t 0-10:00                                # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH -p serial_requeue                         # Partition to submit to
-#SBATCH --mem=2G                                  # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -o slurm.%N.%j.out                        # STDOUT
-#SBATCH -e slurm.%N.%j.err                        # STDERR
-#SBATCH --mail-type=END                           # This command would send an email when the job ends.
-#SBATCH --mail-type=FAIL                          # This command would send an email when the job ends.
-#SBATCH --mail-user=nowellclosser@g.harvard.edu   # Email to which notifications will be sent
-
-# Note that this script can be run interactively or with sbatch.  The above parameters should make sbatch
-# get a GPU, and the below parameters can be used to change the simulation parameters. # If running
-# interactively, one can start the session with something like the following:
-# salloc -p gpu_test -t 0-02:00 --mem 16000 --gres=gpu:1 -n 8 -N 1
-
 # Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
 

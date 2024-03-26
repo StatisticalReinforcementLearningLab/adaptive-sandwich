@@ -12,6 +12,7 @@ import jax
 import numpy as np
 from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
+import scipy
 
 
 from helper_functions import invert_matrix_and_check_conditioning
@@ -26,7 +27,6 @@ logging.basicConfig(
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
 # TODO: Deal with actionprobs being optional.
-@jax.jit
 def get_loss_action_centering(
     theta_est, base_states, treat_states, actions, rewards, action1probs
 ):
@@ -48,7 +48,6 @@ def get_loss_action_centering(
     )
 
 
-# Consider jitting
 # For the loss gradients, we can form the sum of all users values and differentiate that with one
 # call. Instead, this alternative structure which generalizes to the pi function case.
 @jax.jit
@@ -136,6 +135,10 @@ def collect_existing_analyses(input_glob):
     theta_estimates = []
     adaptive_sandwich_var_estimates = []
     classical_sandwich_var_estimates = []
+    filenames = glob.glob(input_glob)
+
+    logger.info("Found %d files under the glob %s", len(filenames), input_glob)
+
     for filename in glob.glob(input_glob):
         with open(filename, "rb") as f:
             analysis_dict = pickle.load(f)
@@ -165,13 +168,53 @@ def collect_existing_analyses(input_glob):
         classical_sandwich_var_estimates, axis=0
     )
 
+    # Calculate standard error (or corresponding variance) of variance estimate for each
+    # component of theta.  This is done by finding an unbiased estimator of the standard
+    # formula for the standard error of a variance from iid observations.
+    # This gives an unbiased estimator of the standard error formula for the variance
+    # of iid observations.
+    # Population standard error formula: https://en.wikipedia.org/wiki/Variance
+    # Unbiased stimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
+    theta_component_variance_std_errors = []
+    for i in range(len(theta_estimate)):
+        component_estimates = [estimate[i] for estimate in theta_estimates]
+        second_central_moment = scipy.stats.moment(component_estimates, moment=4)
+        fourth_central_moment = scipy.stats.moment(component_estimates, moment=4)
+        n = len(theta_estimates)
+        theta_component_variance_std_errors.append(
+            np.sqrt(
+                n
+                * (
+                    ((n) ** 2 - 3) * (second_central_moment) ** 2
+                    + ((n - 1) ** 2) * fourth_central_moment
+                )
+                / ((n - 3) * (n - 2) * ((n - 1) ** 2))
+            )
+        )
+
+    approximate_standard_errors = np.empty_like(empirical_var_normalized)
+    for i, j in np.ndindex(approximate_standard_errors.shape):
+        approximate_standard_errors[i, j] = max(
+            theta_component_variance_std_errors[i],
+            theta_component_variance_std_errors[j],
+        )
+
     print(f"\nParameter estimate:\n{theta_estimate}")
     print(f"\nEmpirical variance:\n{empirical_var_normalized}")
+    print(
+        f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
+    )
     print(
         f"\nAdaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
     )
     print(
         f"\nClassical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}\n",
     )
 
 
@@ -532,7 +575,7 @@ def collect_derivatives(study_df, state_feats, treat_feats, theta_est):
     return user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 
 
-ESTIMATING_FUNCTION_SUM_TOL = 1e-02
+ESTIMATING_FUNCTION_SUM_TOL = 1e-05
 
 
 # TODO: doc string
@@ -561,8 +604,6 @@ def form_meat_matrix(
     if not jnp.allclose(
         estimating_function_sum,
         jnp.zeros((num_rows_cols, 1)),
-        rtol=ESTIMATING_FUNCTION_SUM_TOL,
-        atol=ESTIMATING_FUNCTION_SUM_TOL,
     ):
         warnings.warn(
             f"Estimating functions with estimate plugged in do not sum to within required tolerance {ESTIMATING_FUNCTION_SUM_TOL} of zero: {estimating_function_sum}"

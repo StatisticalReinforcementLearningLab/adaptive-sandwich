@@ -162,7 +162,6 @@ class TestSigmoidLS_T3_n2:
         User 1 takes no action, meaning negative gradient case, and User 2
         gets clipped at .1, meaning zero gradient.
         """
-        breakpoint()
         self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_2, 3)
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,

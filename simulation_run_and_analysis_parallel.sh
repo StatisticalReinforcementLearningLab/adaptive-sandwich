@@ -1,10 +1,9 @@
 #!/bin/bash
 #SBATCH -n 4                                                                 # Number of cores
 #SBATCH -N 1                                                                 # Ensure that all cores are on one machine
-#SBATCH -t 0-0:15                                                            # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH --mem=20G                                                            # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -p gpu_requeue                                                       # Target Partition
-#SBATCH --gres=gpu:1                                                         # Request a GPU
+#SBATCH -t 0-0:10                                                            # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH --mem=5G                                                             # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -p serial_requeue                                                    # Target Partition
 #SBATCH -o /n/holyscratch01/murphy_lab/Lab/nclosser/%A/slurm.%N.%A.%a.out    # STDOUT
 #SBATCH -e /n/holyscratch01/murphy_lab/Lab/nclosser/%A/slurm.%N.%A.%a.out    # STDERR
 #SBATCH --mail-type=END                                                      # This command would send an email when the job ends.
@@ -12,10 +11,14 @@
 #SBATCH --mail-user=nowellclosser@g.harvard.edu                              # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
-# sbatch --array=[0-99] simulation_run_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
+# sbatch --array=[0-99] simulation_run_and_analysis_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
 
 # To analyze, run simulation_collect_analyses.sh as described in the
 # output of one of the simulation runs.
+
+# If running on GPU, the following can be used:
+# S BATCH -p gpu_requeue                                                       # Target Partition
+# S BATCH --gres=gpu:1                                                         # Request a GPU
 
 # Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
@@ -99,7 +102,7 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning RL simulations.
-python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
+python rl_study_simulation.py --T=$T --N=1 --parallel_task_index=$SLURM_ARRAY_TASK_ID --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
@@ -113,4 +116,4 @@ python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${outpu
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"
+echo "$(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"

@@ -219,9 +219,18 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     toc2 = None
 
     logger.info("Running simulations...")
+    # *5000 to avoid neighboring seeds just in case...
+    # important that env and alg seed are different
+    # Note how parallel_task_index is used to get different seeds
+    # when multiple simulations are being run in parallel.  In that case
+    # we should have N = 1 in each simulation, so that there is only
+    # one iteration of this loop with i = 1, and the seed completely determined
+    # by the parallel task index. On the other hand, by default the parallel
+    # task index is 1, so for a typical non-parallel run with N > 1 the seeds
+    # will be completely determined by the iterator i.
     for i in range(1, args.N + 1):
-        env_seed = i * 5000
-        alg_seed = (args.N + i) * 5000
+        env_seed = args.parallel_task_index * i * 5000
+        alg_seed = args.parallel_task_index * (args.N + i) * 5000
 
         toc2 = time.perf_counter()
         if i > 1:
@@ -365,6 +374,12 @@ def main():
     )
     parser.add_argument(
         "--N", type=int, default=10, help="Number of Monte Carlo repetitions"
+    )
+    parser.add_argument(
+        "--parallel_task_index",
+        type=int,
+        default=1,
+        help="Identifier of task in parallel setting, needed to set different seeds",
     )
     parser.add_argument("--n", type=int, default=90, help="Total number of users")
     parser.add_argument(

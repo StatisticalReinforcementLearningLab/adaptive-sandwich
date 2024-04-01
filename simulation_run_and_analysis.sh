@@ -97,12 +97,12 @@ python rl_study_simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --deci
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-output_folder="${save_dir}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
+output_folder="${save_dir}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionCRL=${action_centering_RL}_actionCinference=${action_centering_inference}"
 
 # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
 # and do after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis.sh: Beginning after-study analysis.
-python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl"
+python after_study_analysis.py analyze-multiple-datasets-and-compare-to-empirical-variance --input_folder="${output_folder}" --study_dataframe_pickle_filename="study_df.pkl" --rl_algorithm_object_pickle_filename="study_RLalg.pkl" --action_centering=$action_centering_inference
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis.sh: Simulation complete.

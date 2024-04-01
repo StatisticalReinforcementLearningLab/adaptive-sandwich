@@ -27,16 +27,21 @@ logging.basicConfig(
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
 # TODO: Deal with actionprobs being optional.
-def get_loss_action_centering(
-    theta_est, base_states, treat_states, actions, rewards, action1probs
+def get_loss(
+    theta_est,
+    base_states,
+    treat_states,
+    actions,
+    rewards,
+    action1probs,
+    action_centering,
 ):
     theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
 
-    # Perform action centering
-    # TODO: deal with types more cleanly?
-    actions = actions.astype(jnp.float32)
-    actions -= action1probs
+    if action_centering:
+        actions = actions.astype(jnp.float32)
+        actions -= action1probs
 
     return jnp.sum(
         (
@@ -50,7 +55,6 @@ def get_loss_action_centering(
 
 # For the loss gradients, we can form the sum of all users values and differentiate that with one
 # call. Instead, this alternative structure which generalizes to the pi function case.
-@jax.jit
 def get_loss_gradients_batched(
     theta_est,
     batched_base_states_tensor,
@@ -58,10 +62,11 @@ def get_loss_gradients_batched(
     actions_batch,
     rewards_batch,
     action1probs_batch,
+    action_centering,
 ):
     return jax.vmap(
-        fun=jax.grad(get_loss_action_centering),
-        in_axes=(None, 2, 2, 2, 2, 2),
+        fun=jax.grad(get_loss),
+        in_axes=(None, 2, 2, 2, 2, 2, None),
         out_axes=0,
     )(
         theta_est,
@@ -70,10 +75,10 @@ def get_loss_gradients_batched(
         actions_batch,
         rewards_batch,
         action1probs_batch,
+        action_centering,
     )
 
 
-@jax.jit
 def get_loss_hessians_batched(
     theta_est,
     batched_base_states_tensor,
@@ -81,10 +86,11 @@ def get_loss_hessians_batched(
     actions_batch,
     rewards_batch,
     action1probs_batch,
+    action_centering,
 ):
     return jax.vmap(
-        fun=jax.hessian(get_loss_action_centering),
-        in_axes=(None, 2, 2, 2, 2, 2),
+        fun=jax.hessian(get_loss),
+        in_axes=(None, 2, 2, 2, 2, 2, None),
         out_axes=0,
     )(
         theta_est,
@@ -93,10 +99,11 @@ def get_loss_hessians_batched(
         actions_batch,
         rewards_batch,
         action1probs_batch,
+        None,
+        action_centering,
     )
 
 
-@jax.jit
 def get_loss_gradient_derivatives_wrt_pi_batched(
     theta_est,
     batched_base_states_tensor,
@@ -104,10 +111,11 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     actions_batch,
     rewards_batch,
     action1probs_batch,
+    action_centering,
 ):
     return jax.vmap(
-        fun=jax.jacrev(jax.grad(get_loss_action_centering), 5),
-        in_axes=(None, 2, 2, 2, 2, 2),
+        fun=jax.jacrev(jax.grad(get_loss), 5),
+        in_axes=(None, 2, 2, 2, 2, 2, None),
         out_axes=0,
     )(
         theta_est,
@@ -116,6 +124,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
         actions_batch,
         rewards_batch,
         action1probs_batch,
+        action_centering,
     )
 
 
@@ -138,6 +147,8 @@ def collect_existing_analyses(input_glob):
     filenames = glob.glob(input_glob)
 
     logger.info("Found %d files under the glob %s", len(filenames), input_glob)
+    if len(filenames) == 0:
+        raise RuntimeError("Aborting because no files found. Please check path.")
 
     for filename in glob.glob(input_glob):
         with open(filename, "rb") as f:
@@ -245,11 +256,17 @@ def collect_existing_analyses(input_glob):
     is_flag=True,
     help="If supplied, the important computations will be profiled with summary output shown",
 )
+@click.option(
+    "--action_centering",  # TODO: This needs to be handled more generall and not as an int
+    type=int,
+    default=0,
+)
 def analyze_multiple_datasets_and_compare_to_empirical_variance(
     input_folder,
     study_dataframe_pickle_filename,
     rl_algorithm_object_pickle_filename,
     profile,
+    action_centering,
 ):
     """
     For each of the supplied input_folders, extract the pickled study dataframe
@@ -326,7 +343,7 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
                     theta_est,
                     adaptive_sandwich_var,
                     classical_sandwich_var,
-                ) = analyze_dataset_inner(study_df, study_RLalg)
+                ) = analyze_dataset_inner(study_df, study_RLalg, bool(action_centering))
 
                 theta_estimates.append(theta_est)
                 adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
@@ -382,7 +399,14 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
     is_flag=True,
     help="If supplied, the important computations will be profiled with summary output shown",
 )
-def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle, profile):
+@click.option(
+    "--action_centering",  # TODO: This needs to be handled more generall and not as an int
+    type=int,
+    default=0,
+)
+def analyze_dataset(
+    study_dataframe_pickle, rl_algorithm_object_pickle, profile, action_centering
+):
 
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -400,7 +424,7 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle, profile)
 
     # Analyze data
     theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
-        analyze_dataset_inner(study_df, study_RLalg)
+        analyze_dataset_inner(study_df, study_RLalg, bool(action_centering))
     )
 
     # Write analysis results to same directory as input files
@@ -429,7 +453,7 @@ def analyze_dataset(study_dataframe_pickle, rl_algorithm_object_pickle, profile)
 
 # TODO: docstring
 # TODO: Collect all jax things and then einsum away?
-def analyze_dataset_inner(study_df, study_RLalg):
+def analyze_dataset_inner(study_df, study_RLalg, action_centering):
 
     # List of times that were the first applicable time for some update
     # Sorting shouldn't be necessary, as insertion order should be chronological
@@ -446,7 +470,7 @@ def analyze_dataset_inner(study_df, study_RLalg):
     # Estimate the inferential target using the supplied study data.
     logger.info("Forming theta estimate.")
     theta_est = estimate_theta(
-        study_df, study_RLalg.state_feats, study_RLalg.treat_feats
+        study_df, study_RLalg.state_feats, study_RLalg.treat_feats, action_centering
     )
 
     logger.info("Forming adaptive sandwich variance estimator.")
@@ -454,7 +478,11 @@ def analyze_dataset_inner(study_df, study_RLalg):
     logger.info("Calculating all derivatives needed with JAX")
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         collect_derivatives(
-            study_df, study_RLalg.state_feats, study_RLalg.treat_feats, theta_est
+            study_df,
+            study_RLalg.state_feats,
+            study_RLalg.treat_feats,
+            theta_est,
+            action_centering,
         )
     )
 
@@ -479,6 +507,8 @@ def analyze_dataset_inner(study_df, study_RLalg):
     )
 
     logger.info("Forming adaptive meat.")
+    # TODO: Should I do DOF adjustment as for classical? Probably doesn't make sense to do in
+    # one case but not the other.
     joint_meat_matrix = form_meat_matrix(
         theta_dim,
         update_times,
@@ -489,10 +519,15 @@ def analyze_dataset_inner(study_df, study_RLalg):
     )
 
     logger.info("Combining sandwich ingredients.")
+    # Note the normalization here: underlying the calculations we have asymptotic normality
+    # at rate sqrt(n), so in finite samples we approximate the observed variance of theta itself
+    # by dividing the variance of that limiting normal by a factor of n.  This is happening in the
+    # behind the scenes in the classical function as well.
     joint_adaptive_variance = (
         joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
-    )
+    ) / len(user_ids)
     logger.info("Finished forming adaptive sandwich variance estimator.")
+
     return (
         theta_est,
         joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
@@ -504,21 +539,28 @@ def analyze_dataset_inner(study_df, study_RLalg):
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?
 # TODO: doc string
-def estimate_theta(study_df, state_feats, treat_feats):
+def estimate_theta(study_df, state_feats, treat_feats, action_centering):
     # Note that the intercept is included in the features already (col of 1s)
     linear_model = LinearRegression(fit_intercept=False)
-    trimmed_df = study_df[state_feats].copy()
-    for feat in treat_feats:
-        trimmed_df[f"action:{feat}"] = study_df[feat] * (
-            study_df["action"] - study_df["action1prob"]
-        )
+
+    if action_centering:
+        trimmed_df = study_df[state_feats].copy()
+        for feat in treat_feats:
+            trimmed_df[f"action:{feat}"] = study_df[feat] * (
+                study_df["action"] - study_df["action1prob"]
+            )
+    else:
+        trimmed_df = study_df[state_feats + treat_feats].copy()
+
     linear_model.fit(trimmed_df, study_df["reward"])
 
     return linear_model.coef_
 
 
 # TODO: Just use dicts keyed on user id...
-def collect_derivatives(study_df, state_feats, treat_feats, theta_est):
+def collect_derivatives(
+    study_df, state_feats, treat_feats, theta_est, action_centering
+):
     batched_base_states_list = []
     batched_treat_states_list = []
     batched_actions_list = []
@@ -552,6 +594,7 @@ def collect_derivatives(study_df, state_feats, treat_feats, theta_est):
         batched_actions_tensor,
         batched_rewards_tensor,
         batched_action1probs_tensor,
+        action_centering,
     )
 
     loss_hessians = get_loss_hessians_batched(
@@ -561,6 +604,7 @@ def collect_derivatives(study_df, state_feats, treat_feats, theta_est):
         batched_actions_tensor,
         batched_rewards_tensor,
         batched_action1probs_tensor,
+        action_centering,
     )
 
     loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
@@ -570,16 +614,14 @@ def collect_derivatives(study_df, state_feats, treat_feats, theta_est):
         batched_actions_tensor,
         batched_rewards_tensor,
         batched_action1probs_tensor,
+        action_centering,
     )
 
     return user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 
 
-ESTIMATING_FUNCTION_SUM_TOL = 1e-05
-
-
 # TODO: doc string
-# TODO: rewrite as einsum
+# TODO: rewrite as einsum?
 def form_meat_matrix(
     theta_dim, update_times, beta_dim, algo_stats_dict, user_ids, loss_gradients
 ):
@@ -606,7 +648,7 @@ def form_meat_matrix(
         jnp.zeros((num_rows_cols, 1)),
     ):
         warnings.warn(
-            f"Estimating functions with estimate plugged in do not sum to within required tolerance {ESTIMATING_FUNCTION_SUM_TOL} of zero: {estimating_function_sum}"
+            f"Estimating functions with estimate plugged in do not sum to within required tolerance of zero: {estimating_function_sum}"
         )
 
     return running_meat_matrix / len(user_ids)
@@ -676,6 +718,7 @@ def form_bread_inverse_matrix(
 
     # This is useful for sweeping through the decision times between updates
     # but critically also those after the final update
+    # TODO: Make sure this makes sense for decisions between updates > 1
     update_times_and_upper_limit = (
         update_times if update_times[-1] == max_t + 1 else update_times + [max_t + 1]
     )
@@ -830,7 +873,7 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
 
     logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)
-    sandwich_var = (inv_hessian @ meat @ inv_hessian) / num_users
+    sandwich_var = (inv_hessian @ meat @ inv_hessian.T) / num_users
 
     logger.info("Finished forming classical sandwich variance estimator.")
 

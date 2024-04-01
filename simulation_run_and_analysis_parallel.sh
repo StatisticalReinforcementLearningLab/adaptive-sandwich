@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH -n 4                                                                 # Number of cores
-#SBATCH -N 1                                                                 # Ensure that all cores are on one machine
-#SBATCH -t 0-0:10                                                            # Runtime in D-HH:MM, minimum of 10 minutes
-#SBATCH --mem=5G                                                             # Memory pool for all cores (see also --mem-per-cpu)
-#SBATCH -p serial_requeue                                                    # Target Partition
-#SBATCH -o /n/holyscratch01/murphy_lab/Lab/nclosser/%A/slurm.%N.%A.%a.out    # STDOUT
-#SBATCH -e /n/holyscratch01/murphy_lab/Lab/nclosser/%A/slurm.%N.%A.%a.out    # STDERR
-#SBATCH --mail-type=END                                                      # This command would send an email when the job ends.
-#SBATCH --mail-type=FAIL                                                     # This command would send an email when the job ends.
-#SBATCH --mail-user=nowellclosser@g.harvard.edu                              # Email to which notifications will be sent
+#SBATCH -n 4                                                                                                # Number of cores
+#SBATCH -N 1                                                                                                # Ensure that all cores are on one machine
+#SBATCH -t 0-0:10                                                                                           # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH --mem=5G                                                                                            # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -p serial_requeue                                                                                   # Target Partition
+#SBATCH -o /n/holyscratch01/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out    # STDOUT
+#SBATCH -e /n/holyscratch01/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out    # STDERR
+#SBATCH --mail-type=END                                                                                     # This command would send an email when the job ends.
+#SBATCH --mail-type=FAIL                                                                                    # This command would send an email when the job ends.
+#SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
 # sbatch --array=[0-99] simulation_run_and_analysis_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
@@ -63,7 +63,8 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:l:-: OPT; do
     r  | RL_alg )                       needs_arg; RL_alg="$OPTARG" ;;
     e  | err_corr )                     needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )              needs_arg; alg_state_feats="$OPTARG" ;;
-    a  | action_centering )             needs_arg; action_centering="$OPTARG" ;;
+    a  | action_centering_RL )          needs_arg; action_centering_RL="$OPTARG" ;;
+    A  | action_centering_inference )   needs_arg; action_centering_inference="$OPTARG" ;;
     s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
@@ -91,7 +92,7 @@ echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Making sure
 pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: All Python requirements installed.
 
-save_dir_prefix="/n/murphy_lab/lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
+save_dir_prefix="/n/holyscratch01/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
 
 if test -d save_dir_prefix; then
   die 'Output directory already exists. Please supply a unique label, perhaps a datetime.'
@@ -102,17 +103,18 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning RL simulations.
-python rl_study_simulation.py --T=$T --N=1 --parallel_task_index=$SLURM_ARRAY_TASK_ID --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --save_dir=$save_dir
+python rl_study_simulation.py --T=$T --N=1 --parallel_task_index=$SLURM_ARRAY_TASK_ID --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL --save_dir=$save_dir
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-output_folder="${save_dir}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
-output_folder_glob="${save_dir_glob}/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering}"
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionCRL=${action_centering_RL}_actionCinference=${action_centering_inference}"
+output_folder="${save_dir}/${save_dir_suffix}"
+output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
 # and do after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning after-study analysis.
-python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${output_folder}/exp=1/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=1/study_RLalg.pkl"
+python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${output_folder}/exp=1/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=1/study_RLalg.pkl" --action_centering=$action_centering_inference
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.

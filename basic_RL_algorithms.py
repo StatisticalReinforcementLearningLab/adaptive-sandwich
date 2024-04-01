@@ -153,12 +153,7 @@ def get_action_prob_pure(
 ):
     treat_est = beta_est[-len(treat_states) :]
     lin_est = jnp.matmul(treat_states, treat_est)
-    print(steepness)
-    print(type(steepness))
     raw_prob = jax.scipy.special.expit(steepness * lin_est)
-    raw_prob_2 = jax.scipy.special.expit(1 * lin_est)
-    raw_prob_3 = jax.scipy.special.expit(1.0 * lin_est)
-    print(raw_prob, raw_prob_2, raw_prob_3)
     prob = conditional_x_or_one_minus_x(
         jnp.clip(raw_prob, lower_clip, upper_clip), action
     )

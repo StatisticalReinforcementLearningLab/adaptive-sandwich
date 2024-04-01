@@ -85,7 +85,7 @@ def test_form_meat_matrix():
     expected_meat_matrix = (user_1_meat_contribution + user_2_meat_contribution) / 2
 
     user_ids, loss_gradients, _, _ = after_study_analysis.collect_derivatives(
-        study_df, state_feats, treat_feats, theta_est
+        study_df, state_feats, treat_feats, theta_est, action_centering=True
     )
     # Correct to 5 decimal places is perfectly sufficient
     np.testing.assert_allclose(
@@ -334,7 +334,7 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
 
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         after_study_analysis.collect_derivatives(
-            study_df, state_feats, treat_feats, theta_est
+            study_df, state_feats, treat_feats, theta_est, action_centering=True
         )
     )
     np.testing.assert_allclose(
@@ -652,7 +652,7 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         after_study_analysis.collect_derivatives(
-            study_df, state_feats, treat_feats, theta_est
+            study_df, state_feats, treat_feats, theta_est, action_centering=True
         )
     )
     np.testing.assert_allclose(
@@ -674,4 +674,12 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
 
 
 def test_analyze_dataset():
+    pass
+
+
+def test_no_action_centering():
+    pass
+
+
+def test_steepness_0():
     pass

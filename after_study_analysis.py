@@ -39,9 +39,12 @@ def get_loss(
     theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
 
-    if action_centering:
-        actions = actions.astype(jnp.float32)
-        actions -= action1probs
+    # if action_centering:
+    #     actions = actions.astype(jnp.float32)
+    #     actions -= action1probs
+    actions = jnp.where(
+        action_centering, actions.astype(jnp.float32) - action1probs, actions
+    )
 
     return jnp.sum(
         (
@@ -99,7 +102,6 @@ def get_loss_hessians_batched(
         actions_batch,
         rewards_batch,
         action1probs_batch,
-        None,
         action_centering,
     )
 

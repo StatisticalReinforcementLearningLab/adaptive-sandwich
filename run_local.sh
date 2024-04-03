@@ -25,7 +25,8 @@ RL_alg="sigmoid_LS"
 #err_corr='independent'
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-action_centering=0
+action_centering_RL=0
+action_centering_inference=0
 #TODO: not used currently but maybe should be
 debug=0
 redo_analyses=1

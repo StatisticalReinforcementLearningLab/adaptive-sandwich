@@ -35,7 +35,8 @@ min_users=1
 RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-action_centering=1
+action_centering_RL=0
+action_centering_inference=0
 steepness=0.0  # Note that the ".0" is critical because of the way the filenames below are formed
 synthetic_mode="delayed_1_dosage"
 

@@ -545,14 +545,14 @@ def estimate_theta(study_df, state_feats, treat_feats, action_centering):
     # Note that the intercept is included in the features already (col of 1s)
     linear_model = LinearRegression(fit_intercept=False)
 
-    if action_centering:
-        trimmed_df = study_df[state_feats].copy()
-        for feat in treat_feats:
-            trimmed_df[f"action:{feat}"] = study_df[feat] * (
-                study_df["action"] - study_df["action1prob"]
-            )
-    else:
-        trimmed_df = study_df[state_feats + treat_feats].copy()
+    # Note the role of the action centering flag in here in determining whether
+    # we subtract action probabilities from actions (multiplying by a boolean
+    # in python is like multiplying by 1 if True and 0 if False).
+    trimmed_df = study_df[state_feats].copy()
+    for feat in treat_feats:
+        trimmed_df[f"action:{feat}"] = study_df[feat] * (
+            study_df["action"] - (study_df["action1prob"] * action_centering)
+        )
 
     linear_model.fit(trimmed_df, study_df["reward"])
 

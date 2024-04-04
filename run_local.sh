@@ -7,7 +7,7 @@ die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 T=10
-decisions_between_updates=2
+decisions_between_updates=1
 # recruit_n=25; recruit_t=2
 recruit_n=100; recruit_t=1
 n=100
@@ -67,7 +67,7 @@ python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decis
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script
-output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionCRL=${action_centering_RL}_actionCinference=${action_centering_inference}"
+output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning after-study analysis."

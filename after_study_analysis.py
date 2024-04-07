@@ -152,7 +152,13 @@ def collect_existing_analyses(input_glob):
     if len(filenames) == 0:
         raise RuntimeError("Aborting because no files found. Please check path.")
 
-    for filename in glob.glob(input_glob):
+    for i, filename in enumerate(filenames):
+        if i % (len(filenames) // 10) == 0:
+            logger.info("A(nother) tenth of files processed.")
+        if not os.stat(filename).st_size:
+            raise RuntimeError(
+                "Empty analysis pickle.  This means there were probably timeouts or other failures during simulations."
+            )
         with open(filename, "rb") as f:
             analysis_dict = pickle.load(f)
             (
@@ -184,10 +190,8 @@ def collect_existing_analyses(input_glob):
     # Calculate standard error (or corresponding variance) of variance estimate for each
     # component of theta.  This is done by finding an unbiased estimator of the standard
     # formula for the standard error of a variance from iid observations.
-    # This gives an unbiased estimator of the standard error formula for the variance
-    # of iid observations.
     # Population standard error formula: https://en.wikipedia.org/wiki/Variance
-    # Unbiased stimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
+    # Unbiased estimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
     theta_component_variance_std_errors = []
     for i in range(len(theta_estimate)):
         component_estimates = [estimate[i] for estimate in theta_estimates]

@@ -33,7 +33,7 @@ redo_analyses=1
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name

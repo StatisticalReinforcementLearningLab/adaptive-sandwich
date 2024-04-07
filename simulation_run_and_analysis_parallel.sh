@@ -47,7 +47,7 @@ synthetic_mode="delayed_1_dosage"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:l:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name

@@ -147,17 +147,12 @@ def get_loss_hessians_batched(
 # TODO: Docstring
 # See https://arxiv.org/pdf/2006.06903.pdf
 # TODO: Docstring
-def get_action_prob_pure(
-    beta_est, lower_clip, steepness, upper_clip, treat_states, action=1
-):
+def get_action_1_prob_pure(beta_est, lower_clip, steepness, upper_clip, treat_states):
     treat_est = beta_est[-len(treat_states) :]
     lin_est = jnp.matmul(treat_states, treat_est)
     raw_prob = jax.scipy.special.expit(steepness * lin_est)
-    prob = conditional_x_or_one_minus_x(
-        jnp.clip(raw_prob, lower_clip, upper_clip), action
-    )
 
-    return prob[()]
+    return jnp.clip(raw_prob, lower_clip, upper_clip)[()]
 
 
 # TODO: Docstring
@@ -167,11 +162,10 @@ def get_pi_gradients_batched(
     upper_clip,
     steepness,
     batched_treat_states_tensor,
-    batched_actions_tensor,
 ):
     return jax.vmap(
-        fun=jax.grad(get_action_prob_pure),
-        in_axes=(None, None, None, None, 0, 0),
+        fun=jax.grad(get_action_1_prob_pure),
+        in_axes=(None, None, None, None, 0),
         out_axes=0,
     )(
         beta_est,
@@ -179,7 +173,6 @@ def get_pi_gradients_batched(
         upper_clip,
         steepness,
         batched_treat_states_tensor,
-        batched_actions_tensor,
     )
 
 
@@ -190,11 +183,10 @@ def get_pis_batched(
     upper_clip,
     steepness,
     batched_treat_states_tensor,
-    batched_actions_tensor,
 ):
     return jax.vmap(
-        fun=get_action_prob_pure,
-        in_axes=(None, None, None, None, 0, 0),
+        fun=get_action_1_prob_pure,
+        in_axes=(None, None, None, None, 0),
         out_axes=0,
     )(
         beta_est,
@@ -202,7 +194,6 @@ def get_pis_batched(
         upper_clip,
         steepness,
         batched_treat_states_tensor,
-        batched_actions_tensor,
     )
 
 
@@ -212,8 +203,8 @@ def get_radon_nikodym_weight(
 ):
     common_args = [lower_clip, upper_clip, steepness, treat_states]
 
-    pi_beta = get_action_prob_pure(beta, *common_args)[()]
-    pi_beta_target = get_action_prob_pure(beta_target, *common_args)[()]
+    pi_beta = get_action_1_prob_pure(beta, *common_args)[()]
+    pi_beta_target = get_action_1_prob_pure(beta_target, *common_args)[()]
     return conditional_x_or_one_minus_x(pi_beta, action) / conditional_x_or_one_minus_x(
         pi_beta_target, action
     )
@@ -523,13 +514,15 @@ class SigmoidLS:
         batched_actions_tensor = jnp.array(batched_actions_list)
 
         logger.info("Forming pi gradients with respect to beta.")
+        # Note that we care about the probability of action 1 specifically,
+        # not the taken action.
+        # TODO: verify this with Kelly
         pi_gradients = get_pi_gradients_batched(
             curr_beta_est,
             self.args.lower_clip,
             self.args.upper_clip,
             self.args.steepness,
             batched_treat_states_tensor,
-            batched_actions_tensor,
         )
 
         logger.info("Forming weight gradients with respect to beta.")

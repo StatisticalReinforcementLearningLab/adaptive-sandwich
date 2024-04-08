@@ -347,13 +347,16 @@ class TestSigmoidLS_T3_n2:
 
     # TODO: Should integrate next two functions with actual algorithm logic before testing
     # UPDATE: No I shouldn't. Don't need to put that effort in for sample
+    # UPDATE: Yes you should dummy. Need to eliminate possible sources of problems
+    # when verifying simulations, at least for action probabilities.  Estimating function sum
+    # check for loss makes things more ok there. Makes sure sidecar loss is representative.
     def test_get_loss(self):
         pass
 
     def test_get_action_prob_pure(self):
         pass
 
-    # Indirectly tested by testing its gradient is well-formed
+    # Indirectly tested by testing its gradient is well-formed... but could add something direct.
     def test_get_radon_nikodym_weight(self):
         pass
 

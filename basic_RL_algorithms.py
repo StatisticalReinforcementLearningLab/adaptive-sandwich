@@ -147,7 +147,6 @@ def get_loss_hessians_batched(
 # TODO: Docstring
 # See https://arxiv.org/pdf/2006.06903.pdf
 # TODO: Docstring
-@jax.jit
 def get_action_prob_pure(
     beta_est, lower_clip, steepness, upper_clip, treat_states, action=1
 ):
@@ -162,7 +161,6 @@ def get_action_prob_pure(
 
 
 # TODO: Docstring
-@jax.jit
 def get_pi_gradients_batched(
     beta_est,
     lower_clip,
@@ -186,7 +184,29 @@ def get_pi_gradients_batched(
 
 
 # TODO: Docstring
-@jax.jit
+def get_pis_batched(
+    beta_est,
+    lower_clip,
+    upper_clip,
+    steepness,
+    batched_treat_states_tensor,
+    batched_actions_tensor,
+):
+    return jax.vmap(
+        fun=get_action_prob_pure,
+        in_axes=(None, None, None, None, 0, 0),
+        out_axes=0,
+    )(
+        beta_est,
+        lower_clip,
+        upper_clip,
+        steepness,
+        batched_treat_states_tensor,
+        batched_actions_tensor,
+    )
+
+
+# TODO: Docstring
 def get_radon_nikodym_weight(
     beta, beta_target, lower_clip, steepness, upper_clip, treat_states, action
 ):
@@ -200,7 +220,6 @@ def get_radon_nikodym_weight(
 
 
 # TODO: Docstring
-@jax.jit
 def get_weight_gradients_batched(
     beta_est,
     target_beta,

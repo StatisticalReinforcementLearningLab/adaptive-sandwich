@@ -26,7 +26,6 @@ logging.basicConfig(
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
-# TODO: Deal with actionprobs being optional.
 def get_loss(
     theta_est,
     base_states,
@@ -39,9 +38,6 @@ def get_loss(
     theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
 
-    # if action_centering:
-    #     actions = actions.astype(jnp.float32)
-    #     actions -= action1probs
     actions = jnp.where(
         action_centering, actions.astype(jnp.float32) - action1probs, actions
     )

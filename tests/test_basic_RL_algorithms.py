@@ -171,9 +171,9 @@ class TestSigmoidLS_T3_n2:
                     # self.get_action_prob_pure(curr_beta_est, self.args.lower_clip, self.args.upper_clip, self.args.steepness, self.get_user_states(current_data, user_id)["treat_states" ][-1])
                     # for each user, then plugging into explicit formula.
                     # prob is 0.26894143 for user 1, .9 for user 2
-                    # Negative of previous test because zero action
+                    # NOT negative of previous test despite zero action
                     "pi_gradients_by_user_id": {
-                        1: np.array([0, 0, -0.19661194, 0.19661194], dtype="float32"),
+                        1: np.array([0, 0, 0.19661194, -0.19661194], dtype="float32"),
                         # Note that these are all zeros because this probability is clipped
                         2: np.array([0, 0, 0, 0], dtype="float32"),
                     },
@@ -362,3 +362,53 @@ class TestSigmoidLS_T3_n2:
 
     def test_update_alg(self):
         pass
+
+    # I was concerned about the weight gradients being incorrect in simulations,
+    # in particular the jax vmapping of them.
+
+
+class TestSigmoidActionProbabilitiesIsolated:
+    def test_get_pis_batched_real_numbers(self):
+        treat_states = np.array([[1.0, -1.06434164], [1.0, -0.12627351]])
+        beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
+
+        np.testing.assert_equal(
+            basic_RL_algorithms.get_pis_batched(
+                beta_est=beta_est,
+                lower_clip=0.1,
+                upper_clip=0.9,
+                steepness=10,
+                batched_treat_states_tensor=treat_states,
+            ),
+            np.array([0.1693274, 0.1], dtype=np.float32),
+        )
+
+    def test_get_action_1_prob_pure_no_clip(self):
+        treat_states = np.array([1.0, -1.06434164])
+        beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
+
+        np.testing.assert_equal(
+            basic_RL_algorithms.get_action_1_prob_pure(
+                beta_est=beta_est,
+                lower_clip=0.1,
+                upper_clip=0.9,
+                steepness=10,
+                treat_states=treat_states,
+            ),
+            np.array(0.1693274, dtype=np.float32),
+        )
+
+    def test_get_action_1_prob_pure_clip(self):
+        treat_states = np.array([1.0, -0.12627351])
+        beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
+
+        np.testing.assert_equal(
+            basic_RL_algorithms.get_action_1_prob_pure(
+                beta_est=beta_est,
+                lower_clip=0.1,
+                upper_clip=0.9,
+                steepness=10,
+                treat_states=treat_states,
+            ),
+            np.array(0.1, dtype=np.float32),
+        )

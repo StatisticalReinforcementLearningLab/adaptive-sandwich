@@ -159,8 +159,8 @@ def get_action_1_prob_pure(beta_est, lower_clip, steepness, upper_clip, treat_st
 def get_pi_gradients_batched(
     beta_est,
     lower_clip,
-    upper_clip,
     steepness,
+    upper_clip,
     batched_treat_states_tensor,
 ):
     return jax.vmap(
@@ -170,8 +170,8 @@ def get_pi_gradients_batched(
     )(
         beta_est,
         lower_clip,
-        upper_clip,
         steepness,
+        upper_clip,
         batched_treat_states_tensor,
     )
 
@@ -180,8 +180,8 @@ def get_pi_gradients_batched(
 def get_pis_batched(
     beta_est,
     lower_clip,
-    upper_clip,
     steepness,
+    upper_clip,
     batched_treat_states_tensor,
 ):
     return jax.vmap(
@@ -191,8 +191,8 @@ def get_pis_batched(
     )(
         beta_est,
         lower_clip,
-        upper_clip,
         steepness,
+        upper_clip,
         batched_treat_states_tensor,
     )
 
@@ -201,7 +201,7 @@ def get_pis_batched(
 def get_radon_nikodym_weight(
     beta, beta_target, lower_clip, steepness, upper_clip, treat_states, action
 ):
-    common_args = [lower_clip, upper_clip, steepness, treat_states]
+    common_args = [lower_clip, steepness, upper_clip, treat_states]
 
     pi_beta = get_action_1_prob_pure(beta, *common_args)[()]
     pi_beta_target = get_action_1_prob_pure(beta_target, *common_args)[()]
@@ -215,8 +215,8 @@ def get_weight_gradients_batched(
     beta_est,
     target_beta,
     lower_clip,
-    upper_clip,
     steepness,
+    upper_clip,
     batched_treat_states_tensor,
     batched_actions_tensor,
 ):
@@ -228,8 +228,8 @@ def get_weight_gradients_batched(
         beta_est,
         target_beta,
         lower_clip,
-        upper_clip,
         steepness,
+        upper_clip,
         batched_treat_states_tensor,
         batched_actions_tensor,
     )
@@ -516,12 +516,11 @@ class SigmoidLS:
         logger.info("Forming pi gradients with respect to beta.")
         # Note that we care about the probability of action 1 specifically,
         # not the taken action.
-        # TODO: verify this with Kelly
         pi_gradients = get_pi_gradients_batched(
             curr_beta_est,
             self.args.lower_clip,
-            self.args.upper_clip,
             self.args.steepness,
+            self.args.upper_clip,
             batched_treat_states_tensor,
         )
 
@@ -530,8 +529,8 @@ class SigmoidLS:
             curr_beta_est,
             curr_beta_est,
             self.args.lower_clip,
-            self.args.upper_clip,
             self.args.steepness,
+            self.args.upper_clip,
             batched_treat_states_tensor,
             batched_actions_tensor,
         )
@@ -680,8 +679,15 @@ class SigmoidLS:
         prob_input_dict = {
             "treat_states": treat_states,
         }
-        probs = self.get_action_probs_inner(beta_est.squeeze(), prob_input_dict)
-        return probs
+        # probs = self.get_action_probs_inner(beta_est.squeeze(), prob_input_dict)
+
+        return get_pis_batched(
+            beta_est.squeeze(),
+            self.args.lower_clip,
+            self.args.upper_clip,
+            self.args.steepness,
+            treat_states,
+        )
 
     def get_weights(self, beta_est, collected_data_dict, return_probs=False):
         """

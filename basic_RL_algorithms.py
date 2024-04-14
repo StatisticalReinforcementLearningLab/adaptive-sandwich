@@ -341,12 +341,10 @@ class SigmoidLS:
         new_XX = self.all_policies[-1]["XX"] + jnp.einsum(
             "ij,ik->jk", design_avail, design_avail
         )
-        try:
-            inv_XX = jnp.linalg.inv(new_XX)
-        except Exception:
-            import ipdb
 
-            ipdb.set_trace()
+        # TODO: Note this gives NANs and breaks action selection when the all
+        # users take same action?
+        inv_XX = jnp.linalg.inv(new_XX)
 
         beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1))
         beta_est_df = pd.DataFrame(
@@ -560,6 +558,7 @@ class SigmoidLS:
         # Form the dimensions for our bread matrix portion (pre-inverting). Note that we subtract
         # one from the number of policies  to find the number of updates because there is an
         # initial placeholder policy.
+
         num_updates = len(self.all_policies) - 1
         beta_dim = len(self.state_feats) + len(self.treat_feats)
         overall_dim = beta_dim * num_updates
@@ -664,6 +663,7 @@ class SigmoidLS:
         - Numpy vector of action selection probabilities
         """
 
+        # TODO: Is this problematic to do separate calculation?
         if jnp.sum(jnp.abs(self.all_policies[-1]["XX"])) == 0:
             # check if observed any non-trivial data yet
             raw_probs = (
@@ -676,16 +676,11 @@ class SigmoidLS:
 
         treat_states = curr_timestep_data[self.treat_feats].to_numpy()
 
-        prob_input_dict = {
-            "treat_states": treat_states,
-        }
-        # probs = self.get_action_probs_inner(beta_est.squeeze(), prob_input_dict)
-
         return get_pis_batched(
             beta_est.squeeze(),
             self.args.lower_clip,
-            self.args.upper_clip,
             self.args.steepness,
+            self.args.upper_clip,
             treat_states,
         )
 

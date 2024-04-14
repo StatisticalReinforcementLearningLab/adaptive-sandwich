@@ -61,6 +61,7 @@ class TestSigmoidLS_T3_n2:
                     }
                 ),
                 "seen_user_id": {1, 2},
+                "XX": np.ones(self.sigmoid_1.beta_dim),
             }
         )
         self.sigmoid_1.all_policies.append(
@@ -74,6 +75,57 @@ class TestSigmoidLS_T3_n2:
                     }
                 ),
                 "seen_user_id": {1, 2},
+                "XX": np.ones(self.sigmoid_1.beta_dim),
+            }
+        )
+
+        self.args_1 = argparse.Namespace(
+            dataset_type="synthetic",
+            verbose=0,
+            heartsteps_mode="medium",
+            synthetic_mode="delayed_1_dosage",
+            RL_alg="sigmoid_LS",
+            N=5,
+            n=2,
+            upper_clip=0.9,
+            lower_clip=0.1,
+            fixed_action_prob=0.5,
+            min_users=1,
+            err_corr="time_corr",
+            decisions_between_updates=1,
+            save_dir=".",
+            steepness=10.0,
+            alg_state_feats="intercept,past_reward",
+            action_centering=0,
+            prior="naive",
+            T=3,
+            recruit_n=50,
+            recruit_t=1,
+            allocation_sigma=1,
+            noise_var=1,
+        )
+
+        self.sigmoid_2 = basic_RL_algorithms.SigmoidLS(
+            self.args_1,
+            self.state_feats_1,
+            self.treat_feats_1,
+            alg_seed=1,
+            allocation_sigma=self.args_1.allocation_sigma,
+            steepness=self.args_1.steepness,
+        )
+
+        self.sigmoid_2.all_policies.append(
+            {
+                "beta_est": pd.DataFrame(
+                    {
+                        "intercept": [-0.16610159],
+                        "past_reward": [0.98683333],
+                        "action:intercept": [-1.287509],
+                        "action:past_reward": [-1.0602505],
+                    }
+                ),
+                "seen_user_id": {1, 2},
+                "XX": np.ones(self.sigmoid_1.beta_dim),
             }
         )
 
@@ -168,7 +220,7 @@ class TestSigmoidLS_T3_n2:
             {
                 3: {
                     # Derived by setting a breakpoint in calculate_pi_and_weight_gradients and calling
-                    # self.get_action_prob_pure(curr_beta_est, self.args.lower_clip, self.args.upper_clip, self.args.steepness, self.get_user_states(current_data, user_id)["treat_states" ][-1])
+                    # self.get_action_1_prob_pure(curr_beta_est, self.args.lower_clip, self.args.upper_clip, self.args.steepness, self.get_user_states(current_data, user_id)["treat_states" ][-1])
                     # for each user, then plugging into explicit formula.
                     # prob is 0.26894143 for user 1, .9 for user 2
                     # NOT negative of previous test despite zero action
@@ -345,30 +397,36 @@ class TestSigmoidLS_T3_n2:
     # TODO: Add test of loss derivatives with multiple updates? Had a case that
     # only broke on multiple updates...
 
-    # TODO: Should integrate next two functions with actual algorithm logic before testing
-    # UPDATE: No I shouldn't. Don't need to put that effort in for sample
-    # UPDATE: Yes you should dummy. Need to eliminate possible sources of problems
-    # when verifying simulations, at least for action probabilities.  Estimating function sum
-    # check for loss makes things more ok there. Makes sure sidecar loss is representative.
-    def test_get_loss(self):
-        pass
-
-    def test_get_action_prob_pure(self):
-        pass
-
     # Indirectly tested by testing its gradient is well-formed... but could add something direct.
     def test_get_radon_nikodym_weight(self):
         pass
 
+    def test_get_action_probs(self):
+        curr_timestep_data = pd.DataFrame(
+            {
+                "user_id": [
+                    1,
+                    2,
+                ],
+                "calendar_t": [1, 1],
+                "action": [
+                    0,
+                    1,
+                ],
+                "reward": [1.0, 1],
+                "intercept": [1.0, 1],
+                "past_reward": [-1.06434164, -0.12627351],
+            }
+        )
+        np.testing.assert_equal(
+            self.sigmoid_2.get_action_probs(curr_timestep_data),
+            np.array([0.1693274, 0.1], dtype=np.float32),
+        )
+
     def test_update_alg(self):
         pass
 
-    # I was concerned about the weight gradients being incorrect in simulations,
-    # in particular the jax vmapping of them.
-
-
-class TestSigmoidActionProbabilitiesIsolated:
-    def test_get_pis_batched_real_numbers(self):
+    def test_get_pis_batched(self):
         treat_states = np.array([[1.0, -1.06434164], [1.0, -0.12627351]])
         beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
 
@@ -376,8 +434,8 @@ class TestSigmoidActionProbabilitiesIsolated:
             basic_RL_algorithms.get_pis_batched(
                 beta_est=beta_est,
                 lower_clip=0.1,
-                upper_clip=0.9,
                 steepness=10,
+                upper_clip=0.9,
                 batched_treat_states_tensor=treat_states,
             ),
             np.array([0.1693274, 0.1], dtype=np.float32),
@@ -391,8 +449,8 @@ class TestSigmoidActionProbabilitiesIsolated:
             basic_RL_algorithms.get_action_1_prob_pure(
                 beta_est=beta_est,
                 lower_clip=0.1,
-                upper_clip=0.9,
                 steepness=10,
+                upper_clip=0.9,
                 treat_states=treat_states,
             ),
             np.array(0.1693274, dtype=np.float32),
@@ -406,8 +464,8 @@ class TestSigmoidActionProbabilitiesIsolated:
             basic_RL_algorithms.get_action_1_prob_pure(
                 beta_est=beta_est,
                 lower_clip=0.1,
-                upper_clip=0.9,
                 steepness=10,
+                upper_clip=0.9,
                 treat_states=treat_states,
             ),
             np.array(0.1, dtype=np.float32),

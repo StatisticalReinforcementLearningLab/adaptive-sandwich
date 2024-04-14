@@ -47,6 +47,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     # Loop over all decision times ###############################################
     for t in range(1, study_env.calendar_T + 1):
         logger.info("Processing decision time %s.", t)
+
         # Update study_df with info on latest policy used to select actions
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
             study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = (
@@ -56,8 +57,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                 study_RLalg.all_policies
             )
         # TODO: The if logic might also cover this case correctly
-        # If not, it probably should. Would like to not check which RL alg
-        # is being used here, as a test of a healthy abstraction
         else:
             study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = 0
             study_df.loc[study_df["calendar_t"] == t, "policy_num"] = 1
@@ -69,8 +68,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         action_probs = study_RLalg.get_action_probs(
             curr_timestep_data, filter_keyval=("calendar_t", t)
         )
-        if args.dataset_type == RLStudyArgs.HEARTSTEPS:
-            action_probs *= curr_timestep_data["availability"]
 
         actions = study_RLalg.rng.binomial(1, action_probs)
 
@@ -220,7 +217,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
 
     logger.info("Running simulations...")
     # *5000 to avoid neighboring seeds just in case...
-    # important that env and alg seed are different
+    # Important that env and alg seed are different.
     # Note how parallel_task_index is used to get different seeds
     # when multiple simulations are being run in parallel.  In that case
     # we should have N = 1 in each simulation, so that there is only
@@ -229,8 +226,15 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     # task index is 1, so for a typical non-parallel run with N > 1 the seeds
     # will be completely determined by the iterator i.
     for i in range(1, args.N + 1):
-        env_seed = args.parallel_task_index * i * 5000
-        alg_seed = args.parallel_task_index * (args.N + i) * 5000
+        # env_seed = args.parallel_task_index * i * 5000
+        # alg_seed = args.parallel_task_index * (args.N + i) * 5000
+        # TODO: Set back to repeated seeds eventually?
+        env_seed = int(time.time())
+        alg_seed = int(time.time()) + 5000
+        # TODO: These produce a noninvertible XX matrix with n=2, T=2
+        # env_seed = 1713050031
+        # alg_seed = 1713055031
+        logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()
         if i > 1:

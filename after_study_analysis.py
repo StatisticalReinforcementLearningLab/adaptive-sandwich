@@ -149,7 +149,7 @@ def collect_existing_analyses(input_glob):
         raise RuntimeError("Aborting because no files found. Please check path.")
 
     for i, filename in enumerate(filenames):
-        if i % (len(filenames) // 10) == 0:
+        if i and i % (len(filenames) // 10) == 0:
             logger.info("A(nother) tenth of files processed.")
         if not os.stat(filename).st_size:
             raise RuntimeError(
@@ -870,8 +870,8 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
     normalized_hessian = np.mean(loss_hessians, axis=0)
 
     # degrees of freedom adjustment
-    # TODO: Provide reference
-    meat = meat * (num_users - 1) / (num_users - theta_dim)
+    # TODO: Reinstate? Provide reference? Mentioned in sandwich package
+    # meat = meat * (num_users - 1) / (num_users - theta_dim)
 
     logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)

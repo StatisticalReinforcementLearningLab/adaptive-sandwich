@@ -229,8 +229,8 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # env_seed = args.parallel_task_index * i * 5000
         # alg_seed = args.parallel_task_index * (args.N + i) * 5000
         # TODO: Set back to repeated seeds eventually?
-        env_seed = int(time.time())
-        alg_seed = int(time.time()) + 5000
+        env_seed = int(time.time()) + args.parallel_task_index * i * 5000
+        alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
         # TODO: These produce a noninvertible XX matrix with n=2, T=2
         # env_seed = 1713050031
         # alg_seed = 1713055031

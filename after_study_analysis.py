@@ -504,6 +504,8 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering):
         loss_hessians,
         loss_gradient_pi_derivatives,
     )
+    logger.info("Adaptive joint bread inverse:")
+    logger.info(joint_bread_inverse_matrix)
     joint_bread_matrix = invert_matrix_and_check_conditioning(
         joint_bread_inverse_matrix
     )
@@ -519,6 +521,8 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering):
         user_ids,
         loss_gradients,
     )
+    logger.info("Adaptive joint meat:")
+    logger.info(joint_meat_matrix)
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
@@ -868,6 +872,10 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
 
     logger.info("Forming classical bread inverse.")
     normalized_hessian = np.mean(loss_hessians, axis=0)
+    logger.info("Classical bread (pre-inversion):")
+    logger.info(normalized_hessian)
+    logger.info("Classical meat:")
+    logger.info(meat)
 
     # degrees of freedom adjustment
     # TODO: Reinstate? Provide reference? Mentioned in sandwich package

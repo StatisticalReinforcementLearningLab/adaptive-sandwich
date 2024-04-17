@@ -350,17 +350,6 @@ def main():
     )
     parser.add_argument("--verbose", type=int, default=0, help="Prints helpful info")
     parser.add_argument(
-        "--heartsteps_mode",
-        default=RLStudyArgs.MEDIUM,
-        choices=[
-            RLStudyArgs.EVALSIM,
-            RLStudyArgs.REALISTIC,
-            RLStudyArgs.MEDIUM,
-            RLStudyArgs.EASY,
-        ],
-        help="Sets default parameter values accordingly",
-    )
-    parser.add_argument(
         "--synthetic_mode",
         type=str,
         default=RLStudyArgs.DELAYED_EFFECTS,

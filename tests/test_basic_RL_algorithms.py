@@ -15,7 +15,6 @@ class TestSigmoidLS_T3_n2:
         self.args_1 = argparse.Namespace(
             dataset_type="synthetic",
             verbose=0,
-            heartsteps_mode="medium",
             synthetic_mode="delayed_1_dosage",
             RL_alg="sigmoid_LS",
             N=5,
@@ -82,7 +81,6 @@ class TestSigmoidLS_T3_n2:
         self.args_1 = argparse.Namespace(
             dataset_type="synthetic",
             verbose=0,
-            heartsteps_mode="medium",
             synthetic_mode="delayed_1_dosage",
             RL_alg="sigmoid_LS",
             N=5,

@@ -792,7 +792,7 @@ def form_bread_inverse_matrix(
                     "weight_gradients_by_user_id"
                 ][user_id]
 
-            running_entry_holder += jnp.outer(theta_loss_gradient, weight_gradient_sum)
+            running_entry_holder += jnp.outer(weight_gradient_sum, theta_loss_gradient)
 
             # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece
             # is a bit intricate; we only have the theta loss function in terms of the pis,

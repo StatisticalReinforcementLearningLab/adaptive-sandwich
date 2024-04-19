@@ -229,14 +229,14 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # env_seed = args.parallel_task_index * i * 5000
         # alg_seed = args.parallel_task_index * (args.N + i) * 5000
         # TODO: Set back to repeated seeds eventually?
-        # env_seed = int(time.time()) + args.parallel_task_index * i * 5000
-        # alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
+        env_seed = int(time.time()) + args.parallel_task_index * i * 5000
+        alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
         # env_seed = 1713299542
         # alg_seed = 1713304542
         # env_seed = 1713490887
         # alg_seed = 1713495887
-        env_seed = 1713491843
-        alg_seed = 1713496843
+        # env_seed = 1713491843
+        # alg_seed = 1713496843
         logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()

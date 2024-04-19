@@ -9,7 +9,8 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 T=10
 decisions_between_updates=1
 # recruit_n=25; recruit_t=2
-recruit_n=100; recruit_t=1
+# recruit_n=100;
+recruit_t=1
 n=100
 min_users=1
 synthetic_mode='delayed_1_dosage'
@@ -63,6 +64,8 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning RL study simulation."
 #TODO: Action centering doesn't work in a general way, just for posterior sampling
+#TODO: I put n in for recruit n. May need to change when we have incremental recruitment
+recruit_n=$n
 python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 

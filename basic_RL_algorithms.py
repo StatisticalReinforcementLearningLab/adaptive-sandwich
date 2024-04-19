@@ -7,12 +7,10 @@ import logging
 import pandas as pd
 import scipy.special
 import torch
-import numpy_indexed as npi
 import jax
 from jax import numpy as jnp
 import numpy as np
 
-import least_squares_helper
 from helper_functions import (
     conditional_x_or_one_minus_x,
     clip,

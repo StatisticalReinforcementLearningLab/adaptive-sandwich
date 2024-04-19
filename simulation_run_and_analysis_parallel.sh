@@ -32,7 +32,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 T=3
 recruit_t=1
 decisions_between_updates=1
-recruit_n=100
+# recruit_n=100
 n=100
 min_users=1
 RL_alg="sigmoid_LS"
@@ -104,6 +104,8 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning RL simulations.
+#TODO: I put n in for recruit n. May need to change when we have incremental recruitment
+recruit_n=$n
 python rl_study_simulation.py --T=$T --N=1 --parallel_task_index=$SLURM_ARRAY_TASK_ID --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL --save_dir=$save_dir
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
 

@@ -605,7 +605,8 @@ class SigmoidLS:
                         ]["weight_gradients_by_user_id"][user_id]
 
                     running_entry_holder += jnp.outer(
-                        weight_gradient_sum, loss_gradient
+                        loss_gradient,
+                        weight_gradient_sum,
                     )
 
                     # TODO: if we have action-centering, there will be an additional hessian

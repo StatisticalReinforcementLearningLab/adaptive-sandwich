@@ -229,6 +229,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # env_seed = args.parallel_task_index * i * 5000
         # alg_seed = args.parallel_task_index * (args.N + i) * 5000
         # TODO: Set back to repeated seeds eventually?
+        # TODO: This does result in same seed for task 0
         env_seed = int(time.time()) + args.parallel_task_index * i * 5000
         alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
         # env_seed = 1713299542

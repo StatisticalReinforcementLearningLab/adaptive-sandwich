@@ -409,7 +409,6 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
 def analyze_dataset(
     study_dataframe_pickle, rl_algorithm_object_pickle, profile, action_centering
 ):
-
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
         datefmt="%Y-%m-%d:%H:%M:%S",
@@ -419,6 +418,9 @@ def analyze_dataset(
     if profile:
         pr = cProfile.Profile()
         pr.enable()
+
+    if action_centering:
+        logging.info("Action centering is ENABLED for inference.")
 
     # Load study data
     study_df = pickle.load(study_dataframe_pickle)
@@ -767,7 +769,8 @@ def form_bread_inverse_matrix(
         for user_id in user_ids
     }
 
-    # Think of each iteration of this loop as creating one term in the final (block) row
+    # Think of each iteration of this loop as creating one off-diagonal term in
+    # the final (block) row
     bottom_left_row_blocks = []
     for i in range(len(update_times)):
         lower_t = update_times_and_upper_limit[i]
@@ -776,12 +779,12 @@ def form_bread_inverse_matrix(
 
         # This loop calculates the per-user quantities that will be
         # averaged for the final matrix entries
-        for i, user_id in enumerate(user_ids):
+        for j, user_id in enumerate(user_ids):
             # 1. We first form the outer product of the estimating equation for theta
             # and the sum of the weight gradients with respect to beta for the
             # corresponding decision times
 
-            theta_loss_gradient = loss_gradients[i]
+            theta_loss_gradient = loss_gradients[j]
 
             weight_gradient_sum = jnp.zeros(beta_dim)
 

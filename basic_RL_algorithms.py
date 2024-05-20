@@ -418,6 +418,7 @@ class SigmoidLS:
         batched_actions_list = []
         batched_rewards_list = []
 
+        # TODO: This step is the bottleneck, interestingly
         logger.info("Collecting batched input data as lists.")
         for user_id in self.all_policies[-1]["seen_user_id"]:
             filtered_user_data = all_prev_data.loc[all_prev_data.user_id == user_id]

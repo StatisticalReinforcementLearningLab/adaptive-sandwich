@@ -44,24 +44,27 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     # study_df is a data frame with a record of all data collected in study
     study_df = study_env.make_empty_study_df(args, user_env_data)
 
+    max_calendar_t = study_df["calendar_t"].max()
+
     # Loop over all decision times ###############################################
-    for t in range(1, study_env.calendar_T + 1):
+    for t in range(1, max_calendar_t + 1):
         logger.info("Processing decision time %s.", t)
 
+        curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1)
+
         # Update study_df with info on latest policy used to select actions
+        # TODO: these two columns are wrong
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = (
-                study_RLalg.all_policies[-1]["policy_last_t"]
-            )
-            study_df.loc[study_df["calendar_t"] == t, "policy_num"] = len(
-                study_RLalg.all_policies
-            )
+            study_df.loc[curr_time_bool, "policy_last_t"] = study_RLalg.all_policies[
+                -1
+            ]["policy_last_t"]
+            study_df.loc[curr_time_bool, "policy_num"] = len(study_RLalg.all_policies)
         # TODO: The if logic might also cover this case correctly
         else:
-            study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = 0
-            study_df.loc[study_df["calendar_t"] == t, "policy_num"] = 1
+            study_df.loc[curr_time_bool, "policy_last_t"] = 0
+            study_df.loc[curr_time_bool, "policy_num"] = 1
 
-        curr_timestep_data = study_df[study_df["calendar_t"] == t]
+        curr_timestep_data = study_df[curr_time_bool]
 
         # Sample Actions #####################################################
         logger.info("Sampling actions for time %s.", t)
@@ -84,17 +87,26 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         if args.dataset_type == RLStudyArgs.ORALYTICS:
             fill_columns = ["reward", "brush_time", "action", "action1prob"]
             fill_vals = np.vstack([rewards, brush_times, actions, action_probs]).T
-            study_df.loc[study_df["calendar_t"] == t, fill_columns] = fill_vals
+            study_df.loc[
+                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
+                fill_columns,
+            ] = fill_vals
         else:
             fill_columns = ["reward", "action", "action1prob"]
             fill_vals = np.vstack([rewards, actions, action_probs]).T
-            study_df.loc[study_df["calendar_t"] == t, fill_columns] = fill_vals
+            study_df.loc[
+                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
+                fill_columns,
+            ] = fill_vals
 
         if t < study_env.calendar_T:
             logger.info("Updating study df for time %s.", t)
             # Record data to prepare for state at next decision time
             study_df = study_env.update_study_df(study_df, t)
 
+        # Note that we DO NOT filter to in_study == 1 here.  The way we calculate the gradients
+        # we need in batches requires same-size state inputs for each user, so we actually
+        # want to pass states for when users are not in the study but zero them out.
         all_prev_data_bool = study_df["calendar_t"] <= t
         all_prev_data = study_df[all_prev_data_bool]
 
@@ -102,36 +114,44 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # quantities that will be needed to form the "bread" matrix in the end.
         if t > args.decisions_between_updates:
             logger.info("Calculating pi and weight gradients for time %s.", t)
-            study_RLalg.calculate_pi_and_weight_gradients(all_prev_data, calendar_t=t)
+            curr_beta_est = study_RLalg.get_current_beta_estimate()
+            study_RLalg.calculate_pi_and_weight_gradients(
+                all_prev_data, t, curr_beta_est
+            )
 
         # Check if need to update algorithm #######################################
+        # TODO: recruit_t not respected here.  Either remove it or use here.
         if (
             t < study_env.calendar_T
             and t % args.decisions_between_updates == 0
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
         ):
-            # check enough users; if so, update algorithm
             most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
 
-            new_obs_bool = np.logical_and(
-                all_prev_data_bool,
-                study_df["calendar_t"] > most_recent_policy_t,
+            # TODO: Verify whether we should be filtering to in_study. It is likely
+            # the answer is yes if the code doesn't error, since any problems
+            # would likely be shape-related if we needed to not filter out.
+            new_obs_bool = (
+                all_prev_data_bool
+                & (study_df["calendar_t"] > most_recent_policy_t)
+                & (study_df["in_study"] == 1)
             )
             new_update_data = study_df[new_obs_bool]
 
-            prev_num_users = len(study_df[study_df["calendar_t"] == t])
-            if prev_num_users >= args.min_users:
-                # Update Algorithm ##############################################
-                logger.info("Updating algorithm parameters for time %s.", t)
-                study_RLalg.update_alg(new_update_data, update_last_t=t)
-                # TODO: Actually should probably just do this in update_alg, otherwise makes part
-                # of general RL alg contract
-                # TODO: Also if we build the matrix, don't need the loss deriv separately?
-                logger.info(
-                    "Calculate loss gradients per user and average hessian for time %s.",
-                    t,
-                )
-                study_RLalg.calculate_loss_derivatives(all_prev_data, calendar_t=t)
+            # Previously there was some logic about only updating if min num users met.
+            # I (Nowell) removed because it was intricate to coordinate with incr. recruitment.
+            # We now always update.  This makes the min_users param unused currently.
+
+            # Update Algorithm ##############################################
+            logger.info("Updating algorithm parameters for time %s.", t)
+            study_RLalg.update_alg(new_update_data, update_last_t=t)
+            logger.info(
+                "Calculate loss gradients per user and average hessian for time %s.",
+                t,
+            )
+
+            curr_beta_est = study_RLalg.get_current_beta_estimate()
+            study_RLalg.calculate_loss_derivatives(all_prev_data, t, curr_beta_est)
 
     logger.info("Constructing upper left bread inverse matrix")
     study_RLalg.construct_upper_left_bread_inverse()
@@ -228,16 +248,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     for i in range(1, args.N + 1):
         # env_seed = args.parallel_task_index * i * 5000
         # alg_seed = args.parallel_task_index * (args.N + i) * 5000
-        # TODO: Set back to repeated seeds eventually?
-        # TODO: This does result in same seed for task 0
-        env_seed = int(time.time()) + args.parallel_task_index * i * 5000
+        # TODO: Set back to fixed seeds eventually?
+        env_seed = int(time.time()) + args.parallel_task_index * i * 5000 + 1
         alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
-        # env_seed = 1713299542
-        # alg_seed = 1713304542
-        # env_seed = 1713490887
-        # alg_seed = 1713495887
-        # env_seed = 1713491843
-        # alg_seed = 1713496843
         logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()
@@ -319,7 +332,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
 
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
             study_df = study_df.astype(
-                {"policy_num": "int32", "policy_last_t": "int32", "action": "int32"}
+                {"policy_num": "Int64", "policy_last_t": "Int64", "action": "Int64"}
             )
 
         study_df.to_csv(f"{folder_path}/data.csv", index=False)

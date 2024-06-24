@@ -136,7 +136,6 @@ class SmoothPosteriorSampling:
 
         # Only include available data
         calendar_t = new_data["calendar_t"].to_numpy().reshape(-1, 1)
-        user_t = new_data["user_t"].to_numpy().reshape(-1, 1)
         user_id = new_data["user_id"].to_numpy()
         if self.args.dataset_type == "heartsteps":
             avail_bool = new_data["availability"].astype("bool")
@@ -144,7 +143,6 @@ class SmoothPosteriorSampling:
             design_avail = design[avail_bool]
             user_id_avail = user_id[avail_bool]
             calendar_t = calendar_t[avail_bool]
-            user_t = user_t[avail_bool]
         else:
             avail_bool = np.ones(rewards.shape)
             rewards_avail = rewards
@@ -189,7 +187,6 @@ class SmoothPosteriorSampling:
             "avail": avail_bool.flatten(),
             "user_id": user_id_avail,
             "calendar_t": calendar_t.flatten(),
-            "user_t": user_t.flatten(),
             "norm_samples": tmp_norm_samples,  # noise used to collect inc data
             # "design" : design,
         }

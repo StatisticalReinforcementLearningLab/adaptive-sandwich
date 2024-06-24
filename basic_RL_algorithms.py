@@ -77,7 +77,7 @@ def sigmoid_LS_torch(args, batch_est_treat, treat_states, allocation_sigma):
 # Update Update: We can differentiate for all users at once with jacrev.
 # TODO: Unite with update_alg logic somehow?
 # TODO: Docstring
-@jax.jit
+# @jax.jit
 def get_loss(beta_est, base_states, treat_states, actions, rewards):
     beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)
     beta_1_est = beta_est[base_states.shape[1] :].reshape(-1, 1)
@@ -94,7 +94,7 @@ def get_loss(beta_est, base_states, treat_states, actions, rewards):
 
 
 # Consider jitting
-# For the loss gradients, we can form the sum of all users values and differentiate that with one
+# For the loss gradients, we can form the sum of all users' values and differentiate that with one
 # call. Instead, this alternative structure which generalizes to the pi function case.
 # TODO: Docstring
 @jax.jit
@@ -280,23 +280,30 @@ class SigmoidLS:
         self.upper_left_bread_inverse = None
         self.algorithm_statistics_by_calendar_t = {}
 
+    # TODO: All of these functions arguably should not modify the dataframe...
+    # Should be making a new dataframe and modifying that, or expecting the data
+    # to be formatted as such (though I don't like the latter). Going with this
+    # for now.
+
     # TODO: Docstring
-    def get_base_states(self, df):
+    def get_base_states(self, df, in_study_col="in_study"):
+        df.loc[df[in_study_col] == 0, self.state_feats] = 0
         base_states = df[self.state_feats].to_numpy()
         return jnp.array(base_states)
 
-    def get_treat_states(self, df):
+    def get_treat_states(self, df, in_study_col="in_study"):
+        df.loc[df[in_study_col] == 0, self.treat_feats] = 0
         treat_states = df[self.treat_feats].to_numpy()
         return jnp.array(treat_states)
 
-    # TODO: Allow general reward column names
-    def get_rewards(self, df):
-        rewards = df["reward"].to_numpy().reshape(-1, 1)
+    def get_rewards(self, df, reward_col="reward", in_study_col="in_study"):
+        df.loc[df[in_study_col] == 0, reward_col] = 0
+        rewards = df[reward_col].to_numpy().reshape(-1, 1)
         return jnp.array(rewards)
 
-    # TODO: Allow general action column names
-    def get_actions(self, df):
-        actions = df["action"].to_numpy().reshape(-1, 1)
+    def get_actions(self, df, action_col="action", in_study_col="in_study"):
+        df.loc[df[in_study_col] == 0, action_col] = 0
+        actions = df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
     # TODO: Docstring
@@ -305,7 +312,6 @@ class SigmoidLS:
         treat_states = df[self.treat_feats].to_numpy()
         return (base_states, treat_states)
 
-    # TODO: Make sure correct while debugging simulations
     def update_alg(self, new_data, update_last_t):
         """
         Update algorithm with new data
@@ -328,7 +334,6 @@ class SigmoidLS:
 
         # Only include available data
         calendar_t = new_data["calendar_t"].to_numpy().reshape(-1, 1)
-        user_t = new_data["user_t"].to_numpy().reshape(-1, 1)
         rewards_avail = rewards
         avail_bool = jnp.ones(rewards.shape)
         design_avail = design
@@ -362,7 +367,6 @@ class SigmoidLS:
             "avail": avail_bool.flatten(),
             "user_id": user_id_avail,
             "calendar_t": calendar_t.flatten(),
-            "user_t": user_t.flatten(),
             "design": design,
         }
         update_dict = {
@@ -377,26 +381,19 @@ class SigmoidLS:
 
         self.all_policies.append(update_dict)
 
+    def get_active_users(
+        self, study_df, in_study_column="in_study", user_id_column="user_id"
+    ):
+        return study_df[study_df[in_study_column] == 1][user_id_column].unique()
+
+    def get_current_beta_estimate(self):
+        return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
+
     # TODO: Docstring
     # TODO: probably cleaner to pass in current beta estimate
     # TODO: JIT whole function? or just gradient and hessian batch functions
-    def calculate_loss_derivatives(
-        self,
-        all_prev_data,
-        calendar_t,
-    ):
+    def calculate_loss_derivatives(self, all_prev_data, calendar_t, curr_beta_est):
         logger.info("Calculating loss gradients and hessians with respect to beta.")
-        # Note that it is possible to reconstruct all the data we need by
-        # stitching together the incremental data in self.all_policies.
-        # However, this is complicated logic, and it seems cleaner to just pass
-        # in all study data so far here
-
-        # Get the beta estimate saved in the last algorithm update
-        curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
-
-        # TODO: verify that we don't need hessian for each user, can
-        # differentiate sum of est eqns instead.
-        # Yeah, Hessian calculation per user takes lots of time, probably avoid.
 
         # Because we perform algorithm updates at the *end* of a timestep, the
         # first timestep they apply to is one more than the time of the update.
@@ -418,9 +415,10 @@ class SigmoidLS:
         batched_actions_list = []
         batched_rewards_list = []
 
-        # TODO: This step is the bottleneck, interestingly
+        # This step is the bottleneck, interestingly
         logger.info("Collecting batched input data as lists.")
-        for user_id in self.all_policies[-1]["seen_user_id"]:
+        active_user_ids = self.get_active_users(all_prev_data)
+        for user_id in active_user_ids:
             filtered_user_data = all_prev_data.loc[all_prev_data.user_id == user_id]
             batched_base_states_list.append(self.get_base_states(filtered_user_data))
             batched_treat_states_list.append(self.get_treat_states(filtered_user_data))
@@ -429,10 +427,10 @@ class SigmoidLS:
 
         # TODO: dstack breaks with incremental recruitment
         logger.info("Reforming batched data lists into tensors.")
-        batched_base_states_tensor = jnp.dstack(batched_base_states_list)
-        batched_treat_states_tensor = jnp.dstack(batched_treat_states_list)
-        batched_actions_tensor = jnp.dstack(batched_actions_list)
-        batched_rewards_tensor = jnp.dstack(batched_rewards_list)
+        batched_base_states_tensor = np.dstack(batched_base_states_list)
+        batched_treat_states_tensor = np.dstack(batched_treat_states_list)
+        batched_actions_tensor = np.dstack(batched_actions_list)
+        batched_rewards_tensor = np.dstack(batched_rewards_list)
 
         logger.info("Forming loss gradients with respect to beta.")
         gradients = get_loss_gradients_batched(
@@ -453,21 +451,20 @@ class SigmoidLS:
         logger.info("Collecting loss gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
-        ] = {
-            user_id: gradients[i]
-            for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
-        }
+        ] = {user_id: gradients[i] for i, user_id in enumerate(active_user_ids)}
 
         logger.info("Forming average hessian and storing in algorithm stats dictionary")
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
-        ] = jnp.mean(hessians, axis=0)
+        ] = np.mean(hessians, axis=0)
 
     # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
     # calculate correctly for any t captured in data provided. Also a little
     # weird that only the data at calendar_t is needed but we pass in more data.
     # TODO: Probably cleaner to pass in current beta estimate
-    def calculate_pi_and_weight_gradients(self, current_data, calendar_t):
+    def calculate_pi_and_weight_gradients(
+        self, current_data, calendar_t, curr_beta_est
+    ):
         """
         For all users, compute the gradient with respect to beta of both the pi function
         (which takes an action and state and gives the probability of selecting the action)
@@ -492,13 +489,13 @@ class SigmoidLS:
         logger.info("Calculating pi and weight gradients with respect to beta.")
         assert calendar_t == jnp.max(current_data["calendar_t"].to_numpy())
 
-        curr_beta_est = self.all_policies[-1]["beta_est"].to_numpy().squeeze()
-
         batched_treat_states_list = []
         batched_actions_list = []
 
+        active_user_ids = self.get_active_users(current_data)
+
         logger.info("Collecting batched input data as lists.")
-        for user_id in self.all_policies[-1]["seen_user_id"]:
+        for user_id in active_user_ids:
             filtered_user_data = current_data.loc[current_data.user_id == user_id]
             batched_treat_states_list.append(
                 self.get_treat_states(filtered_user_data)[-1]
@@ -535,18 +532,12 @@ class SigmoidLS:
         logger.info("Collecting pi gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "pi_gradients_by_user_id"
-        ] = {
-            user_id: pi_gradients[i]
-            for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
-        }
+        ] = {user_id: pi_gradients[i] for i, user_id in enumerate(active_user_ids)}
 
         logger.info("Collecting weight gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "weight_gradients_by_user_id"
-        ] = {
-            user_id: weight_gradients[i]
-            for i, user_id in enumerate(self.all_policies[-1]["seen_user_id"])
-        }
+        ] = {user_id: weight_gradients[i] for i, user_id in enumerate(active_user_ids)}
 
     # TODO: Docstring
     # TODO: Use jnp.block to reduce need for indexing
@@ -558,26 +549,29 @@ class SigmoidLS:
         # one from the number of policies  to find the number of updates because there is an
         # initial placeholder policy.
 
+        # TODO: derive from policy_num column or list of betas
         num_updates = len(self.all_policies) - 1
+        # TODO: derive from an actual beta
         beta_dim = len(self.state_feats) + len(self.treat_feats)
         overall_dim = beta_dim * num_updates
         output_matrix = jnp.zeros((overall_dim, overall_dim))
 
         # List of times that were the first applicable time for some update
         # TODO: sort to not rely on insertion order?
-        update_times = [
+        # TODO: use policy_num in df? alg statistics potentially ok too though.
+        next_times_after_update = [
             t
             for t, value in self.algorithm_statistics_by_calendar_t.items()
             if "loss_gradients_by_user_id" in value
         ]
 
+        # TODO: use study_df.  Verify we want all users
         num_users = len(self.all_policies[-1]["seen_user_id"])
 
         # This loop iterates over all times that were the first applicable time
-        # for a non-initial policy, which we call update times. Take care
-        # to note that update_idx starts at 0.
+        # for a non-initial policy. Take care to note that update_idx starts at 0.
         # Think of each iteration of this loop as creating a (block) row of the matrix
-        for update_idx, update_t in enumerate(update_times):
+        for update_idx, update_t in enumerate(next_times_after_update):
             logger.info("Processing update time %s.", update_t)
             t_stats_dict = self.algorithm_statistics_by_calendar_t[update_t]
 
@@ -598,8 +592,8 @@ class SigmoidLS:
                     # according to what was used for each update to collect the
                     # right weight gradients
                     for t in range(
-                        update_times[i],
-                        update_times[i + 1],
+                        next_times_after_update[i],
+                        next_times_after_update[i + 1],
                     ):
                         weight_gradient_sum += self.algorithm_statistics_by_calendar_t[
                             t

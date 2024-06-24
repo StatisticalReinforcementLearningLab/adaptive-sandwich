@@ -231,156 +231,6 @@ def collect_existing_analyses(input_glob):
     )
 
 
-# TODO: Eventually these commands will just take like the algo statistics object and
-# anything else we need after parsing by intermediate package.
-# TODO: This command should handle saving the pickled objects eventually if it
-# sticks around.
-@cli.command()
-@click.option(
-    "--input_folder",
-    type=click.Path(exists=True),
-    help="A parent folder containing a series of subfolders with the required files",
-    required=True,
-)
-@click.option(
-    "--study_dataframe_pickle_filename",
-    help="The name of the pickled pandas dataframe in each folder",
-    required=True,
-)
-@click.option(
-    "--rl_algorithm_object_pickle_filename",
-    help="The name of the pickled RL algorithm in each folder",
-    required=True,
-)
-@click.option(
-    "--profile",
-    default=False,
-    is_flag=True,
-    help="If supplied, the important computations will be profiled with summary output shown",
-)
-@click.option(
-    "--action_centering",  # TODO: This needs to be handled more generall and not as an int
-    type=int,
-    default=0,
-)
-def analyze_multiple_datasets_and_compare_to_empirical_variance(
-    input_folder,
-    study_dataframe_pickle_filename,
-    rl_algorithm_object_pickle_filename,
-    profile,
-    action_centering,
-):
-    """
-    For each of the supplied input_folders, extract the pickled study dataframe
-    and RL algorithm object using the supplied filenames. Analyze each
-    dataset and compute the empirical variance to compare with the mean adaptive
-    sandwich variance.
-    """
-    if profile:
-        pr = cProfile.Profile()
-        pr.enable()
-
-    logging.basicConfig(
-        format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-        datefmt="%Y-%m-%d:%H:%M:%S",
-        level=logging.INFO,
-    )
-
-    theta_estimates = []
-    adaptive_sandwich_var_estimates = []
-    classical_sandwich_var_estimates = []
-
-    for subfolder in os.listdir(input_folder):
-        # We care about folders, not files
-        if os.path.isfile(os.path.join(input_folder, subfolder)):
-            continue
-
-        logger.info("Processing folder %s", subfolder)
-        # Check to make sure each subfolder contains the two required files
-        contains_study_df = False
-        contains_rl_alg = False
-
-        for filename in os.listdir(os.path.join(input_folder, subfolder)):
-            # Skip other files
-            if filename not in {
-                study_dataframe_pickle_filename,
-                rl_algorithm_object_pickle_filename,
-            }:
-                continue
-
-            # Check that objects at these paths are actually files (not folders)
-            f = os.path.join(input_folder, subfolder, filename)
-            if not os.path.isfile(f):
-                raise RuntimeError(f"Required path {f} exists but it is not a file")
-
-            # Record when we've found files of each type
-            if filename == study_dataframe_pickle_filename:
-                contains_study_df = True
-            elif filename == rl_algorithm_object_pickle_filename:
-                contains_rl_alg = True
-
-            if contains_study_df and contains_rl_alg:
-                break
-        else:
-            raise RuntimeError(
-                f"Folder {subfolder} did not contain at least one the required files {study_dataframe_pickle_filename} and {rl_algorithm_object_pickle_filename}"
-            )
-
-        logger.info("Contains required files, let's proceed to analysis.")
-        # If we got here, both required files were found. Analyze this dataset.
-        with open(
-            os.path.join(input_folder, subfolder, study_dataframe_pickle_filename),
-            "+rb",
-        ) as study_dataframe_pickle:
-            with open(
-                os.path.join(
-                    input_folder, subfolder, rl_algorithm_object_pickle_filename
-                ),
-                "+rb",
-            ) as rl_algorithm_object_pickle:
-                study_df = pickle.load(study_dataframe_pickle)
-                study_RLalg = pickle.load(rl_algorithm_object_pickle)
-
-                (
-                    theta_est,
-                    adaptive_sandwich_var,
-                    classical_sandwich_var,
-                ) = analyze_dataset_inner(study_df, study_RLalg, bool(action_centering))
-
-                theta_estimates.append(theta_est)
-                adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
-                classical_sandwich_var_estimates.append(classical_sandwich_var)
-
-    theta_estimates = np.array(theta_estimates)
-    adaptive_sandwich_var_estimates = np.array(adaptive_sandwich_var_estimates)
-    classical_sandwich_var_estimates = np.array(classical_sandwich_var_estimates)
-
-    theta_estimate = np.mean(theta_estimates, axis=0)
-    empirical_var_normalized = np.cov(theta_estimates.T, ddof=0)
-    mean_adaptive_sandwich_var_estimate = np.mean(
-        adaptive_sandwich_var_estimates, axis=0
-    )
-    mean_classical_sandwich_var_estimate = np.mean(
-        classical_sandwich_var_estimates, axis=0
-    )
-
-    print(f"\nParameter estimate:\n{theta_estimate}")
-    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
-    print(
-        f"\nAdaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
-    )
-    print(
-        f"\nClassical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
-    )
-
-    # TODO: Save results to sensible output directory, perhaps where input data is.
-
-    if profile:
-        pr.disable()
-        stats = Stats(pr)
-        stats.sort_stats("cumtime").print_stats(50)
-
-
 # TODO: ADD redo analysis toggle?
 @cli.command()
 @click.option(
@@ -402,12 +252,21 @@ def analyze_multiple_datasets_and_compare_to_empirical_variance(
     help="If supplied, the important computations will be profiled with summary output shown",
 )
 @click.option(
-    "--action_centering",  # TODO: This needs to be handled more generall and not as an int
+    "--action_centering",  # TODO: This needs to be handled more generally and not as an int
     type=int,
     default=0,
 )
+@click.option(
+    "--in_study_column",
+    type=str,
+    default="in_study",
+)
 def analyze_dataset(
-    study_dataframe_pickle, rl_algorithm_object_pickle, profile, action_centering
+    study_dataframe_pickle,
+    rl_algorithm_object_pickle,
+    profile,
+    action_centering,
+    in_study_column,
 ):
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -428,7 +287,9 @@ def analyze_dataset(
 
     # Analyze data
     theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
-        analyze_dataset_inner(study_df, study_RLalg, bool(action_centering))
+        analyze_dataset_inner(
+            study_df, study_RLalg, bool(action_centering), in_study_column
+        )
     )
 
     # Write analysis results to same directory as input files
@@ -457,7 +318,7 @@ def analyze_dataset(
 
 # TODO: docstring
 # TODO: Collect all jax things and then einsum away?
-def analyze_dataset_inner(study_df, study_RLalg, action_centering):
+def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_column):
 
     # List of times that were the first applicable time for some update
     # Sorting shouldn't be necessary, as insertion order should be chronological
@@ -474,7 +335,11 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering):
     # Estimate the inferential target using the supplied study data.
     logger.info("Forming theta estimate.")
     theta_est = estimate_theta(
-        study_df, study_RLalg.state_feats, study_RLalg.treat_feats, action_centering
+        study_df,
+        study_RLalg.state_feats,
+        study_RLalg.treat_feats,
+        action_centering,
+        in_study_column,
     )
 
     logger.info("Forming adaptive sandwich variance estimator.")
@@ -547,20 +412,24 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering):
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?
 # TODO: doc string
-def estimate_theta(study_df, state_feats, treat_feats, action_centering):
+def estimate_theta(
+    study_df, state_feats, treat_feats, action_centering, in_study_column
+):
     # Note that the intercept is included in the features already (col of 1s)
     linear_model = LinearRegression(fit_intercept=False)
 
     # Note the role of the action centering flag in here in determining whether
     # we subtract action probabilities from actions (multiplying by a boolean
     # in python is like multiplying by 1 if True and 0 if False).
-    trimmed_df = study_df[state_feats].copy()
+    in_study_bool = study_df[in_study_column] == 1
+    trimmed_df = study_df.loc[in_study_bool, state_feats].copy()
+    in_study_df = study_df[in_study_bool]
     for feat in treat_feats:
-        trimmed_df[f"action:{feat}"] = study_df[feat] * (
-            study_df["action"] - (study_df["action1prob"] * action_centering)
+        trimmed_df[f"action:{feat}"] = in_study_df[feat] * (
+            in_study_df["action"] - (in_study_df["action1prob"] * action_centering)
         )
 
-    linear_model.fit(trimmed_df, study_df["reward"])
+    linear_model.fit(trimmed_df, in_study_df["reward"])
 
     return linear_model.coef_
 
@@ -636,13 +505,22 @@ def form_meat_matrix(
     num_rows_cols = beta_dim * len(update_times) + theta_dim
     running_meat_matrix = jnp.zeros((num_rows_cols, num_rows_cols)).astype(jnp.float32)
     estimating_function_sum = jnp.zeros((num_rows_cols, 1))
+    fallback_beta_gradient = jnp.zeros(beta_dim)
 
     for i, user_id in enumerate(user_ids):
         user_meat_vector = jnp.concatenate(
+            # beta estimating functions
+            # TODO: Pretty sure this should have zeros when not in study but verify
+            # TODO: Should arguably set things up so fallback isn't needed (0 gradients
+            # for everyone not in study) but maybe good to have regardless. Could
+            # also add a check that all update times have gradients for all users.
             [
-                algo_stats_dict[t]["loss_gradients_by_user_id"][user_id]
+                algo_stats_dict[t]["loss_gradients_by_user_id"].get(
+                    user_id, fallback_beta_gradient
+                )
                 for t in update_times
             ]
+            # theta estimating function
             + [loss_gradients[i]],
         ).reshape(-1, 1)
         running_meat_matrix += jnp.outer(user_meat_vector, user_meat_vector)
@@ -663,31 +541,39 @@ def form_meat_matrix(
 
 
 # TODO: Docstring
-def get_base_states(df, state_feats):
+def get_base_states(df, state_feats, in_study_col="in_study"):
+    df.loc[df[in_study_col] == 0, state_feats] = 0
     base_states = df[state_feats].to_numpy()
     return jnp.array(base_states)
 
 
-def get_treat_states(df, treat_feats):
+# TODO: We can really only have one state-getting function in general
+def get_treat_states(df, treat_feats, in_study_col="in_study"):
+    df.loc[df[in_study_col] == 0, treat_feats] = 0
     treat_states = df[treat_feats].to_numpy()
     return jnp.array(treat_states)
 
 
 # TODO: Allow general reward column names
-def get_rewards(df):
-    rewards = df["reward"].to_numpy().reshape(-1, 1)
+# TODO: Type conversion here a little sloppy
+def get_rewards(df, in_study_col="in_study", reward_col="reward"):
+    df.loc[df[in_study_col] == 0, reward_col] = 0
+    rewards = df["reward"].to_numpy(dtype="float64").reshape(-1, 1)
     return jnp.array(rewards)
 
 
 # TODO: Allow general action column names
-def get_actions(df):
-    actions = df["action"].to_numpy().reshape(-1, 1)
+# TODO: Type conversion here a little sloppy
+def get_actions(df, in_study_col="in_study", action_col="action"):
+    df.loc[df[in_study_col] == 0, action_col] = 0
+    actions = df["action"].to_numpy(dtype="int32").reshape(-1, 1)
     return jnp.array(actions)
 
 
 # TODO: Allow general action column names
+# TODO: Type conversion here a little sloppy
 def get_action1probs(df):
-    action1probs = df["action1prob"].to_numpy().reshape(-1, 1)
+    action1probs = df["action1prob"].to_numpy(dtype="float64").reshape(-1, 1)
     return jnp.array(action1probs)
 
 
@@ -756,6 +642,8 @@ def form_bread_inverse_matrix(
     # times before the first update to be in correspondence with the above data
     # structure.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
+    # TODO: These look weird, too many zeros maybe for
+    # ./run_local.sh --T=2 --n=8 --steepness=0.5 --alg_state_feats=intercept,past_reward --recruit_n=4
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(
@@ -790,6 +678,7 @@ def form_bread_inverse_matrix(
 
             # This loop iterates over decision times in slices between updates
             # to collect the right weight gradients
+            # TODO: related to pis, these seem weirdly sparse. check format
             for t in range(lower_t, upper_t):
                 weight_gradient_sum += algo_stats_dict[t][
                     "weight_gradients_by_user_id"
@@ -818,6 +707,9 @@ def form_bread_inverse_matrix(
             # TODO: *Only* do this when action centering or otherwise using pis
             # NOTE THAT OUR HELPER DATA STRUCTURES ARE 0-INDEXED, SO WE SUBTRACT
             # 1 FROM OUR TIME BOUNDS.
+            # TODO: how does this work with incremental recruitment? Hopefully
+            # burden is all on setting up the two derivative dicts, and then logic
+            # holds
             mixed_theta_beta_loss_derivative = jnp.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,

@@ -744,6 +744,7 @@ def form_bread_inverse_matrix(
 # TODO: Needs tests
 # TODO: Complete docstring
 # TODO: Don't recompute things already computed for adaptive sandwich (or vice versa)
+# TODO: verify works with incremental recruitment
 def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
     """
     Forms standard sandwich variance estimator for inference (thetahat)

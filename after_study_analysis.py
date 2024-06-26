@@ -175,7 +175,9 @@ def collect_existing_analyses(input_glob):
     classical_sandwich_var_estimates = np.array(classical_sandwich_var_estimates)
 
     theta_estimate = np.mean(theta_estimates, axis=0)
-    empirical_var_normalized = np.cov(theta_estimates.T, ddof=0)
+    empirical_var_normalized = empirical_var_normalized = np.atleast_2d(
+        np.cov(theta_estimates.T, ddof=0)
+    )
     mean_adaptive_sandwich_var_estimate = np.mean(
         adaptive_sandwich_var_estimates, axis=0
     )

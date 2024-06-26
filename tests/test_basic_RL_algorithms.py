@@ -135,6 +135,7 @@ class TestSigmoidLS_T3_n2:
                 "reward": [1.0, -1, 0, 1, 0, 1],
                 "intercept": [1.0, 1, 1, 1, 1, 1],
                 "past_reward": [0.0, 1, -1, 1, 1, 0],
+                "in_study": [1, 1, 1, 1, 1, 1],
             }
         )
 
@@ -146,6 +147,7 @@ class TestSigmoidLS_T3_n2:
                 "reward": [1.0, -1, 0, 1, 0, 1],
                 "intercept": [1.0, 1, 1, 1, 1, 1],
                 "past_reward": [0.0, 1, -1, 1, 1, -10],
+                "in_study": [1, 1, 1, 1, 1, 1],
             }
         )
 
@@ -158,6 +160,7 @@ class TestSigmoidLS_T3_n2:
                 "reward": [-1, 0, -1, 0],
                 "intercept": [1, 1, 1, 1],
                 "past_reward": [1, -1, 1, -1],
+                "in_study": [1, 1, 1, 1],
             }
         )
 
@@ -170,8 +173,12 @@ class TestSigmoidLS_T3_n2:
         2 (the df doesn't build incrementally from time 2 to 3 but that's fine) simply to test
         that each of the results goes to the correct key.
         """
-        self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_3, 2)
-        self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_1, 3)
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_3, 2, self.sigmoid_1.get_current_beta_estimate()
+        )
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_1, 3, self.sigmoid_1.get_current_beta_estimate()
+        )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {
@@ -212,7 +219,9 @@ class TestSigmoidLS_T3_n2:
         User 1 takes no action, meaning negative gradient case, and User 2
         gets clipped at .1, meaning zero gradient.
         """
-        self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_2, 3)
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_2, 3, self.sigmoid_1.get_current_beta_estimate()
+        )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {
@@ -367,7 +376,9 @@ class TestSigmoidLS_T3_n2:
         )
 
     def test_calculate_loss_derivatives(self):
-        self.sigmoid_1.calculate_loss_derivatives(self.study_df_1, 2)
+        self.sigmoid_1.calculate_loss_derivatives(
+            self.study_df_1, 2, self.sigmoid_1.get_current_beta_estimate()
+        )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {

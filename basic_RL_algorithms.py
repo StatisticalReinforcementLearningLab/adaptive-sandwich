@@ -255,7 +255,8 @@ class SigmoidLS:
     # TODO: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
     # to be formatted as such (though I don't like the latter). Going with this
-    # for now.
+    # for now. This modification also raises a warning about setting a slice on
+    # a copy, but the modification seems to work perfectly.
 
     # TODO: Docstring
     def get_base_states(self, df, in_study_col="in_study"):

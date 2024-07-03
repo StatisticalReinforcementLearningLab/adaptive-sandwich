@@ -121,14 +121,14 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             and t % args.decisions_between_updates == 0
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
         ):
-            most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
+            last_policy_num = len(study_RLalg.all_policies) - 1
 
             # TODO: Verify whether we should be filtering to in_study. It is likely
             # the answer is yes if the code doesn't error, since any problems
             # would likely be shape-related if we needed to not filter out.
             new_obs_bool = (
                 all_prev_data_bool
-                & (study_df["calendar_t"] > most_recent_policy_t)
+                & (study_df["policy_num"] > last_policy_num)
                 & (study_df["in_study"] == 1)
             )
             new_update_data = study_df[new_obs_bool]

@@ -238,7 +238,6 @@ class SigmoidLS:
         # Set an initial policy
         self.all_policies = [
             {
-                "policy_last_t": 0,
                 "RX": jnp.zeros(self.beta_dim),
                 "XX": jnp.zeros(self.beta_dim),
                 "beta_est": pd.DataFrame(
@@ -343,7 +342,6 @@ class SigmoidLS:
             "design": design,
         }
         update_dict = {
-            "policy_last_t": update_last_t,
             "total_obs": self.all_policies[-1]["total_obs"] + len(new_data),
             "RX": new_RX,
             "XX": new_XX,

@@ -6,7 +6,6 @@ import logging
 
 import pandas as pd
 import scipy.special
-import torch
 import jax
 from jax import numpy as jnp
 import numpy as np
@@ -52,30 +51,8 @@ class FixedRandomization:
         )
 
 
-def torch_clip(args, vals):
-    lower_clipped = torch.max(vals, torch.ones(vals.shape) * args.lower_clip)
-    clipped = torch.min(lower_clipped, torch.ones(vals.shape) * args.upper_clip)
-    return clipped
-
-
-def sigmoid_LS_torch(args, batch_est_treat, treat_states, allocation_sigma):
-    # States
-    treat_states_torch = torch.from_numpy(treat_states.to_numpy())
-
-    # Form Probabilities
-    lin_est = torch.sum(batch_est_treat * treat_states_torch, axis=1)
-    pis = torch_clip(args, torch.sigmoid(args.steepness * lin_est / allocation_sigma))
-
-    # below genralized logistic (different asymptotes)
-    # pis = torch_clip( args, args.lower_clip +
-    #                 (args.upper_clip-args.lower_clip) * torch.sigmoid( args.steepness*lin_est/allocation_sigma ) )
-
-    return pis
-
-
 # TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
-# Update Update: We can differentiate for all users at once with jacrev.
-# TODO: Unite with update_alg logic somehow?
+# Update Update: We *could* differentiate for all users at once with jacrev.
 # TODO: Docstring
 # @jax.jit
 def get_loss(beta_est, base_states, treat_states, actions, rewards):
@@ -140,10 +117,6 @@ def get_loss_hessians_batched(
     )
 
 
-# TODO: Unite with method that does same thing. Needed pure function here.
-# Might need to use jacrev to do so
-# TODO: Docstring
-# See https://arxiv.org/pdf/2006.06903.pdf
 # TODO: Docstring
 def get_action_1_prob_pure(beta_est, lower_clip, steepness, upper_clip, treat_states):
     treat_est = beta_est[-len(treat_states) :]
@@ -253,22 +226,6 @@ class SigmoidLS:
 
         self.rng = np.random.default_rng(self.alg_seed)
         self.beta_dim = len(self.state_feats) + len(self.treat_feats)
-        # Set an initial policy
-        self.all_policies = [
-            {
-                "policy_last_t": 0,
-                "RX": jnp.zeros(self.beta_dim),
-                "XX": jnp.zeros(self.beta_dim),
-                "beta_est": pd.DataFrame(),
-                # TODO: verify changing this to inc_data and {} instead of None is ok. Was inconsistent
-                # before. also changed beta est to empty df
-                # Then standardize this format by making a function that takes all the args
-                # This could possibly be more broad than for sigmoid only.
-                "inc_data": {},
-                "total_obs": 0,
-                "seen_user_id": set(),
-            }
-        ]
 
         self.treat_feats_action = ["action:" + x for x in self.treat_feats]
         self.treat_bool = jnp.array(
@@ -277,6 +234,22 @@ class SigmoidLS:
                 for x in self.state_feats + self.treat_feats_action
             ]
         )
+
+        # Set an initial policy
+        self.all_policies = [
+            {
+                "policy_last_t": 0,
+                "RX": jnp.zeros(self.beta_dim),
+                "XX": jnp.zeros(self.beta_dim),
+                "beta_est": pd.DataFrame(
+                    jnp.zeros(self.beta_dim).reshape(1, -1),
+                    columns=self.state_feats + self.treat_feats_action,
+                ),
+                "inc_data": {},
+                "total_obs": 0,
+                "seen_user_id": set(),
+            }
+        ]
         self.upper_left_bread_inverse = None
         self.algorithm_statistics_by_calendar_t = {}
 
@@ -656,14 +629,6 @@ class SigmoidLS:
         Outputs:
         - Numpy vector of action selection probabilities
         """
-
-        # TODO: Is this problematic to do separate calculation?
-        if jnp.sum(jnp.abs(self.all_policies[-1]["XX"])) == 0:
-            # check if observed any non-trivial data yet
-            raw_probs = (
-                jnp.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
-            )
-            return clip(self.args, raw_probs)
 
         beta_est_df = self.all_policies[-1]["beta_est"].copy()
         beta_est = beta_est_df.to_numpy()

@@ -53,16 +53,11 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1)
 
         # Update study_df with info on latest policy used to select actions
-        # TODO: these two columns are wrong
-        if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df.loc[curr_time_bool, "policy_last_t"] = study_RLalg.all_policies[
-                -1
-            ]["policy_last_t"]
-            study_df.loc[curr_time_bool, "policy_num"] = len(study_RLalg.all_policies)
-        # TODO: The if logic might also cover this case correctly
-        else:
-            study_df.loc[curr_time_bool, "policy_last_t"] = 0
-            study_df.loc[curr_time_bool, "policy_num"] = 1
+        study_df.loc[curr_time_bool, "policy_num"] = (
+            1
+            if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION
+            else len(study_RLalg.all_policies)
+        )
 
         curr_timestep_data = study_df[curr_time_bool]
 
@@ -199,20 +194,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         )
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
-        mode = None
-        paramf_path = "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
-        param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
-        user_env_data = {"bern_params": bern_params, "poisson_params": poisson_params}
-        exp_str = "{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}".format(
-            args.dataset_type,
-            args.RL_alg,
-            args.T,
-            args.n,
-            args.recruit_n,
-            args.decisions_between_updates,
-            args.steepness,
-            args.action_centering,
-        )
+        raise NotImplementedError()
+        # If we want this, there is an implementation in the replicable  bandits
+        # repo
 
     else:
         raise ValueError("Invalid Dataset Type")

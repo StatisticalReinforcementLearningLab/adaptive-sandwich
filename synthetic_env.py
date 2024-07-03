@@ -44,7 +44,6 @@ def make_base_study_df(args, all_cols=None):
     if all_cols is None:
         all_cols = [
             "user_id",
-            "policy_last_t",
             "policy_num",
             "last_t",
             "entry_t",
@@ -66,7 +65,6 @@ def make_base_study_df(args, all_cols=None):
 
     # Used to index into reward noise in an incremental-recruitment-friendly way
     study_df["in_study_row_index"] = study_df["in_study"].cumsum() - 1
-    study_df["policy_last_t"] = np.repeat(np.nan, max_calendar_t * args.n)
     study_df["policy_num"] = np.repeat(np.nan, max_calendar_t * args.n)
     study_df["last_t"] = np.repeat(last_times, max_calendar_t)
     study_df["entry_t"] = np.repeat(entry_times, max_calendar_t)
@@ -211,7 +209,6 @@ class SyntheticEnv:
     def make_empty_study_df(self, args, user_df):
         base_cols = [
             "user_id",
-            "policy_last_t",
             "policy_num",
             "last_t",
             "entry_t",

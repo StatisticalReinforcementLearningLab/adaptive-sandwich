@@ -10,9 +10,7 @@ import numpy as np
 import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env, SyntheticEnv
-from oralytics_env import load_oralytics_env, OralyticsEnv
 from basic_RL_algorithms import FixedRandomization, SigmoidLS
-from smooth_posterior_sampling import SmoothPosteriorSampling
 from constants import RLStudyArgs
 
 logger = logging.getLogger(__name__)
@@ -123,9 +121,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         ):
             last_policy_num = len(study_RLalg.all_policies) - 1
 
-            # TODO: Verify whether we should be filtering to in_study. It is likely
-            # the answer is yes if the code doesn't error, since any problems
-            # would likely be shape-related if we needed to not filter out.
             new_obs_bool = (
                 all_prev_data_bool
                 & (study_df["policy_num"] > last_policy_num)
@@ -133,15 +128,13 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             )
             new_update_data = study_df[new_obs_bool]
 
-            # Previously there was some logic about only updating if min num users met.
-            # I (Nowell) removed because it was intricate to coordinate with incr. recruitment.
-            # We now always update.  This makes the min_users param unused currently.
+            # Min users used to be enforced here. It is ignored now.
 
             # Update Algorithm ##############################################
             logger.info("Updating algorithm parameters for time %s.", t)
             study_RLalg.update_alg(new_update_data, update_last_t=t)
             logger.info(
-                "Calculate loss gradients per user and average hessian for time %s.",
+                "Calculating loss gradients per user and average hessian for time %s.",
                 t,
             )
 
@@ -150,11 +143,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
     logger.info("Constructing upper left bread inverse matrix")
     study_RLalg.construct_upper_left_bread_inverse()
-
-    if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
-        fill_columns = ["policy_last_t", "policy_num"]
-        for col in fill_columns:
-            study_RLalg.norm_samples_df[col] = study_df[col].to_numpy().copy()
 
     return study_df, study_RLalg
 
@@ -274,31 +262,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 alg_seed=alg_seed,
                 steepness=args.steepness,
             )
-        elif args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
-            if args.prior == RLStudyArgs.NAIVE:
-                if args.action_centering:
-                    total_dim = len(alg_state_feats) + len(alg_treat_feats) * 2
-                    prior_mean = np.ones(total_dim) * 0.1
-                    prior_var = np.eye(total_dim) * 2
-                else:
-                    total_dim = len(alg_state_feats) + len(alg_treat_feats)
-                    prior_mean = np.ones(total_dim) * 0.1
-                    prior_var = np.eye(total_dim) * 0.5
-
-            else:
-                raise ValueError(f"Invalid prior type: {args.prior}")
-            study_RLalg = SmoothPosteriorSampling(
-                args,
-                alg_state_feats,
-                alg_treat_feats,
-                alg_seed=alg_seed,
-                allocation_sigma=args.allocation_sigma,
-                steepness=args.steepness,
-                prior_mean=prior_mean,
-                prior_var=prior_var,
-                noise_var=args.noise_var,
-                action_centering=args.action_centering,
-            )
         else:
             raise ValueError("Invalid RL Algorithm Type")
 
@@ -347,7 +310,7 @@ def main():
         "--dataset_type",
         type=str,
         default=RLStudyArgs.SYNTHETIC,
-        choices=[RLStudyArgs.HEARTSTEPS, RLStudyArgs.SYNTHETIC, RLStudyArgs.ORALYTICS],
+        choices=[RLStudyArgs.SYNTHETIC],
     )
     parser.add_argument("--verbose", type=int, default=0, help="Prints helpful info")
     parser.add_argument(
@@ -362,7 +325,6 @@ def main():
         choices=[
             RLStudyArgs.FIXED_RANDOMIZATION,
             RLStudyArgs.SIGMOID_LS,
-            RLStudyArgs.POSTERIOR_SAMPLING,
         ],
         help="RL algorithm used to select actions",
     )
@@ -468,25 +430,6 @@ def main():
             f"past_action_{i}_reward" for i in range(1, past_action_len + 1)
         ]
         gen_feats = past_action_cols + past_reward_action_cols + ["dosage"]
-
-    elif tmp_args.dataset_type == RLStudyArgs.ORALYTICS:
-        default_arg_dict = {
-            RLStudyArgs.T: 50,
-            RLStudyArgs.RECRUIT_N: tmp_args.n,
-            RLStudyArgs.RECRUIT_T: 1,
-            RLStudyArgs.ALLOCATION_SIGMA: 1,
-            RLStudyArgs.NOISE_VAR: 1,
-        }
-
-        # allocation_sigma: 163 (truncated brush times); 5.7 (square-root of truncated brush times)
-
-        alg_state_feats = [
-            RLStudyArgs.INTERCEPT,
-            RLStudyArgs.TIME_OF_DAY,
-            RLStudyArgs.PRIOR_DAY_BRUSH,
-        ]
-        alg_treat_feats = alg_state_feats
-
     else:
         raise ValueError("Invalid Dataset Type")
 

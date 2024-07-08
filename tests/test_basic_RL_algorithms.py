@@ -12,7 +12,7 @@ class TestSigmoidLS_T3_n2:
         """
         Runs anew before each test
         """
-        self.args_1 = argparse.Namespace(
+        args_1 = argparse.Namespace(
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
@@ -36,18 +36,18 @@ class TestSigmoidLS_T3_n2:
             allocation_sigma=1,
             noise_var=1,
         )
-        self.state_feats_1 = [
+        self.state_feats = [
             constants.RLStudyArgs.INTERCEPT,
             constants.RLStudyArgs.PAST_REWARD,
         ]
-        self.treat_feats_1 = self.state_feats_1
+        self.treat_feats = self.state_feats
         self.sigmoid_1 = basic_RL_algorithms.SigmoidLS(
-            self.args_1,
-            self.state_feats_1,
-            self.treat_feats_1,
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
             alg_seed=1,
-            allocation_sigma=self.args_1.allocation_sigma,
-            steepness=self.args_1.steepness,
+            steepness=args_1.steepness,
+            lower_clip=args_1.lower_clip,
+            upper_clip=args_1.upper_clip,
         )
         self.sigmoid_1.all_policies.append(
             {
@@ -78,7 +78,7 @@ class TestSigmoidLS_T3_n2:
             }
         )
 
-        self.args_1 = argparse.Namespace(
+        args_2 = argparse.Namespace(
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
@@ -104,12 +104,12 @@ class TestSigmoidLS_T3_n2:
         )
 
         self.sigmoid_2 = basic_RL_algorithms.SigmoidLS(
-            self.args_1,
-            self.state_feats_1,
-            self.treat_feats_1,
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
             alg_seed=1,
-            allocation_sigma=self.args_1.allocation_sigma,
-            steepness=self.args_1.steepness,
+            steepness=args_2.steepness,
+            lower_clip=args_2.lower_clip,
+            upper_clip=args_2.upper_clip,
         )
 
         self.sigmoid_2.all_policies.append(

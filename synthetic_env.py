@@ -73,7 +73,7 @@ def make_base_study_df(args, all_cols=None):
     return study_df
 
 
-def load_synthetic_env(paramf_path="./synthetic_env_params/delayed_effects.txt"):
+def load_synthetic_env_params(paramf_path="./synthetic_env_params/delayed_effects.txt"):
     """
     Goal:
         - Load synethetic model parameters
@@ -226,12 +226,12 @@ class SyntheticEnv:
 
         # initialize values
         study_df["intercept"] = 1
+        first_entry_bool = study_df["calendar_t"] == study_df["entry_t"]
 
         zero_cols = [x for x in self.gen_feats if x not in base_cols]
-        study_df.loc[study_df["calendar_t"] == 1, zero_cols] = 0
+        study_df.loc[first_entry_bool, zero_cols] = 0
 
         initial_past_rewards = self.rng.normal(0, 0.5, size=args.n)
-        first_entry_bool = study_df["calendar_t"] == study_df["entry_t"]
         study_df.loc[first_entry_bool, "past_reward"] = initial_past_rewards
         study_df.loc[first_entry_bool, "past_action_1"] = 0
         study_df.loc[first_entry_bool, "past_action_1_reward"] = 0

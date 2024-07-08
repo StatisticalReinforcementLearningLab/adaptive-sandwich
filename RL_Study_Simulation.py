@@ -9,7 +9,7 @@ import logging
 import numpy as np
 import cloudpickle as pickle
 
-from synthetic_env import load_synthetic_env, SyntheticEnv
+from synthetic_env import load_synthetic_env_params, SyntheticEnv
 from basic_RL_algorithms import FixedRandomization, SigmoidLS
 from constants import RLStudyArgs
 
@@ -164,7 +164,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         mode = args.synthetic_mode
         user_env_data = None
         paramf_path = f"./synthetic_env_params/{mode}.txt"
-        env_params = load_synthetic_env(paramf_path)
+        env_params = load_synthetic_env_params(paramf_path)
         if len(env_params.shape) == 2:
             assert env_params.shape[0] >= args.T
         exp_str = "{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}".format(
@@ -241,10 +241,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 gen_feats=gen_feats,
                 err_corr=args.err_corr,
             )
-        elif args.dataset_type == RLStudyArgs.ORALYTICS:
-            study_env = OralyticsEnv(
-                args, param_names, bern_params, poisson_params, env_seed=env_seed
-            )
         else:
             raise ValueError("Invalid Dataset Type")
 
@@ -255,12 +251,12 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             )
         elif args.RL_alg == RLStudyArgs.SIGMOID_LS:
             study_RLalg = SigmoidLS(
-                args,
-                alg_state_feats,
-                alg_treat_feats,
-                allocation_sigma=args.allocation_sigma,
+                state_feats=alg_state_feats,
+                treat_feats=alg_treat_feats,
                 alg_seed=alg_seed,
                 steepness=args.steepness,
+                lower_clip=args.lower_clip,
+                upper_clip=args.upper_clip,
             )
         else:
             raise ValueError("Invalid RL Algorithm Type")
@@ -278,9 +274,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             os.mkdir(folder_path)
 
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df = study_df.astype(
-                {"policy_num": "Int64", "policy_last_t": "Int64", "action": "Int64"}
-            )
+            study_df = study_df.astype({"policy_num": "Int64", "action": "Int64"})
 
         study_df.to_csv(f"{folder_path}/data.csv", index=False)
         with open(f"{folder_path}/study_df.pkl", "wb") as f:

@@ -35,20 +35,14 @@ class FixedRandomization:
         self.treat_feats = treat_feats
 
     def update_alg(self, new_data, t):
-        raise ValueError("Fixed randomization never updated")
+        raise NotImplementedError("Fixed randomization never updated")
 
     def get_action_probs(self, curr_timestep_data, filter_keyval):
         raw_probs = jnp.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
-        return clip(self.args, raw_probs)
+        return clip(self.args.lower_clip, self.args.upper_clip, raw_probs)
 
     def get_pi_gradients(self, user_states):
-        raise ValueError("Fixed randomization no policy gradients")
-
-    def get_est_eqn(self, data_sofar):
-        raise ValueError(
-            "Fixed randomization no need for \
-                                     estimating equation of policy"
-        )
+        raise NotImplementedError("Fixed randomization no policy gradients")
 
 
 # TODO: should be able to stack all users. Update IDK about this for differentiation reasons.
@@ -214,16 +208,21 @@ class SigmoidLS:
     """
 
     def __init__(
-        self, args, state_feats, treat_feats, alg_seed, allocation_sigma, steepness
+        self,
+        state_feats,
+        treat_feats,
+        alg_seed,
+        steepness,
+        lower_clip,
+        upper_clip,
     ):
-        self.args = args
         self.state_feats = state_feats
         self.treat_feats = treat_feats
         self.alg_seed = alg_seed
-        self.allocation_sigma = allocation_sigma
         # Note that steepness = 0 should remove learning adaptivity, with action probabilities of .5
         self.steepness = steepness
-
+        self.lower_clip = lower_clip
+        self.upper_clip = upper_clip
         self.rng = np.random.default_rng(self.alg_seed)
         self.beta_dim = len(self.state_feats) + len(self.treat_feats)
 
@@ -358,6 +357,9 @@ class SigmoidLS:
     ):
         return study_df[study_df[in_study_column] == 1][user_id_column].unique()
 
+    def get_all_users(self, study_df, user_id_column="user_id"):
+        return study_df[user_id_column].unique()
+
     def get_current_beta_estimate(self):
         return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
@@ -389,8 +391,10 @@ class SigmoidLS:
 
         # This step is the bottleneck, interestingly
         logger.info("Collecting batched input data as lists.")
-        active_user_ids = self.get_active_users(all_prev_data)
-        for user_id in active_user_ids:
+
+        # Note that we want to get
+        all_user_ids = self.get_all_users(all_prev_data)
+        for user_id in all_user_ids:
             filtered_user_data = all_prev_data.loc[all_prev_data.user_id == user_id]
             batched_base_states_list.append(self.get_base_states(filtered_user_data))
             batched_treat_states_list.append(self.get_treat_states(filtered_user_data))
@@ -423,17 +427,13 @@ class SigmoidLS:
         logger.info("Collecting loss gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
-        ] = {user_id: gradients[i] for i, user_id in enumerate(active_user_ids)}
+        ] = {user_id: gradients[i] for i, user_id in enumerate(all_user_ids)}
 
         logger.info("Forming average hessian and storing in algorithm stats dictionary")
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = np.mean(hessians, axis=0)
 
-    # TODO: kinda weird how most recent beta is implicitly used.  Should perhaps
-    # calculate correctly for any t captured in data provided. Also a little
-    # weird that only the data at calendar_t is needed but we pass in more data.
-    # TODO: Probably cleaner to pass in current beta estimate
     def calculate_pi_and_weight_gradients(
         self, current_data, calendar_t, curr_beta_est
     ):
@@ -464,10 +464,10 @@ class SigmoidLS:
         batched_treat_states_list = []
         batched_actions_list = []
 
-        active_user_ids = self.get_active_users(current_data)
+        all_user_ids = self.get_all_users(current_data)
 
         logger.info("Collecting batched input data as lists.")
-        for user_id in active_user_ids:
+        for user_id in all_user_ids:
             filtered_user_data = current_data.loc[current_data.user_id == user_id]
             batched_treat_states_list.append(
                 self.get_treat_states(filtered_user_data)[-1]
@@ -484,9 +484,9 @@ class SigmoidLS:
         # not the taken action.
         pi_gradients = get_pi_gradients_batched(
             curr_beta_est,
-            self.args.lower_clip,
-            self.args.steepness,
-            self.args.upper_clip,
+            self.lower_clip,
+            self.steepness,
+            self.upper_clip,
             batched_treat_states_tensor,
         )
 
@@ -494,9 +494,9 @@ class SigmoidLS:
         weight_gradients = get_weight_gradients_batched(
             curr_beta_est,
             curr_beta_est,
-            self.args.lower_clip,
-            self.args.steepness,
-            self.args.upper_clip,
+            self.lower_clip,
+            self.steepness,
+            self.upper_clip,
             batched_treat_states_tensor,
             batched_actions_tensor,
         )
@@ -504,12 +504,12 @@ class SigmoidLS:
         logger.info("Collecting pi gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "pi_gradients_by_user_id"
-        ] = {user_id: pi_gradients[i] for i, user_id in enumerate(active_user_ids)}
+        ] = {user_id: pi_gradients[i] for i, user_id in enumerate(all_user_ids)}
 
         logger.info("Collecting weight gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(calendar_t, {})[
             "weight_gradients_by_user_id"
-        ] = {user_id: weight_gradients[i] for i, user_id in enumerate(active_user_ids)}
+        ] = {user_id: weight_gradients[i] for i, user_id in enumerate(all_user_ids)}
 
     # TODO: Docstring
     # TODO: Use jnp.block to reduce need for indexing
@@ -567,9 +567,14 @@ class SigmoidLS:
                         next_times_after_update[i],
                         next_times_after_update[i + 1],
                     ):
-                        weight_gradient_sum += self.algorithm_statistics_by_calendar_t[
-                            t
-                        ]["weight_gradients_by_user_id"][user_id]
+                        try:
+                            weight_gradient_sum += (
+                                self.algorithm_statistics_by_calendar_t[t][
+                                    "weight_gradients_by_user_id"
+                                ][user_id]
+                            )
+                        except:
+                            breakpoint()
 
                     running_entry_holder += jnp.outer(
                         loss_gradient,
@@ -610,10 +615,10 @@ class SigmoidLS:
         treat_est = beta_est[self.treat_bool]
         lin_est = jnp.matmul(prob_input_dict["treat_states"], treat_est)
 
-        raw_probs = scipy.special.expit(self.args.steepness * lin_est)
+        raw_probs = scipy.special.expit(self.steepness * lin_est)
         # TODO: hiding things in args like this makes code harder to follow
         # TODO: can use np clip
-        probs = clip(self.args, raw_probs)
+        probs = clip(self.lower_clip, self.upper_clip, raw_probs)
 
         return probs.squeeze()
 
@@ -636,8 +641,8 @@ class SigmoidLS:
 
         return get_pis_batched(
             beta_est.squeeze(),
-            self.args.lower_clip,
-            self.args.steepness,
-            self.args.upper_clip,
+            self.lower_clip,
+            self.steepness,
+            self.upper_clip,
             treat_states,
         )

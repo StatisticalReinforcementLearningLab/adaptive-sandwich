@@ -287,8 +287,6 @@ def analyze_dataset(
     study_df = pickle.load(study_dataframe_pickle)
     study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
-    breakpoint()
-
     # Analyze data
     theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
         analyze_dataset_inner(

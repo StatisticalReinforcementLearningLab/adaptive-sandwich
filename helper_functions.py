@@ -7,9 +7,9 @@ def conditional_x_or_one_minus_x(x, condition):
     return (1 - condition) + (2 * condition - 1) * x
 
 
-def clip(args, vals):
-    lower_clipped = np.maximum(vals, args.lower_clip)
-    clipped = np.minimum(lower_clipped, args.upper_clip)
+def clip(lower_clip, upper_clip, vals):
+    lower_clipped = np.maximum(vals, lower_clip)
+    clipped = np.minimum(lower_clipped, upper_clip)
     return clipped
 
 

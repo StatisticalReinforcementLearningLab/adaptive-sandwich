@@ -139,6 +139,30 @@ class TestSigmoidLS_T3_n2:
             }
         )
 
+        self.study_df_1 = pd.DataFrame(
+            {
+                "user_id": [1, 1, 1, 2, 2, 2],
+                "calendar_t": [1, 2, 3, 1, 2, 3],
+                "action": [0, 1, 1, 1, 1, 0],
+                "reward": [1.0, -1, 0, 1, 0, 1],
+                "intercept": [1.0, 1, 1, 1, 1, 1],
+                "past_reward": [0.0, 1, -1, 1, 1, 0],
+                "in_study": [1, 1, 1, 1, 1, 1],
+            }
+        )
+
+        self.study_df_1_incremental = pd.DataFrame(
+            {
+                "user_id": [1, 1, 1, 1, 2, 2, 2, 2],
+                "calendar_t": [1, 2, 3, 4, 1, 2, 3, 4],
+                "action": [0, 1, 1, None, None, 1, 1, 0],
+                "reward": [1.0, -1, 0, None, None, 1, 0, 1],
+                "intercept": [1.0, 1, 1, 1, 1, 1, 1, 1],
+                "past_reward": [0.0, 1, -1, None, None, 1, 1, 0],
+                "in_study": [1, 1, 1, 0, 0, 1, 1, 1],
+            }
+        )
+
         self.study_df_2 = pd.DataFrame(
             {
                 "user_id": [1, 1, 1, 2, 2, 2],
@@ -161,6 +185,18 @@ class TestSigmoidLS_T3_n2:
                 "intercept": [1, 1, 1, 1],
                 "past_reward": [1, -1, 1, -1],
                 "in_study": [1, 1, 1, 1],
+            }
+        )
+
+        self.study_df_3_incremental = pd.DataFrame(
+            {
+                "user_id": [1, 1, 1, 2, 2, 2],
+                "calendar_t": [1, 2, 3, 1, 2, 3],
+                "action": [1, 1, None, None, 1, 1],
+                "reward": [-1, 0, None, None, -1, 0],
+                "intercept": [1, 1, 1, 1, 1, 1],
+                "past_reward": [1, -1, None, None, 1, -1],
+                "in_study": [1, 1, 0, 0, 1, 1],
             }
         )
 
@@ -215,6 +251,38 @@ class TestSigmoidLS_T3_n2:
         )
 
     def test_calculate_pi_and_weight_gradients_zero_action_low_clip(self):
+        """
+        User 1 takes no action, meaning negative gradient case, and User 2
+        gets clipped at .1, meaning zero gradient.
+        """
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_2, 3, self.sigmoid_1.get_current_beta_estimate()
+        )
+        np.testing.assert_equal(
+            self.sigmoid_1.algorithm_statistics_by_calendar_t,
+            {
+                3: {
+                    # Derived by setting a breakpoint in calculate_pi_and_weight_gradients and calling
+                    # self.get_action_1_prob_pure(curr_beta_est, self.args.lower_clip, self.args.upper_clip, self.args.steepness, self.get_user_states(current_data, user_id)["treat_states" ][-1])
+                    # for each user, then plugging into explicit formula.
+                    # prob is 0.26894143 for user 1, .9 for user 2
+                    # NOT negative of previous test despite zero action
+                    "pi_gradients_by_user_id": {
+                        1: np.array([0, 0, 0.19661194, -0.19661194], dtype="float32"),
+                        # Note that these are all zeros because this probability is clipped
+                        2: np.array([0, 0, 0, 0], dtype="float32"),
+                    },
+                    # derived using pi and pi gradients from above (two derivative cases depending
+                    # on action are easy to calculate)
+                    "weight_gradients_by_user_id": {
+                        1: np.array([0, 0, -0.26894143, 0.26894143], dtype="float32"),
+                        2: np.array([0, 0, 0, 0], dtype="float32"),
+                    },
+                },
+            },
+        )
+
+    def test_calculate_pi_and_weight_gradients_incremental_recruitment(self):
         """
         User 1 takes no action, meaning negative gradient case, and User 2
         gets clipped at .1, meaning zero gradient.

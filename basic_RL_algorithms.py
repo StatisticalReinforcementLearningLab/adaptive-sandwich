@@ -255,7 +255,7 @@ class SigmoidLS:
     # Should be making a new dataframe and modifying that, or expecting the data
     # to be formatted as such (though I don't like the latter). Going with this
     # for now. This modification also raises a warning about setting a slice on
-    # a copy, but the modification seems to work perfectly.
+    # a copy, but it seems to work perfectly.
 
     # TODO: Docstring
     def get_base_states(self, df, in_study_col="in_study"):
@@ -474,7 +474,9 @@ class SigmoidLS:
             )
             batched_actions_list.append(self.get_actions(filtered_user_data)[-1].item())
 
-        # TODO: stack may break with incremental recruitment
+        # Note this stacking works with incremental recruitment only because we
+        # fill in states for out-of-study times such that all users have the
+        # same state matrix size
         logger.info("Reforming batched data lists into tensors.")
         batched_treat_states_tensor = jnp.vstack(batched_treat_states_list)
         batched_actions_tensor = jnp.array(batched_actions_list)
@@ -567,14 +569,9 @@ class SigmoidLS:
                         next_times_after_update[i],
                         next_times_after_update[i + 1],
                     ):
-                        try:
-                            weight_gradient_sum += (
-                                self.algorithm_statistics_by_calendar_t[t][
-                                    "weight_gradients_by_user_id"
-                                ][user_id]
-                            )
-                        except:
-                            breakpoint()
+                        weight_gradient_sum += self.algorithm_statistics_by_calendar_t[
+                            t
+                        ]["weight_gradients_by_user_id"][user_id]
 
                     running_entry_holder += jnp.outer(
                         loss_gradient,

@@ -47,5 +47,4 @@ def invert_matrix_and_check_conditioning(matrix, condition_num_threshold=10**3):
         warnings.warn(
             f"You are inverting a matrix with a large condition number: {condition_number}"
         )
-
     return np.linalg.inv(matrix)

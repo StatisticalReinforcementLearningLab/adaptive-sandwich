@@ -485,6 +485,7 @@ def collect_derivatives(
         batched_action1probs_tensor,
         action_centering,
     )
+    breakpoint()
 
     loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
         theta_est,
@@ -560,7 +561,7 @@ def get_treat_states(df, treat_feats, in_study_col="in_study"):
 # TODO: Type conversion here a little sloppy
 def get_rewards(df, in_study_col="in_study", reward_col="reward"):
     df.loc[df[in_study_col] == 0, reward_col] = 0
-    rewards = df["reward"].to_numpy(dtype="float64").reshape(-1, 1)
+    rewards = df[reward_col].to_numpy(dtype="float64").reshape(-1, 1)
     return jnp.array(rewards)
 
 
@@ -568,14 +569,15 @@ def get_rewards(df, in_study_col="in_study", reward_col="reward"):
 # TODO: Type conversion here a little sloppy
 def get_actions(df, in_study_col="in_study", action_col="action"):
     df.loc[df[in_study_col] == 0, action_col] = 0
-    actions = df["action"].to_numpy(dtype="int32").reshape(-1, 1)
+    actions = df[action_col].to_numpy(dtype="int32").reshape(-1, 1)
     return jnp.array(actions)
 
 
 # TODO: Allow general action column names
 # TODO: Type conversion here a little sloppy
-def get_action1probs(df):
-    action1probs = df["action1prob"].to_numpy(dtype="float64").reshape(-1, 1)
+def get_action1probs(df, in_study_col="in_study", actionprob_col="action1prob"):
+    df.loc[df[in_study_col] == 0, actionprob_col] = 0
+    action1probs = df[actionprob_col].to_numpy(dtype="float64").reshape(-1, 1)
     return jnp.array(action1probs)
 
 
@@ -680,7 +682,8 @@ def form_bread_inverse_matrix(
 
             # This loop iterates over decision times in slices between updates
             # to collect the right weight gradients
-            # TODO: related to pis, these seem weirdly sparse. check format
+            # Note these may look more sparse than expected due to clipping, which
+            # produces zero gradients when limits are hit.
             for t in range(lower_t, upper_t):
                 weight_gradient_sum += algo_stats_dict[t][
                     "weight_gradients_by_user_id"
@@ -728,7 +731,7 @@ def form_bread_inverse_matrix(
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
 
     bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
-
+    breakpoint()
     return jnp.block(
         [
             [

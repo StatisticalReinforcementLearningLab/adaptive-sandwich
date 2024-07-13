@@ -485,7 +485,6 @@ def collect_derivatives(
         batched_action1probs_tensor,
         action_centering,
     )
-    breakpoint()
 
     loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
         theta_est,
@@ -731,7 +730,6 @@ def form_bread_inverse_matrix(
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
 
     bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
-    breakpoint()
     return jnp.block(
         [
             [

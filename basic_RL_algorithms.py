@@ -364,7 +364,6 @@ class SigmoidLS:
         return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
     # TODO: Docstring
-    # TODO: probably cleaner to pass in current beta estimate
     # TODO: JIT whole function? or just gradient and hessian batch functions
     def calculate_loss_derivatives(self, all_prev_data, calendar_t, curr_beta_est):
         logger.info("Calculating loss gradients and hessians with respect to beta.")

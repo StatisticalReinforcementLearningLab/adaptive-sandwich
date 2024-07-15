@@ -615,7 +615,6 @@ def form_bread_inverse_matrix(
 
     # This is useful for sweeping through the decision times between updates
     # but critically also those after the final update
-    # TODO: Make sure this makes sense for decisions between updates > 1
     update_times_and_upper_limit = (
         update_times if update_times[-1] == max_t + 1 else update_times + [max_t + 1]
     )
@@ -631,22 +630,17 @@ def form_bread_inverse_matrix(
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
     # NOTE THAT COLUMN INDEX i CORRESPONDS TO DECISION TIME i+1!
-    # NOTE that JAX treats positional args as keyword args if they are *supplied* with name=val
-    # syntax.  So though supplying these arg names is a good practice for readability, it has
-    # unexpected consequences in this case. Just noting this because it was tricky to debug here.
     mixed_theta_pi_loss_derivatives_by_user_id = {
         user_id: loss_gradient_derivatives_wrt_pi[i].squeeze()
         for i, user_id in enumerate(user_ids)
     }
-    # TODO: Handle missing data?
+
     # This simply collects the pi derivatives with respect to betas for all
     # decision times for each user, reorganizing existing data from the RL side.
     # The one complication is that we add some padding of zeros for decision
     # times before the first update to be in correspondence with the above data
     # structure.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
-    # TODO: These look weird, too many zeros maybe for
-    # ./run_local.sh --T=2 --n=8 --steepness=0.5 --alg_state_feats=intercept,past_reward --recruit_n=4
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(

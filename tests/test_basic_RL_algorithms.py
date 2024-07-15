@@ -48,6 +48,7 @@ class TestSigmoidLS_T3_n2:
             steepness=args_1.steepness,
             lower_clip=args_1.lower_clip,
             upper_clip=args_1.upper_clip,
+            action_centering=args_1.action_centering,
         )
         self.sigmoid_1.all_policies.append(
             {
@@ -110,6 +111,7 @@ class TestSigmoidLS_T3_n2:
             steepness=args_2.steepness,
             lower_clip=args_2.lower_clip,
             upper_clip=args_2.upper_clip,
+            action_centering=args_2.action_centering,
         )
 
         self.sigmoid_2.all_policies.append(

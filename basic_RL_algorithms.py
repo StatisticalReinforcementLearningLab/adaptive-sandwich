@@ -49,16 +49,27 @@ class FixedRandomization:
 # Update Update: We *could* differentiate for all users at once with jacrev.
 # TODO: Docstring
 # @jax.jit
-def get_loss(beta_est, base_states, treat_states, actions, rewards):
+def get_loss(
+    beta_est,
+    base_states,
+    treat_states,
+    actions,
+    rewards,
+    action1probs,
+    action_centering,
+):
     beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)
     beta_1_est = beta_est[base_states.shape[1] :].reshape(-1, 1)
 
-    return jnp.einsum(
-        "ij->",
+    actions = jnp.where(
+        action_centering, actions.astype(jnp.float32) - action1probs, actions
+    )
+
+    return jnp.sum(
         (
             rewards
-            - jnp.einsum("ij,jk->ik", base_states, beta_0_est)
-            - jnp.einsum("ij,jk->ik", actions * treat_states, beta_1_est)
+            - jnp.matmul(base_states, beta_0_est)
+            - jnp.matmul(actions * treat_states, beta_1_est)
         )
         ** 2,
     )
@@ -75,10 +86,12 @@ def get_loss_gradients_batched(
     batched_treat_states_tensor,
     actions_batch,
     rewards_batch,
+    action1probs_batch,
+    action_centering,
 ):
     return jax.vmap(
         fun=jax.grad(get_loss),
-        in_axes=(None, 2, 2, 2, 2),
+        in_axes=(None, 2, 2, 2, 2, 2, None),
         out_axes=0,
     )(
         beta_est,
@@ -86,6 +99,8 @@ def get_loss_gradients_batched(
         batched_treat_states_tensor,
         actions_batch,
         rewards_batch,
+        action1probs_batch,
+        action_centering,
     )
 
 
@@ -97,10 +112,12 @@ def get_loss_hessians_batched(
     batched_treat_states_tensor,
     actions_batch,
     rewards_batch,
+    action1probs_batch,
+    action_centering,
 ):
     return jax.vmap(
         fun=jax.hessian(get_loss),
-        in_axes=(None, 2, 2, 2, 2),
+        in_axes=(None, 2, 2, 2, 2, 2, None),
         out_axes=0,
     )(
         beta_est,
@@ -108,6 +125,8 @@ def get_loss_hessians_batched(
         batched_treat_states_tensor,
         actions_batch,
         rewards_batch,
+        action1probs_batch,
+        action_centering,
     )
 
 
@@ -215,6 +234,7 @@ class SigmoidLS:
         steepness,
         lower_clip,
         upper_clip,
+        action_centering,
     ):
         self.state_feats = state_feats
         self.treat_feats = treat_feats
@@ -250,6 +270,7 @@ class SigmoidLS:
         ]
         self.upper_left_bread_inverse = None
         self.algorithm_statistics_by_calendar_t = {}
+        self.action_centering = action_centering
 
     # TODO: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
@@ -278,20 +299,28 @@ class SigmoidLS:
         actions = df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
+    def get_action1probs(
+        self,
+        df,
+        actionprob_col="action1prob",
+        in_study_col="in_study",
+    ):
+        df.loc[df[in_study_col] == 0, actionprob_col] = 0
+        action1probs = df[actionprob_col].to_numpy(dtype="float64").reshape(-1, 1)
+        return jnp.array(action1probs)
+
     # TODO: Docstring
     def get_states(self, df):
         base_states = df[self.state_feats].to_numpy()
         treat_states = df[self.treat_feats].to_numpy()
         return (base_states, treat_states)
 
-    def update_alg(self, new_data, update_last_t):
+    def update_alg(self, new_data):
         """
         Update algorithm with new data
 
         Inputs:
         - `new_data`: a pandas data frame with new data
-        - `update_last_t`: an integer representing the last calendar time
-            of data that was used to update the algorithm
 
         Outputs:
         - None
@@ -302,7 +331,13 @@ class SigmoidLS:
         action1probs = new_data["action1prob"].to_numpy().reshape(-1, 1)
         rewards = new_data["reward"].to_numpy().reshape(-1, 1)
         base_states, treat_states = self.get_states(new_data)
-        design = jnp.concatenate([base_states, actions * treat_states], axis=1)
+        design = jnp.concatenate(
+            [
+                base_states,
+                (actions - action1probs * self.action_centering) * treat_states,
+            ],
+            axis=1,
+        )
 
         # Only include available data
         calendar_t = new_data["calendar_t"].to_numpy().reshape(-1, 1)
@@ -317,8 +352,8 @@ class SigmoidLS:
             "ij,ik->jk", design_avail, design_avail
         )
 
-        # TODO: Note this gives NANs and breaks action selection when the all
-        # users take same action?
+        # NOTE: this gives NANs and breaks action selection when the all
+        # users take same action
         inv_XX = jnp.linalg.inv(new_XX)
 
         beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1))
@@ -387,6 +422,7 @@ class SigmoidLS:
         batched_treat_states_list = []
         batched_actions_list = []
         batched_rewards_list = []
+        batched_action1probs_list = []
 
         # This step is the bottleneck, interestingly
         logger.info("Collecting batched input data as lists.")
@@ -399,6 +435,7 @@ class SigmoidLS:
             batched_treat_states_list.append(self.get_treat_states(filtered_user_data))
             batched_actions_list.append(self.get_actions(filtered_user_data))
             batched_rewards_list.append(self.get_rewards(filtered_user_data))
+            batched_action1probs_list.append(self.get_action1probs(filtered_user_data))
 
         # TODO: dstack breaks with incremental recruitment
         logger.info("Reforming batched data lists into tensors.")
@@ -406,6 +443,7 @@ class SigmoidLS:
         batched_treat_states_tensor = np.dstack(batched_treat_states_list)
         batched_actions_tensor = np.dstack(batched_actions_list)
         batched_rewards_tensor = np.dstack(batched_rewards_list)
+        batched_action1probs_tensor = jnp.dstack(batched_action1probs_list)
 
         logger.info("Forming loss gradients with respect to beta.")
         gradients = get_loss_gradients_batched(
@@ -414,6 +452,8 @@ class SigmoidLS:
             batched_treat_states_tensor,
             batched_actions_tensor,
             batched_rewards_tensor,
+            batched_action1probs_tensor,
+            self.action_centering,
         )
         logger.info("Forming loss hessians with respect to beta")
         hessians = get_loss_hessians_batched(
@@ -422,6 +462,8 @@ class SigmoidLS:
             batched_treat_states_tensor,
             batched_actions_tensor,
             batched_rewards_tensor,
+            batched_action1probs_tensor,
+            self.action_centering,
         )
         logger.info("Collecting loss gradients into algorithm stats dictionary.")
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[

@@ -112,8 +112,7 @@ save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
-# Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
-# and do after-study analysis
+# Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning after-study analysis.
 python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${output_folder}/exp=1/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=1/study_RLalg.pkl" --action_centering=$action_centering_inference
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.

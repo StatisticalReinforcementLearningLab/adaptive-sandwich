@@ -556,7 +556,6 @@ def get_treat_states(df, treat_feats, in_study_col="in_study"):
     return jnp.array(treat_states)
 
 
-# TODO: Allow general reward column names
 # TODO: Type conversion here a little sloppy
 def get_rewards(df, in_study_col="in_study", reward_col="reward"):
     df.loc[df[in_study_col] == 0, reward_col] = 0
@@ -564,7 +563,6 @@ def get_rewards(df, in_study_col="in_study", reward_col="reward"):
     return jnp.array(rewards)
 
 
-# TODO: Allow general action column names
 # TODO: Type conversion here a little sloppy
 def get_actions(df, in_study_col="in_study", action_col="action"):
     df.loc[df[in_study_col] == 0, action_col] = 0
@@ -572,7 +570,6 @@ def get_actions(df, in_study_col="in_study", action_col="action"):
     return jnp.array(actions)
 
 
-# TODO: Allow general action column names
 # TODO: Type conversion here a little sloppy
 def get_action1probs(df, in_study_col="in_study", actionprob_col="action1prob"):
     df.loc[df[in_study_col] == 0, actionprob_col] = 0

@@ -8,7 +8,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:N:n:u:d:m:r:e:f:a:s:y:-: OPT; do
+while getopts i:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -45,8 +45,8 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Making sure Python r
 pip install -r simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requirements installed.
 
-# Loop through each dataset created in the simulation (determined by number of Monte carlo repetitions)
-# and do after-study analysis
+# Loop through each dataset created in the referenced simulation and do
+# after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
 python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}"
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.

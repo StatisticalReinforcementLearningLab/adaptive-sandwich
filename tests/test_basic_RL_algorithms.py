@@ -12,7 +12,7 @@ class TestSigmoidLS_T3_n2:
         """
         Runs anew before each test
         """
-        self.args_1 = argparse.Namespace(
+        args_1 = argparse.Namespace(
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
@@ -36,18 +36,18 @@ class TestSigmoidLS_T3_n2:
             allocation_sigma=1,
             noise_var=1,
         )
-        self.state_feats_1 = [
+        self.state_feats = [
             constants.RLStudyArgs.INTERCEPT,
             constants.RLStudyArgs.PAST_REWARD,
         ]
-        self.treat_feats_1 = self.state_feats_1
+        self.treat_feats = self.state_feats
         self.sigmoid_1 = basic_RL_algorithms.SigmoidLS(
-            self.args_1,
-            self.state_feats_1,
-            self.treat_feats_1,
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
             alg_seed=1,
-            allocation_sigma=self.args_1.allocation_sigma,
-            steepness=self.args_1.steepness,
+            steepness=args_1.steepness,
+            lower_clip=args_1.lower_clip,
+            upper_clip=args_1.upper_clip,
         )
         self.sigmoid_1.all_policies.append(
             {
@@ -78,7 +78,7 @@ class TestSigmoidLS_T3_n2:
             }
         )
 
-        self.args_1 = argparse.Namespace(
+        args_2 = argparse.Namespace(
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
@@ -104,12 +104,12 @@ class TestSigmoidLS_T3_n2:
         )
 
         self.sigmoid_2 = basic_RL_algorithms.SigmoidLS(
-            self.args_1,
-            self.state_feats_1,
-            self.treat_feats_1,
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
             alg_seed=1,
-            allocation_sigma=self.args_1.allocation_sigma,
-            steepness=self.args_1.steepness,
+            steepness=args_2.steepness,
+            lower_clip=args_2.lower_clip,
+            upper_clip=args_2.upper_clip,
         )
 
         self.sigmoid_2.all_policies.append(
@@ -135,6 +135,22 @@ class TestSigmoidLS_T3_n2:
                 "reward": [1.0, -1, 0, 1, 0, 1],
                 "intercept": [1.0, 1, 1, 1, 1, 1],
                 "past_reward": [0.0, 1, -1, 1, 1, 0],
+                "in_study": [1, 1, 1, 1, 1, 1],
+            }
+        )
+
+        # Time 4 is like time 3 in study df 1 for user 2,
+        # whereas user 1 has exited.
+        # We use this for an incremental call at time 4.
+        self.study_df_5 = pd.DataFrame(
+            {
+                "user_id": [1, 1, 1, 1, 2, 2, 2, 2],
+                "calendar_t": [1, 2, 3, 4, 1, 2, 3, 4],
+                "action": [0, 1, 1, None, None, 1, 1, 0],
+                "reward": [1.0, -1, 0, None, None, 1, 1, 1],
+                "intercept": [1.0, 1, 1, 1, 1, 1, 1, 1],
+                "past_reward": [0.0, 1, -1, None, None, 0, 1, 0],
+                "in_study": [1, 1, 1, 0, 0, 1, 1, 1],
             }
         )
 
@@ -146,6 +162,19 @@ class TestSigmoidLS_T3_n2:
                 "reward": [1.0, -1, 0, 1, 0, 1],
                 "intercept": [1.0, 1, 1, 1, 1, 1],
                 "past_reward": [0.0, 1, -1, 1, 1, -10],
+                "in_study": [1, 1, 1, 1, 1, 1],
+            }
+        )
+
+        self.study_df_2_incremental = pd.DataFrame(
+            {
+                "user_id": [1, 1, 1, 2, 2, 2],
+                "calendar_t": [1, 2, 3, 1, 2, 3],
+                "action": [0, 1, 0, 1, 1, 0],
+                "reward": [1.0, -1, 0, 1, 0, 1],
+                "intercept": [1.0, 1, 1, 1, 1, 1],
+                "past_reward": [0.0, 1, -1, 1, 1, -10],
+                "in_study": [1, 1, 1, 1, 1, 1],
             }
         )
 
@@ -158,6 +187,34 @@ class TestSigmoidLS_T3_n2:
                 "reward": [-1, 0, -1, 0],
                 "intercept": [1, 1, 1, 1],
                 "past_reward": [1, -1, 1, -1],
+                "in_study": [1, 1, 1, 1],
+            }
+        )
+
+        # Time 1 is like time 2 in study df for user 1,
+        # whereas user 2 has not entered yet.
+        # We use this for an incremental call at time 1.
+        self.study_df_4 = pd.DataFrame(
+            {
+                "user_id": [
+                    1,
+                    2,
+                ],
+                "calendar_t": [
+                    1,
+                    1,
+                ],
+                "action": [
+                    1,
+                    None,
+                ],
+                "reward": [
+                    0,
+                    None,
+                ],
+                "intercept": [1, 1],
+                "past_reward": [-1, None],
+                "in_study": [1, 0],
             }
         )
 
@@ -170,8 +227,12 @@ class TestSigmoidLS_T3_n2:
         2 (the df doesn't build incrementally from time 2 to 3 but that's fine) simply to test
         that each of the results goes to the correct key.
         """
-        self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_3, 2)
-        self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_1, 3)
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_3, 2, self.sigmoid_1.get_current_beta_estimate()
+        )
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_1, 3, self.sigmoid_1.get_current_beta_estimate()
+        )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {
@@ -212,7 +273,9 @@ class TestSigmoidLS_T3_n2:
         User 1 takes no action, meaning negative gradient case, and User 2
         gets clipped at .1, meaning zero gradient.
         """
-        self.sigmoid_1.calculate_pi_and_weight_gradients(self.study_df_2, 3)
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_2, 3, self.sigmoid_1.get_current_beta_estimate()
+        )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {
@@ -231,6 +294,50 @@ class TestSigmoidLS_T3_n2:
                     # on action are easy to calculate)
                     "weight_gradients_by_user_id": {
                         1: np.array([0, 0, -0.26894143, 0.26894143], dtype="float32"),
+                        2: np.array([0, 0, 0, 0], dtype="float32"),
+                    },
+                },
+            },
+        )
+
+    def test_calculate_pi_and_weight_gradients_incremental_recruitment(self):
+        """
+        At time 3, User 1 takes a positive action, meaning positive gradient case, and User 2
+        gets clipped at .9, meaning zero gradient.
+
+        In addition, a study df derived from the time 3 study df is passed in for time
+        2 (the df doesn't build incrementally from time 2 to 3 but that's fine) simply to test
+        that each of the results goes to the correct key.
+        """
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_4, 1, self.sigmoid_1.get_current_beta_estimate()
+        )
+        self.sigmoid_1.calculate_pi_and_weight_gradients(
+            self.study_df_5, 4, self.sigmoid_1.get_current_beta_estimate()
+        )
+        np.testing.assert_equal(
+            self.sigmoid_1.algorithm_statistics_by_calendar_t,
+            {
+                1: {
+                    # User 2 not in study
+                    "pi_gradients_by_user_id": {
+                        1: np.array([0, 0, 0.19661194, -0.19661194], dtype="float32"),
+                        2: np.array([0, 0, 0, 0], dtype="float32"),
+                    },
+                    "weight_gradients_by_user_id": {
+                        1: np.array([0, 0, 0.73105858, -0.73105858], dtype="float32"),
+                        2: np.array([0, 0, 0, 0], dtype="float32"),
+                    },
+                },
+                4: {
+                    # User 2 is clipped, User 1 not in study, so all zeros
+                    "pi_gradients_by_user_id": {
+                        1: np.array([0, 0, 0, 0], dtype="float32"),
+                        # Note that these are all zeros because this probability is clipped
+                        2: np.array([0, 0, 0, 0], dtype="float32"),
+                    },
+                    "weight_gradients_by_user_id": {
+                        1: np.array([0, 0, 0, 0], dtype="float32"),
                         2: np.array([0, 0, 0, 0], dtype="float32"),
                     },
                 },
@@ -367,7 +474,9 @@ class TestSigmoidLS_T3_n2:
         )
 
     def test_calculate_loss_derivatives(self):
-        self.sigmoid_1.calculate_loss_derivatives(self.study_df_1, 2)
+        self.sigmoid_1.calculate_loss_derivatives(
+            self.study_df_1, 2, self.sigmoid_1.get_current_beta_estimate()
+        )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
             {

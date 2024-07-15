@@ -9,10 +9,8 @@ import logging
 import numpy as np
 import cloudpickle as pickle
 
-from synthetic_env import load_synthetic_env, SyntheticEnv
-from oralytics_env import load_oralytics_env, OralyticsEnv
+from synthetic_env import load_synthetic_env_params, SyntheticEnv
 from basic_RL_algorithms import FixedRandomization, SigmoidLS
-from smooth_posterior_sampling import SmoothPosteriorSampling
 from constants import RLStudyArgs
 
 logger = logging.getLogger(__name__)
@@ -44,24 +42,22 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     # study_df is a data frame with a record of all data collected in study
     study_df = study_env.make_empty_study_df(args, user_env_data)
 
+    max_calendar_t = study_df["calendar_t"].max()
+
     # Loop over all decision times ###############################################
-    for t in range(1, study_env.calendar_T + 1):
+    for t in range(1, max_calendar_t + 1):
         logger.info("Processing decision time %s.", t)
 
-        # Update study_df with info on latest policy used to select actions
-        if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = (
-                study_RLalg.all_policies[-1]["policy_last_t"]
-            )
-            study_df.loc[study_df["calendar_t"] == t, "policy_num"] = len(
-                study_RLalg.all_policies
-            )
-        # TODO: The if logic might also cover this case correctly
-        else:
-            study_df.loc[study_df["calendar_t"] == t, "policy_last_t"] = 0
-            study_df.loc[study_df["calendar_t"] == t, "policy_num"] = 1
+        curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1)
 
-        curr_timestep_data = study_df[study_df["calendar_t"] == t]
+        # Update study_df with info on latest policy used to select actions
+        study_df.loc[curr_time_bool, "policy_num"] = (
+            1
+            if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION
+            else len(study_RLalg.all_policies)
+        )
+
+        curr_timestep_data = study_df[curr_time_bool]
 
         # Sample Actions #####################################################
         logger.info("Sampling actions for time %s.", t)
@@ -84,17 +80,26 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         if args.dataset_type == RLStudyArgs.ORALYTICS:
             fill_columns = ["reward", "brush_time", "action", "action1prob"]
             fill_vals = np.vstack([rewards, brush_times, actions, action_probs]).T
-            study_df.loc[study_df["calendar_t"] == t, fill_columns] = fill_vals
+            study_df.loc[
+                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
+                fill_columns,
+            ] = fill_vals
         else:
             fill_columns = ["reward", "action", "action1prob"]
             fill_vals = np.vstack([rewards, actions, action_probs]).T
-            study_df.loc[study_df["calendar_t"] == t, fill_columns] = fill_vals
+            study_df.loc[
+                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
+                fill_columns,
+            ] = fill_vals
 
         if t < study_env.calendar_T:
             logger.info("Updating study df for time %s.", t)
             # Record data to prepare for state at next decision time
             study_df = study_env.update_study_df(study_df, t)
 
+        # Note that we DO NOT filter to in_study == 1 here.  The way we calculate the gradients
+        # we need in batches requires same-size state inputs for each user, so we actually
+        # want to pass states for when users are not in the study but zero them out.
         all_prev_data_bool = study_df["calendar_t"] <= t
         all_prev_data = study_df[all_prev_data_bool]
 
@@ -102,44 +107,42 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # quantities that will be needed to form the "bread" matrix in the end.
         if t > args.decisions_between_updates:
             logger.info("Calculating pi and weight gradients for time %s.", t)
-            study_RLalg.calculate_pi_and_weight_gradients(all_prev_data, calendar_t=t)
+            curr_beta_est = study_RLalg.get_current_beta_estimate()
+            study_RLalg.calculate_pi_and_weight_gradients(
+                all_prev_data, t, curr_beta_est
+            )
 
         # Check if need to update algorithm #######################################
+        # TODO: recruit_t not respected here.  Either remove it or use here.
         if (
             t < study_env.calendar_T
             and t % args.decisions_between_updates == 0
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
         ):
-            # check enough users; if so, update algorithm
-            most_recent_policy_t = study_RLalg.all_policies[-1]["policy_last_t"]
+            last_policy_num = len(study_RLalg.all_policies) - 1
 
-            new_obs_bool = np.logical_and(
-                all_prev_data_bool,
-                study_df["calendar_t"] > most_recent_policy_t,
+            new_obs_bool = (
+                all_prev_data_bool
+                & (study_df["policy_num"] > last_policy_num)
+                & (study_df["in_study"] == 1)
             )
             new_update_data = study_df[new_obs_bool]
 
-            prev_num_users = len(study_df[study_df["calendar_t"] == t])
-            if prev_num_users >= args.min_users:
-                # Update Algorithm ##############################################
-                logger.info("Updating algorithm parameters for time %s.", t)
-                study_RLalg.update_alg(new_update_data, update_last_t=t)
-                # TODO: Actually should probably just do this in update_alg, otherwise makes part
-                # of general RL alg contract
-                # TODO: Also if we build the matrix, don't need the loss deriv separately?
-                logger.info(
-                    "Calculate loss gradients per user and average hessian for time %s.",
-                    t,
-                )
-                study_RLalg.calculate_loss_derivatives(all_prev_data, calendar_t=t)
+            # Min users used to be enforced here. It is ignored now.
+
+            # Update Algorithm ##############################################
+            logger.info("Updating algorithm parameters for time %s.", t)
+            study_RLalg.update_alg(new_update_data, update_last_t=t)
+            logger.info(
+                "Calculating loss gradients per user and average hessian for time %s.",
+                t,
+            )
+
+            curr_beta_est = study_RLalg.get_current_beta_estimate()
+            study_RLalg.calculate_loss_derivatives(all_prev_data, t, curr_beta_est)
 
     logger.info("Constructing upper left bread inverse matrix")
     study_RLalg.construct_upper_left_bread_inverse()
-
-    if args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
-        fill_columns = ["policy_last_t", "policy_num"]
-        for col in fill_columns:
-            study_RLalg.norm_samples_df[col] = study_df[col].to_numpy().copy()
 
     return study_df, study_RLalg
 
@@ -161,7 +164,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         mode = args.synthetic_mode
         user_env_data = None
         paramf_path = f"./synthetic_env_params/{mode}.txt"
-        env_params = load_synthetic_env(paramf_path)
+        env_params = load_synthetic_env_params(paramf_path)
         if len(env_params.shape) == 2:
             assert env_params.shape[0] >= args.T
         exp_str = "{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}".format(
@@ -179,20 +182,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         )
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
-        mode = None
-        paramf_path = "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
-        param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
-        user_env_data = {"bern_params": bern_params, "poisson_params": poisson_params}
-        exp_str = "{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}".format(
-            args.dataset_type,
-            args.RL_alg,
-            args.T,
-            args.n,
-            args.recruit_n,
-            args.decisions_between_updates,
-            args.steepness,
-            args.action_centering,
-        )
+        raise NotImplementedError()
+        # If we want this, there is an implementation in the replicable  bandits
+        # repo
 
     else:
         raise ValueError("Invalid Dataset Type")
@@ -228,16 +220,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     for i in range(1, args.N + 1):
         # env_seed = args.parallel_task_index * i * 5000
         # alg_seed = args.parallel_task_index * (args.N + i) * 5000
-        # TODO: Set back to repeated seeds eventually?
-        # TODO: This does result in same seed for task 0
-        env_seed = int(time.time()) + args.parallel_task_index * i * 5000
+        # TODO: Set back to fixed seeds eventually?
+        env_seed = int(time.time()) + args.parallel_task_index * i * 5000 + 1
         alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
-        # env_seed = 1713299542
-        # alg_seed = 1713304542
-        # env_seed = 1713490887
-        # alg_seed = 1713495887
-        # env_seed = 1713491843
-        # alg_seed = 1713496843
         logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()
@@ -256,10 +241,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 gen_feats=gen_feats,
                 err_corr=args.err_corr,
             )
-        elif args.dataset_type == RLStudyArgs.ORALYTICS:
-            study_env = OralyticsEnv(
-                args, param_names, bern_params, poisson_params, env_seed=env_seed
-            )
         else:
             raise ValueError("Invalid Dataset Type")
 
@@ -270,37 +251,12 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             )
         elif args.RL_alg == RLStudyArgs.SIGMOID_LS:
             study_RLalg = SigmoidLS(
-                args,
-                alg_state_feats,
-                alg_treat_feats,
-                allocation_sigma=args.allocation_sigma,
+                state_feats=alg_state_feats,
+                treat_feats=alg_treat_feats,
                 alg_seed=alg_seed,
                 steepness=args.steepness,
-            )
-        elif args.RL_alg == RLStudyArgs.POSTERIOR_SAMPLING:
-            if args.prior == RLStudyArgs.NAIVE:
-                if args.action_centering:
-                    total_dim = len(alg_state_feats) + len(alg_treat_feats) * 2
-                    prior_mean = np.ones(total_dim) * 0.1
-                    prior_var = np.eye(total_dim) * 2
-                else:
-                    total_dim = len(alg_state_feats) + len(alg_treat_feats)
-                    prior_mean = np.ones(total_dim) * 0.1
-                    prior_var = np.eye(total_dim) * 0.5
-
-            else:
-                raise ValueError(f"Invalid prior type: {args.prior}")
-            study_RLalg = SmoothPosteriorSampling(
-                args,
-                alg_state_feats,
-                alg_treat_feats,
-                alg_seed=alg_seed,
-                allocation_sigma=args.allocation_sigma,
-                steepness=args.steepness,
-                prior_mean=prior_mean,
-                prior_var=prior_var,
-                noise_var=args.noise_var,
-                action_centering=args.action_centering,
+                lower_clip=args.lower_clip,
+                upper_clip=args.upper_clip,
             )
         else:
             raise ValueError("Invalid RL Algorithm Type")
@@ -318,9 +274,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             os.mkdir(folder_path)
 
         if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df = study_df.astype(
-                {"policy_num": "int32", "policy_last_t": "int32", "action": "int32"}
-            )
+            study_df = study_df.astype({"policy_num": "Int64", "action": "Int64"})
 
         study_df.to_csv(f"{folder_path}/data.csv", index=False)
         with open(f"{folder_path}/study_df.pkl", "wb") as f:
@@ -350,7 +304,7 @@ def main():
         "--dataset_type",
         type=str,
         default=RLStudyArgs.SYNTHETIC,
-        choices=[RLStudyArgs.HEARTSTEPS, RLStudyArgs.SYNTHETIC, RLStudyArgs.ORALYTICS],
+        choices=[RLStudyArgs.SYNTHETIC],
     )
     parser.add_argument("--verbose", type=int, default=0, help="Prints helpful info")
     parser.add_argument(
@@ -365,7 +319,6 @@ def main():
         choices=[
             RLStudyArgs.FIXED_RANDOMIZATION,
             RLStudyArgs.SIGMOID_LS,
-            RLStudyArgs.POSTERIOR_SAMPLING,
         ],
         help="RL algorithm used to select actions",
     )
@@ -471,25 +424,6 @@ def main():
             f"past_action_{i}_reward" for i in range(1, past_action_len + 1)
         ]
         gen_feats = past_action_cols + past_reward_action_cols + ["dosage"]
-
-    elif tmp_args.dataset_type == RLStudyArgs.ORALYTICS:
-        default_arg_dict = {
-            RLStudyArgs.T: 50,
-            RLStudyArgs.RECRUIT_N: tmp_args.n,
-            RLStudyArgs.RECRUIT_T: 1,
-            RLStudyArgs.ALLOCATION_SIGMA: 1,
-            RLStudyArgs.NOISE_VAR: 1,
-        }
-
-        # allocation_sigma: 163 (truncated brush times); 5.7 (square-root of truncated brush times)
-
-        alg_state_feats = [
-            RLStudyArgs.INTERCEPT,
-            RLStudyArgs.TIME_OF_DAY,
-            RLStudyArgs.PRIOR_DAY_BRUSH,
-        ]
-        alg_treat_feats = alg_state_feats
-
     else:
         raise ValueError("Invalid Dataset Type")
 

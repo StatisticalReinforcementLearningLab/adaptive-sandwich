@@ -24,6 +24,7 @@ def test_form_meat_matrix():
             "intercept": [1.0, 1, 1, 1, 1, 1],
             "past_reward": [0.0, 1, -1, 1, 1, 0],
             "action1prob": [0.25, 0.5, 0.75, 0.1, 0.2, 0.3],
+            "in_study": [1, 1, 1, 1, 1, 1],
         }
     )
 
@@ -112,6 +113,7 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
             "intercept": [1.0, 1, 1, 1, 1, 1],
             "past_reward": [0.0, 1, -1, 1, 1, 0],
             "action1prob": [0.25, 0.5, 0.75, 0.1, 0.2, 0.3],
+            "in_study": [1, 1, 1, 1, 1, 1],
         }
     )
 
@@ -393,6 +395,7 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
                 0.3,
                 0.3,
             ],
+            "in_study": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
         }
     )
 

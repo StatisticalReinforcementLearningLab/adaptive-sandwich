@@ -351,8 +351,8 @@ class TestSigmoidLS_T3_n2:
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
             2: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([1, 2, 3, 4], dtype="float32"),
@@ -363,11 +363,15 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([None] * 4, dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)) * -1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 2)),
+                    2: np.zeros((4, 2)),
+                },
             },
             3: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([None] * 4, dtype="float32"),
@@ -378,6 +382,10 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([3, 4, 5, 6], dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)),
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 3)),
+                    2: np.zeros((4, 3)),
+                },
             },
         }
         self.sigmoid_1.construct_upper_left_bread_inverse()
@@ -405,8 +413,8 @@ class TestSigmoidLS_T3_n2:
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
             3: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([1, 2, 3, 4], dtype="float32"),
@@ -417,11 +425,15 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([None] * 4, dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)) * -1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 3)),
+                    2: np.zeros((4, 3)),
+                },
             },
             4: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([3, 4, 5, 6], dtype="float32"),
@@ -430,8 +442,8 @@ class TestSigmoidLS_T3_n2:
             },
             5: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([None] * 4, dtype="float32"),
@@ -442,6 +454,10 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([2, 3, 4, 5], dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)) * 1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 5)),
+                    2: np.zeros((4, 5)),
+                },
             },
             6: {
                 "pi_gradients_by_user_id": {
@@ -499,6 +515,10 @@ class TestSigmoidLS_T3_n2:
                         ],
                         dtype="float32",
                     ),
+                    "loss_gradient_pi_derivatives_by_user_id": {
+                        1: np.zeros((4, 3), dtype="float32"),
+                        2: np.zeros((4, 3), dtype="float32"),
+                    },
                 }
             },
         )

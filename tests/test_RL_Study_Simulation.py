@@ -78,6 +78,7 @@ class TestRunStudySimulation:
             steepness=self.args_incremental_1.steepness,
             lower_clip=self.args_incremental_1.lower_clip,
             upper_clip=self.args_incremental_1.upper_clip,
+            action_centering=self.args_incremental_1.action_centering,
         )
         self.sigmoid_1.rng = MagicMock(autospec=True)
         self.sigmoid_1.get_action_probs = MagicMock(autospec=True)

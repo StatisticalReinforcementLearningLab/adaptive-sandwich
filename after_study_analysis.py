@@ -459,7 +459,6 @@ def collect_derivatives(
         batched_rewards_list.append(get_rewards(filtered_user_data))
         batched_action1probs_list.append(get_action1probs(filtered_user_data))
 
-    # TODO: dstack breaks with incremental recruitment
     batched_base_states_tensor = jnp.dstack(batched_base_states_list)
     batched_treat_states_tensor = jnp.dstack(batched_treat_states_list)
     batched_actions_tensor = jnp.dstack(batched_actions_list)
@@ -704,7 +703,10 @@ def form_bread_inverse_matrix(
             # 1 FROM OUR TIME BOUNDS.
             # TODO: how does this work with incremental recruitment? Hopefully
             # burden is all on setting up the two derivative dicts, and then logic
-            # holds
+            # holds -- update, seems to work.
+            # TODO: We really want to do something like a join on policy number,
+            # then multiply and sum in groups, may be simpler to think about
+            # than dealing with spans of update times
             mixed_theta_beta_loss_derivative = jnp.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][
                     :,
@@ -769,6 +771,7 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
 
     # degrees of freedom adjustment
     # TODO: Reinstate? Provide reference? Mentioned in sandwich package
+    # This is HC1 correction
     # meat = meat * (num_users - 1) / (num_users - theta_dim)
 
     logger.info("Inverting classical bread and combining ingredients.")

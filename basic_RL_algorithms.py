@@ -130,6 +130,30 @@ def get_loss_hessians_batched(
     )
 
 
+def get_loss_gradient_derivatives_wrt_pi_batched(
+    beta_est,
+    batched_base_states_tensor,
+    batched_treat_states_tensor,
+    actions_batch,
+    rewards_batch,
+    action1probs_batch,
+    action_centering,
+):
+    return jax.vmap(
+        fun=jax.jacrev(jax.grad(get_loss), 5),
+        in_axes=(None, 2, 2, 2, 2, 2, None),
+        out_axes=0,
+    )(
+        beta_est,
+        batched_base_states_tensor,
+        batched_treat_states_tensor,
+        actions_batch,
+        rewards_batch,
+        action1probs_batch,
+        action_centering,
+    )
+
+
 # TODO: Docstring
 def get_action_1_prob_pure(beta_est, lower_clip, steepness, upper_clip, treat_states):
     treat_est = beta_est[-len(treat_states) :]
@@ -331,6 +355,8 @@ class SigmoidLS:
         action1probs = new_data["action1prob"].to_numpy().reshape(-1, 1)
         rewards = new_data["reward"].to_numpy().reshape(-1, 1)
         base_states, treat_states = self.get_states(new_data)
+        if self.action_centering:
+            logger.info("Action centering is TURNED ON for RL algorithm updates.")
         design = jnp.concatenate(
             [
                 base_states,
@@ -437,7 +463,6 @@ class SigmoidLS:
             batched_rewards_list.append(self.get_rewards(filtered_user_data))
             batched_action1probs_list.append(self.get_action1probs(filtered_user_data))
 
-        # TODO: dstack breaks with incremental recruitment
         logger.info("Reforming batched data lists into tensors.")
         batched_base_states_tensor = np.dstack(batched_base_states_list)
         batched_treat_states_tensor = np.dstack(batched_treat_states_list)
@@ -465,15 +490,33 @@ class SigmoidLS:
             batched_action1probs_tensor,
             self.action_centering,
         )
-        logger.info("Collecting loss gradients into algorithm stats dictionary.")
+        logger.info(
+            "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
+        )
+        loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
+            curr_beta_est,
+            batched_base_states_tensor,
+            batched_treat_states_tensor,
+            batched_actions_tensor,
+            batched_rewards_tensor,
+            batched_action1probs_tensor,
+            self.action_centering,
+        )
+
         self.algorithm_statistics_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {user_id: gradients[i] for i, user_id in enumerate(all_user_ids)}
 
-        logger.info("Forming average hessian and storing in algorithm stats dictionary")
         self.algorithm_statistics_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = np.mean(hessians, axis=0)
+
+        self.algorithm_statistics_by_calendar_t[first_applicable_time][
+            "loss_gradient_pi_derivatives_by_user_id"
+        ] = {
+            user_id: loss_gradient_pi_derivatives[i].squeeze()
+            for i, user_id in enumerate(all_user_ids)
+        }
 
     def calculate_pi_and_weight_gradients(
         self, current_data, calendar_t, curr_beta_est
@@ -581,7 +624,26 @@ class SigmoidLS:
         ]
 
         # TODO: use study_df.  Verify we want all users
-        num_users = len(self.all_policies[-1]["seen_user_id"])
+        user_ids = self.all_policies[-1]["seen_user_id"]
+        num_users = len(user_ids)
+
+        # This simply collects the pi derivatives with respect to betas for all
+        # decision times for each user. The one complication is that we add some
+        # padding of zeros for decision times before the first update to make
+        # indexing simpler below.
+        # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
+        pi_derivatives_by_user_id = {
+            user_id: jnp.pad(
+                jnp.array(
+                    [
+                        t_dict["pi_gradients_by_user_id"][user_id]
+                        for t_dict in self.algorithm_statistics_by_calendar_t.values()
+                    ]
+                ),
+                pad_width=((next_times_after_update[0] - 1, 0), (0, 0)),
+            )
+            for user_id in user_ids
+        }
 
         # This loop iterates over all times that were the first applicable time
         # for a non-initial policy. Take care to note that update_idx starts at 0.
@@ -594,6 +656,8 @@ class SigmoidLS:
             # Think of each iteration of this loop as creating one term in the current (block) row
             logger.info("Creating the non-diagonal terms for the current update.")
             for i in range(update_idx):
+                lower_t = next_times_after_update[i]
+                upper_t = next_times_after_update[i + 1]
                 running_entry_holder = jnp.zeros((beta_dim, beta_dim))
 
                 # This loop calculates the per-user quantities that will be
@@ -607,8 +671,8 @@ class SigmoidLS:
                     # according to what was used for each update to collect the
                     # right weight gradients
                     for t in range(
-                        next_times_after_update[i],
-                        next_times_after_update[i + 1],
+                        lower_t,
+                        upper_t,
                     ):
                         weight_gradient_sum += self.algorithm_statistics_by_calendar_t[
                             t
@@ -619,16 +683,28 @@ class SigmoidLS:
                         weight_gradient_sum,
                     )
 
-                    # TODO: if we have action-centering, there will be an additional hessian
-                    # type term added here. Update: way to implement is to differentiate wrt
-                    # all betas each update and always add extra terms here. If 0, so be it, but
-                    # things like action centering will just work.
+                    mixed_theta_beta_loss_derivative = jnp.matmul(
+                        t_stats_dict["loss_gradient_pi_derivatives_by_user_id"][
+                            user_id
+                        ][
+                            :,
+                            lower_t - 1 : upper_t - 1,
+                        ],
+                        pi_derivatives_by_user_id[user_id][
+                            lower_t - 1 : upper_t - 1,
+                            :,
+                        ],
+                    )
+
+                    running_entry_holder += mixed_theta_beta_loss_derivative
+                # TODO: Use jnp.block instead of indexing
                 output_matrix = output_matrix.at[
                     (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
                     i * beta_dim : (i + 1) * beta_dim,
                 ].set(running_entry_holder / num_users)
 
             # Add the diagonal hessian entry (which is already an average)
+            # TODO: Use jnp.block instead of indexing
             output_matrix = output_matrix.at[
                 (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
                 (update_idx) * beta_dim : (update_idx + 1) * beta_dim,

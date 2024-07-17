@@ -3,11 +3,6 @@ import numpy as np
 
 import after_study_analysis
 
-
-def test_estimate_theta():
-    pass
-
-
 # Note that the testing of collect_derivatives is implicit here, as it's
 # called along the way in each of the below tests.  This reflects the fact that
 # the tests were originally constructed before it existed and it just reorganizes
@@ -676,13 +671,25 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
 
 
+def test_form_bread_inverse_matrix_incremental_recruitment():
+    raise NotImplementedError()
+
+
+def test_form_bread_inverse_matrix_no_action_centering():
+    raise NotImplementedError()
+
+
+def test_adaptive_and_classical_match_steepness_0():
+    raise NotImplementedError()
+
+
 def test_analyze_dataset():
-    pass
+    raise NotImplementedError()
 
 
-def test_no_action_centering():
-    pass
+def test_estimate_theta():
+    raise NotImplementedError()
 
 
-def test_steepness_0():
-    pass
+def test_form_classical_sandwich():
+    raise NotImplementedError()

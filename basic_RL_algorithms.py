@@ -683,6 +683,9 @@ class SigmoidLS:
                         weight_gradient_sum,
                     )
 
+                    # TODO: Detailed comment explaining this logic and the data
+                    # orientation that makes it work
+
                     mixed_theta_beta_loss_derivative = jnp.matmul(
                         t_stats_dict["loss_gradient_pi_derivatives_by_user_id"][
                             user_id

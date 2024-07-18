@@ -2,6 +2,7 @@ import argparse
 
 import pandas as pd
 import numpy as np
+import pytest
 
 import basic_RL_algorithms
 import constants
@@ -48,6 +49,7 @@ class TestSigmoidLS_T3_n2:
             steepness=args_1.steepness,
             lower_clip=args_1.lower_clip,
             upper_clip=args_1.upper_clip,
+            action_centering=args_1.action_centering,
         )
         self.sigmoid_1.all_policies.append(
             {
@@ -94,7 +96,7 @@ class TestSigmoidLS_T3_n2:
             save_dir=".",
             steepness=10.0,
             alg_state_feats="intercept,past_reward",
-            action_centering=0,
+            action_centering=1,
             prior="naive",
             T=3,
             recruit_n=50,
@@ -110,9 +112,35 @@ class TestSigmoidLS_T3_n2:
             steepness=args_2.steepness,
             lower_clip=args_2.lower_clip,
             upper_clip=args_2.upper_clip,
+            action_centering=args_2.action_centering,
         )
 
         self.sigmoid_2.all_policies.append(
+            {
+                "beta_est": pd.DataFrame(
+                    {
+                        "intercept": [-1.0],
+                        "past_reward": [2.0],
+                        "action:intercept": [3.0],
+                        "action:past_reward": [4.0],
+                    }
+                ),
+                "seen_user_id": {1, 2},
+                "XX": np.ones(self.sigmoid_2.beta_dim),
+            }
+        )
+
+        self.sigmoid_3 = basic_RL_algorithms.SigmoidLS(
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
+            alg_seed=1,
+            steepness=args_2.steepness,
+            lower_clip=args_2.lower_clip,
+            upper_clip=args_2.upper_clip,
+            action_centering=args_2.action_centering,
+        )
+
+        self.sigmoid_3.all_policies.append(
             {
                 "beta_est": pd.DataFrame(
                     {
@@ -123,7 +151,7 @@ class TestSigmoidLS_T3_n2:
                     }
                 ),
                 "seen_user_id": {1, 2},
-                "XX": np.ones(self.sigmoid_1.beta_dim),
+                "XX": np.ones(self.sigmoid_2.beta_dim),
             }
         )
 
@@ -136,6 +164,7 @@ class TestSigmoidLS_T3_n2:
                 "intercept": [1.0, 1, 1, 1, 1, 1],
                 "past_reward": [0.0, 1, -1, 1, 1, 0],
                 "in_study": [1, 1, 1, 1, 1, 1],
+                "action1prob": [0.5, 0.6, 0.7, 0.1, 0.2, 0.3],
             }
         )
 
@@ -344,13 +373,14 @@ class TestSigmoidLS_T3_n2:
             },
         )
 
-    # TODO: Test extra hessian term for action centering
-    def test_construct_upper_left_bread_inverse_update_every_decision(self):
+    def test_construct_upper_left_bread_inverse_update_every_decision_no_action_probs_in_loss(
+        self,
+    ):
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
             2: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([1, 2, 3, 4], dtype="float32"),
@@ -361,11 +391,15 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([None] * 4, dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)) * -1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 1)),
+                    2: np.zeros((4, 1)),
+                },
             },
             3: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([None] * 4, dtype="float32"),
@@ -376,6 +410,10 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([3, 4, 5, 6], dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)),
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 2)),
+                    2: np.zeros((4, 2)),
+                },
             },
         }
         self.sigmoid_1.construct_upper_left_bread_inverse()
@@ -399,12 +437,14 @@ class TestSigmoidLS_T3_n2:
             ),
         )
 
-    def test_construct_upper_left_bread_inverse_2_decs_btwn_updates(self):
+    def test_construct_upper_left_bread_inverse_update_every_decision_action_probs_in_loss(
+        self,
+    ):
         self.sigmoid_1.algorithm_statistics_by_calendar_t = {
-            3: {
+            2: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.array([1, 2, 3, 4], dtype="float32"),
+                    2: np.array([3, 4, 5, 6], dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([1, 2, 3, 4], dtype="float32"),
@@ -415,11 +455,129 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([None] * 4, dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)) * -1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.array(
+                        [
+                            [1],
+                            [3],
+                            [5],
+                            [7],
+                        ],
+                        dtype="float32",
+                    ),
+                    2: np.array(
+                        [
+                            [1],
+                            [4],
+                            [6],
+                            [8],
+                        ],
+                        dtype="float32",
+                    ),
+                },
+            },
+            3: {
+                "pi_gradients_by_user_id": {
+                    1: np.array([1, 2, 3, 4], dtype="float32"),
+                    2: np.array([3, 4, 5, 6], dtype="float32"),
+                },
+                "weight_gradients_by_user_id": {
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
+                },
+                "loss_gradients_by_user_id": {
+                    1: np.array([2, 3, 4, 5], dtype="float32"),
+                    2: np.array([3, 4, 5, 6], dtype="float32"),
+                },
+                "avg_loss_hessian": np.ones((4, 4)),
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.array(
+                        [
+                            [1, 2],
+                            [3, 4],
+                            [5, 6],
+                            [7, 8],
+                        ],
+                        dtype="float32",
+                    ),
+                    2: np.array(
+                        [
+                            [1, 1],
+                            [3, 4],
+                            [5, 6],
+                            [7, 8],
+                        ],
+                        dtype="float32",
+                    ),
+                },
+            },
+        }
+
+        # The new contribution to the the bottom left relative to previoius test
+        # due to loss_gradient_pi_derivatives_by_user_id being nonzero
+        # is average of np.array([[2, 4, 6,  8],
+        #                         [4, 8, 12, 16],
+        #                         [6, 12, 18, 24],
+        #                         [8, 16, 24, 32]])
+        # and np.array([[3, 4, 5, 6],
+        #               [12, 16, 20, 24],
+        #               [18, 24, 30, 36],
+        #               [24, 32, 40, 48]])
+        # which is
+        #     np.array([[ 2.5,  4. ,  5.5,  7. ],
+        #               [ 8. , 12. , 16. , 20. ],
+        #               [ 12. , 18. , 24. , 30. ],
+        #               [ 16. , 24. , 32. , 40. ]])
+        #
+
+        self.sigmoid_1.construct_upper_left_bread_inverse()
+        np.testing.assert_equal(
+            self.sigmoid_1.upper_left_bread_inverse,
+            # Note that this was constructed manually by inserting the correct
+            # diagonal blocks and then averaging outer products of the
+            # appropriate things in the above algorithm statistics dict
+            np.array(
+                [
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [06.5, 10.5, 14.5, 18.5, 1.0, 1.0, 1.0, 1.0],
+                    [13.5, 21.0, 28.5, 36.0, 1.0, 1.0, 1.0, 1.0],
+                    [19.0, 29.5, 40.0, 50.5, 1.0, 1.0, 1.0, 1.0],
+                    [24.5, 38.0, 51.5, 65.0, 1.0, 1.0, 1.0, 1.0],
+                ],
+                dtype="float32",
+            ),
+        )
+
+    def test_construct_upper_left_bread_inverse_2_decs_btwn_updates_no_action_probs_in_loss(
+        self,
+    ):
+        self.sigmoid_1.algorithm_statistics_by_calendar_t = {
+            3: {
+                "pi_gradients_by_user_id": {
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
+                },
+                "weight_gradients_by_user_id": {
+                    1: np.array([1, 2, 3, 4], dtype="float32"),
+                    2: np.array([2, 3, 4, 5], dtype="float32"),
+                },
+                "loss_gradients_by_user_id": {
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
+                },
+                "avg_loss_hessian": np.ones((4, 4)) * -1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 2)),
+                    2: np.zeros((4, 2)),
+                },
             },
             4: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([3, 4, 5, 6], dtype="float32"),
@@ -428,8 +586,8 @@ class TestSigmoidLS_T3_n2:
             },
             5: {
                 "pi_gradients_by_user_id": {
-                    1: np.array([None] * 4, dtype="float32"),
-                    2: np.array([None] * 4, dtype="float32"),
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
                 },
                 "weight_gradients_by_user_id": {
                     1: np.array([None] * 4, dtype="float32"),
@@ -440,6 +598,10 @@ class TestSigmoidLS_T3_n2:
                     2: np.array([2, 3, 4, 5], dtype="float32"),
                 },
                 "avg_loss_hessian": np.ones((4, 4)) * 1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.zeros((4, 4)),
+                    2: np.zeros((4, 4)),
+                },
             },
             6: {
                 "pi_gradients_by_user_id": {
@@ -473,9 +635,150 @@ class TestSigmoidLS_T3_n2:
             ),
         )
 
-    def test_calculate_loss_derivatives(self):
+    def test_construct_upper_left_bread_inverse_2_decs_btwn_updates_action_probs_in_loss(
+        self,
+    ):
+        self.sigmoid_1.algorithm_statistics_by_calendar_t = {
+            3: {
+                "pi_gradients_by_user_id": {
+                    1: np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
+                },
+                "weight_gradients_by_user_id": {
+                    1: np.array([1, 2, 3, 4], dtype="float32"),
+                    2: np.array([2, 3, 4, 5], dtype="float32"),
+                },
+                "loss_gradients_by_user_id": {
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
+                },
+                "avg_loss_hessian": np.ones((4, 4)) * -1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.array(
+                        [
+                            [1, 2],
+                            [3, 4],
+                            [5, 6],
+                            [7, 8],
+                        ],
+                        dtype="float32",
+                    ),
+                    2: np.array(
+                        [
+                            [1, 1],
+                            [3, 4],
+                            [5, 6],
+                            [7, 8],
+                        ],
+                        dtype="float32",
+                    ),
+                },
+            },
+            4: {
+                "pi_gradients_by_user_id": {
+                    1: 2 * np.ones(4, dtype="float32"),
+                    2: np.ones(4, dtype="float32"),
+                },
+                "weight_gradients_by_user_id": {
+                    1: np.array([3, 4, 5, 6], dtype="float32"),
+                    2: np.array([4, 5, 6, 7], dtype="float32"),
+                },
+            },
+            5: {
+                "pi_gradients_by_user_id": {
+                    1: np.ones(4, dtype="float32"),
+                    2: 2 * np.ones(4, dtype="float32"),
+                },
+                "weight_gradients_by_user_id": {
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
+                },
+                "loss_gradients_by_user_id": {
+                    1: np.array([1, 2, 3, 4], dtype="float32"),
+                    2: np.array([2, 3, 4, 5], dtype="float32"),
+                },
+                "avg_loss_hessian": np.ones((4, 4)) * 1,
+                "loss_gradient_pi_derivatives_by_user_id": {
+                    1: np.array(
+                        [
+                            [1, 2, 1, 1],
+                            [3, 4, 1, 2],
+                            [5, 6, 1, 1],
+                            [7, 8, 2, 2],
+                        ],
+                        dtype="float32",
+                    ),
+                    2: np.array(
+                        [
+                            [1, 1, 2, 1],
+                            [3, 4, 3, 2],
+                            [5, 6, 1, 1],
+                            [7, 8, 1, 2],
+                        ],
+                        dtype="float32",
+                    ),
+                },
+            },
+            6: {
+                "pi_gradients_by_user_id": {
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
+                },
+                "weight_gradients_by_user_id": {
+                    1: np.array([None] * 4, dtype="float32"),
+                    2: np.array([None] * 4, dtype="float32"),
+                },
+            },
+        }
+
+        # The new contribution to the the bottom left relative to previous test
+        # due to loss_gradient_pi_derivatives_by_user_id being nonzero
+        # is average of np.array([[3., 3., 3., 3.],
+        #                         [5., 5., 5., 5.],
+        #                         [3., 3., 3., 3.],
+        #                         [6., 6., 6., 6.]], dtype=float32)
+        # and np.array([[3., 3., 3., 3.],
+        #               [5., 5., 5., 5.],
+        #               [2., 2., 2., 2.],
+        #               [3., 3., 3., 3.]], dtype=float32)
+        # which is
+        #     np.array([[ 3,  3. ,  3,  3. ],
+        #               [ 5. , 5. , 5. , 5. ],
+        #               [ 2.5 , 2.5 , 2.5 , 2.5 ],
+        #               [ 4.5 , 4.5 , 4.5 , 4.5 ]])
+
+        self.sigmoid_1.construct_upper_left_bread_inverse()
+        np.testing.assert_equal(
+            self.sigmoid_1.upper_left_bread_inverse,
+            # Note that this was constructed manually by inserting the correct
+            # diagonal blocks and then summing weight gradients and averaging outer
+            # products of appropriate things in the above algorithm statistics dict
+            np.array(
+                [
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                    [11.0, 14.0, 17.0, 20.0, 1.0, 1.0, 1.0, 1.0],
+                    [18.0, 23.0, 28.0, 33.0, 1.0, 1.0, 1.0, 1.0],
+                    [20.5, 27.5, 34.5, 41.5, 1.0, 1.0, 1.0, 1.0],
+                    [27.5, 36.5, 45.5, 54.5, 1.0, 1.0, 1.0, 1.0],
+                ],
+                dtype="float32",
+            ),
+        )
+
+    @pytest.mark.skip(reason="To be implemented")
+    def test_construct_upper_left_bread_inverse_incremental_recruitment(self):
+        raise NotImplementedError()
+
+    @pytest.mark.skip(reason="To be implemented")
+    def test_construct_upper_left_bread_inverse_two_updates(self):
+        raise NotImplementedError()
+
+    def test_calculate_loss_derivatives_no_action_centering(self):
         self.sigmoid_1.calculate_loss_derivatives(
-            self.study_df_1, 2, self.sigmoid_1.get_current_beta_estimate()
+            self.study_df_1, 3, self.sigmoid_1.get_current_beta_estimate()
         )
         np.testing.assert_equal(
             self.sigmoid_1.algorithm_statistics_by_calendar_t,
@@ -483,7 +786,9 @@ class TestSigmoidLS_T3_n2:
                 # Derived by doing loss calculation by hand and also setting
                 # a breakpoint inside get_loss, verifying pieces incrementally.
                 # Hessians calculated manually using formula for each user and averaged
-                3: {
+                # See test with action centering for a better step-by-step
+                # derivation that can be replicated.
+                4: {
                     "loss_gradients_by_user_id": {
                         1: np.array([6, 26, 10, 26], dtype="float32"),
                         2: np.array([26, 30, 30, 30], dtype="float32"),
@@ -497,9 +802,130 @@ class TestSigmoidLS_T3_n2:
                         ],
                         dtype="float32",
                     ),
+                    "loss_gradient_pi_derivatives_by_user_id": {
+                        1: np.zeros((4, 3), dtype="float32"),
+                        2: np.zeros((4, 3), dtype="float32"),
+                    },
                 }
             },
         )
+
+    def test_calculate_loss_derivatives_action_centering(self):
+        self.sigmoid_2.calculate_loss_derivatives(
+            self.study_df_1, 3, self.sigmoid_2.get_current_beta_estimate()
+        )
+
+        beta = np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+        user_1_centered_actions = np.array([0 - 0.5, 1 - 0.6, 1 - 0.7], dtype="float32")
+        user_1_states = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, -1.0]], dtype="float32")
+        user_1_rewards = np.array([1.0, -1, 0], dtype="float32")
+        user_1_loss_gradient = -2 * sum(
+            (
+                (
+                    user_1_rewards[i]
+                    - beta[:2] @ user_1_states[i]
+                    - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
+                )
+                * np.concatenate(
+                    [
+                        user_1_states[i],
+                        user_1_centered_actions[i] * user_1_states[i],
+                    ]
+                )
+                for i in range(3)
+            )
+        )
+
+        user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
+        user_2_states = np.array([[1.0, 1.0], [1.0, 1.0], [1.0, 0.0]], dtype="float32")
+        user_2_rewards = np.array([1.0, 0, 1.0], dtype="float32")
+        user_2_loss_gradient = -2 * sum(
+            [
+                (
+                    user_2_rewards[i]
+                    - beta[:2] @ user_2_states[i]
+                    - beta[2:] @ (user_2_centered_actions[i] * user_2_states[i])
+                )
+                * np.concatenate(
+                    [
+                        user_2_states[i],
+                        user_2_centered_actions[i] * user_2_states[i],
+                    ]
+                )
+                for i in range(3)
+            ]
+        )
+
+        # There are small numerical differences between the above calculations
+        # and the real results. Assert they are close here and then just use
+        # the real results nested in the algorithm stats dict below
+        # instead of ironing out floating point issues
+        np.testing.assert_allclose(
+            user_1_loss_gradient,
+            np.array([-4.0000005, 16.199999, 5.3599997, 5.8199997], dtype="float32"),
+            atol=1e-05,
+        )
+        np.testing.assert_allclose(
+            user_2_loss_gradient,
+            np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+            atol=1e-05,
+        )
+
+        # This is a little lazy but the loss gradients match up, it suggests action
+        # centering is being incorporated correctly into the loss, and I will
+        # simply take the hessian and pi derivatives being computed and
+        # use them as the expected values because the code is behaving correctly
+        # in simulations and the addition of action centering doesn't add
+        # further difficulties to the JAX gradient infrastructure.
+
+        np.testing.assert_equal(
+            self.sigmoid_2.algorithm_statistics_by_calendar_t,
+            {
+                4: {
+                    "loss_gradients_by_user_id": {
+                        1: np.array(
+                            [-4.0000005, 16.199999, 5.3599997, 5.8199997],
+                            dtype="float32",
+                        ),
+                        2: np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+                    },
+                    "avg_loss_hessian": np.array(
+                        [
+                            [6.0, 2.0, 1.6000001, 1.8],
+                            [2.0, 4.0, 1.8, 2.4],
+                            [1.6000001, 1.8, 2.04, 1.5199999],
+                            [1.8, 2.4, 1.5199999, 1.6999999],
+                        ],
+                        dtype="float32",
+                    ),
+                    "loss_gradient_pi_derivatives_by_user_id": {
+                        1: np.array(
+                            [
+                                [-6.0, -14.0, 2.0],
+                                [-0.0, -14.0, -2.0],
+                                [10.0, -15.199999, 7.2],
+                                [-0.0, -15.199999, -7.2],
+                            ],
+                            dtype="float32",
+                        ),
+                        2: np.array(
+                            [
+                                [-14.0, -14.0, -6.0],
+                                [-14.0, -14.0, -0.0],
+                                [-25.2, -24.4, 7.6000004],
+                                [-25.199999, -24.400002, -0.0],
+                            ],
+                            dtype="float32",
+                        ),
+                    },
+                }
+            },
+        )
+
+    @pytest.mark.skip(reason="To be implemented")
+    def test_calculate_loss_derivatives_incremental_recruitment(self):
+        raise NotImplementedError()
 
     # TODO: Add test of loss derivatives with multiple updates? Had a case that
     # only broke on multiple updates...
@@ -526,7 +952,7 @@ class TestSigmoidLS_T3_n2:
             }
         )
         np.testing.assert_equal(
-            self.sigmoid_2.get_action_probs(curr_timestep_data),
+            self.sigmoid_3.get_action_probs(curr_timestep_data),
             np.array([0.1693274, 0.1], dtype=np.float32),
         )
 

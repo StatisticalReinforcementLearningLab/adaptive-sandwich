@@ -132,7 +132,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
             # Update Algorithm ##############################################
             logger.info("Updating algorithm parameters for time %s.", t)
-            study_RLalg.update_alg(new_update_data, update_last_t=t)
+            study_RLalg.update_alg(new_update_data)
             logger.info(
                 "Calculating loss gradients per user and average hessian for time %s.",
                 t,
@@ -257,6 +257,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 steepness=args.steepness,
                 lower_clip=args.lower_clip,
                 upper_clip=args.upper_clip,
+                action_centering=args.action_centering,
             )
         else:
             raise ValueError("Invalid RL Algorithm Type")
@@ -384,7 +385,7 @@ def main():
         "--action_centering",
         type=int,
         default=0,
-        help="Whether posterior sampling algorithm uses action centering",
+        help="Whether RL algorithm uses action centering (if applicable)",
     )
     parser.add_argument(
         "--prior",

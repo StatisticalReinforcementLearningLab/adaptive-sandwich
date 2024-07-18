@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import synthetic_env
 import basic_RL_algorithms
@@ -78,6 +79,7 @@ class TestRunStudySimulation:
             steepness=self.args_incremental_1.steepness,
             lower_clip=self.args_incremental_1.lower_clip,
             upper_clip=self.args_incremental_1.upper_clip,
+            action_centering=self.args_incremental_1.action_centering,
         )
         self.sigmoid_1.rng = MagicMock(autospec=True)
         self.sigmoid_1.get_action_probs = MagicMock(autospec=True)
@@ -984,5 +986,6 @@ class TestRunStudySimulation:
         pd.testing.assert_frame_equal(study_df, expected_df)
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_load_data_and_simulate_studies():
-    pass
+    raise NotImplementedError()

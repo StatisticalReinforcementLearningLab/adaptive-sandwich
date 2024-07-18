@@ -8,30 +8,17 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 T=10
 decisions_between_updates=1
-# recruit_n=25; recruit_t=2
-# recruit_n=100;
 recruit_t=1
 n=100
 recruit_n=$n
 min_users=1
 synthetic_mode='delayed_1_dosage'
-#synthetic_mode='delayed_1_dosage'
-#synthetic_mode='delayed_01_5_dosage'
-#synthetic_mode='test_1_1_T2'
-#synthetic_mode='delayed_effects_large'
 steepness=0.0
-eta=0
 RL_alg="sigmoid_LS"
-#RL_alg="posterior_sampling"
-#RL_alg="fixed_randomization"
-#err_corr='independent'
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 action_centering_inference=0
-#TODO: not used currently but maybe should be
-debug=0
-redo_analyses=1
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -64,12 +51,11 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning RL study simulation."
-#TODO: Action centering doesn't work in a general way, just for posterior sampling
-#TODO: I put n in for recruit n. May need to change when we have incremental recruitment
 python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 
-# Create a convenience variable that holds the output folder for the last script
+# Create a convenience variable that holds the output folder for the last script.
+# This should be output by that script or passed into it as an arg, but alas.
 output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
 
 # Do after-study analysis on the single algorithm run from above

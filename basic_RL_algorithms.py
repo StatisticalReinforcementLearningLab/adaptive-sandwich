@@ -684,7 +684,12 @@ class SigmoidLS:
                     )
 
                     # TODO: Detailed comment explaining this logic and the data
-                    # orientation that makes it work
+                    # orientation that makes it work.  Also note the assumption
+                    # that the estimating function is additive across times
+                    # so that matrix multiplication is the right operation. Also
+                    # place this comment on the after study analysis logic or
+                    # link to the same explanation in both places.
+                    # Maybe link to a document with a picture...
 
                     mixed_theta_beta_loss_derivative = jnp.matmul(
                         t_stats_dict["loss_gradient_pi_derivatives_by_user_id"][
@@ -698,7 +703,6 @@ class SigmoidLS:
                             :,
                         ],
                     )
-
                     running_entry_holder += mixed_theta_beta_loss_derivative
                 # TODO: Use jnp.block instead of indexing
                 output_matrix = output_matrix.at[

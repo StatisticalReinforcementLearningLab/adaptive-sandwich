@@ -1,12 +1,8 @@
 import pandas as pd
 import numpy as np
+import pytest
 
 import after_study_analysis
-
-# Note that the testing of collect_derivatives is implicit here, as it's
-# called along the way in each of the below tests.  This reflects the fact that
-# the tests were originally constructed before it existed and it just reorganizes
-# the same data.  That being said, a direct unit test would be nice to add.
 
 
 def test_form_meat_matrix():
@@ -671,25 +667,39 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_form_bread_inverse_matrix_incremental_recruitment():
     raise NotImplementedError()
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_form_bread_inverse_matrix_no_action_centering():
     raise NotImplementedError()
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_adaptive_and_classical_match_steepness_0():
     raise NotImplementedError()
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_analyze_dataset():
     raise NotImplementedError()
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_estimate_theta():
     raise NotImplementedError()
 
 
+@pytest.mark.skip(reason="To be implemented")
 def test_form_classical_sandwich():
     raise NotImplementedError()
+
+
+# Note that the testing of collect_derivatives is implicit here, as it's
+# called along the way in several tests above.  This reflects the fact that
+# the tests were originally constructed before it existed and it just reorganizes
+# the same data.  That being said, a direct unit test would be nice to add.
+# UPDATE: should add test for incremental recruitment case, unless incremental
+# recruitment bread test is full end-to-end style like above

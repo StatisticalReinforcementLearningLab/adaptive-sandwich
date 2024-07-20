@@ -1,4 +1,6 @@
 import warnings
+import importlib.util
+import importlib.machinery
 
 import numpy as np
 
@@ -48,3 +50,14 @@ def invert_matrix_and_check_conditioning(matrix, condition_num_threshold=10**3):
             f"You are inverting a matrix with a large condition number: {condition_number}"
         )
     return np.linalg.inv(matrix)
+
+
+def load_module_from_source_file(modname, filename):
+    loader = importlib.machinery.SourceFileLoader(modname, filename)
+    spec = importlib.util.spec_from_file_location(modname, filename, loader=loader)
+    module = importlib.util.module_from_spec(spec)
+    # The module is always executed and not cached in sys.modules.
+    # Uncomment the following line to cache the module.
+    # sys.modules[module.__name__] = module
+    loader.exec_module(module)
+    return module

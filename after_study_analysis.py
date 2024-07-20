@@ -14,6 +14,8 @@ from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 import scipy
 
+import calculate_RL_derivatives
+
 
 from helper_functions import invert_matrix_and_check_conditioning
 
@@ -23,6 +25,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
+
+# TODO: Break this file up
 
 
 # TODO: Think about interface here.  User should probably specify model, we create loss from it
@@ -233,18 +237,74 @@ def collect_existing_analyses(input_glob):
     )
 
 
-# TODO: ADD redo analysis toggle?
+# TODO: Add option to give per-user loss OR estimating function. Just loss now
+# TODO: take in theta instead of forming it, and use to check estimating function.
+#       Yet we still want to support large simulation case where we DO calculate theta.
+#       I think you have to pass in theta-forming function OR theta itself.
+# TODO: Take in requirements files for action prob and loss and take derivatives
+# in corresponding sandbox. For now we just assume the dependencies in this package
+# suffice.
+# TODO: Handle raw timestamps instead of calendar time index? For now I'm requiring it
+# TODO: Make sure user id column name is actually respected. There are .user_id's lingering
 @cli.command()
 @click.option(
-    "--study_dataframe_pickle",
+    "--study_df_pickle",
     type=click.File("rb"),
     help="Pickled pandas dataframe in correct format (see contract/readme)",
     required=True,
 )
 @click.option(
-    "--rl_algorithm_object_pickle",
+    "--beta_df_pickle",
     type=click.File("rb"),
-    help="Pickled RL algorithm object in correct format (see contract/readme)",
+    help="Pickled pandas dataframe in correct format (see contract/readme)",
+    required=True,
+)
+@click.option(
+    "--action_prob_func_filename",
+    type=click.File("rb"),
+    help="File that contains the action probability function and relevant imports.  The filename will be assumed to match the function name.",
+    required=True,
+)
+@click.option(
+    "--action_prob_func_args_pickle",
+    type=click.File("rb"),
+    help="Pickled dictionary that contains the action probability function arguments for all decision times for all users",
+    required=True,
+)
+@click.option(
+    "--action_prob_func_args_beta_index",
+    type=int,
+    required=True,
+    help="Index of the RL parameter vector beta in the tuple of action probability func args",
+)
+@click.option(
+    "--RL_loss_func_filename",
+    type=click.Path(exists=True),
+    help="File that contains the per-user loss function used to determine the RL parameters at each update and relevant imports.  The filename will be assumed to match the function name.",
+    required=True,
+)
+@click.option(
+    "--RL_loss_func_args_pickle",
+    type=click.File("rb"),
+    help="Pickled dictionary that contains the RL loss function arguments for all update times for all users",
+    required=True,
+)
+@click.option(
+    "--RL_loss_func_args_beta_index",
+    type=int,
+    required=True,
+    help="Index of the RL parameter vector beta in the tuple of RL loss func args",
+)
+@click.option(
+    "--RL_loss_func_args_action_prob_index",
+    type=int,
+    default=-1,
+    help="Index of the action probability in the tuple of RL loss func args, if applicable",
+)
+@click.option(
+    "--covariate_names",
+    type=str,
+    help="If supplied, the important computations will be profiled with summary output shown",
     required=True,
 )
 @click.option(
@@ -259,16 +319,53 @@ def collect_existing_analyses(input_glob):
     default=0,
 )
 @click.option(
-    "--in_study_column",
+    "--in_study_col_name",
     type=str,
-    default="in_study",
+    required=True,
+    help="Name of the binary column in the study dataframe that indicates whether a user is in the study",
+)
+@click.option(
+    "--action_col_name",
+    type=str,
+    required=True,
+    help="Name of the binary column in the study dataframe that indicates which action was taken",
+)
+@click.option(
+    "--policy_num_col_name",
+    type=str,
+    required=True,
+    help="Name of the column in the study dataframe that indicates the policy number in use",
+)
+@click.option(
+    "--calendar_t_col_name",
+    type=str,
+    required=True,
+    help="Name of the column in the study dataframe that indicates calendar time (shared integer index across users).",
+)
+@click.option(
+    "--user_id_col_name",
+    type=str,
+    required=True,
+    help="Name of the column in the study dataframe that indicates user id",
 )
 def analyze_dataset(
-    study_dataframe_pickle,
-    rl_algorithm_object_pickle,
+    study_df_pickle,
+    beta_df_pickle,
+    action_prob_func_filename,
+    action_prob_func_args_pickle,
+    action_prob_func_args_beta_index,
+    RL_loss_func_filename,
+    RL_loss_func_args_pickle,
+    RL_loss_func_args_beta_index,
+    RL_loss_func_args_action_prob_index,
+    covariate_names_str,
     profile,
     action_centering,
-    in_study_column,
+    in_study_col_name,
+    action_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
 ):
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -284,18 +381,91 @@ def analyze_dataset(
         logging.info("Action centering is ENABLED for inference.")
 
     # Load study data
-    study_df = pickle.load(study_dataframe_pickle)
-    study_RLalg = pickle.load(rl_algorithm_object_pickle)
+    study_df = pickle.load(study_df_pickle)
+
+    # TODO: Do I even need this beta df?
+    beta_df = pickle.load(beta_df_pickle)
+    beta_dim = beta_df.shape[1]
+
+    action_prob_func_args = pickle.load(action_prob_func_args_pickle)
+    RL_loss_func_args = pickle.load(RL_loss_func_args_pickle)
+
+    # TODO: Data integrity checks.
+    # Reconstruct action probabilites now or later?
+
+    # I check estimating function sum 0 later, but differentiate between
+    # RL and beta side? Also could move check here. Might be  nice to have all
+    # checks in same place.
+
+    # Make sure study df sorted within users and across users? .sort_values(by=["user_id", "calendar_t"])
+
+    # Make sure every user has entry for union of all decision times across
+    # all users.
+
+    # Make sure in study is never on for more than one stretch
+
+    # Make sure right number of in study rows per user?? May not be precise
+
+    # Possibly make sure no real-looking data when in study is off
+
+    # Make sure function args for all users for all t even if not in study
+    # policy num the same for all users for each calendar t.  Something that adds
+    # nothing to gradients when users are not in the study is needed... maybe
+    # think of way to make this happen more directly in response to in study
+    # indicator. Well, can pass in zeros or NAs but not use computed gradients,
+    # automatically spit out gradient zero somehow.
+
+    # I think I'm agnostic to indexing of calendar times but should check because
+    # otherwise need to add a check here to verify required format.
+
+    # Verify actions binary
+
+    # Verify action column present in study df
+
+    # Verify policy num column present in both beta df and study df, and joinable,
+    # for instance no policy nums in study df not present in beta df.  Other way
+    # is acceptable maybe but could be a warning.
+
+    # Verify in study column present in study df
+
+    # If no action probabilites vector is specified,
+
+    algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
+        study_df,
+        in_study_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_func_filename,
+        action_prob_func_args,
+        action_prob_func_args_beta_index,
+        RL_loss_func_filename,
+        RL_loss_func_args,
+        RL_loss_func_args_beta_index,
+        RL_loss_func_args_action_prob_index,
+    )
+    upper_left_bread_inverse = calculate_upper_left_bread_inverse(
+        study_df, beta_dim, algorithm_statistics_by_calendar_t
+    )
+
+    covariate_names = covariate_names_str.split(",")
 
     # Analyze data
     theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
         analyze_dataset_inner(
-            study_df, study_RLalg, bool(action_centering), in_study_column
+            study_df,
+            beta_dim,
+            algorithm_statistics_by_calendar_t,
+            upper_left_bread_inverse,
+            bool(action_centering),
+            covariate_names,
+            in_study_col_name,
         )
     )
 
     # Write analysis results to same directory as input files
-    folder_path = pathlib.Path(study_dataframe_pickle.name).parent.resolve()
+    folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
     with open(f"{folder_path}/analysis.pkl", "wb") as f:
         pickle.dump(
             {
@@ -319,27 +489,198 @@ def analyze_dataset(
 
 
 # TODO: docstring
-# TODO: Collect all jax things and then einsum away?
-def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_column):
+def calculate_algorithm_statistics(
+    study_df,
+    in_study_col_name,
+    action_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
+    action_prob_func_filename,
+    action_prob_func_args,
+    action_prob_func_args_beta_index,
+    RL_loss_func_filename,
+    RL_loss_func_args,
+    RL_loss_func_args_beta_index,
+    RL_loss_func_args_action_prob_index,
+):
+    pi_and_weight_gradients_by_calendar_t = (
+        calculate_RL_derivatives.calculate_pi_and_weight_gradients(
+            study_df,
+            in_study_col_name,
+            action_col_name,
+            calendar_t_col_name,
+            user_id_col_name,
+            action_prob_func_filename,
+            action_prob_func_args,
+            action_prob_func_args_beta_index,
+        )
+    )
 
+    RL_update_derivatives_by_calendar_t = (
+        calculate_RL_derivatives.calculate_loss_derivatives(
+            study_df,
+            RL_loss_func_filename,
+            RL_loss_func_args,
+            RL_loss_func_args_beta_index,
+            RL_loss_func_args_action_prob_index,
+            policy_num_col_name,
+            calendar_t_col_name,
+        )
+    )
+
+    merged_dict = pi_and_weight_gradients_by_calendar_t
+    for t, t_dict in pi_and_weight_gradients_by_calendar_t.items():
+        merged_dict[t] = {
+            **t_dict,
+            **RL_update_derivatives_by_calendar_t.get(t, {}),
+        }
+
+    return merged_dict
+
+
+# TODO: docstring
+def calculate_upper_left_bread_inverse(
+    study_df, beta_dim, algorithm_statistics_by_calendar_t
+):
+
+    # Form the dimensions for our bread matrix portion (pre-inverting)
+    num_updates = None
+    overall_dim = beta_dim * num_updates
+    output_matrix = jnp.zeros((overall_dim, overall_dim))
+
+    # List of times that were the first applicable time for some update
+    # TODO: sort to not rely on insertion order?
+    # TODO: use policy_num in df? alg statistics potentially ok too though.
+    next_times_after_update = [
+        t
+        for t, value in algorithm_statistics_by_calendar_t.items()
+        if "loss_gradients_by_user_id" in value
+    ]
+
+    user_ids = study_df.user_id.unique()
+    num_users = len(user_ids)
+
+    # This simply collects the pi derivatives with respect to betas for all
+    # decision times for each user. The one complication is that we add some
+    # padding of zeros for decision times before the first update to make
+    # indexing simpler below.
+    # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
+    pi_derivatives_by_user_id = {
+        user_id: jnp.pad(
+            jnp.array(
+                [
+                    t_dict["pi_gradients_by_user_id"][user_id]
+                    for t_dict in algorithm_statistics_by_calendar_t.values()
+                ]
+            ),
+            pad_width=((next_times_after_update[0] - 1, 0), (0, 0)),
+        )
+        for user_id in user_ids
+    }
+
+    # This loop iterates over all times that were the first applicable time
+    # for a non-initial policy. Take care to note that update_idx starts at 0.
+    # Think of each iteration of this loop as creating a (block) row of the matrix
+    for update_idx, update_t in enumerate(next_times_after_update):
+        logger.info("Processing update time %s.", update_t)
+        t_stats_dict = algorithm_statistics_by_calendar_t[update_t]
+
+        # This loop creates the non-diagonal terms for the current update
+        # Think of each iteration of this loop as creating one term in the current (block) row
+        logger.info("Creating the non-diagonal terms for the current update.")
+        for i in range(update_idx):
+            lower_t = next_times_after_update[i]
+            upper_t = next_times_after_update[i + 1]
+            running_entry_holder = jnp.zeros((beta_dim, beta_dim))
+
+            # This loop calculates the per-user quantities that will be
+            # averaged for the final matrix entries
+            for user_id, loss_gradient in t_stats_dict[
+                "loss_gradients_by_user_id"
+            ].items():
+                weight_gradient_sum = jnp.zeros(beta_dim)
+
+                # This loop iterates over decision times in slices
+                # according to what was used for each update to collect the
+                # right weight gradients
+                for t in range(
+                    lower_t,
+                    upper_t,
+                ):
+                    weight_gradient_sum += algorithm_statistics_by_calendar_t[t][
+                        "weight_gradients_by_user_id"
+                    ][user_id]
+
+                running_entry_holder += jnp.outer(
+                    loss_gradient,
+                    weight_gradient_sum,
+                )
+
+                # TODO: Detailed comment explaining this logic and the data
+                # orientation that makes it work.  Also note the assumption
+                # that the estimating function is additive across times
+                # so that matrix multiplication is the right operation. Also
+                # place this comment on the after study analysis logic or
+                # link to the same explanation in both places.
+                # Maybe link to a document with a picture...
+
+                mixed_theta_beta_loss_derivative = jnp.matmul(
+                    t_stats_dict["loss_gradient_pi_derivatives_by_user_id"][user_id][
+                        :,
+                        lower_t - 1 : upper_t - 1,
+                    ],
+                    pi_derivatives_by_user_id[user_id][
+                        lower_t - 1 : upper_t - 1,
+                        :,
+                    ],
+                )
+                running_entry_holder += mixed_theta_beta_loss_derivative
+            # TODO: Use jnp.block instead of indexing
+            output_matrix = output_matrix.at[
+                (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
+                i * beta_dim : (i + 1) * beta_dim,
+            ].set(running_entry_holder / num_users)
+
+        # Add the diagonal hessian entry (which is already an average)
+        # TODO: Use jnp.block instead of indexing
+        output_matrix = output_matrix.at[
+            (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
+            (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
+        ].set(t_stats_dict["avg_loss_hessian"])
+
+    return output_matrix
+
+
+# TODO: docstring
+def analyze_dataset_inner(
+    study_df,
+    beta_dim,
+    algorithm_statistics_by_calendar_t,
+    upper_left_bread_inverse,
+    action_centering,
+    covariate_names,
+    in_study_column,
+):
     # List of times that were the first applicable time for some update
     # Sorting shouldn't be necessary, as insertion order should be chronological
     # but we do it just in case.
     update_times = sorted(
         [
             t
-            for t, value in study_RLalg.algorithm_statistics_by_calendar_t.items()
+            for t, value in algorithm_statistics_by_calendar_t.items()
             if "loss_gradients_by_user_id" in value
         ]
     )
 
     # TODO: state features should not be the same as RL alg for full generality
     # Estimate the inferential target using the supplied study data.
+    # TODO: We may not want to estimate theta in general... too complicated.
     logger.info("Forming theta estimate.")
+
     theta_est = estimate_theta(
         study_df,
-        study_RLalg.state_feats,
-        study_RLalg.treat_feats,
+        covariate_names,
         action_centering,
         in_study_column,
     )
@@ -350,8 +691,7 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_colu
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         collect_derivatives(
             study_df,
-            study_RLalg.state_feats,
-            study_RLalg.treat_feats,
+            covariate_names,
             theta_est,
             action_centering,
         )
@@ -362,11 +702,11 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_colu
     max_t = study_df.calendar_t.max()
     theta_dim = len(theta_est)
     joint_bread_inverse_matrix = form_bread_inverse_matrix(
-        study_RLalg.upper_left_bread_inverse,
+        upper_left_bread_inverse,
         max_t,
-        study_RLalg.algorithm_statistics_by_calendar_t,
+        algorithm_statistics_by_calendar_t,
         update_times,
-        study_RLalg.beta_dim,
+        beta_dim,
         theta_dim,
         user_ids,
         loss_gradients,
@@ -380,13 +720,12 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_colu
     )
 
     logger.info("Forming adaptive meat.")
-    # TODO: Should I do DOF adjustment as for classical? Probably doesn't make sense to do in
-    # one case but not the other.
+    # TODO: Small sample corrections
     joint_meat_matrix = form_meat_matrix(
         theta_dim,
         update_times,
-        study_RLalg.beta_dim,
-        study_RLalg.algorithm_statistics_by_calendar_t,
+        beta_dim,
+        algorithm_statistics_by_calendar_t,
         user_ids,
         loss_gradients,
     )
@@ -414,19 +753,18 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_colu
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?
 # TODO: doc string
-def estimate_theta(
-    study_df, state_feats, treat_feats, action_centering, in_study_column
-):
+def estimate_theta(study_df, covariate_names, action_centering, in_study_column):
     # Note that the intercept is included in the features already (col of 1s)
+    # in the way we typically run this
     linear_model = LinearRegression(fit_intercept=False)
 
     # Note the role of the action centering flag in here in determining whether
     # we subtract action probabilities from actions (multiplying by a boolean
     # in python is like multiplying by 1 if True and 0 if False).
     in_study_bool = study_df[in_study_column] == 1
-    trimmed_df = study_df.loc[in_study_bool, state_feats].copy()
+    trimmed_df = study_df.loc[in_study_bool, covariate_names].copy()
     in_study_df = study_df[in_study_bool]
-    for feat in treat_feats:
+    for feat in covariate_names:
         trimmed_df[f"action:{feat}"] = in_study_df[feat] * (
             in_study_df["action"] - (in_study_df["action1prob"] * action_centering)
         )
@@ -437,9 +775,7 @@ def estimate_theta(
 
 
 # TODO: Just use dicts keyed on user id...
-def collect_derivatives(
-    study_df, state_feats, treat_feats, theta_est, action_centering
-):
+def collect_derivatives(study_df, covariate_names, theta_est, action_centering):
     batched_base_states_list = []
     batched_treat_states_list = []
     batched_actions_list = []
@@ -450,10 +786,10 @@ def collect_derivatives(
     for user_id in user_ids:
         filtered_user_data = study_df.loc[study_df.user_id == user_id]
         batched_base_states_list.append(
-            get_base_states(filtered_user_data, state_feats)
+            get_base_states(filtered_user_data, covariate_names)
         )
         batched_treat_states_list.append(
-            get_treat_states(filtered_user_data, treat_feats)
+            get_treat_states(filtered_user_data, covariate_names)
         )
         batched_actions_list.append(get_actions(filtered_user_data))
         batched_rewards_list.append(get_rewards(filtered_user_data))
@@ -698,14 +1034,10 @@ def form_bread_inverse_matrix(
             # the precollected pi beta derivative matrix for the user. These
             # segments are simply those that correspond to all the decision times
             # in the current slice between updates under consideration.
-            # TODO: *Only* do this when action centering or otherwise using pis
             # NOTE THAT OUR HELPER DATA STRUCTURES ARE 0-INDEXED, SO WE SUBTRACT
             # 1 FROM OUR TIME BOUNDS.
-            # TODO: how does this work with incremental recruitment? Hopefully
-            # burden is all on setting up the two derivative dicts, and then logic
-            # holds -- update, seems to work.
-            # TODO: We really want to do something like a join on policy number,
-            # then multiply and sum in groups, may be simpler to think about
+            # NOTE we could also do something like a join on policy number,
+            # then multiply and sum in groups--may be simpler to think about
             # than dealing with spans of update times
             mixed_theta_beta_loss_derivative = jnp.matmul(
                 mixed_theta_pi_loss_derivatives_by_user_id[user_id][

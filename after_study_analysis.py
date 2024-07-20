@@ -428,7 +428,7 @@ def analyze_dataset(
 
     # Verify in study column present in study df
 
-    # If no action probabilites vector is specified,
+    # If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,

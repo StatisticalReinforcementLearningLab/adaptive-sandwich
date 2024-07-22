@@ -51,16 +51,45 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning RL study simulation."
-python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL
+python rl_study_simulation.py \
+  --T=$T \
+  --N=1 \
+  --n=$n \
+  --min_users=$min_users \
+  --decisions_between_updates $decisions_between_updates \
+  --recruit_n $recruit_n \
+  --recruit_t $recruit_t \
+  --synthetic_mode $synthetic_mode \
+  --steepness $steepness \
+  --RL_alg $RL_alg \
+  --err_corr $err_corr \
+  --alg_state_feats $alg_state_feats \
+  --action_centering $action_centering_RL
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
-# This should be output by that script or passed into it as an arg, but alas.
+# This should really be output by that script or passed into it as an arg, but alas.
 output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning after-study analysis."
-python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${output_folder}/exp=1/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=1/study_RLalg.pkl" --action_centering=$action_centering_inference
+python after_study_analysis.py analyze-dataset \
+  --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+  --beta_df_pickle="${output_folder}/exp=1/beta_df.pkl" \
+  --action_prob_func_filename="functions_to_pass_to_analysis/get_action_1_prob_pure.py" \
+  --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+  --action_prob_func_args_beta_index=0 \
+  --rl_loss_func_filename="functions_to_pass_to_analysis/get_loss.py" \
+  --rl_loss_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+  --rl_loss_func_args_beta_index=0 \
+  --rl_loss_func_args_action_prob_index=5 \
+  --covariate_names_str=$alg_state_feats \
+  --action_centering=$action_centering_inference \
+  --in_study_col_name="in_study" \
+  --action_col_name="action" \
+  --policy_num_col_name="policy_num" \
+  --calendar_t_col_name="calendar_t" \
+  --user_id_col_name="user_id"
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Ending after-study analysis."
 
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished simulation."

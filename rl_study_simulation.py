@@ -7,6 +7,7 @@ from pstats import Stats
 import logging
 
 import numpy as np
+import pandas as pd
 import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env_params, SyntheticEnv
@@ -111,6 +112,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             study_RLalg.calculate_pi_and_weight_gradients(
                 all_prev_data, t, curr_beta_est
             )
+            study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
 
         # Check if need to update algorithm #######################################
         # TODO: recruit_t not respected here.  Either remove it or use here.
@@ -140,6 +142,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
             curr_beta_est = study_RLalg.get_current_beta_estimate()
             study_RLalg.calculate_loss_derivatives(all_prev_data, t, curr_beta_est)
+            study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
 
     logger.info("Constructing upper left bread inverse matrix")
     study_RLalg.construct_upper_left_bread_inverse()
@@ -278,11 +281,37 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             study_df = study_df.astype({"policy_num": "Int64", "action": "Int64"})
 
         study_df.to_csv(f"{folder_path}/data.csv", index=False)
+
         with open(f"{folder_path}/study_df.pkl", "wb") as f:
             pickle.dump(study_df, f)
 
         with open(f"{folder_path}/study_RLalg.pkl", "wb") as f:
             pickle.dump(study_RLalg, f)
+
+        with open(f"{folder_path}/pi_args.pkl", "wb") as f:
+            pickle.dump(study_RLalg.pi_args, f)
+
+        with open(f"{folder_path}/rl_update_args.pkl", "wb") as f:
+            pickle.dump(study_RLalg.rl_update_args, f)
+
+        beta_dim = study_RLalg.all_policies[-1]["beta_est"].shape[1]
+        beta_df = pd.DataFrame(
+            data=np.array(
+                [
+                    np.concatenate(
+                        # Note the plus 1 in policy num. This is just how we do
+                        # things when setting up study df.
+                        [np.array([i + 1]), policy["beta_est"].to_numpy().squeeze()]
+                    )
+                    for i, policy in enumerate(study_RLalg.all_policies)
+                ]
+            ),
+            columns=["policy_num", *[f"beta_{j}" for j in range(beta_dim)]],
+        )
+        beta_df = beta_df.astype({"policy_num": "Int64"})
+
+        with open(f"{folder_path}/beta_df.pkl", "wb") as f:
+            pickle.dump(beta_df, f)
 
     logger.info(
         f"Simulation {args.N} of {args.N} ran in {time.perf_counter() - toc2:0.4f} seconds"

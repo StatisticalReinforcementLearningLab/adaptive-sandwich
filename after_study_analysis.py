@@ -14,7 +14,7 @@ from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 import scipy
 
-import calculate_RL_derivatives
+import calculate_rl_derivatives
 
 
 from helper_functions import invert_matrix_and_check_conditioning
@@ -246,6 +246,8 @@ def collect_existing_analyses(input_glob):
 # suffice.
 # TODO: Handle raw timestamps instead of calendar time index? For now I'm requiring it
 # TODO: Make sure user id column name is actually respected. There are .user_id's lingering
+# TODO: Action centering option should be removed when we start just taking in a loss/estimating
+# function for inference
 @cli.command()
 @click.option(
     "--study_df_pickle",
@@ -261,7 +263,7 @@ def collect_existing_analyses(input_glob):
 )
 @click.option(
     "--action_prob_func_filename",
-    type=click.File("rb"),
+    type=click.Path(exists=True),
     help="File that contains the action probability function and relevant imports.  The filename will be assumed to match the function name.",
     required=True,
 )
@@ -278,33 +280,33 @@ def collect_existing_analyses(input_glob):
     help="Index of the RL parameter vector beta in the tuple of action probability func args",
 )
 @click.option(
-    "--RL_loss_func_filename",
+    "--rl_loss_func_filename",
     type=click.Path(exists=True),
     help="File that contains the per-user loss function used to determine the RL parameters at each update and relevant imports.  The filename will be assumed to match the function name.",
     required=True,
 )
 @click.option(
-    "--RL_loss_func_args_pickle",
+    "--rl_loss_func_args_pickle",
     type=click.File("rb"),
     help="Pickled dictionary that contains the RL loss function arguments for all update times for all users",
     required=True,
 )
 @click.option(
-    "--RL_loss_func_args_beta_index",
+    "--rl_loss_func_args_beta_index",
     type=int,
     required=True,
     help="Index of the RL parameter vector beta in the tuple of RL loss func args",
 )
 @click.option(
-    "--RL_loss_func_args_action_prob_index",
+    "--rl_loss_func_args_action_prob_index",
     type=int,
     default=-1,
     help="Index of the action probability in the tuple of RL loss func args, if applicable",
 )
 @click.option(
-    "--covariate_names",
+    "--covariate_names_str",
     type=str,
-    help="If supplied, the important computations will be profiled with summary output shown",
+    help="The covariates used for inference, as a comma-separated string",
     required=True,
 )
 @click.option(
@@ -314,7 +316,7 @@ def collect_existing_analyses(input_glob):
     help="If supplied, the important computations will be profiled with summary output shown",
 )
 @click.option(
-    "--action_centering",  # TODO: This needs to be handled more generally and not as an int
+    "--action_centering",
     type=int,
     default=0,
 )
@@ -354,10 +356,10 @@ def analyze_dataset(
     action_prob_func_filename,
     action_prob_func_args_pickle,
     action_prob_func_args_beta_index,
-    RL_loss_func_filename,
-    RL_loss_func_args_pickle,
-    RL_loss_func_args_beta_index,
-    RL_loss_func_args_action_prob_index,
+    rl_loss_func_filename,
+    rl_loss_func_args_pickle,
+    rl_loss_func_args_beta_index,
+    rl_loss_func_args_action_prob_index,
     covariate_names_str,
     profile,
     action_centering,
@@ -383,12 +385,11 @@ def analyze_dataset(
     # Load study data
     study_df = pickle.load(study_df_pickle)
 
-    # TODO: Do I even need this beta df?
     beta_df = pickle.load(beta_df_pickle)
-    beta_dim = beta_df.shape[1]
+    beta_dim = beta_df.shape[1] - 1
 
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
-    RL_loss_func_args = pickle.load(RL_loss_func_args_pickle)
+    rl_loss_func_args = pickle.load(rl_loss_func_args_pickle)
 
     # TODO: Data integrity checks.
     # Reconstruct action probabilites now or later?
@@ -430,6 +431,11 @@ def analyze_dataset(
 
     # If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
 
+    # Currently assuming arraylike (numpy compatible) for for function args
+    # This is to make v/d/array stacking work
+
+    # Should be clear from dataframe spec but beta must be vector (not matrix)
+
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
         in_study_col_name,
@@ -440,10 +446,10 @@ def analyze_dataset(
         action_prob_func_filename,
         action_prob_func_args,
         action_prob_func_args_beta_index,
-        RL_loss_func_filename,
-        RL_loss_func_args,
-        RL_loss_func_args_beta_index,
-        RL_loss_func_args_action_prob_index,
+        rl_loss_func_filename,
+        rl_loss_func_args,
+        rl_loss_func_args_beta_index,
+        rl_loss_func_args_action_prob_index,
     )
     upper_left_bread_inverse = calculate_upper_left_bread_inverse(
         study_df, beta_dim, algorithm_statistics_by_calendar_t
@@ -499,13 +505,13 @@ def calculate_algorithm_statistics(
     action_prob_func_filename,
     action_prob_func_args,
     action_prob_func_args_beta_index,
-    RL_loss_func_filename,
-    RL_loss_func_args,
-    RL_loss_func_args_beta_index,
-    RL_loss_func_args_action_prob_index,
+    rl_loss_func_filename,
+    rl_loss_func_args,
+    rl_loss_func_args_beta_index,
+    rl_loss_func_args_action_prob_index,
 ):
     pi_and_weight_gradients_by_calendar_t = (
-        calculate_RL_derivatives.calculate_pi_and_weight_gradients(
+        calculate_rl_derivatives.calculate_pi_and_weight_gradients(
             study_df,
             in_study_col_name,
             action_col_name,
@@ -517,23 +523,23 @@ def calculate_algorithm_statistics(
         )
     )
 
-    RL_update_derivatives_by_calendar_t = (
-        calculate_RL_derivatives.calculate_loss_derivatives(
+    rl_update_derivatives_by_calendar_t = (
+        calculate_rl_derivatives.calculate_loss_derivatives(
             study_df,
-            RL_loss_func_filename,
-            RL_loss_func_args,
-            RL_loss_func_args_beta_index,
-            RL_loss_func_args_action_prob_index,
+            rl_loss_func_filename,
+            rl_loss_func_args,
+            rl_loss_func_args_beta_index,
+            rl_loss_func_args_action_prob_index,
             policy_num_col_name,
             calendar_t_col_name,
         )
     )
 
-    merged_dict = pi_and_weight_gradients_by_calendar_t
+    merged_dict = {}
     for t, t_dict in pi_and_weight_gradients_by_calendar_t.items():
         merged_dict[t] = {
             **t_dict,
-            **RL_update_derivatives_by_calendar_t.get(t, {}),
+            **rl_update_derivatives_by_calendar_t.get(t, {}),
         }
 
     return merged_dict
@@ -544,11 +550,6 @@ def calculate_upper_left_bread_inverse(
     study_df, beta_dim, algorithm_statistics_by_calendar_t
 ):
 
-    # Form the dimensions for our bread matrix portion (pre-inverting)
-    num_updates = None
-    overall_dim = beta_dim * num_updates
-    output_matrix = jnp.zeros((overall_dim, overall_dim))
-
     # List of times that were the first applicable time for some update
     # TODO: sort to not rely on insertion order?
     # TODO: use policy_num in df? alg statistics potentially ok too though.
@@ -557,6 +558,11 @@ def calculate_upper_left_bread_inverse(
         for t, value in algorithm_statistics_by_calendar_t.items()
         if "loss_gradients_by_user_id" in value
     ]
+
+    # Form the dimensions for our bread matrix portion (pre-inverting)
+    num_updates = len(next_times_after_update)
+    overall_dim = beta_dim * num_updates
+    output_matrix = jnp.zeros((overall_dim, overall_dim))
 
     user_ids = study_df.user_id.unique()
     num_users = len(user_ids)

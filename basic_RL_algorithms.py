@@ -269,6 +269,8 @@ class SigmoidLS:
         self.upper_clip = upper_clip
         self.rng = np.random.default_rng(self.alg_seed)
         self.beta_dim = len(self.state_feats) + len(self.treat_feats)
+        self.pi_args = {}
+        self.rl_update_args = {}
 
         self.treat_feats_action = ["action:" + x for x in self.treat_feats]
         self.treat_bool = jnp.array(
@@ -424,6 +426,31 @@ class SigmoidLS:
     def get_current_beta_estimate(self):
         return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
+    def collect_rl_update_args(self, all_prev_data, calendar_t, curr_beta_est):
+        logger.info(
+            "Collecting args to loss/estimating function at time %d for each user in dictionary format",
+            calendar_t,
+        )
+        next_policy_num = all_prev_data["policy_num"].max() + 1
+        self.rl_update_args[next_policy_num] = {
+            user_id: (
+                curr_beta_est,
+                self.get_base_states(
+                    all_prev_data.loc[all_prev_data.user_id == user_id]
+                ),
+                self.get_treat_states(
+                    all_prev_data.loc[all_prev_data.user_id == user_id]
+                ),
+                self.get_actions(all_prev_data.loc[all_prev_data.user_id == user_id]),
+                self.get_rewards(all_prev_data.loc[all_prev_data.user_id == user_id]),
+                self.get_action1probs(
+                    all_prev_data.loc[all_prev_data.user_id == user_id]
+                ),
+                self.action_centering,
+            )
+            for user_id in self.get_all_users(all_prev_data)
+        }
+
     # TODO: Docstring
     # TODO: JIT whole function? or just gradient and hessian batch functions
     def calculate_loss_derivatives(self, all_prev_data, calendar_t, curr_beta_est):
@@ -516,6 +543,26 @@ class SigmoidLS:
         ] = {
             user_id: loss_gradient_pi_derivatives[i].squeeze()
             for i, user_id in enumerate(all_user_ids)
+        }
+
+    def collect_pi_args(self, all_prev_data, calendar_t, curr_beta_est):
+        logger.info(
+            "Collecting args to pi function at time %d for each user in dictionary format",
+            calendar_t,
+        )
+        assert calendar_t == jnp.max(all_prev_data["calendar_t"].to_numpy())
+
+        self.pi_args[calendar_t] = {
+            user_id: (
+                curr_beta_est,
+                self.lower_clip,
+                self.steepness,
+                self.upper_clip,
+                self.get_treat_states(
+                    all_prev_data.loc[all_prev_data.user_id == user_id]
+                )[-1],
+            )
+            for user_id in self.get_all_users(all_prev_data)
         }
 
     def calculate_pi_and_weight_gradients(

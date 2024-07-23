@@ -1,7 +1,7 @@
 from jax import numpy as jnp
 
 
-def get_loss(
+def get_least_squares_loss(
     beta_est,
     base_states,
     treat_states,

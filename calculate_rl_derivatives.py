@@ -293,12 +293,12 @@ def get_weight_gradients_batched(
 
 # TODO: Docstring
 # TODO: JIT whole function? or just gradient and hessian batch functions
-def calculate_loss_derivatives(
+def calculate_rl_loss_derivatives(
     study_df,
-    RL_loss_func_filename,
-    RL_loss_func_args,
-    RL_loss_func_args_beta_index,
-    RL_loss_func_args_action_prob_index,
+    rl_loss_func_filename,
+    rl_loss_func_args,
+    rl_loss_func_args_beta_index,
+    rl_loss_func_args_action_prob_index,
     policy_num_col_name,
     calendar_t_col_name,
 ):
@@ -306,69 +306,73 @@ def calculate_loss_derivatives(
 
     # Because we perform algorithm updates at the *end* of a timestep, the
     # first timestep they apply to is one more than the time of the update.
-    # Hence we add 1 here for notational consistency with the paper.
 
     # TODO: Note that we don't need the loss gradient for the first update
     # time... include anyway?
 
-    # TODO: Do this pandas filtering only once. Also consider doing it in numpy?
-    # Or just do everything in matrix form somehow?
-    # https://stackoverflow.com/questions/31863083/python-split-numpy-array-based-on-values-in-the-array
-
     # Retrieve the RL function from file
-    RL_loss_module = load_module_from_source_file("RL_loss", RL_loss_func_filename)
+    rl_loss_module = load_module_from_source_file("rl_loss", rl_loss_func_filename)
     # NOTE the assumption that the function and file have the same name
-    RL_loss_func_name = os.path.basename(RL_loss_func_filename).split(".")[0]
+    rl_loss_func_name = os.path.basename(rl_loss_func_filename).split(".")[0]
     try:
-        RL_loss_func = getattr(RL_loss_module, RL_loss_func_name)
+        rl_loss_func = getattr(rl_loss_module, rl_loss_func_name)
     except AttributeError as e:
         raise ValueError(
             "Unable to import RL loss function.  Please verify the file has the same name as the function of interest."
         ) from e
 
     # TODO: Fallback for users missing or require complete?
-    RL_update_derivatives_by_calendar_t = {}
-    user_ids = list(next(iter(RL_loss_func_args.values())).keys())
+    rl_update_derivatives_by_calendar_t = {}
+    user_ids = list(next(iter(rl_loss_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
-    for policy_num, user_args_dict in RL_loss_func_args.items():
-        loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-            calculate_loss_derivatives_specific_update(
-                RL_loss_func,
-                RL_loss_func_args_beta_index,
-                RL_loss_func_args_action_prob_index,
-                user_args_dict,
-                sorted_user_ids,
-            )
-        )
-
+    for policy_num, user_args_dict in rl_loss_func_args.items():
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
+        # Because we perform algorithm updates at the *end* of a timestep, the
+        # first timestep they apply to is one more than the time at which the
+        # update data is gathered.
         first_applicable_time = get_first_applicable_time(
             study_df, policy_num, policy_num_col_name, calendar_t_col_name
         )
-        RL_update_derivatives_by_calendar_t.setdefault(first_applicable_time, {})[
+        loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+            calculate_rl_loss_derivatives_specific_update(
+                rl_loss_func,
+                rl_loss_func_args_beta_index,
+                rl_loss_func_args_action_prob_index,
+                user_args_dict,
+                sorted_user_ids,
+                first_applicable_time,
+            )
+        )
+        rl_update_derivatives_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {user_id: loss_gradients[i] for i, user_id in enumerate(user_ids)}
 
-        RL_update_derivatives_by_calendar_t[first_applicable_time][
+        rl_update_derivatives_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = np.mean(loss_hessians, axis=0)
 
-        RL_update_derivatives_by_calendar_t[first_applicable_time][
+        rl_update_derivatives_by_calendar_t[first_applicable_time][
             "loss_gradient_pi_derivatives_by_user_id"
         ] = {
+            # NOTE the squeeze here... it is very important.Without it we have
+            # a 4D shape (x,y,z,1) array of gradients, and the use of these
+            # probabilities assumes (x,y,z).  The squeezing should arguably
+            # happen above, but the vmap call spits out a 4D array so in that
+            # sense that's the most natural return value.
             user_id: loss_gradient_pi_derivatives[i].squeeze()
             for i, user_id in enumerate(user_ids)
         }
-    return RL_update_derivatives_by_calendar_t
+    return rl_update_derivatives_by_calendar_t
 
 
-def calculate_loss_derivatives_specific_update(
-    RL_loss_func,
-    RL_loss_func_args_beta_index,
-    RL_loss_func_args_action_prob_index,
+def calculate_rl_loss_derivatives_specific_update(
+    rl_loss_func,
+    rl_loss_func_args_beta_index,
+    rl_loss_func_args_action_prob_index,
     user_args_dict,
     sorted_user_ids,
+    first_applicable_time,
 ):
     # Sort users to be cautious
     sorted_user_args_dict = {
@@ -386,71 +390,76 @@ def calculate_loss_derivatives_specific_update(
     # same state matrix size
     # TODO: Articulate requirement that each arg can be tensorized into a numpy array
     # because of type
-    # TODO: Unite the stacking function... One idea is to use jnp.array if scalar,
-    # vstack if vector, dstack if matrix, and also compute appropriate batch dimension vector
-    # with 2s in the dstack cases and 0s otherwise.  Note we still require beta to be a vector.
-    # RIGHT NOW, THIS MAY BREAK FOR SCALAR ARGS.
     logger.info("Reforming batched data lists into tensors.")
     batched_arg_tensors, batch_axes = (
         stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
     )
 
     logger.info("Forming loss gradients with respect to beta.")
-    loss_gradients = get_RL_loss_gradients_batched(
-        RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+    loss_gradients = get_rl_loss_gradients_batched(
+        rl_loss_func, rl_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
     )
     logger.info("Forming loss hessians with respect to beta")
-    loss_hessians = get_RL_loss_hessians_batched(
-        RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+    loss_hessians = get_rl_loss_hessians_batched(
+        rl_loss_func, rl_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
     )
     logger.info(
         "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
     )
-    loss_gradient_pi_derivatives = get_RL_loss_gradient_derivatives_wrt_pi_batched(
-        RL_loss_func,
-        RL_loss_func_args_beta_index,
-        RL_loss_func_args_action_prob_index,
-        batch_axes,
-        *batched_arg_tensors,
-    )
+    # If there is NOT an action probability argument in the loss, we need to
+    # simply return zero gradients of the correct shape.
+    if rl_loss_func_args_action_prob_index < 0:
+        num_users = len(sorted_user_ids)
+        beta_dim = batched_arg_lists[rl_loss_func_args_beta_index][0].size
+        timesteps_included = first_applicable_time - 1
+
+        loss_gradient_pi_derivatives = np.zeros(
+            (num_users, beta_dim, timesteps_included, 1)
+        )
+    # Otherwise, actually differentiate with respect to action probabilities.
+    else:
+        loss_gradient_pi_derivatives = get_rl_loss_gradient_derivatives_wrt_pi_batched(
+            rl_loss_func,
+            rl_loss_func_args_beta_index,
+            rl_loss_func_args_action_prob_index,
+            batch_axes,
+            *batched_arg_tensors,
+        )
 
     return loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 
 
-# TODO: note the 2s for in axes vs 0s for action prob func args. It seems right
-# roughly, but think about generality. It occurs because of dstack here vs vstack
-# there
-def get_RL_loss_gradients_batched(
-    RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+def get_rl_loss_gradients_batched(
+    rl_loss_func, rl_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
 ):
     return jax.vmap(
-        fun=jax.grad(RL_loss_func, RL_loss_func_args_beta_index),
+        fun=jax.grad(rl_loss_func, rl_loss_func_args_beta_index),
         in_axes=batch_axes,
         out_axes=0,
     )(*batched_arg_tensors)
 
 
-def get_RL_loss_hessians_batched(
-    RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+def get_rl_loss_hessians_batched(
+    rl_loss_func, rl_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
 ):
     return jax.vmap(
-        fun=jax.hessian(RL_loss_func, RL_loss_func_args_beta_index),
+        fun=jax.hessian(rl_loss_func, rl_loss_func_args_beta_index),
         in_axes=batch_axes,
         out_axes=0,
     )(*batched_arg_tensors)
 
 
-def get_RL_loss_gradient_derivatives_wrt_pi_batched(
-    RL_loss_func,
-    RL_loss_func_args_beta_index,
-    RL_loss_func_args_action_prob_index,
+def get_rl_loss_gradient_derivatives_wrt_pi_batched(
+    rl_loss_func,
+    rl_loss_func_args_beta_index,
+    rl_loss_func_args_action_prob_index,
     batch_axes,
     *batched_arg_tensors,
 ):
     return jax.vmap(
         fun=jax.jacrev(
-            jax.grad(RL_loss_func, RL_loss_func_args_beta_index),
-            RL_loss_func_args_action_prob_index,
+            jax.grad(rl_loss_func, rl_loss_func_args_beta_index),
+            rl_loss_func_args_action_prob_index,
         ),
         in_axes=batch_axes,
         out_axes=0,

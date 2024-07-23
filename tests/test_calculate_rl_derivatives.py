@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 import calculate_rl_derivatives
 import functions_to_pass_to_analysis.get_action_1_prob_pure
-import functions_to_pass_to_analysis.get_loss
+import functions_to_pass_to_analysis.get_least_squares_loss
 
 
 def test_calculate_pi_and_weight_gradients_specific_t_positive_action_high_clip():
@@ -347,8 +347,8 @@ def test_calculate_loss_derivatives_no_action_centering():
     Note that the pi derivatives are squeezed after this to get rid of a dimension
     """
     np.testing.assert_equal(
-        calculate_rl_derivatives.calculate_loss_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_loss.get_loss,
+        calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
+            functions_to_pass_to_analysis.get_least_squares_loss.get_least_squares_loss,
             0,
             5,
             {
@@ -400,6 +400,7 @@ def test_calculate_loss_derivatives_no_action_centering():
                 ),
             },
             [1, 2],
+            4,
         ),
         (
             np.array(
@@ -410,8 +411,104 @@ def test_calculate_loss_derivatives_no_action_centering():
             ),
             np.array(
                 [
-                    # TODO: Each of these are actually the things that average to make this.
-                    # Just inspect and grab them.
+                    np.array(
+                        [
+                            [6, 0, 4, 0],
+                            [0, 4, 0, 4],
+                            [4, 0, 4, 0],
+                            [0, 4, 0, 4],
+                        ],
+                        dtype="float32",
+                    ),
+                    np.array(
+                        [
+                            [6, 4, 4, 4],
+                            [4, 4, 4, 4],
+                            [4, 4, 4, 4],
+                            [4, 4, 4, 4],
+                        ],
+                        dtype="float32",
+                    ),
+                ]
+            ),
+            np.zeros((2, 4, 3, 1)),
+        ),
+    )
+
+
+def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
+    """
+    Just like previous test, but we pretend the loss function doesn't actually
+    take action probabilities to get the same zero gradients.f
+
+
+    Note that the pi derivatives are squeezed after this to get rid of a dimension
+    """
+    np.testing.assert_equal(
+        calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
+            functions_to_pass_to_analysis.get_least_squares_loss.get_least_squares_loss,
+            0,
+            -1,
+            {
+                1: (
+                    np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                    jnp.array(
+                        [
+                            [1.0, 0],
+                            [1.0, 1.0],
+                            [1.0, -1.0],
+                        ],
+                        dtype="float32",
+                    ),
+                    jnp.array(
+                        [
+                            [1.0, 0],
+                            [1.0, 1.0],
+                            [1.0, -1.0],
+                        ],
+                        dtype="float32",
+                    ),
+                    jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
+                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    0,
+                ),
+                2: (
+                    np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                    jnp.array(
+                        [
+                            [1.0, 1.0],
+                            [1.0, 1.0],
+                            [1.0, 0.0],
+                        ],
+                        dtype="float32",
+                    ),
+                    jnp.array(
+                        [
+                            [1.0, 1.0],
+                            [1.0, 1.0],
+                            [1.0, 0.0],
+                        ],
+                        dtype="float32",
+                    ),
+                    jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
+                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
+                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    0,
+                ),
+            },
+            [1, 2],
+            4,
+        ),
+        (
+            np.array(
+                [
+                    np.array([6, 26, 10, 26], dtype="float32"),
+                    np.array([26, 30, 30, 30], dtype="float32"),
+                ]
+            ),
+            np.array(
+                [
                     np.array(
                         [
                             [6, 0, 4, 0],
@@ -520,8 +617,8 @@ def test_calculate_loss_derivatives_action_centering():
     # in simulations and the addition of action centering doesn't add
     # further difficulties to the JAX gradient infrastructure.
     np.testing.assert_equal(
-        calculate_rl_derivatives.calculate_loss_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_loss.get_loss,
+        calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
+            functions_to_pass_to_analysis.get_least_squares_loss.get_least_squares_loss,
             0,
             5,
             {
@@ -573,6 +670,7 @@ def test_calculate_loss_derivatives_action_centering():
                 ),
             },
             [1, 2],
+            4,
         ),
         (
             np.array(
@@ -585,8 +683,6 @@ def test_calculate_loss_derivatives_action_centering():
             ),
             np.array(
                 [
-                    # TODO: Each of these are actually the things that average to make this.
-                    # Just inspect and grab them.
                     np.array(
                         [
                             [6.0, 0, 0.39999998, 0.19999993],

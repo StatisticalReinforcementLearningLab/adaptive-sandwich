@@ -456,6 +456,16 @@ def analyze_dataset(
     # have scalar output.  If estimating function given instead of loss, specify
     # correct vector orientation. I think beta dim row vector.
 
+    # Write down assumptions about data handling for incremental recruitment.
+    # Zeros, NAs, etc.
+    # I need function args that produce a zero gradient.... this is a bit weird
+    # though, maybe in general I need an in study indicator passed along instead,
+    # just spitting out zero gradients automatically in that case. See what
+    # happens if NAs are given. This is a nice solution potentially, because if
+    # I get an NA gradient I can then just force it to be zero. This would also
+    # mean some kind of requirement that functions being differentiated take
+    # NAs and produce NAs from them, which should also be stated.
+
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
         in_study_col_name,

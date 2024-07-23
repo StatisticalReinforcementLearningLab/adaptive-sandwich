@@ -306,14 +306,9 @@ def calculate_rl_loss_derivatives(
 
     # Because we perform algorithm updates at the *end* of a timestep, the
     # first timestep they apply to is one more than the time of the update.
-    # Hence we add 1 here for notational consistency with the paper.
 
     # TODO: Note that we don't need the loss gradient for the first update
     # time... include anyway?
-
-    # TODO: Do this pandas filtering only once. Also consider doing it in numpy?
-    # Or just do everything in matrix form somehow?
-    # https://stackoverflow.com/questions/31863083/python-split-numpy-array-based-on-values-in-the-array
 
     # Retrieve the RL function from file
     rl_loss_module = load_module_from_source_file("rl_loss", rl_loss_func_filename)
@@ -343,6 +338,9 @@ def calculate_rl_loss_derivatives(
 
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
+        # Because we perform algorithm updates at the *end* of a timestep, the
+        # first timestep they apply to is one more than the time at which the
+        # update data is gathered.
         first_applicable_time = get_first_applicable_time(
             study_df, policy_num, policy_num_col_name, calendar_t_col_name
         )
@@ -357,6 +355,11 @@ def calculate_rl_loss_derivatives(
         rl_update_derivatives_by_calendar_t[first_applicable_time][
             "loss_gradient_pi_derivatives_by_user_id"
         ] = {
+            # NOTE the squeeze here... it is very important.Without it we have
+            # a 4D shape (x,y,z,1) array of gradients, and the use of these
+            # probabilities assumes (x,y,z).  The squeezing should arguably
+            # happen above, but the vmap call spits out a 4D array so in that
+            # sense that's the most natural return value.
             user_id: loss_gradient_pi_derivatives[i].squeeze()
             for i, user_id in enumerate(user_ids)
         }

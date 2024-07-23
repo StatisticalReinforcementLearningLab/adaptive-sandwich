@@ -545,7 +545,7 @@ def calculate_algorithm_statistics(
     )
 
     rl_update_derivatives_by_calendar_t = (
-        calculate_rl_derivatives.calculate_loss_derivatives(
+        calculate_rl_derivatives.calculate_rl_loss_derivatives(
             study_df,
             rl_loss_func_filename,
             rl_loss_func_args,

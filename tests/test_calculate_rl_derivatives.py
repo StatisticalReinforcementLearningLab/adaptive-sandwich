@@ -347,7 +347,7 @@ def test_calculate_loss_derivatives_no_action_centering():
     Note that the pi derivatives are squeezed after this to get rid of a dimension
     """
     np.testing.assert_equal(
-        calculate_rl_derivatives.calculate_loss_derivatives_specific_update(
+        calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_loss.get_loss,
             0,
             5,
@@ -520,7 +520,7 @@ def test_calculate_loss_derivatives_action_centering():
     # in simulations and the addition of action centering doesn't add
     # further difficulties to the JAX gradient infrastructure.
     np.testing.assert_equal(
-        calculate_rl_derivatives.calculate_loss_derivatives_specific_update(
+        calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_loss.get_loss,
             0,
             5,

@@ -450,6 +450,12 @@ def analyze_dataset(
 
     # Codify assumptions used for collect_batched_actions
 
+    # Use arg groups/manual checks to help verify args are used correctly
+
+    # Specify that action probability function and loss function have to
+    # have scalar output.  If estimating function given instead of loss, specify
+    # correct vector orientation. I think beta dim row vector.
+
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
         in_study_col_name,
@@ -466,7 +472,7 @@ def analyze_dataset(
         rl_loss_func_args_action_prob_index,
     )
     upper_left_bread_inverse = calculate_upper_left_bread_inverse(
-        study_df, beta_dim, algorithm_statistics_by_calendar_t
+        study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
     )
 
     covariate_names = covariate_names_str.split(",")
@@ -481,6 +487,7 @@ def analyze_dataset(
             bool(action_centering),
             covariate_names,
             in_study_col_name,
+            user_id_col_name,
         )
     )
 
@@ -561,7 +568,7 @@ def calculate_algorithm_statistics(
 
 # TODO: docstring
 def calculate_upper_left_bread_inverse(
-    study_df, beta_dim, algorithm_statistics_by_calendar_t
+    study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
 ):
 
     # List of times that were the first applicable time for some update
@@ -578,7 +585,7 @@ def calculate_upper_left_bread_inverse(
     overall_dim = beta_dim * num_updates
     output_matrix = jnp.zeros((overall_dim, overall_dim))
 
-    user_ids = study_df.user_id.unique()
+    user_ids = study_df[user_id_col_name].unique()
     num_users = len(user_ids)
 
     # This simply collects the pi derivatives with respect to betas for all
@@ -680,7 +687,8 @@ def analyze_dataset_inner(
     upper_left_bread_inverse,
     action_centering,
     covariate_names,
-    in_study_column,
+    in_study_col_name,
+    user_id_col_name,
 ):
     # List of times that were the first applicable time for some update
     # Sorting shouldn't be necessary, as insertion order should be chronological
@@ -702,7 +710,7 @@ def analyze_dataset_inner(
         study_df,
         covariate_names,
         action_centering,
-        in_study_column,
+        in_study_col_name,
     )
 
     logger.info("Forming adaptive sandwich variance estimator.")
@@ -711,6 +719,7 @@ def analyze_dataset_inner(
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         collect_derivatives(
             study_df,
+            user_id_col_name,
             covariate_names,
             theta_est,
             action_centering,
@@ -773,7 +782,7 @@ def analyze_dataset_inner(
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?
 # TODO: doc string
-def estimate_theta(study_df, covariate_names, action_centering, in_study_column):
+def estimate_theta(study_df, covariate_names, action_centering, in_study_col_name):
     # Note that the intercept is included in the features already (col of 1s)
     # in the way we typically run this
     linear_model = LinearRegression(fit_intercept=False)
@@ -781,7 +790,7 @@ def estimate_theta(study_df, covariate_names, action_centering, in_study_column)
     # Note the role of the action centering flag in here in determining whether
     # we subtract action probabilities from actions (multiplying by a boolean
     # in python is like multiplying by 1 if True and 0 if False).
-    in_study_bool = study_df[in_study_column] == 1
+    in_study_bool = study_df[in_study_col_name] == 1
     trimmed_df = study_df.loc[in_study_bool, covariate_names].copy()
     in_study_df = study_df[in_study_bool]
     for feat in covariate_names:
@@ -795,16 +804,18 @@ def estimate_theta(study_df, covariate_names, action_centering, in_study_column)
 
 
 # TODO: Just use dicts keyed on user id...
-def collect_derivatives(study_df, covariate_names, theta_est, action_centering):
+def collect_derivatives(
+    study_df, user_id_col_name, covariate_names, theta_est, action_centering
+):
     batched_base_states_list = []
     batched_treat_states_list = []
     batched_actions_list = []
     batched_rewards_list = []
     batched_action1probs_list = []
 
-    user_ids = study_df.user_id.unique()
+    user_ids = study_df[user_id_col_name].unique()
     for user_id in user_ids:
-        filtered_user_data = study_df.loc[study_df.user_id == user_id]
+        filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
         batched_base_states_list.append(
             get_base_states(filtered_user_data, covariate_names)
         )
@@ -930,18 +941,6 @@ def get_action1probs(df, in_study_col="in_study", actionprob_col="action1prob"):
     df.loc[df[in_study_col] == 0, actionprob_col] = 0
     action1probs = df[actionprob_col].to_numpy(dtype="float64").reshape(-1, 1)
     return jnp.array(action1probs)
-
-
-# TODO: Doc string
-def get_user_states(study_df, state_feats, treat_feats, user_id):
-    """
-    Extract just the states for the given user in the given study_df as a
-    tuple of numpy (column) vectors.
-    """
-    user_df = study_df.loc[study_df.user_id == user_id]
-    base_states = user_df[state_feats].to_numpy()
-    treat_states = user_df[treat_feats].to_numpy()
-    return (base_states, treat_states)
 
 
 # TODO: Handle get_loss_gradient generic interface.  Probably need some function that just takes a

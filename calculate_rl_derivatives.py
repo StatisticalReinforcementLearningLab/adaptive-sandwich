@@ -386,10 +386,6 @@ def calculate_loss_derivatives_specific_update(
     # same state matrix size
     # TODO: Articulate requirement that each arg can be tensorized into a numpy array
     # because of type
-    # TODO: Unite the stacking function... One idea is to use jnp.array if scalar,
-    # vstack if vector, dstack if matrix, and also compute appropriate batch dimension vector
-    # with 2s in the dstack cases and 0s otherwise.  Note we still require beta to be a vector.
-    # RIGHT NOW, THIS MAY BREAK FOR SCALAR ARGS.
     logger.info("Reforming batched data lists into tensors.")
     batched_arg_tensors, batch_axes = (
         stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
@@ -417,9 +413,6 @@ def calculate_loss_derivatives_specific_update(
     return loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 
 
-# TODO: note the 2s for in axes vs 0s for action prob func args. It seems right
-# roughly, but think about generality. It occurs because of dstack here vs vstack
-# there
 def get_RL_loss_gradients_batched(
     RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
 ):

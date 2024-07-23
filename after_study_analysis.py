@@ -1125,7 +1125,7 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
     # TODO: Reinstate? Provide reference? Mentioned in sandwich package
     # This is HC1 correction
     # Should we use something other than theta_dim for d?
-    meat = meat * (num_users - 1) / (num_users - theta_dim)
+    # meat = meat * (num_users - 1) / (num_users - theta_dim)
 
     logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)

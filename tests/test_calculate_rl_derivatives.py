@@ -330,7 +330,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_incremental_recruitment_2(
 
 def test_calculate_loss_derivatives_no_action_centering():
     """
-    Study df for reference (look at first two times)
+    Study df for reference
     pd.DataFrame(
         {
             "user_id": [1, 1, 1, 2, 2, 2],
@@ -342,7 +342,10 @@ def test_calculate_loss_derivatives_no_action_centering():
             "in_study": [1, 1, 1, 1, 1, 1],
             "action1prob": [0.5, 0.6, 0.7, 0.1, 0.2, 0.3],
         }
-    )"""
+    )
+
+    Note that the pi derivatives are squeezed after this to get rid of a dimension
+    """
     np.testing.assert_equal(
         calculate_rl_derivatives.calculate_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_loss.get_loss,
@@ -355,6 +358,7 @@ def test_calculate_loss_derivatives_no_action_centering():
                         [
                             [1.0, 0],
                             [1.0, 1.0],
+                            [1.0, -1.0],
                         ],
                         dtype="float32",
                     ),
@@ -362,12 +366,13 @@ def test_calculate_loss_derivatives_no_action_centering():
                         [
                             [1.0, 0],
                             [1.0, 1.0],
+                            [1.0, -1.0],
                         ],
                         dtype="float32",
                     ),
-                    jnp.array([[0.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6]]], dtype="float32"),
+                    jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
+                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
                     0,
                 ),
                 2: (
@@ -376,6 +381,7 @@ def test_calculate_loss_derivatives_no_action_centering():
                         [
                             [1.0, 1.0],
                             [1.0, 1.0],
+                            [1.0, 0.0],
                         ],
                         dtype="float32",
                     ),
@@ -383,12 +389,13 @@ def test_calculate_loss_derivatives_no_action_centering():
                         [
                             [1.0, 1.0],
                             [1.0, 1.0],
+                            [1.0, 0.0],
                         ],
                         dtype="float32",
                     ),
-                    jnp.array([[1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2]]], dtype="float32"),
+                    jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
+                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
+                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
                     0,
                 ),
             },
@@ -407,30 +414,25 @@ def test_calculate_loss_derivatives_no_action_centering():
                     # Just inspect and grab them.
                     np.array(
                         [
-                            [6, 2, 4, 2],
-                            [2, 4, 2, 4],
-                            [4, 2, 4, 2],
-                            [2, 4, 2, 4],
+                            [6, 0, 4, 0],
+                            [0, 4, 0, 4],
+                            [4, 0, 4, 0],
+                            [0, 4, 0, 4],
                         ],
                         dtype="float32",
                     ),
                     np.array(
                         [
-                            [6, 2, 4, 2],
-                            [2, 4, 2, 4],
-                            [4, 2, 4, 2],
-                            [2, 4, 2, 4],
+                            [6, 4, 4, 4],
+                            [4, 4, 4, 4],
+                            [4, 4, 4, 4],
+                            [4, 4, 4, 4],
                         ],
                         dtype="float32",
                     ),
                 ]
             ),
-            np.array(
-                [
-                    np.zeros((4, 3), dtype="float32"),
-                    np.zeros((4, 3), dtype="float32"),
-                ]
-            ),
+            np.zeros((2, 4, 3, 1)),
         ),
     )
 
@@ -449,7 +451,10 @@ def test_calculate_loss_derivatives_action_centering():
             "in_study": [1, 1, 1, 1, 1, 1],
             "action1prob": [0.5, 0.6, 0.7, 0.1, 0.2, 0.3],
         }
-    )"""
+    )
+
+    Note that the pi derivatives are squeezed after this to get rid of a dimension
+    """
 
     beta = np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32")
 
@@ -514,7 +519,6 @@ def test_calculate_loss_derivatives_action_centering():
     # use them as the expected values because the code is behaving correctly
     # in simulations and the addition of action centering doesn't add
     # further difficulties to the JAX gradient infrastructure.
-
     np.testing.assert_equal(
         calculate_rl_derivatives.calculate_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_loss.get_loss,
@@ -527,6 +531,7 @@ def test_calculate_loss_derivatives_action_centering():
                         [
                             [1.0, 0],
                             [1.0, 1.0],
+                            [1.0, -1.0],
                         ],
                         dtype="float32",
                     ),
@@ -534,12 +539,13 @@ def test_calculate_loss_derivatives_action_centering():
                         [
                             [1.0, 0],
                             [1.0, 1.0],
+                            [1.0, -1.0],
                         ],
                         dtype="float32",
                     ),
-                    jnp.array([[0.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6]]], dtype="float32"),
+                    jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
+                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
                     1,
                 ),
                 2: (
@@ -548,6 +554,7 @@ def test_calculate_loss_derivatives_action_centering():
                         [
                             [1.0, 1.0],
                             [1.0, 1.0],
+                            [1.0, 0.0],
                         ],
                         dtype="float32",
                     ),
@@ -555,12 +562,13 @@ def test_calculate_loss_derivatives_action_centering():
                         [
                             [1.0, 1.0],
                             [1.0, 1.0],
+                            [1.0, 0.0],
                         ],
                         dtype="float32",
                     ),
-                    jnp.array([[1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2]]], dtype="float32"),
+                    jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
+                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
+                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
                     1,
                 ),
             },
@@ -581,19 +589,19 @@ def test_calculate_loss_derivatives_action_centering():
                     # Just inspect and grab them.
                     np.array(
                         [
-                            [6.0, 2.0, 1.6000001, 1.8],
-                            [2.0, 4.0, 1.8, 2.4],
-                            [1.6000001, 1.8, 2.04, 1.5199999],
-                            [1.8, 2.4, 1.5199999, 1.6999999],
+                            [6.0, 0, 0.39999998, 0.19999993],
+                            [0, 4.0, 0.19999993, 1.4],
+                            [0.39999998, 0.19999993, 0.99999994, 0.13999996],
+                            [0.19999993, 1.4, 0.13999996, 0.49999997],
                         ],
                         dtype="float32",
                     ),
                     np.array(
                         [
-                            [6.0, 2.0, 1.6000001, 1.8],
-                            [2.0, 4.0, 1.8, 2.4],
-                            [1.6000001, 1.8, 2.04, 1.5199999],
-                            [1.8, 2.4, 1.5199999, 1.6999999],
+                            [6.0, 4.0, 2.8000002, 3.4],
+                            [4.0, 4.0, 3.4, 3.4],
+                            [2.8000002, 3.4, 3.08, 2.8999999],
+                            [3.4, 3.4, 2.8999999, 2.8999999],
                         ],
                         dtype="float32",
                     ),
@@ -601,25 +609,20 @@ def test_calculate_loss_derivatives_action_centering():
             ),
             np.array(
                 [
-                    np.array(
-                        [
-                            [-6.0, -14.0, 2.0],
-                            [-0.0, -14.0, -2.0],
-                            [10.0, -15.199999, 7.2],
-                            [-0.0, -15.199999, -7.2],
-                        ],
-                        dtype="float32",
-                    ),
-                    np.array(
-                        [
-                            [-14.0, -14.0, -6.0],
-                            [-14.0, -14.0, -0.0],
-                            [-25.2, -24.4, 7.6000004],
-                            [-25.199999, -24.400002, -0.0],
-                        ],
-                        dtype="float32",
-                    ),
-                ]
+                    [
+                        [[-6.0], [-14.0], [2.0]],
+                        [[-0.0], [-14.0], [-2.0]],
+                        [[10.0], [-15.199999], [7.2]],
+                        [[-0.0], [-15.199999], [-7.2]],
+                    ],
+                    [
+                        [[-14.0], [-14.0], [-6.0]],
+                        [[-14.0], [-14.0], [-0.0]],
+                        [[-25.2], [-24.4], [7.6000004]],
+                        [[-25.199999], [-24.400002], [-0.0]],
+                    ],
+                ],
+                dtype="float32",
             ),
         ),
     )
@@ -630,13 +633,15 @@ def test_calculate_loss_derivatives_incremental_recruitment():
     raise NotImplementedError()
 
 
-# Especially to exercise stacking function and get_batched_actions
+# Especially to exercise stacking function and get_batched_actions and dict
+# formation
 @pytest.mark.skip(reason="Nice to have")
 def test_calculate_pi_and_weight_gradients_all_times():
     raise NotImplementedError()
 
 
-# Especially to exercise stacking function and get_first_applicable_time
+# Especially to exercise stacking function and get_first_applicable_time and
+# squeeze of pi gradients and rest of dict formation
 @pytest.mark.skip(reason="Nice to have")
 def test_calculate_loss_derivatives_all_updates():
     raise NotImplementedError()

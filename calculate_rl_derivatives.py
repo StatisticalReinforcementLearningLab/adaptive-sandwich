@@ -326,16 +326,6 @@ def calculate_rl_loss_derivatives(
     user_ids = list(next(iter(rl_loss_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
     for policy_num, user_args_dict in rl_loss_func_args.items():
-        loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-            calculate_rl_loss_derivatives_specific_update(
-                rl_loss_func,
-                rl_loss_func_args_beta_index,
-                rl_loss_func_args_action_prob_index,
-                user_args_dict,
-                sorted_user_ids,
-            )
-        )
-
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
         # Because we perform algorithm updates at the *end* of a timestep, the
@@ -343,6 +333,16 @@ def calculate_rl_loss_derivatives(
         # update data is gathered.
         first_applicable_time = get_first_applicable_time(
             study_df, policy_num, policy_num_col_name, calendar_t_col_name
+        )
+        loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+            calculate_rl_loss_derivatives_specific_update(
+                rl_loss_func,
+                rl_loss_func_args_beta_index,
+                rl_loss_func_args_action_prob_index,
+                user_args_dict,
+                sorted_user_ids,
+                first_applicable_time,
+            )
         )
         rl_update_derivatives_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
@@ -372,6 +372,7 @@ def calculate_rl_loss_derivatives_specific_update(
     rl_loss_func_args_action_prob_index,
     user_args_dict,
     sorted_user_ids,
+    first_applicable_time,
 ):
     # Sort users to be cautious
     sorted_user_args_dict = {
@@ -405,13 +406,25 @@ def calculate_rl_loss_derivatives_specific_update(
     logger.info(
         "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
     )
-    loss_gradient_pi_derivatives = get_rl_loss_gradient_derivatives_wrt_pi_batched(
-        rl_loss_func,
-        rl_loss_func_args_beta_index,
-        rl_loss_func_args_action_prob_index,
-        batch_axes,
-        *batched_arg_tensors,
-    )
+    # If there is NOT an action probability argument in the loss, we need to
+    # simply return zero gradients of the correct shape.
+    if rl_loss_func_args_action_prob_index < 0:
+        num_users = len(sorted_user_ids)
+        beta_dim = batched_arg_lists[rl_loss_func_args_beta_index][0].size
+        timesteps_included = first_applicable_time - 1
+
+        loss_gradient_pi_derivatives = np.zeros(
+            (num_users, beta_dim, timesteps_included, 1)
+        )
+    # Otherwise, actually differentiate with respect to action probabilities.
+    else:
+        loss_gradient_pi_derivatives = get_rl_loss_gradient_derivatives_wrt_pi_batched(
+            rl_loss_func,
+            rl_loss_func_args_beta_index,
+            rl_loss_func_args_action_prob_index,
+            batch_axes,
+            *batched_arg_tensors,
+        )
 
     return loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 

@@ -77,7 +77,7 @@ def test_form_meat_matrix():
     expected_meat_matrix = (user_1_meat_contribution + user_2_meat_contribution) / 2
 
     user_ids, loss_gradients, _, _ = after_study_analysis.collect_derivatives(
-        study_df, state_feats, theta_est, action_centering=True
+        study_df, "user_id", state_feats, theta_est, action_centering=True
     )
     # Correct to 5 decimal places is perfectly sufficient
     np.testing.assert_allclose(
@@ -327,7 +327,7 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
 
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         after_study_analysis.collect_derivatives(
-            study_df, state_feats, theta_est, action_centering=True
+            study_df, "user_id", state_feats, theta_est, action_centering=True
         )
     )
     np.testing.assert_allclose(
@@ -646,7 +646,7 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         after_study_analysis.collect_derivatives(
-            study_df, state_feats, theta_est, action_centering=True
+            study_df, "user_id", state_feats, theta_est, action_centering=True
         )
     )
     np.testing.assert_allclose(
@@ -747,7 +747,10 @@ def test_calculate_upper_left_bread_inverse_update_every_decision_no_action_prob
         },
     }
     upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
-        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+        pd.DataFrame({"user_id": [1, 2]}),
+        "user_id",
+        4,
+        algorithm_statistics_by_calendar_t,
     )
     np.testing.assert_equal(
         upper_left_bread_inverse,
@@ -862,7 +865,10 @@ def test_calculate_upper_left_bread_inverse_update_every_decision_action_probs_i
     #
 
     upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
-        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+        pd.DataFrame({"user_id": [1, 2]}),
+        "user_id",
+        4,
+        algorithm_statistics_by_calendar_t,
     )
     np.testing.assert_equal(
         upper_left_bread_inverse,
@@ -947,7 +953,10 @@ def test_calculate_upper_left_bread_inverse_2_decs_btwn_updates_no_action_probs_
         },
     }
     upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
-        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+        pd.DataFrame({"user_id": [1, 2]}),
+        "user_id",
+        4,
+        algorithm_statistics_by_calendar_t,
     )
     np.testing.assert_equal(
         upper_left_bread_inverse,
@@ -1081,7 +1090,10 @@ def test_calculate_upper_left_bread_inverse_2_decs_btwn_updates_action_probs_in_
     #               [ 4.5 , 4.5 , 4.5 , 4.5 ]])
 
     upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
-        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+        pd.DataFrame({"user_id": [1, 2]}),
+        "user_id",
+        4,
+        algorithm_statistics_by_calendar_t,
     )
     np.testing.assert_equal(
         upper_left_bread_inverse,

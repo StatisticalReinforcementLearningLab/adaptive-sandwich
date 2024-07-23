@@ -244,7 +244,9 @@ def collect_existing_analyses(input_glob):
 # TODO: Take in requirements files for action prob and loss and take derivatives
 # in corresponding sandbox. For now we just assume the dependencies in this package
 # suffice.
-# TODO: Handle raw timestamps instead of calendar time index? For now I'm requiring it
+# TODO: Handle raw timestamps instead of calendar time index? For now I'm requiring it.
+# More generally, handle decision times being different across different users? Would like
+# to consolidate.
 # TODO: Make sure user id column name is actually respected. There are .user_id's lingering
 # TODO: Action centering option should be removed when we start just taking in a loss/estimating
 # function for inference
@@ -465,6 +467,12 @@ def analyze_dataset(
     # I get an NA gradient I can then just force it to be zero. This would also
     # mean some kind of requirement that functions being differentiated take
     # NAs and produce NAs from them, which should also be stated.
+
+    # For any column indices given, check any appropriate constraints for that column.
+    # Probabilities between 0 and 1.  In fact probabilites of 0 or 1 illustrate
+    # a non-compliant RL algorithm so this is strict. Mentioned above, but actions
+    # binary. calendar_t an integer. user_id hashable, not a float.
+    # This helps data validation but also simply that the indices are correct.
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,

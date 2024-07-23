@@ -109,9 +109,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         if t > args.decisions_between_updates:
             logger.info("Calculating pi and weight gradients for time %s.", t)
             curr_beta_est = study_RLalg.get_current_beta_estimate()
-            study_RLalg.calculate_pi_and_weight_gradients(
-                all_prev_data, t, curr_beta_est
-            )
             study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
 
         # Check if need to update algorithm #######################################
@@ -141,12 +138,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             )
 
             curr_beta_est = study_RLalg.get_current_beta_estimate()
-            study_RLalg.calculate_loss_derivatives(all_prev_data, t, curr_beta_est)
             study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
-
-    logger.info("Constructing upper left bread inverse matrix")
-    study_RLalg.construct_upper_left_bread_inverse()
-
     return study_df, study_RLalg
 
 

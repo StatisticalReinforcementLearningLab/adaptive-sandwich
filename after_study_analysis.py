@@ -396,7 +396,8 @@ def analyze_dataset(
 
     # I check estimating function sum 0 later, but differentiate between
     # RL and beta side? Also could move check here. Might be  nice to have all
-    # checks in same place.
+    # checks in same place. Wherever that check is, should allow user to see
+    # and verify close enough to zero
 
     # Make sure study df sorted within users and across users? .sort_values(by=["user_id", "calendar_t"])
 
@@ -407,7 +408,7 @@ def analyze_dataset(
 
     # Make sure right number of in study rows per user?? May not be precise
 
-    # Possibly make sure no real-looking data when in study is off
+    # Possibly make sure no real-looking data when in_study is off
 
     # Make sure function args for all users for all t even if not in study
     # policy num the same for all users for each calendar t.  Something that adds
@@ -431,10 +432,23 @@ def analyze_dataset(
 
     # If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
 
-    # Currently assuming arraylike (numpy compatible) for for function args
-    # This is to make v/d/array stacking work
+    # Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
+    # Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 
     # Should be clear from dataframe spec but beta must be vector (not matrix)
+
+    # beta df must have policy num as first column and then one column per coordinate of beta
+    # nothing else. But.. could reconsider and put array in one column
+
+    # Codify assumptions that make get_first_applicable_time work.  The main
+    # thing is an assumption that users don't get different policies at the same
+    # time.
+
+    # Functions compatible with JAX 0.4.24. And DIFFERENTIABLE with grad.
+
+    # Summarize study df and ask users to verify.
+
+    # Codify assumptions used for collect_batched_actions
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
@@ -1110,7 +1124,8 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
     # degrees of freedom adjustment
     # TODO: Reinstate? Provide reference? Mentioned in sandwich package
     # This is HC1 correction
-    # meat = meat * (num_users - 1) / (num_users - theta_dim)
+    # Should we use something other than theta_dim for d?
+    meat = meat * (num_users - 1) / (num_users - theta_dim)
 
     logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)

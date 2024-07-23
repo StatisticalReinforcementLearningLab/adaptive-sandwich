@@ -101,62 +101,21 @@ def calculate_pi_and_weight_gradients(
         ) from e
     # TODO: Fallback for users missing or require complete?
     pi_and_weight_gradients_by_calendar_t = {}
+    user_ids = list(next(iter(action_prob_func_args.values())).keys())
+    sorted_user_ids = sorted(user_ids)
     for calendar_t, user_args_dict in action_prob_func_args.items():
 
-        # Sort users to be cautious
-        # TODO: Can do sorting of user list and arg length determination just once
-        user_ids = list(user_args_dict.keys())
-        sorted_user_ids = sorted(user_ids)
-        sorted_user_args_dict = {
-            user_id: user_args_dict[user_id] for user_id in sorted_user_ids
-        }
-
-        num_args = len(sorted_user_args_dict[user_ids[0]])
-        # NOTE: Cannot do [[]] * num_args here! Then all lists point
-        # same object...
-        batched_arg_lists = [[] for _ in range(num_args)]
-        for user_args in sorted_user_args_dict.values():
-            for idx, arg in enumerate(user_args):
-                batched_arg_lists[idx].append(arg)
-
-        logger.info("Reforming batched data lists into tensors.")
-        batched_arg_tensors, batch_axes = (
-            stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
-        )
-
-        logger.info("Forming pi gradients with respect to beta.")
-        # Note that we care about the probability of action 1 specifically,
-        # not the taken action.
-        pi_gradients = get_pi_gradients_batched(
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            batch_axes,
-            *batched_arg_tensors,
-        )
-
-        # TODO: betas should be verified to be the same across users now or earlier
-        logger.info("Forming weight gradients with respect to beta.")
-        batched_actions_tensor = collect_batched_actions(
+        pi_gradients, weight_gradients = calculate_pi_and_weight_gradients_specific_t(
             study_df,
-            calendar_t,
-            sorted_user_ids,
             in_study_col_name,
             action_col_name,
             calendar_t_col_name,
             user_id_col_name,
-        )
-        # Note the first argument here: we extract the betas to pass in
-        # again as the "target" denominator betas, whereas we differentiate with
-        # respect to the betas in the numerator. Also note that these betas are
-        # redundant across users: it's just the same thing repeated num users
-        # times.
-        weight_gradients = get_weight_gradients_batched(
-            batched_arg_tensors[action_prob_func_args_beta_index],
             action_prob_func,
             action_prob_func_args_beta_index,
-            batched_actions_tensor,
-            batch_axes,
-            *batched_arg_tensors,
+            calendar_t,
+            user_args_dict,
+            sorted_user_ids,
         )
 
         logger.info("Collecting pi gradients into algorithm stats dictionary.")
@@ -168,11 +127,82 @@ def calculate_pi_and_weight_gradients(
         pi_and_weight_gradients_by_calendar_t.setdefault(calendar_t, {})[
             "weight_gradients_by_user_id"
         ] = {user_id: weight_gradients[i] for i, user_id in enumerate(user_ids)}
+
     return pi_and_weight_gradients_by_calendar_t
+
+
+def calculate_pi_and_weight_gradients_specific_t(
+    study_df,
+    in_study_col_name,
+    action_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
+    action_prob_func,
+    action_prob_func_args_beta_index,
+    calendar_t,
+    user_args_dict,
+    sorted_user_ids,
+):
+    # Sort users to be cautious
+    sorted_user_args_dict = {
+        user_id: user_args_dict[user_id] for user_id in sorted_user_ids
+    }
+
+    num_args = len(sorted_user_args_dict[sorted_user_ids[0]])
+    # NOTE: Cannot do [[]] * num_args here! Then all lists point
+    # same object...
+    batched_arg_lists = [[] for _ in range(num_args)]
+    for user_args in sorted_user_args_dict.values():
+        for idx, arg in enumerate(user_args):
+            batched_arg_lists[idx].append(arg)
+
+    logger.info("Reforming batched data lists into tensors.")
+    batched_arg_tensors, batch_axes = (
+        stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
+    )
+
+    logger.info("Forming pi gradients with respect to beta.")
+    # Note that we care about the probability of action 1 specifically,
+    # not the taken action.
+    pi_gradients = get_pi_gradients_batched(
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        batch_axes,
+        *batched_arg_tensors,
+    )
+
+    # TODO: betas should be verified to be the same across users now or earlier
+    logger.info("Forming weight gradients with respect to beta.")
+    batched_actions_tensor = collect_batched_actions(
+        study_df,
+        calendar_t,
+        sorted_user_ids,
+        in_study_col_name,
+        action_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+    )
+    # Note the first argument here: we extract the betas to pass in
+    # again as the "target" denominator betas, whereas we differentiate with
+    # respect to the betas in the numerator. Also note that these betas are
+    # redundant across users: it's just the same thing repeated num users
+    # times.
+    weight_gradients = get_weight_gradients_batched(
+        batched_arg_tensors[action_prob_func_args_beta_index],
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        batched_actions_tensor,
+        batch_axes,
+        *batched_arg_tensors,
+    )
+
+    return pi_gradients, weight_gradients
 
 
 # TODO: is it ok to get the action from the study df? No issues with actions taken
 # but not known about?
+# TODO: This fallback action business is a bit weird and probably should not
+# happen.  Probably just need to communicate they must set an appropriate fallback
 def collect_batched_actions(
     study_df,
     calendar_t,
@@ -298,54 +328,17 @@ def calculate_loss_derivatives(
 
     # TODO: Fallback for users missing or require complete?
     RL_update_derivatives_by_calendar_t = {}
-
+    user_ids = list(next(iter(RL_loss_func_args.values())).keys())
+    sorted_user_ids = sorted(user_ids)
     for policy_num, user_args_dict in RL_loss_func_args.items():
-
-        # Sort users to be cautious
-        # TODO: Can do sorting of user list and arg length determination just once
-        user_ids = list(user_args_dict.keys())
-        sorted_user_ids = sorted(user_ids)
-        sorted_user_args_dict = {
-            user_id: user_args_dict[user_id] for user_id in sorted_user_ids
-        }
-
-        num_args = len(sorted_user_args_dict[user_ids[0]])
-        batched_arg_lists = [[] for _ in range(num_args)]
-        for user_args in sorted_user_args_dict.values():
-            for idx, arg in enumerate(user_args):
-                batched_arg_lists[idx].append(arg)
-
-        # Note this stacking works with incremental recruitment only because we
-        # fill in states for out-of-study times such that all users have the
-        # same state matrix size
-        # TODO: Articulate requirement that each arg can be tensorized into a numpy array
-        # because of type
-        # TODO: Unite the stacking function... One idea is to use jnp.array if scalar,
-        # vstack if vector, dstack if matrix, and also compute appropriate batch dimension vector
-        # with 2s in the dstack cases and 0s otherwise.  Note we still require beta to be a vector.
-        # RIGHT NOW, THIS MAY BREAK FOR SCALAR ARGS.
-        logger.info("Reforming batched data lists into tensors.")
-        batched_arg_tensors, batch_axes = (
-            stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
-        )
-
-        logger.info("Forming loss gradients with respect to beta.")
-        loss_gradients = get_RL_loss_gradients_batched(
-            RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
-        )
-        logger.info("Forming loss hessians with respect to beta")
-        loss_hessians = get_RL_loss_hessians_batched(
-            RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
-        )
-        logger.info(
-            "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
-        )
-        loss_gradient_pi_derivatives = get_RL_loss_gradient_derivatives_wrt_pi_batched(
-            RL_loss_func,
-            RL_loss_func_args_beta_index,
-            RL_loss_func_args_action_prob_index,
-            batch_axes,
-            *batched_arg_tensors,
+        loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+            calculate_loss_derivatives_specific_update(
+                RL_loss_func,
+                RL_loss_func_args_beta_index,
+                RL_loss_func_args_action_prob_index,
+                user_args_dict,
+                sorted_user_ids,
+            )
         )
 
         # We store these loss gradients by the first time the resulting parameters
@@ -368,6 +361,60 @@ def calculate_loss_derivatives(
             for i, user_id in enumerate(user_ids)
         }
     return RL_update_derivatives_by_calendar_t
+
+
+def calculate_loss_derivatives_specific_update(
+    RL_loss_func,
+    RL_loss_func_args_beta_index,
+    RL_loss_func_args_action_prob_index,
+    user_args_dict,
+    sorted_user_ids,
+):
+    # Sort users to be cautious
+    sorted_user_args_dict = {
+        user_id: user_args_dict[user_id] for user_id in sorted_user_ids
+    }
+
+    num_args = len(sorted_user_args_dict[sorted_user_ids[0]])
+    batched_arg_lists = [[] for _ in range(num_args)]
+    for user_args in sorted_user_args_dict.values():
+        for idx, arg in enumerate(user_args):
+            batched_arg_lists[idx].append(arg)
+
+    # Note this stacking works with incremental recruitment only because we
+    # fill in states for out-of-study times such that all users have the
+    # same state matrix size
+    # TODO: Articulate requirement that each arg can be tensorized into a numpy array
+    # because of type
+    # TODO: Unite the stacking function... One idea is to use jnp.array if scalar,
+    # vstack if vector, dstack if matrix, and also compute appropriate batch dimension vector
+    # with 2s in the dstack cases and 0s otherwise.  Note we still require beta to be a vector.
+    # RIGHT NOW, THIS MAY BREAK FOR SCALAR ARGS.
+    logger.info("Reforming batched data lists into tensors.")
+    batched_arg_tensors, batch_axes = (
+        stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
+    )
+
+    logger.info("Forming loss gradients with respect to beta.")
+    loss_gradients = get_RL_loss_gradients_batched(
+        RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+    )
+    logger.info("Forming loss hessians with respect to beta")
+    loss_hessians = get_RL_loss_hessians_batched(
+        RL_loss_func, RL_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+    )
+    logger.info(
+        "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
+    )
+    loss_gradient_pi_derivatives = get_RL_loss_gradient_derivatives_wrt_pi_batched(
+        RL_loss_func,
+        RL_loss_func_args_beta_index,
+        RL_loss_func_args_action_prob_index,
+        batch_axes,
+        *batched_arg_tensors,
+    )
+
+    return loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 
 
 # TODO: note the 2s for in axes vs 0s for action prob func args. It seems right

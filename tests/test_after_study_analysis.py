@@ -77,7 +77,7 @@ def test_form_meat_matrix():
     expected_meat_matrix = (user_1_meat_contribution + user_2_meat_contribution) / 2
 
     user_ids, loss_gradients, _, _ = after_study_analysis.collect_derivatives(
-        study_df, state_feats, treat_feats, theta_est, action_centering=True
+        study_df, state_feats, theta_est, action_centering=True
     )
     # Correct to 5 decimal places is perfectly sufficient
     np.testing.assert_allclose(
@@ -327,7 +327,7 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
 
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         after_study_analysis.collect_derivatives(
-            study_df, state_feats, treat_feats, theta_est, action_centering=True
+            study_df, state_feats, theta_est, action_centering=True
         )
     )
     np.testing.assert_allclose(
@@ -646,7 +646,7 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         after_study_analysis.collect_derivatives(
-            study_df, state_feats, treat_feats, theta_est, action_centering=True
+            study_df, state_feats, theta_est, action_centering=True
         )
     )
     np.testing.assert_allclose(
@@ -667,32 +667,32 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
 
 
-@pytest.mark.skip(reason="To be implemented")
+@pytest.mark.skip(reason="Nice to have")
 def test_form_bread_inverse_matrix_incremental_recruitment():
     raise NotImplementedError()
 
 
-@pytest.mark.skip(reason="To be implemented")
+@pytest.mark.skip(reason="Nice to have")
 def test_form_bread_inverse_matrix_no_action_centering():
     raise NotImplementedError()
 
 
-@pytest.mark.skip(reason="To be implemented")
+@pytest.mark.skip(reason="Nice to have")
 def test_adaptive_and_classical_match_steepness_0():
     raise NotImplementedError()
 
 
-@pytest.mark.skip(reason="To be implemented")
+@pytest.mark.skip(reason="Nice to have")
 def test_analyze_dataset():
     raise NotImplementedError()
 
 
-@pytest.mark.skip(reason="To be implemented")
+@pytest.mark.skip(reason="Nice to have")
 def test_estimate_theta():
     raise NotImplementedError()
 
 
-@pytest.mark.skip(reason="To be implemented")
+@pytest.mark.skip(reason="Nice to have")
 def test_form_classical_sandwich():
     raise NotImplementedError()
 
@@ -703,3 +703,422 @@ def test_form_classical_sandwich():
 # the same data.  That being said, a direct unit test would be nice to add.
 # UPDATE: should add test for incremental recruitment case, unless incremental
 # recruitment bread test is full end-to-end style like above
+
+
+def test_calculate_upper_left_bread_inverse_update_every_decision_no_action_probs_in_loss():
+    algorithm_statistics_by_calendar_t = {
+        2: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * -1,
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.zeros((4, 1)),
+                2: np.zeros((4, 1)),
+            },
+        },
+        3: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([2, 3, 4, 5], dtype="float32"),
+                2: np.array([3, 4, 5, 6], dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)),
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.zeros((4, 2)),
+                2: np.zeros((4, 2)),
+            },
+        },
+    }
+    upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
+        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+    )
+    np.testing.assert_equal(
+        upper_left_bread_inverse,
+        # Note that this was constructed manually by inserting the correct
+        # diagonal blocks and then averaging outer products of the
+        # appropriate things in the above algorithm statistics dict
+        np.array(
+            [
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [04.0, 06.5, 09.0, 11.5, 1.0, 1.0, 1.0, 1.0],
+                [05.5, 09.0, 12.5, 16.0, 1.0, 1.0, 1.0, 1.0],
+                [07.0, 11.5, 16.0, 20.5, 1.0, 1.0, 1.0, 1.0],
+                [08.5, 14.0, 19.5, 25.0, 1.0, 1.0, 1.0, 1.0],
+            ],
+            dtype="float32",
+        ),
+    )
+
+
+def test_calculate_upper_left_bread_inverse_update_every_decision_action_probs_in_loss():
+    algorithm_statistics_by_calendar_t = {
+        2: {
+            "pi_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([3, 4, 5, 6], dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * -1,
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.array(
+                    [
+                        [1],
+                        [3],
+                        [5],
+                        [7],
+                    ],
+                    dtype="float32",
+                ),
+                2: np.array(
+                    [
+                        [1],
+                        [4],
+                        [6],
+                        [8],
+                    ],
+                    dtype="float32",
+                ),
+            },
+        },
+        3: {
+            "pi_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([3, 4, 5, 6], dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([2, 3, 4, 5], dtype="float32"),
+                2: np.array([3, 4, 5, 6], dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)),
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.array(
+                    [
+                        [1, 2],
+                        [3, 4],
+                        [5, 6],
+                        [7, 8],
+                    ],
+                    dtype="float32",
+                ),
+                2: np.array(
+                    [
+                        [1, 1],
+                        [3, 4],
+                        [5, 6],
+                        [7, 8],
+                    ],
+                    dtype="float32",
+                ),
+            },
+        },
+    }
+
+    # The new contribution to the the bottom left relative to previoius test
+    # due to loss_gradient_pi_derivatives_by_user_id being nonzero
+    # is average of np.array([[2, 4, 6,  8],
+    #                         [4, 8, 12, 16],
+    #                         [6, 12, 18, 24],
+    #                         [8, 16, 24, 32]])
+    # and np.array([[3, 4, 5, 6],
+    #               [12, 16, 20, 24],
+    #               [18, 24, 30, 36],
+    #               [24, 32, 40, 48]])
+    # which is
+    #     np.array([[ 2.5,  4. ,  5.5,  7. ],
+    #               [ 8. , 12. , 16. , 20. ],
+    #               [ 12. , 18. , 24. , 30. ],
+    #               [ 16. , 24. , 32. , 40. ]])
+    #
+
+    upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
+        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+    )
+    np.testing.assert_equal(
+        upper_left_bread_inverse,
+        # Note that this was constructed manually by inserting the correct
+        # diagonal blocks and then averaging outer products of the
+        # appropriate things in the above algorithm statistics dict
+        np.array(
+            [
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [06.5, 10.5, 14.5, 18.5, 1.0, 1.0, 1.0, 1.0],
+                [13.5, 21.0, 28.5, 36.0, 1.0, 1.0, 1.0, 1.0],
+                [19.0, 29.5, 40.0, 50.5, 1.0, 1.0, 1.0, 1.0],
+                [24.5, 38.0, 51.5, 65.0, 1.0, 1.0, 1.0, 1.0],
+            ],
+            dtype="float32",
+        ),
+    )
+
+
+def test_calculate_upper_left_bread_inverse_2_decs_btwn_updates_no_action_probs_in_loss():
+    algorithm_statistics_by_calendar_t = {
+        3: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * -1,
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.zeros((4, 2)),
+                2: np.zeros((4, 2)),
+            },
+        },
+        4: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([3, 4, 5, 6], dtype="float32"),
+                2: np.array([4, 5, 6, 7], dtype="float32"),
+            },
+        },
+        5: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * 1,
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.zeros((4, 4)),
+                2: np.zeros((4, 4)),
+            },
+        },
+        6: {
+            "pi_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+        },
+    }
+    upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
+        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+    )
+    np.testing.assert_equal(
+        upper_left_bread_inverse,
+        # Note that this was constructed manually by inserting the correct
+        # diagonal blocks and then summing weight gradients and averaging outer
+        # products of appropriate things in the above algorithm statistics dict
+        np.array(
+            [
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [08.0, 11.0, 14.0, 17.0, 1.0, 1.0, 1.0, 1.0],
+                [13.0, 18.0, 23.0, 28.0, 1.0, 1.0, 1.0, 1.0],
+                [18.0, 25.0, 32.0, 39.0, 1.0, 1.0, 1.0, 1.0],
+                [23.0, 32.0, 41.0, 50.0, 1.0, 1.0, 1.0, 1.0],
+            ],
+            dtype="float32",
+        ),
+    )
+
+
+def test_calculate_upper_left_bread_inverse_2_decs_btwn_updates_action_probs_in_loss():
+    algorithm_statistics_by_calendar_t = {
+        3: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * -1,
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.array(
+                    [
+                        [1, 2],
+                        [3, 4],
+                        [5, 6],
+                        [7, 8],
+                    ],
+                    dtype="float32",
+                ),
+                2: np.array(
+                    [
+                        [1, 1],
+                        [3, 4],
+                        [5, 6],
+                        [7, 8],
+                    ],
+                    dtype="float32",
+                ),
+            },
+        },
+        4: {
+            "pi_gradients_by_user_id": {
+                1: 2 * np.ones(4, dtype="float32"),
+                2: np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([3, 4, 5, 6], dtype="float32"),
+                2: np.array([4, 5, 6, 7], dtype="float32"),
+            },
+        },
+        5: {
+            "pi_gradients_by_user_id": {
+                1: np.ones(4, dtype="float32"),
+                2: 2 * np.ones(4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "loss_gradients_by_user_id": {
+                1: np.array([1, 2, 3, 4], dtype="float32"),
+                2: np.array([2, 3, 4, 5], dtype="float32"),
+            },
+            "avg_loss_hessian": np.ones((4, 4)) * 1,
+            "loss_gradient_pi_derivatives_by_user_id": {
+                1: np.array(
+                    [
+                        [1, 2, 1, 1],
+                        [3, 4, 1, 2],
+                        [5, 6, 1, 1],
+                        [7, 8, 2, 2],
+                    ],
+                    dtype="float32",
+                ),
+                2: np.array(
+                    [
+                        [1, 1, 2, 1],
+                        [3, 4, 3, 2],
+                        [5, 6, 1, 1],
+                        [7, 8, 1, 2],
+                    ],
+                    dtype="float32",
+                ),
+            },
+        },
+        6: {
+            "pi_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+            "weight_gradients_by_user_id": {
+                1: np.array([None] * 4, dtype="float32"),
+                2: np.array([None] * 4, dtype="float32"),
+            },
+        },
+    }
+
+    # The new contribution to the the bottom left relative to previous test
+    # due to loss_gradient_pi_derivatives_by_user_id being nonzero
+    # is average of np.array([[3., 3., 3., 3.],
+    #                         [5., 5., 5., 5.],
+    #                         [3., 3., 3., 3.],
+    #                         [6., 6., 6., 6.]], dtype=float32)
+    # and np.array([[3., 3., 3., 3.],
+    #               [5., 5., 5., 5.],
+    #               [2., 2., 2., 2.],
+    #               [3., 3., 3., 3.]], dtype=float32)
+    # which is
+    #     np.array([[ 3,  3. ,  3,  3. ],
+    #               [ 5. , 5. , 5. , 5. ],
+    #               [ 2.5 , 2.5 , 2.5 , 2.5 ],
+    #               [ 4.5 , 4.5 , 4.5 , 4.5 ]])
+
+    upper_left_bread_inverse = after_study_analysis.calculate_upper_left_bread_inverse(
+        pd.DataFrame({"user_id": [1, 2]}), 4, algorithm_statistics_by_calendar_t
+    )
+    np.testing.assert_equal(
+        upper_left_bread_inverse,
+        # Note that this was constructed manually by inserting the correct
+        # diagonal blocks and then summing weight gradients and averaging outer
+        # products of appropriate things in the above algorithm statistics dict
+        np.array(
+            [
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                [11.0, 14.0, 17.0, 20.0, 1.0, 1.0, 1.0, 1.0],
+                [18.0, 23.0, 28.0, 33.0, 1.0, 1.0, 1.0, 1.0],
+                [20.5, 27.5, 34.5, 41.5, 1.0, 1.0, 1.0, 1.0],
+                [27.5, 36.5, 45.5, 54.5, 1.0, 1.0, 1.0, 1.0],
+            ],
+            dtype="float32",
+        ),
+    )
+
+
+@pytest.mark.skip(reason="Nice to have")
+def test_calculate_upper_left_bread_inverse_incremental_recruitment(self):
+    raise NotImplementedError()
+
+
+@pytest.mark.skip(reason="Nice to have")
+def test_calculate_upper_left_bread_inverse_three_updates(self):
+    raise NotImplementedError()
+
+
+@pytest.mark.skip(reason="Nice to have")
+def test_custom_column_names_respected():
+    raise NotImplementedError()
+
+
+@pytest.mark.skip(reason="Nice to have")
+def test_collect_algorithm_statistics():
+    raise NotImplementedError()

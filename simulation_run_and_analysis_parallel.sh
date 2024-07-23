@@ -104,7 +104,22 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning RL simulations.
-python rl_study_simulation.py --T=$T --N=1 --parallel_task_index=$SLURM_ARRAY_TASK_ID --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL --save_dir=$save_dir
+python rl_study_simulation.py \
+  --T=$T \
+  --N=1 \
+  --parallel_task_index=$SLURM_ARRAY_TASK_ID \
+  --n=$n \
+  --min_users=$min_users \
+  --decisions_between_updates $decisions_between_updates \
+  --recruit_n $recruit_n \
+  --recruit_t $recruit_t \
+  --synthetic_mode $synthetic_mode \
+  --steepness $steepness \
+  --RL_alg $RL_alg \
+  --err_corr $err_corr \
+  --alg_state_feats $alg_state_feats \
+  --action_centering $action_centering_RL \
+  --save_dir=$save_dir
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
@@ -114,7 +129,23 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning after-study analysis.
-python after_study_analysis.py analyze-dataset --study_dataframe_pickle="${output_folder}/exp=1/study_df.pkl" --rl_algorithm_object_pickle="${output_folder}/exp=1/study_RLalg.pkl" --action_centering=$action_centering_inference
+python after_study_analysis.py analyze-dataset \
+  --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+  --beta_df_pickle="${output_folder}/exp=1/beta_df.pkl" \
+  --action_prob_func_filename="functions_to_pass_to_analysis/get_action_1_prob_pure.py" \
+  --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+  --action_prob_func_args_beta_index=0 \
+  --rl_loss_func_filename="functions_to_pass_to_analysis/get_loss.py" \
+  --rl_loss_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+  --rl_loss_func_args_beta_index=0 \
+  --rl_loss_func_args_action_prob_index=5 \
+  --covariate_names_str=$alg_state_feats \
+  --action_centering=$action_centering_inference \
+  --in_study_col_name="in_study" \
+  --action_col_name="action" \
+  --policy_num_col_name="policy_num" \
+  --calendar_t_col_name="calendar_t" \
+  --user_id_col_name="user_id"
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.

@@ -138,7 +138,12 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             )
 
             curr_beta_est = study_RLalg.get_current_beta_estimate()
-            study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
+            # It's redundant to pass in both the filtered study df and the whole
+            # thing, but also pretty clear this way. We need to check whether
+            # the user will be in-study at the next time.
+            study_RLalg.collect_rl_update_args(
+                all_prev_data, study_df, t, curr_beta_est
+            )
     return study_df, study_RLalg
 
 

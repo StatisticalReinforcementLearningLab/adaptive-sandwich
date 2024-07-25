@@ -20,24 +20,28 @@ steepness=0.0
 RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-action_centering_RL=0
+action_centering_RL=1
 
 # Arguments that only affect inference side.
-action_centering_inference=0
+action_centering_inference=1
 in_study_col_name="in_study"
 action_col_name="action"
 policy_num_col_name="policy_num"
 calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
+action_prob_col_name="action1prob"
 action_prob_func_filename="functions_to_pass_to_analysis/get_action_1_prob_pure.py"
 action_prob_func_args_beta_index=0
-rl_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss.py"
+rl_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
 rl_loss_func_args_beta_index=0
 rl_loss_func_args_action_prob_index=5
+inference_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
+inference_loss_func_args_theta_index=0
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_action_centering.py"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:i:c:p:C:U:P:b:l:B:D:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -63,11 +67,15 @@ while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:i:c:p:C:U:P:b:l:B:D:-: OPT; do
     p  | policy_num_col_name )                  needs_arg; policy_num_col_name="$OPTARG" ;;
     C  | calendar_t_col_name )                  needs_arg; calendar_t_col_name="$OPTARG" ;;
     U  | user_id_col_name )                     needs_arg; user_id_col_name="$OPTARG" ;;
+    E  | action_prob_col_name )                 needs_arg; action_prob_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )            needs_arg; action_prob_func_filename="$OPTARG" ;;
     b  | action_prob_func_args_beta_index )     needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
     l  | rl_loss_func_filename )                needs_arg; rl_loss_func_filename="$OPTARG" ;;
     B  | rl_loss_func_args_beta_index )         needs_arg; rl_loss_func_args_beta_index="$OPTARG" ;;
     D  | rl_loss_func_args_action_prob_index )  needs_arg; rl_loss_func_args_action_prob_index="$OPTARG" ;;
+    I  | inference_loss_func_filename )         needs_arg; inference_loss_func_filename="$OPTARG" ;;
+    h  | inference_loss_func_args_theta_index ) needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
+    H  | theta_calculation_func_filename )      needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -108,13 +116,17 @@ python after_study_analysis.py analyze-dataset \
   --rl_loss_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
   --rl_loss_func_args_beta_index=$rl_loss_func_args_beta_index \
   --rl_loss_func_args_action_prob_index=$rl_loss_func_args_action_prob_index \
+  --inference_loss_func_filename=$inference_loss_func_filename \
+  --inference_loss_func_args_theta_index=$inference_loss_func_args_theta_index \
+  --theta_calculation_func_filename=$theta_calculation_func_filename \
   --covariate_names_str=$alg_state_feats \
   --action_centering=$action_centering_inference \
   --in_study_col_name=$in_study_col_name \
   --action_col_name=$action_col_name \
   --policy_num_col_name=$policy_num_col_name \
   --calendar_t_col_name=$calendar_t_col_name \
-  --user_id_col_name=$user_id_col_name
+  --user_id_col_name=$user_id_col_name \
+  --action_prob_col_name=$action_prob_col_name
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Ending after-study analysis."
 
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished simulation."

@@ -244,27 +244,41 @@ class SigmoidLS:
     def get_current_beta_estimate(self):
         return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
-    def collect_rl_update_args(self, all_prev_data, calendar_t, curr_beta_est):
+    def collect_rl_update_args(
+        self, all_prev_data, study_df, calendar_t, curr_beta_est
+    ):
         logger.info(
-            "Collecting args to loss/estimating function at time %d for each user in dictionary format",
+            "Collecting args to loss/estimating function at time %d (last time included in update data) for each user in dictionary format",
             calendar_t,
         )
-        next_policy_num = all_prev_data["policy_num"].max() + 1
+        next_policy_num = int(all_prev_data["policy_num"].max() + 1)
+        first_applicable_time = calendar_t + 1
         self.rl_update_args[next_policy_num] = {
             user_id: (
-                curr_beta_est,
-                self.get_base_states(
-                    all_prev_data.loc[all_prev_data.user_id == user_id]
-                ),
-                self.get_treat_states(
-                    all_prev_data.loc[all_prev_data.user_id == user_id]
-                ),
-                self.get_actions(all_prev_data.loc[all_prev_data.user_id == user_id]),
-                self.get_rewards(all_prev_data.loc[all_prev_data.user_id == user_id]),
-                self.get_action1probs(
-                    all_prev_data.loc[all_prev_data.user_id == user_id]
-                ),
-                self.action_centering,
+                (
+                    curr_beta_est,
+                    self.get_base_states(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    ),
+                    self.get_treat_states(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    ),
+                    self.get_actions(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    ),
+                    self.get_rewards(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    ),
+                    self.get_action1probs(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    ),
+                    self.action_centering,
+                )
+                if study_df.loc[
+                    (study_df.user_id == user_id)
+                    & (study_df.calendar_t == first_applicable_time)
+                ].in_study.item()
+                else ()
             )
             for user_id in self.get_all_users(all_prev_data)
         }
@@ -278,13 +292,20 @@ class SigmoidLS:
 
         self.pi_args[calendar_t] = {
             user_id: (
-                curr_beta_est,
-                self.lower_clip,
-                self.steepness,
-                self.upper_clip,
-                self.get_treat_states(
-                    all_prev_data.loc[all_prev_data.user_id == user_id]
-                )[-1],
+                (
+                    curr_beta_est,
+                    self.lower_clip,
+                    self.steepness,
+                    self.upper_clip,
+                    self.get_treat_states(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    )[-1],
+                )
+                if all_prev_data.loc[
+                    (all_prev_data.user_id == user_id)
+                    & (all_prev_data.calendar_t == calendar_t)
+                ].in_study.item()
+                else ()
             )
             for user_id in self.get_all_users(all_prev_data)
         }

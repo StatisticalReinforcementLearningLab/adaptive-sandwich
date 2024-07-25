@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 import calculate_rl_derivatives
 import functions_to_pass_to_analysis.get_action_1_prob_pure
-import functions_to_pass_to_analysis.get_least_squares_loss
+import functions_to_pass_to_analysis.get_least_squares_loss_rl
 
 
 def test_calculate_pi_and_weight_gradients_specific_t_positive_action_high_clip():
@@ -348,7 +348,7 @@ def test_calculate_loss_derivatives_no_action_centering():
     """
     np.testing.assert_equal(
         calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_least_squares_loss.get_least_squares_loss,
+            functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             5,
             {
@@ -446,7 +446,7 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
     """
     np.testing.assert_equal(
         calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_least_squares_loss.get_least_squares_loss,
+            functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             -1,
             {
@@ -618,7 +618,7 @@ def test_calculate_loss_derivatives_action_centering():
     # further difficulties to the JAX gradient infrastructure.
     np.testing.assert_equal(
         calculate_rl_derivatives.calculate_rl_loss_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_least_squares_loss.get_least_squares_loss,
+            functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             5,
             {

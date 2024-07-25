@@ -14,10 +14,13 @@ from jax import numpy as jnp
 from sklearn.linear_model import LinearRegression
 import scipy
 
-import calculate_rl_derivatives
+import calculate_derivatives
 
 
-from helper_functions import invert_matrix_and_check_conditioning
+from helper_functions import (
+    invert_matrix_and_check_conditioning,
+    load_module_from_source_file,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -29,7 +32,6 @@ logging.basicConfig(
 # TODO: Break this file up
 
 
-# TODO: Think about interface here.  User should probably specify model, we create loss from it
 def get_loss(
     theta_est,
     base_states,
@@ -250,6 +252,10 @@ def collect_existing_analyses(input_glob):
 # TODO: Make sure user id column name is actually respected. There are .user_id's lingering
 # TODO: Action centering option should be removed when we start just taking in a loss/estimating
 # function for inference
+# TODO: Probably remove profiling.  Doesn't even play nicely with JAX.
+# TODO: Check all help strings for accuracy.
+# TODO: Don't use theta and beta jargon?? Need a legend if I do.
+# TODO: Make run scripts that hardcode to action centering or not on both RL and inference sides
 @cli.command()
 @click.option(
     "--study_df_pickle",
@@ -306,6 +312,24 @@ def collect_existing_analyses(input_glob):
     help="Index of the action probability in the tuple of RL loss func args, if applicable",
 )
 @click.option(
+    "--inference_loss_func_filename",
+    type=click.Path(exists=True),
+    help="File that contains the per-user loss function used to determine the inference estimate and relevant imports.  The filename will be assumed to match the function name.",
+    required=True,
+)
+@click.option(
+    "--inference_loss_func_args_theta_index",
+    type=int,
+    required=True,
+    help="Index of the RL parameter vector beta in the tuple of inference loss func args",
+)
+@click.option(
+    "--theta_calculation_func_filename",
+    type=click.Path(exists=True),
+    help="File that allows one to actually calculate a theta estimate given the study dataframe only. One must supply either this or a precomputed theta estimate.",
+    required=True,
+)
+@click.option(
     "--covariate_names_str",
     type=str,
     help="The covariates used for inference, as a comma-separated string",
@@ -352,6 +376,12 @@ def collect_existing_analyses(input_glob):
     required=True,
     help="Name of the column in the study dataframe that indicates user id",
 )
+@click.option(
+    "--action_prob_col_name",
+    type=str,
+    required=True,
+    help="Name of the column in the study dataframe that gives action probabilities",
+)
 def analyze_dataset(
     study_df_pickle,
     beta_df_pickle,
@@ -362,6 +392,9 @@ def analyze_dataset(
     rl_loss_func_args_pickle,
     rl_loss_func_args_beta_index,
     rl_loss_func_args_action_prob_index,
+    inference_loss_func_filename,
+    inference_loss_func_args_theta_index,
+    theta_calculation_func_filename,
     covariate_names_str,
     profile,
     action_centering,
@@ -370,6 +403,7 @@ def analyze_dataset(
     policy_num_col_name,
     calendar_t_col_name,
     user_id_col_name,
+    action_prob_col_name,
 ):
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -387,6 +421,8 @@ def analyze_dataset(
     # Load study data
     study_df = pickle.load(study_df_pickle)
 
+    # TODO: Do I actually need beta df? Might only need to ask for
+    # beta dimension...
     beta_df = pickle.load(beta_df_pickle)
     beta_dim = beta_df.shape[1] - 1
 
@@ -474,6 +510,35 @@ def analyze_dataset(
     # binary. calendar_t an integer. user_id hashable, not a float.
     # This helps data validation but also simply that the indices are correct.
 
+    # Do I need to mandate whether beta is 1 or 2d?
+
+    # Theta loss makes assumptions about colnames. Theta index can be called
+    # whatever, but everything else has to be a colname in study df with an
+    # s added (actually probably shouldn't do s in case there is already a plural colname...)
+    # This can be verified.
+
+    # Theta estimation function must only take study df.  It can be verified to only
+    # have one arg at least, and this must be communicated.
+
+    # Policy num has to be consecutive integers now... should I relax this? If not
+    # check for it
+
+    # Make it clear that args are needed for all users for each decision time/policy num in those
+    # dicts, but with empty tuples or None or something Falsey for times out of study.
+    # Can check this against study df!
+
+    # Check calendar t consecutive..
+
+    # Args have to be same shape for all users at a given time for stacking to work.
+    # This is fine for action probs... but what about estimating func in the face
+    # of incremental recruitment? We opted to pass something Falsey as the whole arg
+    # tuple for an update for which the user is not in the study for the next time,
+    # but what about filling in values for all previous times at a given time
+    # across users that have been in the study for different amounts of time?  Sort of have
+    # to require zeros here....
+
+    # Check that pi args given for all
+
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
         in_study_col_name,
@@ -496,16 +561,36 @@ def analyze_dataset(
     covariate_names = covariate_names_str.split(",")
 
     # Analyze data
-    theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
-        analyze_dataset_inner(
+    # TODO: Remove this hardcoded pathway once the new has reproduced same results.
+    (
+        theta_est_old,
+        adaptive_sandwich_var_estimate_old,
+        classical_sandwich_var_estimate_old,
+    ) = analyze_dataset_inner(
+        study_df,
+        beta_dim,
+        algorithm_statistics_by_calendar_t,
+        upper_left_bread_inverse,
+        bool(action_centering),
+        covariate_names,
+        in_study_col_name,
+        user_id_col_name,
+    )
+
+    theta_est = estimate_theta(study_df, theta_calculation_func_filename)
+    adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
+        compute_variance_estimates(
             study_df,
             beta_dim,
+            theta_est,
             algorithm_statistics_by_calendar_t,
             upper_left_bread_inverse,
-            bool(action_centering),
-            covariate_names,
+            inference_loss_func_filename,
+            inference_loss_func_args_theta_index,
             in_study_col_name,
             user_id_col_name,
+            action_prob_col_name,
+            calendar_t_col_name,
         )
     )
 
@@ -550,7 +635,7 @@ def calculate_algorithm_statistics(
     rl_loss_func_args_action_prob_index,
 ):
     pi_and_weight_gradients_by_calendar_t = (
-        calculate_rl_derivatives.calculate_pi_and_weight_gradients(
+        calculate_derivatives.calculate_pi_and_weight_gradients(
             study_df,
             in_study_col_name,
             action_col_name,
@@ -563,7 +648,7 @@ def calculate_algorithm_statistics(
     )
 
     rl_update_derivatives_by_calendar_t = (
-        calculate_rl_derivatives.calculate_rl_loss_derivatives(
+        calculate_derivatives.calculate_rl_loss_derivatives(
             study_df,
             rl_loss_func_filename,
             rl_loss_func_args,
@@ -697,6 +782,125 @@ def calculate_upper_left_bread_inverse(
     return output_matrix
 
 
+# TODO: Docstring
+def estimate_theta(study_df, theta_calculation_func_filename):
+    logger.info("Forming theta estimate.")
+    # Retrieve the RL function from file
+    theta_calculation_module = load_module_from_source_file(
+        "theta_calculation", theta_calculation_func_filename
+    )
+    # NOTE the assumption that the function and file have the same name
+    theta_calculation_func_name = os.path.basename(
+        theta_calculation_func_filename
+    ).split(".")[0]
+    try:
+        theta_calculation_func = getattr(
+            theta_calculation_module, theta_calculation_func_name
+        )
+    except AttributeError as e:
+        raise ValueError(
+            "Unable to import theta estimation function.  Please verify the file has the same name as the function of interest."
+        ) from e
+
+    return theta_calculation_func(study_df)
+
+
+# TODO: Docstring
+def compute_variance_estimates(
+    study_df,
+    beta_dim,
+    theta_est,
+    algorithm_statistics_by_calendar_t,
+    upper_left_bread_inverse,
+    inference_loss_func_filename,
+    inference_loss_func_args_theta_index,
+    in_study_col_name,
+    user_id_col_name,
+    action_prob_col_name,
+    calendar_t_col_name,
+):
+    # List of times that were the first applicable time for some update
+    # Sorting shouldn't be necessary, as insertion order should be chronological
+    # but we do it just in case.
+    update_times = sorted(
+        [
+            t
+            for t, value in algorithm_statistics_by_calendar_t.items()
+            if "loss_gradients_by_user_id" in value
+        ]
+    )
+
+    # Collect list of user ids to guarantee we have a shared, fixed order
+    # to iterate through in a variety of places.
+    user_ids = study_df[user_id_col_name].unique()
+
+    logger.info("Forming adaptive sandwich variance estimator.")
+
+    logger.info("Calculating all derivatives needed with JAX")
+    loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+        calculate_derivatives.calculate_inference_loss_derivatives(
+            study_df,
+            theta_est,
+            inference_loss_func_filename,
+            inference_loss_func_args_theta_index,
+            user_ids,
+            user_id_col_name,
+            action_prob_col_name,
+            in_study_col_name,
+            calendar_t_col_name,
+        )
+    )
+
+    logger.info("Forming adaptive bread inverse and inverting.")
+    max_t = study_df.calendar_t.max()
+    theta_dim = len(theta_est)
+    joint_bread_inverse_matrix = form_bread_inverse_matrix(
+        upper_left_bread_inverse,
+        max_t,
+        algorithm_statistics_by_calendar_t,
+        update_times,
+        beta_dim,
+        theta_dim,
+        user_ids,
+        loss_gradients,
+        loss_hessians,
+        loss_gradient_pi_derivatives,
+    )
+    logger.info("Adaptive joint bread inverse:")
+    logger.info(joint_bread_inverse_matrix)
+    joint_bread_matrix = invert_matrix_and_check_conditioning(
+        joint_bread_inverse_matrix
+    )
+
+    logger.info("Forming adaptive meat.")
+    # TODO: Small sample corrections
+    joint_meat_matrix = form_meat_matrix(
+        theta_dim,
+        update_times,
+        beta_dim,
+        algorithm_statistics_by_calendar_t,
+        user_ids,
+        loss_gradients,
+    )
+    logger.info("Adaptive joint meat:")
+    logger.info(joint_meat_matrix)
+
+    logger.info("Combining sandwich ingredients.")
+    # Note the normalization here: underlying the calculations we have asymptotic normality
+    # at rate sqrt(n), so in finite samples we approximate the observed variance of theta itself
+    # by dividing the variance of that limiting normal by a factor of n.  This is happening in the
+    # behind the scenes in the classical function as well.
+    joint_adaptive_variance = (
+        joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
+    ) / len(user_ids)
+    logger.info("Finished forming adaptive sandwich variance estimator.")
+
+    return (
+        joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
+        get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
+    )
+
+
 # TODO: docstring
 def analyze_dataset_inner(
     study_df,
@@ -724,7 +928,7 @@ def analyze_dataset_inner(
     # TODO: We may not want to estimate theta in general... too complicated.
     logger.info("Forming theta estimate.")
 
-    theta_est = estimate_theta(
+    theta_est = estimate_theta_old(
         study_df,
         covariate_names,
         action_centering,
@@ -735,7 +939,7 @@ def analyze_dataset_inner(
 
     logger.info("Calculating all derivatives needed with JAX")
     user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-        collect_derivatives(
+        collect_derivatives_old(
             study_df,
             user_id_col_name,
             covariate_names,
@@ -800,7 +1004,7 @@ def analyze_dataset_inner(
 # spec and we do the fitting within some framework
 # TODO: Should we specify the format of study df or allow flexibility?
 # TODO: doc string
-def estimate_theta(study_df, covariate_names, action_centering, in_study_col_name):
+def estimate_theta_old(study_df, covariate_names, action_centering, in_study_col_name):
     # Note that the intercept is included in the features already (col of 1s)
     # in the way we typically run this
     linear_model = LinearRegression(fit_intercept=False)
@@ -821,8 +1025,7 @@ def estimate_theta(study_df, covariate_names, action_centering, in_study_col_nam
     return linear_model.coef_
 
 
-# TODO: Just use dicts keyed on user id...
-def collect_derivatives(
+def collect_derivatives_old(
     study_df, user_id_col_name, covariate_names, theta_est, action_centering
 ):
     batched_base_states_list = []
@@ -999,6 +1202,9 @@ def form_bread_inverse_matrix(
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
     # NOTE THAT COLUMN INDEX i CORRESPONDS TO DECISION TIME i+1!
+    # TODO: This squeeze is a little sketchy... It might be nice to squeeze at the time they are
+    # computed. Note there is also a corresponding RL squeeze, but it happens closer to
+    # the gradient computation.
     mixed_theta_pi_loss_derivatives_by_user_id = {
         user_id: loss_gradient_derivatives_wrt_pi[i].squeeze()
         for i, user_id in enumerate(user_ids)

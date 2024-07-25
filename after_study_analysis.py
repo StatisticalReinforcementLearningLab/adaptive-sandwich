@@ -249,10 +249,6 @@ def collect_existing_analyses(input_glob):
 # TODO: Handle raw timestamps instead of calendar time index? For now I'm requiring it.
 # More generally, handle decision times being different across different users? Would like
 # to consolidate.
-# TODO: Make sure user id column name is actually respected. There are .user_id's lingering
-# TODO: Action centering option should be removed when we start just taking in a loss/estimating
-# function for inference
-# TODO: Probably remove profiling.  Doesn't even play nicely with JAX.
 # TODO: Check all help strings for accuracy.
 # TODO: Don't use theta and beta jargon?? Need a legend if I do.
 # TODO: Make run scripts that hardcode to action centering or not on both RL and inference sides
@@ -511,6 +507,8 @@ def analyze_dataset(
     # to require zeros here....
 
     # Check that pi args given for all in study rows, not for others.
+
+    # Make the user give the min and max probabilities, and I'll enforce it
 
     theta_est = estimate_theta(study_df, theta_calculation_func_filename)
 

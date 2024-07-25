@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 import after_study_analysis
+import calculate_derivatives
 
 
 def test_form_meat_matrix():
@@ -76,8 +77,17 @@ def test_form_meat_matrix():
 
     expected_meat_matrix = (user_1_meat_contribution + user_2_meat_contribution) / 2
 
-    user_ids, loss_gradients, _, _ = after_study_analysis.collect_derivatives_old(
-        study_df, "user_id", state_feats, theta_est, action_centering=True
+    user_ids = [1, 2]
+    loss_gradients, _, _ = calculate_derivatives.calculate_inference_loss_derivatives(
+        study_df,
+        theta_est,
+        "functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py",
+        0,
+        user_ids,
+        "user_id",
+        "action1prob",
+        "in_study",
+        "calendar_t",
     )
     # Correct to 5 decimal places is perfectly sufficient
     np.testing.assert_allclose(
@@ -325,9 +335,18 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
         ]
     )
 
-    user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-        after_study_analysis.collect_derivatives_old(
-            study_df, "user_id", state_feats, theta_est, action_centering=True
+    user_ids = [1, 2]
+    loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+        calculate_derivatives.calculate_inference_loss_derivatives(
+            study_df,
+            theta_est,
+            "functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py",
+            0,
+            user_ids,
+            "user_id",
+            "action1prob",
+            "in_study",
+            "calendar_t",
         )
     )
     np.testing.assert_allclose(
@@ -644,9 +663,18 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
             [block_1, block_2, theta_hessian],
         ]
     )
-    user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-        after_study_analysis.collect_derivatives_old(
-            study_df, "user_id", state_feats, theta_est, action_centering=True
+    user_ids = [1, 2]
+    loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
+        calculate_derivatives.calculate_inference_loss_derivatives(
+            study_df,
+            theta_est,
+            "functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py",
+            0,
+            user_ids,
+            "user_id",
+            "action1prob",
+            "in_study",
+            "calendar_t",
         )
     )
     np.testing.assert_allclose(

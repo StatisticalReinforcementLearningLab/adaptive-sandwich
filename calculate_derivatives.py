@@ -213,8 +213,8 @@ def calculate_pi_and_weight_gradients_specific_t(
 
 # TODO: is it ok to get the action from the study df? No issues with actions taken
 # but not known about?
-# TODO: This fallback action business is a bit weird and probably should not
-# happen.  Probably just need to communicate they must set an appropriate fallback
+# TODO: Test this at least with an incremental recruitment collect pi gradients
+# case, possibly directly.
 def collect_batched_in_study_actions(
     study_df,
     calendar_t,

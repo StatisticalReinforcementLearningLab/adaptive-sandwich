@@ -330,23 +330,6 @@ def collect_existing_analyses(input_glob):
     required=True,
 )
 @click.option(
-    "--covariate_names_str",
-    type=str,
-    help="The covariates used for inference, as a comma-separated string",
-    required=True,
-)
-@click.option(
-    "--profile",
-    default=False,
-    is_flag=True,
-    help="If supplied, the important computations will be profiled with summary output shown",
-)
-@click.option(
-    "--action_centering",
-    type=int,
-    default=0,
-)
-@click.option(
     "--in_study_col_name",
     type=str,
     required=True,
@@ -395,9 +378,6 @@ def analyze_dataset(
     inference_loss_func_filename,
     inference_loss_func_args_theta_index,
     theta_calculation_func_filename,
-    covariate_names_str,
-    profile,
-    action_centering,
     in_study_col_name,
     action_col_name,
     policy_num_col_name,
@@ -410,13 +390,6 @@ def analyze_dataset(
         datefmt="%Y-%m-%d:%H:%M:%S",
         level=logging.INFO,
     )
-
-    if profile:
-        pr = cProfile.Profile()
-        pr.enable()
-
-    if action_centering:
-        logging.info("Action centering is ENABLED for inference.")
 
     # Load study data
     study_df = pickle.load(study_df_pickle)
@@ -515,7 +488,7 @@ def analyze_dataset(
     # Theta loss makes assumptions about colnames. Theta index can be called
     # whatever, but everything else has to be a colname in study df with an
     # s added (actually probably shouldn't do s in case there is already a plural colname...)
-    # This can be verified.
+    # This can be verified. Detects action probs by name. Must take Tx1 vectors only
 
     # Theta estimation function must only take study df.  It can be verified to only
     # have one arg at least, and this must be communicated.
@@ -537,7 +510,9 @@ def analyze_dataset(
     # across users that have been in the study for different amounts of time?  Sort of have
     # to require zeros here....
 
-    # Check that pi args given for all
+    # Check that pi args given for all in study rows, not for others.
+
+    theta_est = estimate_theta(study_df, theta_calculation_func_filename)
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
@@ -558,26 +533,6 @@ def analyze_dataset(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
     )
 
-    covariate_names = covariate_names_str.split(",")
-
-    # Analyze data
-    # TODO: Remove this hardcoded pathway once the new has reproduced same results.
-    (
-        theta_est_old,
-        adaptive_sandwich_var_estimate_old,
-        classical_sandwich_var_estimate_old,
-    ) = analyze_dataset_inner(
-        study_df,
-        beta_dim,
-        algorithm_statistics_by_calendar_t,
-        upper_left_bread_inverse,
-        bool(action_centering),
-        covariate_names,
-        in_study_col_name,
-        user_id_col_name,
-    )
-
-    theta_est = estimate_theta(study_df, theta_calculation_func_filename)
     adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
         compute_variance_estimates(
             study_df,
@@ -612,10 +567,28 @@ def analyze_dataset(
         f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
     )
 
-    if profile:
-        pr.disable()
-        stats = Stats(pr)
-        stats.sort_stats("cumtime").print_stats(50)
+
+# TODO: Docstring
+def estimate_theta(study_df, theta_calculation_func_filename):
+    logger.info("Forming theta estimate.")
+    # Retrieve the RL function from file
+    theta_calculation_module = load_module_from_source_file(
+        "theta_calculation", theta_calculation_func_filename
+    )
+    # NOTE the assumption that the function and file have the same name
+    theta_calculation_func_name = os.path.basename(
+        theta_calculation_func_filename
+    ).split(".")[0]
+    try:
+        theta_calculation_func = getattr(
+            theta_calculation_module, theta_calculation_func_name
+        )
+    except AttributeError as e:
+        raise ValueError(
+            "Unable to import theta estimation function.  Please verify the file has the same name as the function of interest."
+        ) from e
+
+    return theta_calculation_func(study_df)
 
 
 # TODO: docstring
@@ -783,29 +756,6 @@ def calculate_upper_left_bread_inverse(
 
 
 # TODO: Docstring
-def estimate_theta(study_df, theta_calculation_func_filename):
-    logger.info("Forming theta estimate.")
-    # Retrieve the RL function from file
-    theta_calculation_module = load_module_from_source_file(
-        "theta_calculation", theta_calculation_func_filename
-    )
-    # NOTE the assumption that the function and file have the same name
-    theta_calculation_func_name = os.path.basename(
-        theta_calculation_func_filename
-    ).split(".")[0]
-    try:
-        theta_calculation_func = getattr(
-            theta_calculation_module, theta_calculation_func_name
-        )
-    except AttributeError as e:
-        raise ValueError(
-            "Unable to import theta estimation function.  Please verify the file has the same name as the function of interest."
-        ) from e
-
-    return theta_calculation_func(study_df)
-
-
-# TODO: Docstring
 def compute_variance_estimates(
     study_df,
     beta_dim,
@@ -901,197 +851,12 @@ def compute_variance_estimates(
     )
 
 
-# TODO: docstring
-def analyze_dataset_inner(
-    study_df,
-    beta_dim,
-    algorithm_statistics_by_calendar_t,
-    upper_left_bread_inverse,
-    action_centering,
-    covariate_names,
-    in_study_col_name,
-    user_id_col_name,
-):
-    # List of times that were the first applicable time for some update
-    # Sorting shouldn't be necessary, as insertion order should be chronological
-    # but we do it just in case.
-    update_times = sorted(
-        [
-            t
-            for t, value in algorithm_statistics_by_calendar_t.items()
-            if "loss_gradients_by_user_id" in value
-        ]
-    )
-
-    # TODO: state features should not be the same as RL alg for full generality
-    # Estimate the inferential target using the supplied study data.
-    # TODO: We may not want to estimate theta in general... too complicated.
-    logger.info("Forming theta estimate.")
-
-    theta_est = estimate_theta_old(
-        study_df,
-        covariate_names,
-        action_centering,
-        in_study_col_name,
-    )
-
-    logger.info("Forming adaptive sandwich variance estimator.")
-
-    logger.info("Calculating all derivatives needed with JAX")
-    user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-        collect_derivatives_old(
-            study_df,
-            user_id_col_name,
-            covariate_names,
-            theta_est,
-            action_centering,
-        )
-    )
-
-    # TODO: state features should not be the same as RL alg for full generality
-    logger.info("Forming adaptive bread inverse and inverting.")
-    max_t = study_df.calendar_t.max()
-    theta_dim = len(theta_est)
-    joint_bread_inverse_matrix = form_bread_inverse_matrix(
-        upper_left_bread_inverse,
-        max_t,
-        algorithm_statistics_by_calendar_t,
-        update_times,
-        beta_dim,
-        theta_dim,
-        user_ids,
-        loss_gradients,
-        loss_hessians,
-        loss_gradient_pi_derivatives,
-    )
-    logger.info("Adaptive joint bread inverse:")
-    logger.info(joint_bread_inverse_matrix)
-    joint_bread_matrix = invert_matrix_and_check_conditioning(
-        joint_bread_inverse_matrix
-    )
-
-    logger.info("Forming adaptive meat.")
-    # TODO: Small sample corrections
-    joint_meat_matrix = form_meat_matrix(
-        theta_dim,
-        update_times,
-        beta_dim,
-        algorithm_statistics_by_calendar_t,
-        user_ids,
-        loss_gradients,
-    )
-    logger.info("Adaptive joint meat:")
-    logger.info(joint_meat_matrix)
-
-    logger.info("Combining sandwich ingredients.")
-    # Note the normalization here: underlying the calculations we have asymptotic normality
-    # at rate sqrt(n), so in finite samples we approximate the observed variance of theta itself
-    # by dividing the variance of that limiting normal by a factor of n.  This is happening in the
-    # behind the scenes in the classical function as well.
-    joint_adaptive_variance = (
-        joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
-    ) / len(user_ids)
-    logger.info("Finished forming adaptive sandwich variance estimator.")
-
-    return (
-        theta_est,
-        joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
-        get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
-    )
-
-
-# TODO: Think about user interface.  Do they give whole estimate theta function? or simply a model
-# spec and we do the fitting within some framework
-# TODO: Should we specify the format of study df or allow flexibility?
 # TODO: doc string
-def estimate_theta_old(study_df, covariate_names, action_centering, in_study_col_name):
-    # Note that the intercept is included in the features already (col of 1s)
-    # in the way we typically run this
-    linear_model = LinearRegression(fit_intercept=False)
-
-    # Note the role of the action centering flag in here in determining whether
-    # we subtract action probabilities from actions (multiplying by a boolean
-    # in python is like multiplying by 1 if True and 0 if False).
-    in_study_bool = study_df[in_study_col_name] == 1
-    trimmed_df = study_df.loc[in_study_bool, covariate_names].copy()
-    in_study_df = study_df[in_study_bool]
-    for feat in covariate_names:
-        trimmed_df[f"action:{feat}"] = in_study_df[feat] * (
-            in_study_df["action"] - (in_study_df["action1prob"] * action_centering)
-        )
-
-    linear_model.fit(trimmed_df, in_study_df["reward"])
-
-    return linear_model.coef_
-
-
-def collect_derivatives_old(
-    study_df, user_id_col_name, covariate_names, theta_est, action_centering
-):
-    batched_base_states_list = []
-    batched_treat_states_list = []
-    batched_actions_list = []
-    batched_rewards_list = []
-    batched_action1probs_list = []
-
-    user_ids = study_df[user_id_col_name].unique()
-    for user_id in user_ids:
-        filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
-        batched_base_states_list.append(
-            get_base_states(filtered_user_data, covariate_names)
-        )
-        batched_treat_states_list.append(
-            get_treat_states(filtered_user_data, covariate_names)
-        )
-        batched_actions_list.append(get_actions(filtered_user_data))
-        batched_rewards_list.append(get_rewards(filtered_user_data))
-        batched_action1probs_list.append(get_action1probs(filtered_user_data))
-
-    batched_base_states_tensor = jnp.dstack(batched_base_states_list)
-    batched_treat_states_tensor = jnp.dstack(batched_treat_states_list)
-    batched_actions_tensor = jnp.dstack(batched_actions_list)
-    batched_rewards_tensor = jnp.dstack(batched_rewards_list)
-    batched_action1probs_tensor = jnp.dstack(batched_action1probs_list)
-
-    loss_gradients = get_loss_gradients_batched(
-        theta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        batched_actions_tensor,
-        batched_rewards_tensor,
-        batched_action1probs_tensor,
-        action_centering,
-    )
-
-    loss_hessians = get_loss_hessians_batched(
-        theta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        batched_actions_tensor,
-        batched_rewards_tensor,
-        batched_action1probs_tensor,
-        action_centering,
-    )
-
-    loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
-        theta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        batched_actions_tensor,
-        batched_rewards_tensor,
-        batched_action1probs_tensor,
-        action_centering,
-    )
-
-    return user_ids, loss_gradients, loss_hessians, loss_gradient_pi_derivatives
-
-
-# TODO: doc string
-# TODO: rewrite as einsum?
 def form_meat_matrix(
     theta_dim, update_times, beta_dim, algo_stats_dict, user_ids, loss_gradients
 ):
     num_rows_cols = beta_dim * len(update_times) + theta_dim
+    # TODO: Why do I do this type conversion?
     running_meat_matrix = jnp.zeros((num_rows_cols, num_rows_cols)).astype(jnp.float32)
     estimating_function_sum = jnp.zeros((num_rows_cols, 1))
     fallback_beta_gradient = jnp.zeros(beta_dim)
@@ -1127,41 +892,6 @@ def form_meat_matrix(
         )
 
     return running_meat_matrix / len(user_ids)
-
-
-# TODO: Docstring
-def get_base_states(df, state_feats, in_study_col="in_study"):
-    df.loc[df[in_study_col] == 0, state_feats] = 0
-    base_states = df[state_feats].to_numpy()
-    return jnp.array(base_states)
-
-
-# TODO: We can really only have one state-getting function in general
-def get_treat_states(df, treat_feats, in_study_col="in_study"):
-    df.loc[df[in_study_col] == 0, treat_feats] = 0
-    treat_states = df[treat_feats].to_numpy()
-    return jnp.array(treat_states)
-
-
-# TODO: Type conversion here a little sloppy
-def get_rewards(df, in_study_col="in_study", reward_col="reward"):
-    df.loc[df[in_study_col] == 0, reward_col] = 0
-    rewards = df[reward_col].to_numpy(dtype="float64").reshape(-1, 1)
-    return jnp.array(rewards)
-
-
-# TODO: Type conversion here a little sloppy
-def get_actions(df, in_study_col="in_study", action_col="action"):
-    df.loc[df[in_study_col] == 0, action_col] = 0
-    actions = df[action_col].to_numpy(dtype="int32").reshape(-1, 1)
-    return jnp.array(actions)
-
-
-# TODO: Type conversion here a little sloppy
-def get_action1probs(df, in_study_col="in_study", actionprob_col="action1prob"):
-    df.loc[df[in_study_col] == 0, actionprob_col] = 0
-    action1probs = df[actionprob_col].to_numpy(dtype="float64").reshape(-1, 1)
-    return jnp.array(action1probs)
 
 
 # TODO: Handle get_loss_gradient generic interface.  Probably need some function that just takes a

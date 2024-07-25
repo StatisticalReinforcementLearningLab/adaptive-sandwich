@@ -150,12 +150,12 @@ def calculate_pi_and_weight_gradients_specific_t(
         user_id: user_args_dict[user_id] for user_id in sorted_user_ids
     }
 
-    num_args = len(sorted_user_args_dict[sorted_user_ids[0]])
+    num_args = action_prob_func.__code__.co_argcount
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]
     in_study_user_ids = set()
-    for user_id, user_args in sorted_user_args_dict.values():
+    for user_id, user_args in sorted_user_args_dict.items():
         if not user_args:
             continue
         in_study_user_ids.add(user_id)
@@ -235,7 +235,8 @@ def collect_batched_in_study_actions(
             & (study_df[calendar_t_col_name] == calendar_t)
             & (study_df[in_study_col_name] == 1)
         ]
-        batched_actions_list.append(filtered_user_data[action_col_name].values[0])
+        if filtered_user_data.size:
+            batched_actions_list.append(filtered_user_data[action_col_name].values[0])
 
     return jnp.array(batched_actions_list)
 
@@ -395,12 +396,12 @@ def calculate_rl_loss_derivatives_specific_update(
         user_id: user_args_dict[user_id] for user_id in sorted_user_ids
     }
 
-    num_args = len(sorted_user_args_dict[sorted_user_ids[0]])
+    num_args = rl_loss_func.__code__.co_argcount
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]
     in_study_user_ids = set()
-    for user_id, user_args in sorted_user_args_dict.values():
+    for user_id, user_args in sorted_user_args_dict.items():
         if not user_args:
             continue
         in_study_user_ids.add(user_id)
@@ -558,7 +559,8 @@ def calculate_inference_loss_derivatives(
             "Unable to import RL loss function.  Please verify the file has the same name as the function of interest."
         ) from e
 
-    inference_loss_func_arg_names = inference_loss_func.__code__.co_varnames
+    num_args = inference_loss_func.__code__.co_argcount
+    inference_loss_func_arg_names = inference_loss_func.__code__.co_varnames[:num_args]
     num_args = len(inference_loss_func_arg_names)
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
@@ -631,5 +633,4 @@ def get_study_df_column(study_df, col_name, in_study_col_name):
     # appropriate in general, and needs to be fixed.
     # See https://nowell-closser.atlassian.net/browse/ADS-28
     study_df.loc[study_df[in_study_col_name] == 0, col_name] = 0
-
     return jnp.array(study_df[col_name].to_numpy().reshape(-1, 1))

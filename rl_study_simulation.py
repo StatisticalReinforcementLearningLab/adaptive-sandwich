@@ -274,9 +274,6 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         if not os.path.isdir(folder_path):
             os.mkdir(folder_path)
 
-        if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
-            study_df = study_df.astype({"policy_num": "Int64", "action": "Int64"})
-
         study_df.to_csv(f"{folder_path}/data.csv", index=False)
 
         with open(f"{folder_path}/study_df.pkl", "wb") as f:

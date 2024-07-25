@@ -9,7 +9,7 @@ def get_least_squares_loss_inference_action_centering(
     reward,
     action1prob,
 ):
-    state = jnp.hstack(intercept, past_reward)
+    state = jnp.hstack((intercept, past_reward))
     theta_0 = theta_est[: state.shape[1]].reshape(-1, 1)
     theta_1 = theta_est[state.shape[1] :].reshape(-1, 1)
 

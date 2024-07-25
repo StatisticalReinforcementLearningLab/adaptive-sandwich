@@ -41,10 +41,9 @@ steepness=0.0
 RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-action_centering_RL=0
+action_centering_RL=1
 
 # Arguments that only affect inference side.
-action_centering_inference=1
 in_study_col_name="in_study"
 action_col_name="action"
 policy_num_col_name="policy_num"
@@ -64,7 +63,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_le
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -82,7 +81,6 @@ while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
     e  | err_corr )                             needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )                      needs_arg; alg_state_feats="$OPTARG" ;;
     a  | action_centering_RL )                  needs_arg; action_centering_RL="$OPTARG" ;;
-    A  | action_centering_inference )           needs_arg; action_centering_inference="$OPTARG" ;;
     s  | steepness )                            needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                       needs_arg; synthetic_mode="$OPTARG" ;;
     i  | in_study_col_name )                    needs_arg; in_study_col_name="$OPTARG" ;;
@@ -99,8 +97,8 @@ while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
     I  | inference_loss_func_filename )         needs_arg; inference_loss_func_filename="$OPTARG" ;;
     h  | inference_loss_func_args_theta_index ) needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )      needs_arg; theta_calculation_func_filename="$OPTARG" ;;
-    \? )                                exit 2 ;;  # bad short option (error reported via getopts)
-    * )                                 die "Illegal option --$OPT" ;; # bad long option
+    \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
+    * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
@@ -161,6 +159,7 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning after-study analysis.
 python after_study_analysis.py analyze-dataset \
+  --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --beta_df_pickle="${output_folder}/exp=1/beta_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
@@ -172,8 +171,6 @@ python after_study_analysis.py analyze-dataset \
   --inference_loss_func_filename=$inference_loss_func_filename \
   --inference_loss_func_args_theta_index=$inference_loss_func_args_theta_index \
   --theta_calculation_func_filename=$theta_calculation_func_filename \
-  --covariate_names_str=$alg_state_feats \
-  --action_centering=$action_centering_inference \
   --in_study_col_name=$in_study_col_name \
   --action_col_name=$action_col_name \
   --policy_num_col_name=$policy_num_col_name \

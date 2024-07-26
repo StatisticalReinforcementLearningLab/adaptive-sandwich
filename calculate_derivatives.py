@@ -226,7 +226,7 @@ def collect_batched_in_study_actions(
 ):
 
     # TODO: This for loop can be removed, just grabbing the actions col after
-    # filtering and sorting and converting to jnp array.  It's just an artifact
+    # filtering and sorting, and converting to jnp array.  It's just an artifact
     # from when the loop used to be more complicated.
     batched_actions_list = []
     for user_id in sorted_user_ids:
@@ -254,14 +254,11 @@ def get_radon_nikodym_weight(
         beta_target
     )
 
-    # TODO: The [()] is probably not generally necessary. specify format
-    # of function clearly to make it either way. Actually should make it so it
-    # is not necessary.
+    # TODO: How could it be that [()] after each of the prob func calls doesn't
+    # make any difference here. ?? Understand. I expect these to be scalars...
 
-    pi_beta = action_prob_func(*action_prob_func_args_single_user)[()]
-    pi_beta_target = action_prob_func(*beta_target_action_prob_func_args_single_user)[
-        ()
-    ]
+    pi_beta = action_prob_func(*action_prob_func_args_single_user)
+    pi_beta_target = action_prob_func(*beta_target_action_prob_func_args_single_user)
     return conditional_x_or_one_minus_x(pi_beta, action) / conditional_x_or_one_minus_x(
         pi_beta_target, action
     )

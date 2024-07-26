@@ -233,11 +233,6 @@ class SigmoidLS:
 
         self.all_policies.append(update_dict)
 
-    def get_active_users(
-        self, study_df, in_study_column="in_study", user_id_column="user_id"
-    ):
-        return study_df[study_df[in_study_column] == 1][user_id_column].unique()
-
     def get_all_users(self, study_df, user_id_column="user_id"):
         return study_df[user_id_column].unique()
 

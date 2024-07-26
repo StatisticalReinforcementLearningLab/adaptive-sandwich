@@ -160,7 +160,6 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning after-study analysis.
 python after_study_analysis.py analyze-dataset \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
-  --beta_df_pickle="${output_folder}/exp=1/beta_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \

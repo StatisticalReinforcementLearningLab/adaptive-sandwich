@@ -156,12 +156,6 @@ def collect_existing_analyses(input_glob):
     required=True,
 )
 @click.option(
-    "--beta_df_pickle",
-    type=click.File("rb"),
-    help="Pickled pandas dataframe in correct format (see contract/readme)",
-    required=True,
-)
-@click.option(
     "--action_prob_func_filename",
     type=click.Path(exists=True),
     help="File that contains the action probability function and relevant imports.  The filename will be assumed to match the function name.",
@@ -259,7 +253,6 @@ def collect_existing_analyses(input_glob):
 )
 def analyze_dataset(
     study_df_pickle,
-    beta_df_pickle,
     action_prob_func_filename,
     action_prob_func_args_pickle,
     action_prob_func_args_beta_index,
@@ -286,13 +279,10 @@ def analyze_dataset(
     # Load study data
     study_df = pickle.load(study_df_pickle)
 
-    # TODO: Do I actually need beta df? Might only need to ask for
-    # beta dimension...
-    beta_df = pickle.load(beta_df_pickle)
-    beta_dim = beta_df.shape[1] - 1
-
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     rl_loss_func_args = pickle.load(rl_loss_func_args_pickle)
+
+    beta_dim = calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index)
 
     # TODO: Data integrity checks.
     # Reconstruct action probabilites now or later?
@@ -460,6 +450,13 @@ def analyze_dataset(
     print(
         f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
     )
+
+
+def calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index):
+    for user_args_dict in rl_loss_func_args.values():
+        for args in user_args_dict.values():
+            if args:
+                return args[rl_loss_func_args_beta_index].size
 
 
 # TODO: Docstring

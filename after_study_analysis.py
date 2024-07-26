@@ -1,17 +1,13 @@
 import pickle
 import os
 import logging
-import cProfile
-from pstats import Stats
 import warnings
 import pathlib
 import glob
 
 import click
-import jax
 import numpy as np
 from jax import numpy as jnp
-from sklearn.linear_model import LinearRegression
 import scipy
 
 import calculate_derivatives
@@ -30,106 +26,6 @@ logging.basicConfig(
 )
 
 # TODO: Break this file up
-
-
-def get_loss(
-    theta_est,
-    base_states,
-    treat_states,
-    actions,
-    rewards,
-    action1probs,
-    action_centering,
-):
-    theta_0 = theta_est[: base_states.shape[1]].reshape(-1, 1)
-    theta_1 = theta_est[base_states.shape[1] :].reshape(-1, 1)
-
-    actions = jnp.where(
-        action_centering, actions.astype(jnp.float32) - action1probs, actions
-    )
-
-    return jnp.sum(
-        (
-            rewards
-            - jnp.matmul(base_states, theta_0)
-            - jnp.matmul(actions * treat_states, theta_1)
-        )
-        ** 2
-    )
-
-
-# For the loss gradients, we can form the sum of all users values and differentiate that with one
-# call. Instead, this alternative structure which generalizes to the pi function case.
-def get_loss_gradients_batched(
-    theta_est,
-    batched_base_states_tensor,
-    batched_treat_states_tensor,
-    actions_batch,
-    rewards_batch,
-    action1probs_batch,
-    action_centering,
-):
-    return jax.vmap(
-        fun=jax.grad(get_loss),
-        in_axes=(None, 2, 2, 2, 2, 2, None),
-        out_axes=0,
-    )(
-        theta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        actions_batch,
-        rewards_batch,
-        action1probs_batch,
-        action_centering,
-    )
-
-
-def get_loss_hessians_batched(
-    theta_est,
-    batched_base_states_tensor,
-    batched_treat_states_tensor,
-    actions_batch,
-    rewards_batch,
-    action1probs_batch,
-    action_centering,
-):
-    return jax.vmap(
-        fun=jax.hessian(get_loss),
-        in_axes=(None, 2, 2, 2, 2, 2, None),
-        out_axes=0,
-    )(
-        theta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        actions_batch,
-        rewards_batch,
-        action1probs_batch,
-        action_centering,
-    )
-
-
-def get_loss_gradient_derivatives_wrt_pi_batched(
-    theta_est,
-    batched_base_states_tensor,
-    batched_treat_states_tensor,
-    actions_batch,
-    rewards_batch,
-    action1probs_batch,
-    action_centering,
-):
-    return jax.vmap(
-        fun=jax.jacrev(jax.grad(get_loss), 5),
-        in_axes=(None, 2, 2, 2, 2, 2, None),
-        out_axes=0,
-    )(
-        theta_est,
-        batched_base_states_tensor,
-        batched_treat_states_tensor,
-        actions_batch,
-        rewards_batch,
-        action1probs_batch,
-        action_centering,
-    )
 
 
 @click.group()

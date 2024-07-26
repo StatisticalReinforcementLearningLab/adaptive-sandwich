@@ -21,7 +21,6 @@ def test_form_meat_matrix():
     )
 
     theta_est = np.array([1.0, 2, 3, 4])
-    state_feats = treat_feats = ["intercept", "past_reward"]
     update_times = [2, 3]
     beta_dim = 4
     algo_stats_dict = {
@@ -119,7 +118,6 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
     )
 
     theta_est = np.array([1.0, 2, 3, 4])
-    state_feats = treat_feats = ["intercept", "past_reward"]
     update_times = [2, 3]
     beta_dim = 4
     algo_stats_dict = {
@@ -410,7 +408,6 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
     )
 
     theta_est = np.array([1.0, 2, 3, 4])
-    state_feats = treat_feats = ["intercept", "past_reward"]
     update_times = [3, 5]
     beta_dim = 4
     algo_stats_dict = {

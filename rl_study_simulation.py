@@ -104,12 +104,14 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         all_prev_data_bool = study_df["calendar_t"] <= t
         all_prev_data = study_df[all_prev_data_bool]
 
-        # If we are beyond the initial policy, start recording
-        # quantities that will be needed to form the "bread" matrix in the end.
-        if t > args.decisions_between_updates:
-            logger.info("Collecting pi args for time %s.", t)
-            curr_beta_est = study_RLalg.get_current_beta_estimate()
-            study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
+        # Record quantities that will be needed to form the "bread" matrix.
+        # These are actually only needed if t > args.decisions_between_updates
+        # but always collect anyway for clarity since that
+        # structure is the simplest to ask for and so we may as well test the
+        # full pipeline doing that.
+        logger.info("Collecting pi args for time %s.", t)
+        curr_beta_est = study_RLalg.get_current_beta_estimate()
+        study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
 
         # Check if need to update algorithm #######################################
         # TODO: recruit_t not respected here.  Either remove it or use here.

@@ -396,6 +396,12 @@ def analyze_dataset(
 
     # Make the user give the min and max probabilities, and I'll enforce it
 
+    # I am making assumptions about the times that the action probs correspond to if supplied
+    # I think currently I am requiring an entry for all times going into an update
+    # Probably this needs to change to be for all in study times?
+
+    # Construct update times from policy num col and compare to
+
     theta_est = estimate_theta(study_df, theta_calculation_func_filename)
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(

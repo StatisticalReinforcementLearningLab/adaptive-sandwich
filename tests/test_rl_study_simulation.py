@@ -1028,7 +1028,6 @@ class TestRunStudySimulation:
                 },
             },
         )
-        breakpoint()
         # TODO: When zero padding is removed, users 3 and 4 for policy 3 and
         # all users for policy 4 will need it undone here.
         np.testing.assert_equal(

@@ -105,7 +105,6 @@ class SyntheticEnv:
         self.env_params = env_params
         self.env_seed = env_seed
         self.rng = np.random.default_rng(env_seed)
-        self.args = args
 
         self.gen_feats = gen_feats
         self.err_corr = err_corr

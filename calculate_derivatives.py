@@ -235,7 +235,7 @@ def collect_batched_in_study_actions(
             & (study_df[calendar_t_col_name] == calendar_t)
             & (study_df[in_study_col_name] == 1)
         ]
-        if filtered_user_data.size:
+        if not filtered_user_data.empty:
             batched_actions_list.append(filtered_user_data[action_col_name].values[0])
 
     return jnp.array(batched_actions_list)

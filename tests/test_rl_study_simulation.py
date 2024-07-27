@@ -107,6 +107,31 @@ class TestRunStudySimulation:
             spec=synthetic_env.SyntheticEnv.sample_rewards
         )
 
+        self.study_env_2 = synthetic_env.SyntheticEnv(
+            self.args_no_incremental_1,
+            np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
+            env_seed=int(time.time()),
+            gen_feats=gen_feats,
+            err_corr=self.args_no_incremental_1.err_corr,
+        )
+        self.study_env_2.rng = MagicMock(autospec=True)
+        self.study_env_2.rng = MagicMock(autospec=True)
+        self.study_env_2.sample_rewards = MagicMock(
+            spec=synthetic_env.SyntheticEnv.sample_rewards
+        )
+
+        self.sigmoid_2 = basic_RL_algorithms.SigmoidLS(
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
+            alg_seed=int(time.time()),
+            steepness=self.args_no_incremental_1.steepness,
+            lower_clip=self.args_no_incremental_1.lower_clip,
+            upper_clip=self.args_no_incremental_1.upper_clip,
+            action_centering=self.args_no_incremental_1.action_centering,
+        )
+        self.sigmoid_2.rng = MagicMock(autospec=True)
+        self.sigmoid_2.get_action_probs = MagicMock(autospec=True)
+
     def test_run_study_simulation_incremental_recruitment(self):
         self.sigmoid_1.get_action_probs.side_effect = [
             np.array([0.6, 0.3]),
@@ -718,30 +743,749 @@ class TestRunStudySimulation:
         expected_df = expected_df.astype({"policy_num": "float64"})
         pd.testing.assert_frame_equal(study_df, expected_df)
 
+        np.testing.assert_equal(
+            self.sigmoid_1.pi_args,
+            {
+                1: {
+                    1: (
+                        np.array(
+                            [0, 0, 0, 0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.1], dtype="float32"),
+                    ),
+                    2: (
+                        np.array(
+                            [0, 0, 0, 0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.2], dtype="float32"),
+                    ),
+                    3: (),
+                    4: (),
+                    5: (),
+                    6: (),
+                },
+                2: {
+                    1: (
+                        np.array(
+                            [0, 0, 0, 0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.1], dtype="float32"),
+                    ),
+                    2: (
+                        np.array(
+                            [0, 0, 0, 0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.9], dtype="float32"),
+                    ),
+                    3: (),
+                    4: (),
+                    5: (),
+                    6: (),
+                },
+                3: {
+                    1: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.8], dtype="float32"),
+                    ),
+                    2: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.6], dtype="float32"),
+                    ),
+                    3: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.3], dtype="float32"),
+                    ),
+                    4: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.4], dtype="float32"),
+                    ),
+                    5: (),
+                    6: (),
+                },
+                4: {
+                    1: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 1.0], dtype="float32"),
+                    ),
+                    2: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    3: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 1.0], dtype="float32"),
+                    ),
+                    4: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    5: (),
+                    6: (),
+                },
+                5: {
+                    1: (),
+                    2: (),
+                    3: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, -1.0], dtype="float32"),
+                    ),
+                    4: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    5: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.5], dtype="float32"),
+                    ),
+                    6: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.6], dtype="float32"),
+                    ),
+                },
+                6: {
+                    1: (),
+                    2: (),
+                    3: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.5], dtype="float32"),
+                    ),
+                    4: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 1.5], dtype="float32"),
+                    ),
+                    5: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, -1.0], dtype="float32"),
+                    ),
+                    6: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                },
+                7: {
+                    1: (),
+                    2: (),
+                    3: (),
+                    4: (),
+                    5: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, -1.0], dtype="float32"),
+                    ),
+                    6: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.9], dtype="float32"),
+                    ),
+                },
+                8: {
+                    1: (),
+                    2: (),
+                    3: (),
+                    4: (),
+                    5: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    6: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                },
+            },
+        )
+        # TODO: When zero padding is removed, users 3 and 4 for policy 3 and
+        # all users for policy 4 will need it undone here.
+        np.testing.assert_equal(
+            self.sigmoid_1.rl_update_args,
+            {
+                2: {
+                    1: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[1], [1]]),
+                        np.array([[0.1], [0.8]], dtype="float32"),
+                        np.array([[0.6], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    2: (
+                        np.array(
+                            [-0.295102, 2.7183683, 0.0, 0.0],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0]]),
+                        np.array([[0.9], [0.6]], dtype="float32"),
+                        np.array([[0.3], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                    3: (),
+                    4: (),
+                    5: (),
+                    6: (),
+                },
+                3: {
+                    1: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                                [1, 0.8],
+                                [1, 1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                                [1, 0.8],
+                                [1, 1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[1], [1], [1], [1]]),
+                        np.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
+                        np.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    2: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                                [1, 0.6],
+                                [1, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                                [1, 0.6],
+                                [1, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [0], [0]]),
+                        np.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
+                        np.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                    3: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.3],
+                                [1, 1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.3],
+                                [1, 1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [1], [1]]),
+                        np.array([[0], [0], [1], [-1]], dtype="float32"),
+                        np.array([[0], [0], [0.6], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    4: (
+                        np.array(
+                            [0.68189, -0.5196854, 0.08869833, -0.15411115],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.4],
+                                [1, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.4],
+                                [1, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [0], [0]]),
+                        np.array([[0], [0], [0], [0]], dtype="float32"),
+                        np.array([[0], [0], [0.3], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                    5: (),
+                    6: (),
+                },
+                4: {
+                    1: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                                [1, 0.8],
+                                [1, 1.0],
+                                [0, 0],
+                                [0, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                                [1, 0.8],
+                                [1, 1.0],
+                                [0, 0],
+                                [0, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1],
+                                [1],
+                                [1],
+                                [1],
+                                [0],
+                                [0],
+                            ]
+                        ),
+                        np.array(
+                            [
+                                [0.1],
+                                [0.8],
+                                [1.0],
+                                [0.5],
+                                [0],
+                                [0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0.6],
+                                [0.6],
+                                [0.6],
+                                [0.6],
+                                [0],
+                                [0],
+                            ],
+                            dtype="float32",
+                        ),
+                        0,
+                    ),
+                    2: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                                [1, 0.6],
+                                [1, 0],
+                                [0, 0],
+                                [0, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                                [1, 0.6],
+                                [1, 0],
+                                [0, 0],
+                                [0, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0],
+                                [0],
+                                [0],
+                                [0],
+                                [0],
+                                [0],
+                            ]
+                        ),
+                        np.array(
+                            [
+                                [0.9],
+                                [0.6],
+                                [0.0],
+                                [1.5],
+                                [0],
+                                [0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0.3],
+                                [0.3],
+                                [0.3],
+                                [0.3],
+                                [0],
+                                [0],
+                            ],
+                            dtype="float32",
+                        ),
+                        0,
+                    ),
+                    3: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.3],
+                                [1, 1.0],
+                                [1, -1],
+                                [1, 0.5],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.3],
+                                [1, 1.0],
+                                [1, -1],
+                                [1, 0.5],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [1], [1], [0], [1]]),
+                        np.array([[0], [0], [1], [-1], [0.5], [-0.5]], dtype="float32"),
+                        np.array(
+                            [[0], [0], [0.6], [0.6], [0.5], [0.6]], dtype="float32"
+                        ),
+                        0,
+                    ),
+                    4: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.4],
+                                [1, 0],
+                                [1, 0],
+                                [1, 1.5],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.4],
+                                [1, 0],
+                                [1, 0],
+                                [1, 1.5],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [0], [0], [0], [1]]),
+                        np.array([[0], [0], [0], [0], [1.5], [2.3]], dtype="float32"),
+                        np.array(
+                            [[0], [0], [0.3], [0.3], [0.5], [0.3]], dtype="float32"
+                        ),
+                        0,
+                    ),
+                    5: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.5],
+                                [1, -1],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.5],
+                                [1, -1],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [0], [0], [1], [0]]),
+                        np.array([[0], [0], [0], [0], [-1], [-1]], dtype="float32"),
+                        np.array([[0], [0], [0], [0], [0.5], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    6: (
+                        np.array(
+                            [0.38212448, 0.25536534, -0.24691856, 0.2184174],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.6],
+                                [1, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [0, 0],
+                                [1, 0.6],
+                                [1, 0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0], [0], [0], [0], [1]]),
+                        np.array([[0], [0], [0], [0], [0], [0.9]], dtype="float32"),
+                        np.array([[0], [0], [0], [0], [0.5], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                },
+            },
+        )
+
     def test_run_study_simulation_no_incremental_recruitment(self):
-        self.sigmoid_1.get_action_probs.side_effect = [
+        self.sigmoid_2.get_action_probs.side_effect = [
             np.array([0.6, 0.3, 0.6, 0.3, 0.5, 0.5]),
             np.array([0.6, 0.3, 0.6, 0.3, 0.6, 0.3]),
             np.array([0.6, 0.3, 0.5, 0.5, 0.6, 0.3]),
             np.array([0.6, 0.3, 0.6, 0.3, 0.6, 0.3]),
         ]
-        self.sigmoid_1.rng.binomial.side_effect = [
+        self.sigmoid_2.rng.binomial.side_effect = [
             np.array([1, 0, 1, 0, 1, 0]),
             np.array([1, 0, 1, 0, 0, 1]),
             np.array([1, 0, 0, 0, 1, 0]),
             np.array([1, 0, 1, 0, 1, 0]),
         ]
-        self.study_env_1.sample_rewards.side_effect = [
+        self.study_env_2.sample_rewards.side_effect = [
             np.array([0.1, 0.9, 1.0, 0, -1, 0]),
             np.array([0.8, 0.6, -1, 0, -1, 0.9]),
             np.array([1.0, 0, 0.5, 1.5, 0.0, 0.0]),
             np.array([0.5, 1.5, -0.5, 2.3, 10, 4.67]),
         ]
-        self.study_env_1.rng.normal.return_value = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+        self.study_env_2.rng.normal.return_value = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
         study_df, _ = rl_study_simulation.run_study_simulation(
             args=self.args_no_incremental_1,
-            study_env=self.study_env_1,
-            study_RLalg=self.sigmoid_1,
+            study_env=self.study_env_2,
+            study_RLalg=self.sigmoid_2,
             user_env_data=None,
         )
         expected_df = pd.DataFrame(
@@ -890,25 +1634,25 @@ class TestRunStudySimulation:
                     0.2,
                     0.9,
                     0.6,
-                    0,
+                    0.0,
                     # USER 3
                     0.3,
                     1.0,
-                    -1,
+                    -1.0,
                     0.5,
                     # USER 4
                     0.4,
-                    0,
-                    0,
+                    0.0,
+                    0.0,
                     1.5,
                     # USER 5
                     0.5,
-                    -1,
-                    -1,
+                    -1.0,
+                    -1.0,
                     0.0,
                     # USER 6
                     0.6,
-                    0,
+                    0.0,
                     0.9,
                     0.0,
                 ],
@@ -984,6 +1728,375 @@ class TestRunStudySimulation:
             {"policy_num": "float64", "action": "float64", "past_action_1": "float64"}
         )
         pd.testing.assert_frame_equal(study_df, expected_df)
+
+        np.testing.assert_equal(
+            self.sigmoid_2.pi_args,
+            {
+                1: {
+                    1: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.1], dtype="float32"),
+                    ),
+                    2: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.2], dtype="float32"),
+                    ),
+                    3: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.3], dtype="float32"),
+                    ),
+                    4: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.4], dtype="float32"),
+                    ),
+                    5: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.5], dtype="float32"),
+                    ),
+                    6: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.6], dtype="float32"),
+                    ),
+                },
+                2: {
+                    1: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.1], dtype="float32"),
+                    ),
+                    2: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.9], dtype="float32"),
+                    ),
+                    3: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 1.0], dtype="float32"),
+                    ),
+                    4: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    5: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, -1.0], dtype="float32"),
+                    ),
+                    6: (
+                        np.array([0.0, 0.0, 0.0, 0.0], dtype="float32"),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                },
+                3: {
+                    1: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.8], dtype="float32"),
+                    ),
+                    2: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.6], dtype="float32"),
+                    ),
+                    3: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, -1.0], dtype="float32"),
+                    ),
+                    4: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    5: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, -1.0], dtype="float32"),
+                    ),
+                    6: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.9], dtype="float32"),
+                    ),
+                },
+                4: {
+                    1: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 1.0], dtype="float32"),
+                    ),
+                    2: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    3: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.5], dtype="float32"),
+                    ),
+                    4: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 1.5], dtype="float32"),
+                    ),
+                    5: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                    6: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        0.1,
+                        1.0,
+                        0.9,
+                        np.array([1, 0.0], dtype="float32"),
+                    ),
+                },
+            },
+        )
+        np.testing.assert_equal(
+            self.sigmoid_2.rl_update_args,
+            {
+                2: {
+                    1: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.1],
+                                [1, 0.1],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[1], [1]]),
+                        np.array([[0.1], [0.8]], dtype="float32"),
+                        np.array([[0.6], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    2: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.2],
+                                [1, 0.9],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0]]),
+                        np.array([[0.9], [0.6]], dtype="float32"),
+                        np.array([[0.3], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                    3: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.3],
+                                [1, 1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.3],
+                                [1, 1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[1], [1]]),
+                        np.array([[1.0], [-1]], dtype="float32"),
+                        np.array([[0.6], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    4: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.4],
+                                [1, 0.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.4],
+                                [1, 0.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [0]]),
+                        np.array([[0], [0]], dtype="float32"),
+                        np.array([[0.3], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                    5: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.5],
+                                [1, -1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.5],
+                                [1, -1.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[1], [0]]),
+                        np.array([[-1.0], [-1.0]], dtype="float32"),
+                        np.array([[0.5], [0.6]], dtype="float32"),
+                        0,
+                    ),
+                    6: (
+                        np.array(
+                            [-0.054342836, 0.7509609, 0.8495352, -2.736538],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.6],
+                                [1, 0.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array(
+                            [
+                                [1, 0.6],
+                                [1, 0.0],
+                            ],
+                            dtype="float32",
+                        ),
+                        np.array([[0], [1]]),
+                        np.array([[0], [0.9]], dtype="float32"),
+                        np.array([[0.5], [0.3]], dtype="float32"),
+                        0,
+                    ),
+                },
+            },
+        )
 
 
 @pytest.mark.skip(reason="To be implemented")

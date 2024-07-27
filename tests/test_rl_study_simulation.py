@@ -107,6 +107,31 @@ class TestRunStudySimulation:
             spec=synthetic_env.SyntheticEnv.sample_rewards
         )
 
+        self.study_env_2 = synthetic_env.SyntheticEnv(
+            self.args_no_incremental_1,
+            np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
+            env_seed=int(time.time()),
+            gen_feats=gen_feats,
+            err_corr=self.args_no_incremental_1.err_corr,
+        )
+        self.study_env_2.rng = MagicMock(autospec=True)
+        self.study_env_2.rng = MagicMock(autospec=True)
+        self.study_env_2.sample_rewards = MagicMock(
+            spec=synthetic_env.SyntheticEnv.sample_rewards
+        )
+
+        self.sigmoid_2 = basic_RL_algorithms.SigmoidLS(
+            state_feats=self.state_feats,
+            treat_feats=self.treat_feats,
+            alg_seed=int(time.time()),
+            steepness=self.args_no_incremental_1.steepness,
+            lower_clip=self.args_no_incremental_1.lower_clip,
+            upper_clip=self.args_no_incremental_1.upper_clip,
+            action_centering=self.args_no_incremental_1.action_centering,
+        )
+        self.sigmoid_2.rng = MagicMock(autospec=True)
+        self.sigmoid_2.get_action_probs = MagicMock(autospec=True)
+
     def test_run_study_simulation_incremental_recruitment(self):
         self.sigmoid_1.get_action_probs.side_effect = [
             np.array([0.6, 0.3]),
@@ -719,29 +744,29 @@ class TestRunStudySimulation:
         pd.testing.assert_frame_equal(study_df, expected_df)
 
     def test_run_study_simulation_no_incremental_recruitment(self):
-        self.sigmoid_1.get_action_probs.side_effect = [
+        self.sigmoid_2.get_action_probs.side_effect = [
             np.array([0.6, 0.3, 0.6, 0.3, 0.5, 0.5]),
             np.array([0.6, 0.3, 0.6, 0.3, 0.6, 0.3]),
             np.array([0.6, 0.3, 0.5, 0.5, 0.6, 0.3]),
             np.array([0.6, 0.3, 0.6, 0.3, 0.6, 0.3]),
         ]
-        self.sigmoid_1.rng.binomial.side_effect = [
+        self.sigmoid_2.rng.binomial.side_effect = [
             np.array([1, 0, 1, 0, 1, 0]),
             np.array([1, 0, 1, 0, 0, 1]),
             np.array([1, 0, 0, 0, 1, 0]),
             np.array([1, 0, 1, 0, 1, 0]),
         ]
-        self.study_env_1.sample_rewards.side_effect = [
+        self.study_env_2.sample_rewards.side_effect = [
             np.array([0.1, 0.9, 1.0, 0, -1, 0]),
             np.array([0.8, 0.6, -1, 0, -1, 0.9]),
             np.array([1.0, 0, 0.5, 1.5, 0.0, 0.0]),
             np.array([0.5, 1.5, -0.5, 2.3, 10, 4.67]),
         ]
-        self.study_env_1.rng.normal.return_value = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+        self.study_env_2.rng.normal.return_value = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
         study_df, _ = rl_study_simulation.run_study_simulation(
             args=self.args_no_incremental_1,
-            study_env=self.study_env_1,
-            study_RLalg=self.sigmoid_1,
+            study_env=self.study_env_2,
+            study_RLalg=self.sigmoid_2,
             user_env_data=None,
         )
         expected_df = pd.DataFrame(

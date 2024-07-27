@@ -107,7 +107,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # If we are beyond the initial policy, start recording
         # quantities that will be needed to form the "bread" matrix in the end.
         if t > args.decisions_between_updates:
-            logger.info("Calculating pi and weight gradients for time %s.", t)
+            logger.info("Collecting pi args for time %s.", t)
             curr_beta_est = study_RLalg.get_current_beta_estimate()
             study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
 
@@ -131,6 +131,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
             # Update Algorithm ##############################################
             logger.info("Updating algorithm parameters for time %s.", t)
+            logger.info("Collecting RL loss args for time %s.", t)
             study_RLalg.update_alg(new_update_data)
             logger.info(
                 "Calculating loss gradients per user and average hessian for time %s.",
@@ -141,9 +142,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             # It's redundant to pass in both the filtered study df and the whole
             # thing, but also pretty clear this way. We need to check whether
             # the user will be in-study at the next time.
-            study_RLalg.collect_rl_update_args(
-                all_prev_data, study_df, t, curr_beta_est
-            )
+            study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
     return study_df, study_RLalg
 
 

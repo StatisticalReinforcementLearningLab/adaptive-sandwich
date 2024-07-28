@@ -21,29 +21,41 @@ logging.basicConfig(
 # TODO: Consolidate function loading logic
 
 
-# Note this stacking works with incremental recruitment only because we
-# fill in states for out-of-study times such that all users have the
-# same state matrix size
-# TODO: Are there cases where an arg can't be tensorized into a numpy array
-# because of type?
-# TODO: I am assuming args can be placed in numpy array here
-# The casework here is annoying, but to play nicely with vmap we need
-# to stack arrays and non-arrays differently. We must be able to iterate
-# along the first dimension to get the values for different users in the batch.
-# If we vstack a 1d array of scalars we get a 2d array--list of 1-element lists--so
-# iterating along first dimension gives 1-element arrays now. We do not
-# want that.
+# TODO: Check for exactly the required types earlier
 # TODO: Try except and nice error message
-def stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists):
+# TODO: This is complicated enough to deserve its own unit tests
+# TODO: Technically dont need to pad betas but I think handling that is too messy
+# TODO: This shape based approach doesn't actually work, because you can't vmap over different shapes duh
+# Maybe some kind of grouping by shape? That should actually work. There should be a common trimming
+# needed per active recruitment group barring special cases.
+def stack_batched_arg_lists_into_tensor(batched_arg_lists):
+    """
+    Stack a simple Python list of function arguments (across all users for a specific arg position)
+    into an array that can be supplied to vmap as batch arguments. vmap requires all elements of
+    such a batched array to be the same shape, as do the stacking functions we use here.  Thus
+    we take the original argument lists and pad each to constant size within itself, recording the
+    original sizes via an array of zeros so they can be unpadded later (we can trim only based the
+    size of arguments inside of vmap (see JAX sharp bits)). We also supply the axes one must
+    iterate over to get each users's args in a batch.
+    """
 
-    batched_arg_tensors = []
+    padded_batched_arg_tensors = []
 
     # This ends up being all zeros because of the way we are (now) doing the
     # stacking, but better to not assume that externally and send out what
     # we've done with this list.
     batch_axes = []
 
+    batched_zeros_like_arrays = []
     for batched_arg_list in batched_arg_lists:
+        if (
+            isinstance(
+                batched_arg_list[0],
+                (jnp.ndarray, np.ndarray),
+            )
+            and batched_arg_list[0].ndim > 2
+        ):
+            raise TypeError("Arrays with dimension greater that 2 are not supported.")
         if (
             isinstance(
                 batched_arg_list[0],
@@ -51,23 +63,84 @@ def stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists):
             )
             and batched_arg_list[0].ndim == 2
         ):
-            # We have a matrix (2D array) arg
-            batched_arg_tensors.append(jnp.stack(batched_arg_list, 0))
+            ########## We have a matrix (2D array) arg
+
+            padded_batched_arg_list, batched_zeros_like_list = (
+                pad_batched_arg_list_to_max_on_each_dimension(batched_arg_list)
+            )
+
+            padded_batched_arg_tensors.append(jnp.stack(padded_batched_arg_list, 0))
+            batched_zeros_like_arrays.append(jnp.vstack(batched_zeros_like_list))
             batch_axes.append(0)
         elif isinstance(
             batched_arg_list[0],
             (collections.abc.Sequence, jnp.ndarray, np.ndarray),
         ) and not isinstance(batched_arg_list[0], str):
-            # We have a vector (1D array) arg
-            batched_arg_tensors.append(jnp.vstack(batched_arg_list))
+            ########## We have a vector (1D array) arg
+            if not isinstance(batched_arg_list[0], (jnp.ndarray, np.ndarray)):
+                try:
+                    batched_arg_list = [jnp.ndarray(x) for x in batched_arg_list]
+                except Exception as e:
+                    raise TypeError(
+                        "Argument of sequence type that cannot be cast to JAX numpy array"
+                    ) from e
+            assert batched_arg_list[0].ndim == 1
+
+            padded_batched_arg_list, batched_zeros_like_list = (
+                pad_batched_arg_list_to_max_on_each_dimension(batched_arg_list)
+            )
+
+            padded_batched_arg_tensors.append(jnp.vstack(padded_batched_arg_list))
+            batched_zeros_like_arrays.append(jnp.vstack(batched_zeros_like_list))
             batch_axes.append(0)
         else:
-            # Otherwise we should have a list of scalars. Just turn into a
-            # jnp array.
-            batched_arg_tensors.append(jnp.array(batched_arg_list))
+            ########## Otherwise we should have a list of scalars.
+            # Just turn into a jnp array.
+            padded_batched_arg_tensors.append(jnp.array(batched_arg_list))
+            batched_zeros_like_arrays.append(
+                # We can't put None here, because vmap doesn't accept an
+                # batch array of NoneType.  We also can't communicate that
+                # we have non-trimmable values here by the *values* in our input
+                # array. So just pass a batched 5D array that could not have arisen
+                # above due to shape constraints, and communicate not to trim
+                # by only the SIZE of this array.
+                np.zeros((len(batched_arg_list), 1, 1, 1, 1, 1))
+            )
             batch_axes.append(0)
 
-    return batched_arg_tensors, batch_axes
+    return padded_batched_arg_tensors, batch_axes, batched_zeros_like_arrays
+
+
+# TODO: Could consider padding with an actual value from the array, but zero
+# should be pretty safe.
+def pad_batched_arg_list_to_max_on_each_dimension(batched_arg_list):
+    assert isinstance(batched_arg_list[0], (np.ndarray, jnp.ndarray))
+
+    # Find the maximum size along each axis
+    num_dims = batched_arg_list[0].ndim
+    max_size_per_dim = [0] * num_dims
+    for arg in batched_arg_list:
+        for dim in range(num_dims):
+            if arg.shape[dim] > max_size_per_dim[dim]:
+                max_size_per_dim[dim] = arg.shape[dim]
+
+    # Pad each array with zeros to those max sizes, noop if not needed, and
+    # record original sizes for later trimming
+    batched_zeros_like_list = []
+    padded_batched_arg_list = []
+    for arg in batched_arg_list:
+        batched_zeros_like_list.append(jnp.zeros_like(arg))
+        padded_batched_arg_list.append(
+            jnp.pad(
+                arg,
+                pad_width=[
+                    (0, max_size_per_dim[dim] - arg.shape[dim])
+                    for dim in range(num_dims)
+                ],
+            )
+        )
+
+    return padded_batched_arg_list, batched_zeros_like_list
 
 
 def calculate_pi_and_weight_gradients(
@@ -101,10 +174,14 @@ def calculate_pi_and_weight_gradients(
         raise ValueError(
             "Unable to import action probability function.  Please verify the file has the same name as the function of interest."
         ) from e
-    # TODO: Fallback for users missing or require complete?
+
     pi_and_weight_gradients_by_calendar_t = {}
+
+    # This is a reliable way to get all user ids since we require all user ids
+    # at all decision times
     user_ids = list(next(iter(action_prob_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
+
     for calendar_t, user_args_dict in action_prob_func_args.items():
 
         pi_gradients, weight_gradients = calculate_pi_and_weight_gradients_specific_t(
@@ -163,8 +240,8 @@ def calculate_pi_and_weight_gradients_specific_t(
             batched_arg_lists[idx].append(arg)
 
     logger.info("Reforming batched data lists into tensors.")
-    batched_arg_tensors, batch_axes = (
-        stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
+    padded_batched_arg_tensors, batch_axes, batched_zeros_like_arrays = (
+        stack_batched_arg_lists_into_tensor(batched_arg_lists)
     )
 
     logger.info("Forming pi gradients with respect to beta.")
@@ -174,7 +251,8 @@ def calculate_pi_and_weight_gradients_specific_t(
         action_prob_func,
         action_prob_func_args_beta_index,
         batch_axes,
-        *batched_arg_tensors,
+        padded_batched_arg_tensors,
+        batched_zeros_like_arrays,
     )
     pi_gradients = pad_in_study_derivatives_with_zeros(
         in_study_pi_gradients, sorted_user_ids, in_study_user_ids
@@ -197,12 +275,13 @@ def calculate_pi_and_weight_gradients_specific_t(
     # redundant across users: it's just the same thing repeated num users
     # times.
     in_study_weight_gradients = get_weight_gradients_batched(
-        batched_arg_tensors[action_prob_func_args_beta_index],
+        padded_batched_arg_tensors[action_prob_func_args_beta_index],
         action_prob_func,
         action_prob_func_args_beta_index,
         in_study_batched_actions_tensor,
         batch_axes,
-        *batched_arg_tensors,
+        padded_batched_arg_tensors,
+        batched_zeros_like_arrays,
     )
     weight_gradients = pad_in_study_derivatives_with_zeros(
         in_study_weight_gradients, sorted_user_ids, in_study_user_ids
@@ -264,15 +343,42 @@ def get_radon_nikodym_weight(
     )
 
 
+def arg_unpadding_wrapper(func, num_initial_no_pad_args, *args):
+    """
+    This is a little tricky but *args should be of size 2n + k, where the first
+    k elements are not to be unpadded and the next n elements
+    are potentially padded args. The next n are in the shapes of these args
+    pre-padding.
+    """
+    half_num_pad_args = (len(args) - num_initial_no_pad_args) // 2
+    unpadded_args = []
+    for i, arg in enumerate(
+        args[num_initial_no_pad_args : num_initial_no_pad_args + half_num_pad_args]
+    ):
+        trim_shape = args[num_initial_no_pad_args + half_num_pad_args + i].shape
+        if len(trim_shape) != 5:
+            slice_tuple = tuple(slice(size) for size in trim_shape)
+            unpadded_args.append(arg[slice_tuple])
+        else:
+            unpadded_args.append(arg)
+    return func(*args[:num_initial_no_pad_args], *unpadded_args)
+
+
 # TODO: Docstring
 def get_pi_gradients_batched(
-    action_prob_func, action_prob_func_args_beta_index, batch_axes, *batched_arg_tensors
+    action_prob_func,
+    action_prob_func_args_beta_index,
+    batch_axes,
+    padded_batched_arg_tensors,
+    batched_zeros_like_arrays,
 ):
+    # NOTE the (2 + index) is due to the fact that we have 2 fixed args in the
+    # unpadding function
     return jax.vmap(
-        fun=jax.grad(action_prob_func, action_prob_func_args_beta_index),
-        in_axes=batch_axes,
+        fun=jax.grad(arg_unpadding_wrapper, 2 + action_prob_func_args_beta_index),
+        in_axes=[None, None] + batch_axes * 2,
         out_axes=0,
-    )(*batched_arg_tensors)
+    )(action_prob_func, 0, *padded_batched_arg_tensors, *batched_zeros_like_arrays)
 
 
 # TODO: Docstring
@@ -282,21 +388,25 @@ def get_weight_gradients_batched(
     action_prob_func_args_beta_index,
     batched_actions_tensor,
     batch_axes,
-    *batched_arg_tensors,
+    padded_batched_arg_tensors,
+    batched_zeros_like_arrays,
 ):
-    # NOTE the (4 + index) is due to the fact that we have four fixed args in
+    # NOTE the (2 + 4 + index) is due to the fact that we have four fixed args in
     # the above definition of the weight function before passing in the action
-    # prob args
+    # prob args and 2 fixed args in the unpadding function
     return jax.vmap(
-        fun=jax.grad(get_radon_nikodym_weight, 4 + action_prob_func_args_beta_index),
-        in_axes=[0, None, None, 0] + batch_axes,
+        fun=jax.grad(arg_unpadding_wrapper, 2 + 4 + action_prob_func_args_beta_index),
+        in_axes=[None, None, 0, None, None, 0] + batch_axes * 2,
         out_axes=0,
     )(
+        get_radon_nikodym_weight,
+        4,
         batched_beta_target_tensor,
         action_prob_func,
         action_prob_func_args_beta_index,
         batched_actions_tensor,
-        *batched_arg_tensors,
+        *padded_batched_arg_tensors,
+        *batched_zeros_like_arrays,
     )
 
 
@@ -411,13 +521,16 @@ def calculate_rl_loss_derivatives_specific_update(
     # TODO: Articulate requirement that each arg can be tensorized into a numpy array
     # because of type
     logger.info("Reforming batched data lists into tensors.")
-    batched_arg_tensors, batch_axes = (
-        stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
+    padded_batched_arg_tensors, batch_axes, batched_trim_shape_arrays = (
+        stack_batched_arg_lists_into_tensor(batched_arg_lists)
     )
 
     logger.info("Forming loss gradients with respect to beta.")
     in_study_loss_gradients = get_loss_gradients_batched(
-        rl_loss_func, rl_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+        rl_loss_func,
+        rl_loss_func_args_beta_index,
+        batch_axes,
+        *padded_batched_arg_tensors,
     )
     loss_gradients = pad_in_study_derivatives_with_zeros(
         in_study_loss_gradients, sorted_user_ids, in_study_user_ids
@@ -425,7 +538,10 @@ def calculate_rl_loss_derivatives_specific_update(
 
     logger.info("Forming loss hessians with respect to beta")
     in_study_loss_hessians = get_loss_hessians_batched(
-        rl_loss_func, rl_loss_func_args_beta_index, batch_axes, *batched_arg_tensors
+        rl_loss_func,
+        rl_loss_func_args_beta_index,
+        batch_axes,
+        *padded_batched_arg_tensors,
     )
     loss_hessians = pad_in_study_derivatives_with_zeros(
         in_study_loss_hessians, sorted_user_ids, in_study_user_ids
@@ -451,7 +567,7 @@ def calculate_rl_loss_derivatives_specific_update(
                 rl_loss_func_args_beta_index,
                 rl_loss_func_args_action_prob_index,
                 batch_axes,
-                *batched_arg_tensors,
+                *padded_batched_arg_tensors,
             )
         )
         loss_gradient_pi_derivatives = pad_in_study_derivatives_with_zeros(
@@ -577,8 +693,8 @@ def calculate_inference_loss_derivatives(
     # fill in states for out-of-study times such that all users have the
     # same state matrix size
     logger.info("Reforming batched data lists into tensors.")
-    batched_arg_tensors, batch_axes = (
-        stack_batched_arg_list_into_tensor_and_get_batch_axes(batched_arg_lists)
+    batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
+        batched_arg_lists
     )
 
     logger.info("Forming loss gradients with respect to beta.")

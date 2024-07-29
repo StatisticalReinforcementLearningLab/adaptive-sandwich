@@ -111,9 +111,15 @@ def stack_batched_arg_lists_into_tensor(batched_arg_lists):
     return padded_batched_arg_tensors, batch_axes, batched_zeros_like_arrays
 
 
-# TODO: Could consider padding with an actual value from the array, but zero
-# should be pretty safe.
 def pad_batched_arg_list_to_max_on_each_dimension(batched_arg_list):
+    """
+    This function makes a new version of batched_arg_list where all the elements
+    have the same size, by padding with zeros so that each argument has the prior
+    maximum size for each dimension across all users.  We also return a list
+    of arrays the sizes of which are the pre-padding array sizes for the users.
+
+    Not used currently because the unpadding func can't be differentiated easily.
+    """
     assert isinstance(batched_arg_list[0], (np.ndarray, jnp.ndarray))
 
     # Find the maximum size along each axis
@@ -345,10 +351,23 @@ def get_radon_nikodym_weight(
 
 def arg_unpadding_wrapper(func, num_initial_no_pad_args, *args):
     """
-    This is a little tricky but *args should be of size 2n + k, where the first
+    This is a little tricky but *args should be of size k + 2n, where the first
     k elements are not to be unpadded and the next n elements
-    are potentially padded args. The next n are in the shapes of these args
-    pre-padding.
+    are potentially padded args. The next n are arrays in the shapes of these args
+    pre-padding (or an arbitrary 5d array that signifies no unpadding).
+    We then slice each of these first n down to the sizes of the second
+    n. We must not pass in the shapes to unpad to direclty, because the shapes of
+    any arrays in the body cannot depend on the *values* of any args, but may
+    depend on their shapes.
+
+    NOTE: This function is not used currently.  There is a fundamental challenge:
+    if batching over users, we can't give a list of different shape trim size
+    arrays as one of the batched args.  So this actually only works if there
+    isn't any trimming to be done.  The other thought was to pass in all the
+    trim size arrays to every user, but then we need an index arg the value of
+    which ultimately determines the post-trim size of some array.  Pass in a
+    thing of size the desired index? Then you run into the problem of different
+    length args across users for batching again, and so on.
     """
     half_num_pad_args = (len(args) - num_initial_no_pad_args) // 2
     unpadded_args = []

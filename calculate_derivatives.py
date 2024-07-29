@@ -154,10 +154,10 @@ def calculate_pi_and_weight_gradients(
     action_prob_func_args_beta_index,
 ):
     """
-    For all users, compute the gradient with respect to beta of both the pi function
-    (which takes an action and state and gives the probability of selecting the action)
-    and the Radon-Nikodym weight (derived from pi functions as described in the paper)
-    for all update times.
+    For all decision times, for all users, compute the gradient with respect to
+    beta of both the pi function (which takes a state and gives the probability
+    of selecting action 1) and the Radon-Nikodym weight (derived from pi
+    functions as described in the paper)
     """
 
     logger.info("Calculating pi and weight gradients with respect to beta.")

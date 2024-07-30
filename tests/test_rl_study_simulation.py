@@ -1052,6 +1052,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1]]),
                         np.array([[0.1], [0.8]], dtype="float32"),
                         np.array([[0.6], [0.6]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     2: (
@@ -1073,6 +1074,7 @@ class TestRunStudySimulation:
                         np.array([[0], [0]]),
                         np.array([[0.9], [0.6]], dtype="float32"),
                         np.array([[0.3], [0.3]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     3: (),
@@ -1104,6 +1106,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1], [1], [1]]),
                         np.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
                         np.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
+                        np.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     2: (
@@ -1129,6 +1132,7 @@ class TestRunStudySimulation:
                         np.array([[0], [0], [0], [0]]),
                         np.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
                         np.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
+                        np.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     3: (
@@ -1150,6 +1154,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1]]),
                         np.array([[1], [-1]], dtype="float32"),
                         np.array([[0.6], [0.6]], dtype="float32"),
+                        np.array([[3], [4]], dtype="int32"),
                         0,
                     ),
                     4: (
@@ -1182,6 +1187,7 @@ class TestRunStudySimulation:
                             dtype="float32",
                         ),
                         np.array([[0.3], [0.3]], dtype="float32"),
+                        np.array([[3], [4]], dtype="int32"),
                         0,
                     ),
                     5: (),
@@ -1211,6 +1217,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1], [1], [1]]),
                         np.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
                         np.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
+                        np.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     2: (
@@ -1236,6 +1243,7 @@ class TestRunStudySimulation:
                         np.array([[0], [0], [0], [0]]),
                         np.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
                         np.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
+                        np.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     3: (
@@ -1261,6 +1269,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1], [0], [1]]),
                         np.array([[1], [-1], [0.5], [-0.5]], dtype="float32"),
                         np.array([[0.6], [0.6], [0.5], [0.6]], dtype="float32"),
+                        np.array([[3], [4], [5], [6]], dtype="int32"),
                         0,
                     ),
                     4: (
@@ -1286,6 +1295,7 @@ class TestRunStudySimulation:
                         np.array([[0], [0], [0], [1]]),
                         np.array([[0], [0], [1.5], [2.3]], dtype="float32"),
                         np.array([[0.3], [0.3], [0.5], [0.3]], dtype="float32"),
+                        np.array([[3], [4], [5], [6]], dtype="int32"),
                         0,
                     ),
                     5: (
@@ -1307,6 +1317,7 @@ class TestRunStudySimulation:
                         np.array([[1], [0]]),
                         np.array([[-1], [-1]], dtype="float32"),
                         np.array([[0.5], [0.6]], dtype="float32"),
+                        np.array([[5], [6]], dtype="int32"),
                         0,
                     ),
                     6: (
@@ -1328,6 +1339,7 @@ class TestRunStudySimulation:
                         np.array([[0], [1]]),
                         np.array([[0], [0.9]], dtype="float32"),
                         np.array([[0.5], [0.3]], dtype="float32"),
+                        np.array([[5], [6]], dtype="int32"),
                         0,
                     ),
                 },
@@ -1805,6 +1817,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1]]),
                         np.array([[0.1], [0.8]], dtype="float32"),
                         np.array([[0.6], [0.6]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     2: (
@@ -1826,6 +1839,7 @@ class TestRunStudySimulation:
                         np.array([[0], [0]]),
                         np.array([[0.9], [0.6]], dtype="float32"),
                         np.array([[0.3], [0.3]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     3: (
@@ -1847,6 +1861,7 @@ class TestRunStudySimulation:
                         np.array([[1], [1]]),
                         np.array([[1.0], [-1]], dtype="float32"),
                         np.array([[0.6], [0.6]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     4: (
@@ -1868,6 +1883,7 @@ class TestRunStudySimulation:
                         np.array([[0], [0]]),
                         np.array([[0], [0]], dtype="float32"),
                         np.array([[0.3], [0.3]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     5: (
@@ -1889,6 +1905,7 @@ class TestRunStudySimulation:
                         np.array([[1], [0]]),
                         np.array([[-1.0], [-1.0]], dtype="float32"),
                         np.array([[0.5], [0.6]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     6: (
@@ -1910,6 +1927,7 @@ class TestRunStudySimulation:
                         np.array([[0], [1]]),
                         np.array([[0], [0.9]], dtype="float32"),
                         np.array([[0.5], [0.3]], dtype="float32"),
+                        np.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                 },

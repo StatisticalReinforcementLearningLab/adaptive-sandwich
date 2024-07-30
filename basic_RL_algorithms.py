@@ -147,6 +147,14 @@ class SigmoidLS:
         action1probs = df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
         return jnp.array(action1probs)
 
+    def get_action1probstimes(
+        self,
+        df,
+        calendar_t_col="calendar_t",
+    ):
+        action1probs = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        return jnp.array(action1probs)
+
     # TODO: Docstring
     def get_states(self, df):
         base_states = df[self.state_feats].to_numpy()
@@ -245,20 +253,26 @@ class SigmoidLS:
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
         self.rl_update_args[next_policy_num] = {}
         for user_id in self.get_all_users(all_prev_data):
-            filtered_data = all_prev_data.loc[
+            in_study_user_data = all_prev_data.loc[
                 (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
             ]
             self.rl_update_args[next_policy_num][user_id] = (
                 (
                     curr_beta_est,
-                    self.get_base_states(filtered_data),
-                    self.get_treat_states(filtered_data),
-                    self.get_actions(filtered_data),
-                    self.get_rewards(filtered_data),
-                    self.get_action1probs(filtered_data),
+                    self.get_base_states(in_study_user_data),
+                    self.get_treat_states(in_study_user_data),
+                    self.get_actions(in_study_user_data),
+                    self.get_rewards(in_study_user_data),
+                    # NOTE important: we require an entry for all times before the update
+                    # regardless of in-study or not. This is necessary because these probabilities
+                    # have special meaning and must correspond to particular times if used.
+                    self.get_action1probs(in_study_user_data),
+                    self.get_action1probstimes(in_study_user_data),
                     self.action_centering,
                 )
-                if not filtered_data.empty
+                # We only care about the data overall, however, if there is any
+                # in-study data for this user so far
+                if not in_study_user_data.empty
                 else ()
             )
 

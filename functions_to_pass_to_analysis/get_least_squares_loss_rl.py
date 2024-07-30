@@ -8,6 +8,7 @@ def get_least_squares_loss_rl(
     actions,
     rewards,
     action1probs,
+    action1probtimes,  # pylint: disable=unused-argument, because this is needed by package
     action_centering,
 ):
     beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)

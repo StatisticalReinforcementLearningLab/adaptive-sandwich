@@ -338,6 +338,7 @@ def test_calculate_loss_derivatives_no_action_centering():
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             5,
+            6,
             {
                 1: (
                     np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -358,8 +359,9 @@ def test_calculate_loss_derivatives_no_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                    jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
                 2: (
@@ -381,8 +383,9 @@ def test_calculate_loss_derivatives_no_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                    jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
             },
@@ -426,8 +429,10 @@ def test_calculate_loss_derivatives_no_action_centering():
 def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
     """
     Just like previous test, but we pretend the loss function doesn't actually
-    take action probabilities to get the same zero gradients.f
-
+    take action probabilities to get the same zero gradients. This is extra
+    artificial because we are still passing in the arg that tells the times
+    that action probs correspond to, but this doesn't affect the mechanics of
+    the test. Just another unused argument.
 
     Note that the pi derivatives are squeezed after this to get rid of a dimension
     """
@@ -435,6 +440,7 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
         calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
+            -1,
             -1,
             {
                 1: (
@@ -456,8 +462,9 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
                         dtype="float32",
                     ),
                     jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                    jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
                 2: (
@@ -479,8 +486,9 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
                         dtype="float32",
                     ),
                     jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                    jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
             },
@@ -597,7 +605,7 @@ def test_calculate_loss_derivatives_action_centering():
         atol=1e-05,
     )
 
-    # This is a little lazy but the loss gradients match up, it suggests action
+    # This is a little lazy but the loss gradients match up, which suggests action
     # centering is being incorporated correctly into the loss, and I
     # simply took the hessian and pi derivatives being computed and
     # use them as the expected values because the code is behaving correctly
@@ -608,6 +616,7 @@ def test_calculate_loss_derivatives_action_centering():
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             5,
+            6,
             {
                 1: (
                     np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -628,8 +637,9 @@ def test_calculate_loss_derivatives_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                    jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     1,
                 ),
                 2: (
@@ -651,8 +661,9 @@ def test_calculate_loss_derivatives_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                    jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     1,
                 ),
             },
@@ -720,6 +731,19 @@ def test_calculate_loss_derivatives_incremental_recruitment():
 # formation
 @pytest.mark.skip(reason="Nice to have")
 def test_calculate_pi_and_weight_gradients_all_times():
+    raise NotImplementedError()
+
+
+# One for each of pi and loss?
+@pytest.mark.skip(reason="Need to add")
+def test_calculate_gradients_equal_with_and_without_zero_padding():
+    raise NotImplementedError()
+
+
+# This is tested indirectly through the after study analysis test
+# for inference side
+@pytest.mark.skip(reason="Nice to have")
+def test_inference_loss_derivatives():
     raise NotImplementedError()
 
 

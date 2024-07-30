@@ -582,7 +582,7 @@ def calculate_upper_left_bread_inverse(
     # decision times for each user. The one complication is that we add some
     # padding of zeros for decision times before the first update to make
     # indexing simpler below.
-    # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME with index i+1!
+    # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(

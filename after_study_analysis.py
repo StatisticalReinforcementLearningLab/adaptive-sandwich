@@ -148,6 +148,7 @@ def collect_existing_analyses(input_glob):
 # TODO: Check all help strings for accuracy.
 # TODO: Don't use theta and beta jargon?? Need a legend if I do.
 # TODO: Make run scripts that hardcode to action centering or not on both RL and inference sides
+# TODO: Need to support pure exploration phase with more flags than just in study. Maybe in study, receiving updates
 @cli.command()
 @click.option(
     "--study_df_pickle",
@@ -194,8 +195,14 @@ def collect_existing_analyses(input_glob):
 @click.option(
     "--rl_loss_func_args_action_prob_index",
     type=int,
-    default=-1,
+    default=-1000,
     help="Index of the action probability in the tuple of RL loss func args, if applicable",
+)
+@click.option(
+    "--rl_loss_func_args_action_prob_times_index",
+    type=int,
+    default=-1000,
+    help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of RL loss func args, if applicable",
 )
 @click.option(
     "--inference_loss_func_filename",
@@ -260,6 +267,7 @@ def analyze_dataset(
     rl_loss_func_args_pickle,
     rl_loss_func_args_beta_index,
     rl_loss_func_args_action_prob_index,
+    rl_loss_func_args_action_prob_times_index,
     inference_loss_func_filename,
     inference_loss_func_args_theta_index,
     theta_calculation_func_filename,
@@ -270,135 +278,144 @@ def analyze_dataset(
     user_id_col_name,
     action_prob_col_name,
 ):
+    """
+    TODO: Data integrity checks.
+    Reconstruct action probabilites now or later?
+
+    I check estimating function sum 0 later, but differentiate between
+    RL and beta side? Also could move check here. Might be  nice to have all
+    checks in same place. Wherever that check is, should allow user to see
+    and verify close enough to zero
+
+    Make sure study df sorted within users and across users? .sort_values(by=["user_id", "calendar_t"])
+
+    Make sure every user has entry for union of all decision times across
+    all users.
+
+    Make sure in study is never on for more than one stretch
+
+    Make sure right number of in study rows per user?? May not be precise
+
+    Possibly make sure no real-looking data when in_study is off
+
+    Make sure function args for all users for all t even if not in study
+    policy num the same for all users for each calendar t.  Something that adds
+    nothing to gradients when users are not in the study is needed... maybe
+    think of way to make this happen more directly in response to in study
+    indicator. Well, can pass in zeros or NAs but not use computed gradients,
+    automatically spit out gradient zero somehow.
+
+    I think I'm agnostic to indexing of calendar times but should check because
+    otherwise need to add a check here to verify required format.
+
+    Verify actions binary
+
+    Verify action column present in study df
+
+    Verify policy num column present in both beta df and study df, and joinable,
+    for instance no policy nums in study df not present in beta df.  Other way
+    is acceptable maybe but could be a warning.
+
+    Verify in study column present in study df
+
+    If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
+
+    Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
+    Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
+
+    Should be clear from dataframe spec but beta must be vector (not matrix)
+
+    beta df must have policy num as first column and then one column per coordinate of beta
+    nothing else. But.. could reconsider and put array in one column
+
+    Codify assumptions that make get_first_applicable_time work.  The main
+    thing is an assumption that users don't get different policies at the same
+    time.
+
+    Functions compatible with JAX 0.4.24. And DIFFERENTIABLE with grad and JITTABLE because of vmap.
+    https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html#
+    Tricky ones are control flow, indexing, and shapes not depending on args
+
+    Summarize study df and ask users to verify.
+
+    Codify assumptions used for collect_batched_actions
+
+    Use arg groups/manual checks to help verify args are used correctly
+
+    Specify that action probability function and loss function have to
+    have scalar output.  If estimating function given instead of loss, specify
+    correct vector orientation. I think (beta dim,) vector.
+
+    Write down assumptions about data handling for incremental recruitment.
+    Empty tuples for decision times when not in study and updates where no
+    data is being used for that user (probably they have not been in study yet).
+
+    For any column indices given, check any appropriate constraints for that column.
+    Probabilities between 0 and 1 (or nan).  In fact probabilites of 0 or 1 illustrate
+    a non-compliant RL algorithm so this is strict (though using nan when out of study).
+    Mentioned above, but actions binary. calendar_t an integer. user_id hashable, not a float.
+    This helps data validation but also simply that the indices are correct.
+
+    Do I need to mandate whether beta is 1 or 2d? Yes.
+
+    Theta loss makes assumptions about colnames. Theta index can be called
+    whatever, but everything else has to be a colname in study df.
+    This can be verified. Detects action probs by name. Must take Tx1 vectors only
+
+    Theta estimation function must only take study df.  It can be verified to only
+    have one arg at least, and this must be communicated.
+
+    Policy num has to be consecutive integers now... should I relax this? If not
+    check for it
+
+    Make it clear that args are needed for all users for each decision time/policy num in those
+    dicts, but with empty tuples or None or something Falsey for times out of study.
+    Can check this against study df!
+
+    Check calendar t consecutive..
+
+    Check that pi args given for all in study rows, not for others.
+
+    Make the user give the min and max probabilities, and I'll enforce it
+
+    I am making assumptions about the times that the action probs correspond to if supplied
+    in rl loss/estimating function. I think currently I am requiring an entry for all times going into an update
+    Probably this needs to change to be for all in study times? Eh, padding is not obvious. Needs zeros
+    before and after... I could deduce from the study dataframe but I'm just gonna require entries for all times
+    that have occurred before update.  Will require padding with nans, and
+    THUS THE RL LOSS/ESTIMATING FUNCTION MUST compute correctly with nan-padded action probs.
+    This can be as simple as x = x[~numpy.isnan(x)]
+
+    Verify betas the same across all users for given decision/update time
+
+    Flag to suppress interactive checks for simulations
+
+    Functions have same name as files that contain
+
+    I assume someone is in the study at each decision time. Check for this or
+    see if shouldn't always be true.
+
+    I also assume someone has some data to contribute at each update time. Check
+    for this or see if shouldn't always be true.
+
+    If you pass actionprobs, you must also pass a same shape array with the times
+    tha they apply to.  This is because padding to make the times clear is not so nice.
+    Can't filter in a simple way and still be JAX-compatible. Check that neither
+    or both supplied, and if supplied, same size. Check valid decision times.
+
+    Action prob times strictly increasing.  Should probably be contiguous but could be some weird case. Maybe warning if not.
+    """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
         datefmt="%Y-%m-%d:%H:%M:%S",
         level=logging.INFO,
     )
 
-    # Load study data
     study_df = pickle.load(study_df_pickle)
-
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     rl_loss_func_args = pickle.load(rl_loss_func_args_pickle)
 
     beta_dim = calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index)
-
-    # TODO: Data integrity checks.
-    # Reconstruct action probabilites now or later?
-
-    # I check estimating function sum 0 later, but differentiate between
-    # RL and beta side? Also could move check here. Might be  nice to have all
-    # checks in same place. Wherever that check is, should allow user to see
-    # and verify close enough to zero
-
-    # Make sure study df sorted within users and across users? .sort_values(by=["user_id", "calendar_t"])
-
-    # Make sure every user has entry for union of all decision times across
-    # all users.
-
-    # Make sure in study is never on for more than one stretch
-
-    # Make sure right number of in study rows per user?? May not be precise
-
-    # Possibly make sure no real-looking data when in_study is off
-
-    # Make sure function args for all users for all t even if not in study
-    # policy num the same for all users for each calendar t.  Something that adds
-    # nothing to gradients when users are not in the study is needed... maybe
-    # think of way to make this happen more directly in response to in study
-    # indicator. Well, can pass in zeros or NAs but not use computed gradients,
-    # automatically spit out gradient zero somehow.
-
-    # I think I'm agnostic to indexing of calendar times but should check because
-    # otherwise need to add a check here to verify required format.
-
-    # Verify actions binary
-
-    # Verify action column present in study df
-
-    # Verify policy num column present in both beta df and study df, and joinable,
-    # for instance no policy nums in study df not present in beta df.  Other way
-    # is acceptable maybe but could be a warning.
-
-    # Verify in study column present in study df
-
-    # If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
-
-    # Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
-    # Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
-
-    # Should be clear from dataframe spec but beta must be vector (not matrix)
-
-    # beta df must have policy num as first column and then one column per coordinate of beta
-    # nothing else. But.. could reconsider and put array in one column
-
-    # Codify assumptions that make get_first_applicable_time work.  The main
-    # thing is an assumption that users don't get different policies at the same
-    # time.
-
-    # Functions compatible with JAX 0.4.24. And DIFFERENTIABLE with grad.
-
-    # Summarize study df and ask users to verify.
-
-    # Codify assumptions used for collect_batched_actions
-
-    # Use arg groups/manual checks to help verify args are used correctly
-
-    # Specify that action probability function and loss function have to
-    # have scalar output.  If estimating function given instead of loss, specify
-    # correct vector orientation. I think beta dim row vector.
-
-    # Write down assumptions about data handling for incremental recruitment.
-    # Zeros, NAs, etc.
-    # I need function args that produce a zero gradient.... this is a bit weird
-    # though, maybe in general I need an in study indicator passed along instead,
-    # just spitting out zero gradients automatically in that case. See what
-    # happens if NAs are given. This is a nice solution potentially, because if
-    # I get an NA gradient I can then just force it to be zero. This would also
-    # mean some kind of requirement that functions being differentiated take
-    # NAs and produce NAs from them, which should also be stated.
-
-    # For any column indices given, check any appropriate constraints for that column.
-    # Probabilities between 0 and 1.  In fact probabilites of 0 or 1 illustrate
-    # a non-compliant RL algorithm so this is strict. Mentioned above, but actions
-    # binary. calendar_t an integer. user_id hashable, not a float.
-    # This helps data validation but also simply that the indices are correct.
-
-    # Do I need to mandate whether beta is 1 or 2d?
-
-    # Theta loss makes assumptions about colnames. Theta index can be called
-    # whatever, but everything else has to be a colname in study df with an
-    # s added (actually probably shouldn't do s in case there is already a plural colname...)
-    # This can be verified. Detects action probs by name. Must take Tx1 vectors only
-
-    # Theta estimation function must only take study df.  It can be verified to only
-    # have one arg at least, and this must be communicated.
-
-    # Policy num has to be consecutive integers now... should I relax this? If not
-    # check for it
-
-    # Make it clear that args are needed for all users for each decision time/policy num in those
-    # dicts, but with empty tuples or None or something Falsey for times out of study.
-    # Can check this against study df!
-
-    # Check calendar t consecutive..
-
-    # Args have to be same shape for all users at a given time for stacking to work.
-    # This is fine for action probs... but what about estimating func in the face
-    # of incremental recruitment? We opted to pass something Falsey as the whole arg
-    # tuple for an update for which the user is not in the study for the next time,
-    # but what about filling in values for all previous times at a given time
-    # across users that have been in the study for different amounts of time?  Sort of have
-    # to require zeros here....
-
-    # Check that pi args given for all in study rows, not for others.
-
-    # Make the user give the min and max probabilities, and I'll enforce it
-
-    # I am making assumptions about the times that the action probs correspond to if supplied
-    # in rl loss/estimating function. I think currently I am requiring an entry for all times going into an update
-    # Probably this needs to change to be for all in study times?
 
     theta_est = estimate_theta(study_df, theta_calculation_func_filename)
 
@@ -416,6 +433,7 @@ def analyze_dataset(
         rl_loss_func_args,
         rl_loss_func_args_beta_index,
         rl_loss_func_args_action_prob_index,
+        rl_loss_func_args_action_prob_times_index,
     )
     upper_left_bread_inverse = calculate_upper_left_bread_inverse(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
@@ -437,7 +455,7 @@ def analyze_dataset(
         )
     )
 
-    # Write analysis results to same directory as input files
+    # Write analysis results to same directory that input files are in
     folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
     with open(f"{folder_path}/analysis.pkl", "wb") as f:
         pickle.dump(
@@ -501,6 +519,7 @@ def calculate_algorithm_statistics(
     rl_loss_func_args,
     rl_loss_func_args_beta_index,
     rl_loss_func_args_action_prob_index,
+    rl_loss_func_args_action_prob_times_index,
 ):
     pi_and_weight_gradients_by_calendar_t = (
         calculate_derivatives.calculate_pi_and_weight_gradients(
@@ -522,6 +541,7 @@ def calculate_algorithm_statistics(
             rl_loss_func_args,
             rl_loss_func_args_beta_index,
             rl_loss_func_args_action_prob_index,
+            rl_loss_func_args_action_prob_times_index,
             policy_num_col_name,
             calendar_t_col_name,
         )
@@ -580,9 +600,11 @@ def calculate_upper_left_bread_inverse(
     # This loop iterates over all times that were the first applicable time
     # for a non-initial policy. Take care to note that update_idx starts at 0.
     # Think of each iteration of this loop as creating a (block) row of the matrix
-    for update_idx, update_t in enumerate(next_times_after_update):
-        logger.info("Processing update time %s.", update_t)
-        t_stats_dict = algorithm_statistics_by_calendar_t[update_t]
+    for update_idx, next_t_after_update in enumerate(next_times_after_update):
+        logger.info(
+            "Processing the update that first applied at time %s.", next_t_after_update
+        )
+        t_stats_dict = algorithm_statistics_by_calendar_t[next_t_after_update]
 
         # This loop creates the non-diagonal terms for the current update
         # Think of each iteration of this loop as creating one term in the current (block) row
@@ -622,7 +644,7 @@ def calculate_upper_left_bread_inverse(
                 # place this comment on the after study analysis logic or
                 # link to the same explanation in both places.
                 # Maybe link to a document with a picture...
-
+                # TODO: This assumes indexing starts at 1
                 mixed_theta_beta_loss_derivative = jnp.matmul(
                     t_stats_dict["loss_gradient_pi_derivatives_by_user_id"][user_id][
                         :,
@@ -921,7 +943,6 @@ def form_bread_inverse_matrix(
             running_entry_holder += mixed_theta_beta_loss_derivative
 
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
-
     bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
     return jnp.block(
         [

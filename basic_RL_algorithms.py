@@ -123,23 +123,19 @@ class SigmoidLS:
     # a copy, but it seems to work perfectly.
 
     # TODO: Docstring
-    def get_base_states(self, df, in_study_col="in_study"):
-        df.loc[df[in_study_col] == 0, self.state_feats] = 0
+    def get_base_states(self, df):
         base_states = df[self.state_feats].to_numpy()
         return jnp.array(base_states)
 
-    def get_treat_states(self, df, in_study_col="in_study"):
-        df.loc[df[in_study_col] == 0, self.treat_feats] = 0
+    def get_treat_states(self, df):
         treat_states = df[self.treat_feats].to_numpy()
         return jnp.array(treat_states)
 
-    def get_rewards(self, df, reward_col="reward", in_study_col="in_study"):
-        df.loc[df[in_study_col] == 0, reward_col] = 0
+    def get_rewards(self, df, reward_col="reward"):
         rewards = df[reward_col].to_numpy().reshape(-1, 1)
         return jnp.array(rewards)
 
-    def get_actions(self, df, action_col="action", in_study_col="in_study"):
-        df.loc[df[in_study_col] == 0, action_col] = 0
+    def get_actions(self, df, action_col="action"):
         actions = df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
@@ -147,10 +143,16 @@ class SigmoidLS:
         self,
         df,
         actionprob_col="action1prob",
-        in_study_col="in_study",
     ):
-        df.loc[df[in_study_col] == 0, actionprob_col] = 0
-        action1probs = df[actionprob_col].to_numpy(dtype="float64").reshape(-1, 1)
+        action1probs = df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        return jnp.array(action1probs)
+
+    def get_action1probstimes(
+        self,
+        df,
+        calendar_t_col="calendar_t",
+    ):
+        action1probs = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
         return jnp.array(action1probs)
 
     # TODO: Docstring
@@ -240,39 +242,39 @@ class SigmoidLS:
         return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
 
     def collect_rl_update_args(self, all_prev_data, calendar_t, curr_beta_est):
+        """
+        NOTE: Must be called AFTER the update it concerns happens, so that the
+        beta the rest of the data already produced is used.
+        """
         logger.info(
             "Collecting args to loss/estimating function at time %d (last time included in update data) for each user in dictionary format",
             calendar_t,
         )
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
-        self.rl_update_args[next_policy_num] = {
-            user_id: (
+        self.rl_update_args[next_policy_num] = {}
+        for user_id in self.get_all_users(all_prev_data):
+            in_study_user_data = all_prev_data.loc[
+                (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
+            ]
+            self.rl_update_args[next_policy_num][user_id] = (
                 (
                     curr_beta_est,
-                    self.get_base_states(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    ),
-                    self.get_treat_states(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    ),
-                    self.get_actions(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    ),
-                    self.get_rewards(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    ),
-                    self.get_action1probs(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    ),
+                    self.get_base_states(in_study_user_data),
+                    self.get_treat_states(in_study_user_data),
+                    self.get_actions(in_study_user_data),
+                    self.get_rewards(in_study_user_data),
+                    # NOTE important: we require an entry for all times before the update
+                    # regardless of in-study or not. This is necessary because these probabilities
+                    # have special meaning and must correspond to particular times if used.
+                    self.get_action1probs(in_study_user_data),
+                    self.get_action1probstimes(in_study_user_data),
                     self.action_centering,
                 )
-                if not all_prev_data.loc[
-                    (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
-                ].empty
+                # We only care about the data overall, however, if there is any
+                # in-study data for this user so far
+                if not in_study_user_data.empty
                 else ()
             )
-            for user_id in self.get_all_users(all_prev_data)
-        }
 
     def collect_pi_args(self, all_prev_data, calendar_t, curr_beta_est):
         logger.info(

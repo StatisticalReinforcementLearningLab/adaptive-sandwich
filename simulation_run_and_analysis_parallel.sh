@@ -55,6 +55,7 @@ action_prob_func_args_beta_index=0
 rl_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
 rl_loss_func_args_beta_index=0
 rl_loss_func_args_action_prob_index=5
+rl_loss_func_args_action_prob_times_index=6
 inference_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
 inference_loss_func_args_theta_index=0
 theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_action_centering.py"
@@ -63,7 +64,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_le
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -71,32 +72,33 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:E:I:h:H:-: OPT; do
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
-    T  | max_time )                             needs_arg; T="$OPTARG" ;;
-    t  | recruit_t )                            needs_arg; recruit_t="$OPTARG" ;;
-    n  | num_users )                            needs_arg; n="$OPTARG" ;;
-    u  | recruit_n )                            needs_arg; recruit_n="$OPTARG" ;;
-    d  | decisions_between_updates )            needs_arg; decisions_between_updates="$OPTARG" ;;
-    m  | min_users )                            needs_arg; min_users="$OPTARG" ;;
-    r  | RL_alg )                               needs_arg; RL_alg="$OPTARG" ;;
-    e  | err_corr )                             needs_arg; err_corr="$OPTARG" ;;
-    f  | alg_state_feats )                      needs_arg; alg_state_feats="$OPTARG" ;;
-    a  | action_centering_RL )                  needs_arg; action_centering_RL="$OPTARG" ;;
-    s  | steepness )                            needs_arg; steepness="$OPTARG" ;;
-    y  | synthetic_mode )                       needs_arg; synthetic_mode="$OPTARG" ;;
-    i  | in_study_col_name )                    needs_arg; in_study_col_name="$OPTARG" ;;
-    c  | action_col_name )                      needs_arg; action_col_name="$OPTARG" ;;
-    p  | policy_num_col_name )                  needs_arg; policy_num_col_name="$OPTARG" ;;
-    C  | calendar_t_col_name )                  needs_arg; calendar_t_col_name="$OPTARG" ;;
-    U  | user_id_col_name )                     needs_arg; user_id_col_name="$OPTARG" ;;
-    E  | action_prob_col_name )                 needs_arg; action_prob_col_name="$OPTARG" ;;
-    P  | action_prob_func_filename )            needs_arg; action_prob_func_filename="$OPTARG" ;;
-    b  | action_prob_func_args_beta_index )     needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
-    l  | rl_loss_func_filename )                needs_arg; rl_loss_func_filename="$OPTARG" ;;
-    B  | rl_loss_func_args_beta_index )         needs_arg; rl_loss_func_args_beta_index="$OPTARG" ;;
-    D  | rl_loss_func_args_action_prob_index )  needs_arg; rl_loss_func_args_action_prob_index="$OPTARG" ;;
-    I  | inference_loss_func_filename )         needs_arg; inference_loss_func_filename="$OPTARG" ;;
-    h  | inference_loss_func_args_theta_index ) needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
-    H  | theta_calculation_func_filename )      needs_arg; theta_calculation_func_filename="$OPTARG" ;;
+    T  | max_time )                                   needs_arg; T="$OPTARG" ;;
+    t  | recruit_t )                                  needs_arg; recruit_t="$OPTARG" ;;
+    n  | num_users )                                  needs_arg; n="$OPTARG" ;;
+    u  | recruit_n )                                  needs_arg; recruit_n="$OPTARG" ;;
+    d  | decisions_between_updates )                  needs_arg; decisions_between_updates="$OPTARG" ;;
+    m  | min_users )                                  needs_arg; min_users="$OPTARG" ;;
+    r  | RL_alg )                                     needs_arg; RL_alg="$OPTARG" ;;
+    e  | err_corr )                                   needs_arg; err_corr="$OPTARG" ;;
+    f  | alg_state_feats )                            needs_arg; alg_state_feats="$OPTARG" ;;
+    a  | action_centering_RL )                        needs_arg; action_centering_RL="$OPTARG" ;;
+    s  | steepness )                                  needs_arg; steepness="$OPTARG" ;;
+    y  | synthetic_mode )                             needs_arg; synthetic_mode="$OPTARG" ;;
+    i  | in_study_col_name )                          needs_arg; in_study_col_name="$OPTARG" ;;
+    c  | action_col_name )                            needs_arg; action_col_name="$OPTARG" ;;
+    p  | policy_num_col_name )                        needs_arg; policy_num_col_name="$OPTARG" ;;
+    C  | calendar_t_col_name )                        needs_arg; calendar_t_col_name="$OPTARG" ;;
+    U  | user_id_col_name )                           needs_arg; user_id_col_name="$OPTARG" ;;
+    E  | action_prob_col_name )                       needs_arg; action_prob_col_name="$OPTARG" ;;
+    P  | action_prob_func_filename )                  needs_arg; action_prob_func_filename="$OPTARG" ;;
+    b  | action_prob_func_args_beta_index )           needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
+    l  | rl_loss_func_filename )                      needs_arg; rl_loss_func_filename="$OPTARG" ;;
+    B  | rl_loss_func_args_beta_index )               needs_arg; rl_loss_func_args_beta_index="$OPTARG" ;;
+    D  | rl_loss_func_args_action_prob_index )        needs_arg; rl_loss_func_args_action_prob_index="$OPTARG" ;;
+    j  | rl_loss_func_args_action_prob_times_index )  needs_arg; rl_loss_func_args_action_prob_times_index="$OPTARG" ;;
+    I  | inference_loss_func_filename )               needs_arg; inference_loss_func_filename="$OPTARG" ;;
+    h  | inference_loss_func_args_theta_index )       needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
+    H  | theta_calculation_func_filename )            needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -167,6 +169,7 @@ python after_study_analysis.py analyze-dataset \
   --rl_loss_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
   --rl_loss_func_args_beta_index=$rl_loss_func_args_beta_index \
   --rl_loss_func_args_action_prob_index=$rl_loss_func_args_action_prob_index \
+  --rl_loss_func_args_action_prob_times_index=$rl_loss_func_args_action_prob_times_index \
   --inference_loss_func_filename=$inference_loss_func_filename \
   --inference_loss_func_args_theta_index=$inference_loss_func_args_theta_index \
   --theta_calculation_func_filename=$theta_calculation_func_filename \

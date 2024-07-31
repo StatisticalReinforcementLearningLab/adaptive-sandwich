@@ -5,6 +5,7 @@ from jax import numpy as jnp
 
 import calculate_derivatives
 import functions_to_pass_to_analysis.get_action_1_prob_pure
+import functions_to_pass_to_analysis.get_least_squares_loss_inference_action_centering
 import functions_to_pass_to_analysis.get_least_squares_loss_rl
 
 
@@ -198,7 +199,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_zero_action_low_clip():
     )
 
 
-def test_calculate_pi_and_weight_gradients_specific_t_incremental_recruitment_1():
+def test_calculate_pi_and_weight_gradients_specific_t_out_of_study_1():
     study_df = pd.DataFrame(
         {
             "user_id": [
@@ -262,7 +263,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_incremental_recruitment_1(
     )
 
 
-def test_calculate_pi_and_weight_gradients_specific_t_incremental_recruitment_2():
+def test_calculate_pi_and_weight_gradients_specific_t_out_of_study_2():
 
     study_df = pd.DataFrame(
         {
@@ -299,6 +300,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_incremental_recruitment_2(
             [1, 2],
         ),
         (
+            # User 1 not in study, User 2 clipped
             np.array(
                 [
                     np.array([0, 0, 0, 0], dtype="float32"),
@@ -315,7 +317,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_incremental_recruitment_2(
     )
 
 
-def test_calculate_loss_derivatives_no_action_centering():
+def test_calculate_rl_loss_derivatives_specific_update_no_action_centering():
     """
     Study df for reference
     pd.DataFrame(
@@ -338,6 +340,7 @@ def test_calculate_loss_derivatives_no_action_centering():
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             5,
+            6,
             {
                 1: (
                     np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -358,8 +361,9 @@ def test_calculate_loss_derivatives_no_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                    jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
                 2: (
@@ -381,8 +385,9 @@ def test_calculate_loss_derivatives_no_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                    jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
             },
@@ -423,11 +428,13 @@ def test_calculate_loss_derivatives_no_action_centering():
     )
 
 
-def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
+def test_calculate_rl_loss_derivatives_specific_update_no_action_probs_passed_to_function():
     """
     Just like previous test, but we pretend the loss function doesn't actually
-    take action probabilities to get the same zero gradients.f
-
+    take action probabilities to get the same zero gradients. This is extra
+    artificial because we are still passing in the arg that tells the times
+    that action probs correspond to, but this doesn't affect the mechanics of
+    the test. Just another unused argument.
 
     Note that the pi derivatives are squeezed after this to get rid of a dimension
     """
@@ -435,6 +442,7 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
         calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
+            -1,
             -1,
             {
                 1: (
@@ -456,8 +464,9 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
                         dtype="float32",
                     ),
                     jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                    jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
                 2: (
@@ -479,8 +488,9 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
                         dtype="float32",
                     ),
                     jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                    jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     0,
                 ),
             },
@@ -521,9 +531,9 @@ def test_calculate_loss_derivatives_no_action_probs_passed_to_function():
     )
 
 
-def test_calculate_loss_derivatives_action_centering():
+def test_calculate_rl_loss_derivatives_specific_update_action_centering():
     """
-    Study df for reference (look at first two times)
+    Study df for reference
     pd.DataFrame(
         {
             "user_id": [1, 1, 1, 2, 2, 2],
@@ -597,17 +607,12 @@ def test_calculate_loss_derivatives_action_centering():
         atol=1e-05,
     )
 
-    # This is a little lazy but the loss gradients match up, it suggests action
-    # centering is being incorporated correctly into the loss, and I
-    # simply took the hessian and pi derivatives being computed and
-    # use them as the expected values because the code is behaving correctly
-    # in simulations and the addition of action centering doesn't add
-    # further difficulties to the JAX gradient infrastructure.
     np.testing.assert_equal(
         calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
             0,
             5,
+            6,
             {
                 1: (
                     np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -628,8 +633,9 @@ def test_calculate_loss_derivatives_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
-                    jnp.array([[[1.0], [-1.0], [0.0]]], dtype="float32"),
-                    jnp.array([[[0.5], [0.6], [0.7]]], dtype="float32"),
+                    jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                    jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     1,
                 ),
                 2: (
@@ -651,8 +657,9 @@ def test_calculate_loss_derivatives_action_centering():
                         dtype="float32",
                     ),
                     jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
-                    jnp.array([[[1.0], [0.0], [1.0]]], dtype="float32"),
-                    jnp.array([[[0.1], [0.2], [0.3]]], dtype="float32"),
+                    jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                    jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                    jnp.array([[1], [2], [3]], dtype="int32"),
                     1,
                 ),
             },
@@ -711,22 +718,790 @@ def test_calculate_loss_derivatives_action_centering():
     )
 
 
-@pytest.mark.skip(reason="Nice to have")
-def test_calculate_loss_derivatives_incremental_recruitment():
-    raise NotImplementedError()
+def test_calculate_rl_loss_derivatives_specific_update_with_and_without_zero_padding():
+    """
+    Study df for reference
+    pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+            "action": [0, 1, 1, None, None, None, 1, 1, 0, None],
+            "reward": [1.0, -1, 0, None, None, None, 1, 0, 1, None],
+            "intercept": [1.0, 1, 1, None, None, None, 1, 1, 1, None],
+            "past_reward": [0.0, 1, -1, None, None, None, 1, 1, 0, None],
+            "in_study": [1, 1, 1, 0, 0, 0, 1, 1, 1, 0],
+            "action1prob": [0.5, 0.6, 0.7, None, None, None, 0.1, 0.2, 0.3, None],
+        }
+    )
+
+    Note that the pi derivatives are squeezed after this to get rid of a dimension
+    """
+
+    beta = np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    user_1_centered_actions = np.array([0 - 0.5, 1 - 0.6, 1 - 0.7], dtype="float32")
+    user_1_states = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, -1.0]], dtype="float32")
+    user_1_rewards = np.array([1.0, -1, 0], dtype="float32")
+    user_1_loss_gradient = -2 * sum(
+        (
+            (
+                user_1_rewards[i]
+                - beta[:2] @ user_1_states[i]
+                - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
+            )
+            * np.concatenate(
+                [
+                    user_1_states[i],
+                    user_1_centered_actions[i] * user_1_states[i],
+                ]
+            )
+            for i in range(3)
+        )
+    )
+
+    user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
+    user_2_states = np.array([[1.0, 1.0], [1.0, 1.0], [1.0, 0.0]], dtype="float32")
+    user_2_rewards = np.array([1.0, 0, 1.0], dtype="float32")
+    user_2_loss_gradient = -2 * sum(
+        [
+            (
+                user_2_rewards[i]
+                - beta[:2] @ user_2_states[i]
+                - beta[2:] @ (user_2_centered_actions[i] * user_2_states[i])
+            )
+            * np.concatenate(
+                [
+                    user_2_states[i],
+                    user_2_centered_actions[i] * user_2_states[i],
+                ]
+            )
+            for i in range(3)
+        ]
+    )
+
+    # There are small numerical differences between the above calculations
+    # and the real results. Assert they are close here and then just use
+    # the real results nested in the algorithm stats dict below
+    # instead of ironing out floating point issues
+    np.testing.assert_allclose(
+        user_1_loss_gradient,
+        np.array([-4.0000005, 16.199999, 5.3599997, 5.8199997], dtype="float32"),
+        atol=1e-05,
+    )
+    np.testing.assert_allclose(
+        user_2_loss_gradient,
+        np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+        atol=1e-05,
+    )
+    expected_result = (
+        np.array(
+            [
+                np.array(
+                    [-4.0000005, 16.199999, 5.3599997, 5.8199997], dtype="float32"
+                ),
+                np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+            ]
+        ),
+        np.array(
+            [
+                np.array(
+                    [
+                        [6.0, 0, 0.39999998, 0.19999993],
+                        [0, 4.0, 0.19999993, 1.4],
+                        [0.39999998, 0.19999993, 0.99999994, 0.13999996],
+                        [0.19999993, 1.4, 0.13999996, 0.49999997],
+                    ],
+                    dtype="float32",
+                ),
+                np.array(
+                    [
+                        [6.0, 4.0, 2.8000002, 3.4],
+                        [4.0, 4.0, 3.4, 3.4],
+                        [2.8000002, 3.4, 3.08, 2.8999999],
+                        [3.4, 3.4, 2.8999999, 2.8999999],
+                    ],
+                    dtype="float32",
+                ),
+            ]
+        ),
+        np.array(
+            [
+                [
+                    [[-6.0], [-14.0], [2.0], [0], [0]],
+                    [[-0.0], [-14.0], [-2.0], [0], [0]],
+                    [[10.0], [-15.199999], [7.2], [0], [0]],
+                    [[-0.0], [-15.199999], [-7.2], [0], [0]],
+                ],
+                [
+                    [[0], [-14.0], [-14.0], [-6.0], [0]],
+                    [[0], [-14.0], [-14.0], [-0.0], [0]],
+                    [[0], [-25.2], [-24.4], [7.6000004], [0]],
+                    [[0], [-25.199999], [-24.400002], [-0.0], [0]],
+                ],
+            ],
+            dtype="float32",
+        ),
+    )
+
+    # Pass the data in from the above dataframe by just passing in in-study data,
+    # no padding, and get the resulting derivatives.
+    non_zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        0,
+        5,
+        6,
+        {
+            1: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                jnp.array([[1], [2], [3]], dtype="int32"),
+                1,
+            ),
+            2: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
+                jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                jnp.array([[2], [3], [4]], dtype="int32"),
+                1,
+            ),
+        },
+        [1, 2],
+        6,
+    )
+    np.testing.assert_equal(non_zero_padded_result, expected_result)
+
+    # Pass the data in from the above dataframe by padding out of study values with zeros
+    zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        0,
+        5,
+        6,
+        {
+            1: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                        [0, 0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                        [0, 0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                        [1.0],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0],
+                        [-1.0],
+                        [0.0],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.5],
+                        [0.6],
+                        [0.7],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[1], [2], [3], [4], [5]], dtype="int32"),
+                1,
+            ),
+            2: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [0, 0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0, 0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                        [1.0],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                        [0.0],
+                        [1.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [0.1],
+                        [0.2],
+                        [0.3],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[1], [2], [3], [4], [5]], dtype="int32"),
+                1,
+            ),
+        },
+        [1, 2],
+        6,
+    )
+
+    np.testing.assert_equal(zero_padded_result, expected_result)
+
+    # NOTE: np isn't able to do the following comparison for some reason:
+    # np.testing.assert_equal(non_zero_padded_result, zero_padded_result)
+
+
+def test_calculate_rl_loss_derivatives_specific_update_action_centering_incremental_recruitment_with_and_without_zero_padding_multiple_size_groups():
+    """
+    Study df for reference
+    pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+            "action": [0, 1, 1, 0, None, None, 1, 1, 0, None],
+            "reward": [1.0, -1, 0, 0, None, None, 1, 0, 1, None],
+            "intercept": [1.0, 1, 1, 0, None, None, 1, 1, 1, None],
+            "past_reward": [0.0, 1, -1, 0, None, None, 1, 1, 0, None],
+            "in_study": [1, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+            "action1prob": [0.5, 0.6, 0.7, 0, None, None, 0.1, 0.2, 0.3, None],
+        }
+    )
+
+    Note that the pi derivatives are squeezed after this to get rid of a dimension
+    """
+
+    beta = np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    user_1_centered_actions = np.array(
+        [0 - 0.5, 1 - 0.6, 1 - 0.7, 0 - 0], dtype="float32"
+    )
+    user_1_states = np.array(
+        [[1.0, 0.0], [1.0, 1.0], [1.0, -1.0], [0, 0]], dtype="float32"
+    )
+    user_1_rewards = np.array([1.0, -1, 0, 0], dtype="float32")
+    user_1_loss_gradient = -2 * sum(
+        (
+            (
+                user_1_rewards[i]
+                - beta[:2] @ user_1_states[i]
+                - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
+            )
+            * np.concatenate(
+                [
+                    user_1_states[i],
+                    user_1_centered_actions[i] * user_1_states[i],
+                ]
+            )
+            for i in range(4)
+        )
+    )
+
+    user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
+    user_2_states = np.array([[1.0, 1.0], [1.0, 1.0], [1.0, 0.0]], dtype="float32")
+    user_2_rewards = np.array([1.0, 0, 1.0], dtype="float32")
+    user_2_loss_gradient = -2 * sum(
+        [
+            (
+                user_2_rewards[i]
+                - beta[:2] @ user_2_states[i]
+                - beta[2:] @ (user_2_centered_actions[i] * user_2_states[i])
+            )
+            * np.concatenate(
+                [
+                    user_2_states[i],
+                    user_2_centered_actions[i] * user_2_states[i],
+                ]
+            )
+            for i in range(3)
+        ]
+    )
+
+    # There are small numerical differences between the above calculations
+    # and the real results. Assert they are close here and then just use
+    # the real results nested in the algorithm stats dict below
+    # instead of ironing out floating point issues
+    np.testing.assert_allclose(
+        user_1_loss_gradient,
+        np.array([-4.0000005, 16.199999, 5.3599997, 5.8199997], dtype="float32"),
+        atol=1e-05,
+    )
+    np.testing.assert_allclose(
+        user_2_loss_gradient,
+        np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+        atol=1e-05,
+    )
+    expected_result = (
+        np.array(
+            [
+                np.array(
+                    [-4.0000005, 16.199999, 5.3599997, 5.8199997], dtype="float32"
+                ),
+                np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+            ]
+        ),
+        np.array(
+            [
+                np.array(
+                    [
+                        [6.0, 0, 0.39999998, 0.19999993],
+                        [0, 4.0, 0.19999993, 1.4],
+                        [0.39999998, 0.19999993, 0.99999994, 0.13999996],
+                        [0.19999993, 1.4, 0.13999996, 0.49999997],
+                    ],
+                    dtype="float32",
+                ),
+                np.array(
+                    [
+                        [6.0, 4.0, 2.8000002, 3.4],
+                        [4.0, 4.0, 3.4, 3.4],
+                        [2.8000002, 3.4, 3.08, 2.8999999],
+                        [3.4, 3.4, 2.8999999, 2.8999999],
+                    ],
+                    dtype="float32",
+                ),
+            ]
+        ),
+        np.array(
+            [
+                [
+                    [[-6.0], [-14.0], [2.0], [0], [0]],
+                    [[-0.0], [-14.0], [-2.0], [0], [0]],
+                    [[10.0], [-15.199999], [7.2], [0], [0]],
+                    [[-0.0], [-15.199999], [-7.2], [0], [0]],
+                ],
+                [
+                    [[0], [-14.0], [-14.0], [-6.0], [0]],
+                    [[0], [-14.0], [-14.0], [-0.0], [0]],
+                    [[0], [-25.2], [-24.4], [7.6000004], [0]],
+                    [[0], [-25.199999], [-24.400002], [-0.0], [0]],
+                ],
+            ],
+            dtype="float32",
+        ),
+    )
+
+    # Pass the data in from the above dataframe by just passing in in-study data,
+    # no padding, and get the resulting derivatives.
+    non_zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        0,
+        5,
+        6,
+        {
+            1: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                jnp.array([[1], [2], [3]], dtype="int32"),
+                1,
+            ),
+            2: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[1.0], [1.0], [0.0]], dtype="float32"),
+                jnp.array([[1.0], [0.0], [1.0]], dtype="float32"),
+                jnp.array([[0.1], [0.2], [0.3]], dtype="float32"),
+                jnp.array([[2], [3], [4]], dtype="int32"),
+                1,
+            ),
+        },
+        [1, 2],
+        6,
+    )
+    np.testing.assert_equal(non_zero_padded_result, expected_result)
+
+    # Pass the data in from the above dataframe by padding out of study values with zeros
+    zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        0,
+        5,
+        6,
+        {
+            1: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                        [0, 0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0, 0],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                        [0, 0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                        [1.0],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [1.0],
+                        [-1.0],
+                        [0.0],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.5],
+                        [0.6],
+                        [0.7],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[1], [2], [3], [4], [5]], dtype="int32"),
+                1,
+            ),
+            2: (
+                np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [0, 0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0, 0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                        [1.0, 0.0],
+                        [0, 0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                        [1.0],
+                        [0.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                        [0.0],
+                        [1.0],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [0.0],
+                        [0.1],
+                        [0.2],
+                        [0.3],
+                        [0.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[1], [2], [3], [4], [5]], dtype="int32"),
+                1,
+            ),
+        },
+        [1, 2],
+        6,
+    )
+
+    np.testing.assert_equal(zero_padded_result, expected_result)
+
+
+def test_calculate_inference_loss_derivatives_multiple_size_groups():
+    """
+    Note that the non-incremental case is tested via larger tests in
+    test_after_study_analysis.py.
+
+    """
+
+    study_df = pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+            "action": [0, 1, 1, 0, None, None, 1, 1, 0, None],
+            "reward": [1.0, -1, 0, 0, None, None, 1, 0, 1, None],
+            "intercept": [1.0, 1, 1, 0, None, None, 1, 1, 1, None],
+            "past_reward": [0.0, 1, -1, 0, None, None, 1, 1, 0, None],
+            "in_study": [1, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+            "action1prob": [0.5, 0.6, 0.7, 0, None, None, 0.1, 0.2, 0.3, None],
+        }
+    )
+
+    theta = np.array([-1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    user_1_centered_actions = np.array(
+        [0 - 0.5, 1 - 0.6, 1 - 0.7, 0 - 0], dtype="float32"
+    )
+    user_1_states = np.array(
+        [[1.0, 0.0], [1.0, 1.0], [1.0, -1.0], [0, 0]], dtype="float32"
+    )
+    user_1_rewards = np.array([1.0, -1, 0, 0], dtype="float32")
+    user_1_loss_gradient = -2 * sum(
+        (
+            (
+                user_1_rewards[i]
+                - theta[:2] @ user_1_states[i]
+                - theta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
+            )
+            * np.concatenate(
+                [
+                    user_1_states[i],
+                    user_1_centered_actions[i] * user_1_states[i],
+                ]
+            )
+            for i in range(4)
+        )
+    )
+
+    user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
+    user_2_states = np.array([[1.0, 1.0], [1.0, 1.0], [1.0, 0.0]], dtype="float32")
+    user_2_rewards = np.array([1.0, 0, 1.0], dtype="float32")
+    user_2_loss_gradient = -2 * sum(
+        [
+            (
+                user_2_rewards[i]
+                - theta[:2] @ user_2_states[i]
+                - theta[2:] @ (user_2_centered_actions[i] * user_2_states[i])
+            )
+            * np.concatenate(
+                [
+                    user_2_states[i],
+                    user_2_centered_actions[i] * user_2_states[i],
+                ]
+            )
+            for i in range(3)
+        ]
+    )
+
+    # There are small numerical differences between the above calculations
+    # and the real results. Assert they are close here and then just use
+    # the real results nested in the algorithm stats dict below
+    # instead of ironing out floating point issues
+    np.testing.assert_allclose(
+        user_1_loss_gradient,
+        np.array([-4.0000005, 16.199999, 5.359999, 5.8199997], dtype="float32"),
+        atol=1e-05,
+    )
+    np.testing.assert_allclose(
+        user_2_loss_gradient,
+        np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+        atol=1e-05,
+    )
+    expected_result = (
+        np.array(
+            [
+                np.array([-4.0000005, 16.199999, 5.359999, 5.8199997], dtype="float32"),
+                np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
+            ]
+        ),
+        np.array(
+            [
+                np.array(
+                    [
+                        [6.0, 0, 0.39999998, 0.19999993],
+                        [0, 4.0, 0.19999993, 1.4],
+                        [0.39999998, 0.19999993, 0.99999994, 0.13999996],
+                        [0.19999993, 1.4, 0.13999996, 0.49999997],
+                    ],
+                    dtype="float32",
+                ),
+                np.array(
+                    [
+                        [6.0, 4.0, 2.8000002, 3.4],
+                        [4.0, 4.0, 3.4, 3.4],
+                        [2.8000002, 3.4, 3.08, 2.8999999],
+                        [3.4, 3.4, 2.8999999, 2.8999999],
+                    ],
+                    dtype="float32",
+                ),
+            ]
+        ),
+        np.array(
+            [
+                [
+                    [[-6.0], [-14.0], [2.0], [0], [0]],
+                    [[-0.0], [-14.0], [-2.0], [0], [0]],
+                    [[10.0], [-15.199999], [7.2], [0], [0]],
+                    [[-0.0], [-15.199999], [-7.2], [0], [0]],
+                ],
+                [
+                    [[0], [-14.0], [-14.0], [-6.0], [0]],
+                    [[0], [-14.0], [-14.0], [-0.0], [0]],
+                    [[0], [-25.2], [-24.4], [7.6000004], [0]],
+                    [[0], [-25.199999], [-24.400002], [-0.0], [0]],
+                ],
+            ],
+            dtype="float32",
+        ),
+    )
+
+    calculated_result = calculate_derivatives.calculate_inference_loss_derivatives(
+        study_df,
+        theta,
+        "functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py",
+        0,
+        [1, 2],
+        "user_id",
+        "action1prob",
+        "in_study",
+        "calendar_t",
+    )
+    np.testing.assert_equal(calculated_result, expected_result)
 
 
 # Especially to exercise stacking function and get_batched_actions and dict
 # formation
 @pytest.mark.skip(reason="Nice to have")
-def test_calculate_pi_and_weight_gradients_all_times():
+def test_calculate_pi_and_weight_gradients():
     raise NotImplementedError()
 
 
 # Especially to exercise stacking function and get_first_applicable_time and
 # squeeze of pi gradients and rest of dict formation
 @pytest.mark.skip(reason="Nice to have")
-def test_calculate_loss_derivatives_all_updates():
+def test_calculate_rl_loss_derivatives():
     raise NotImplementedError()
 
 

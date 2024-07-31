@@ -144,6 +144,10 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             # It's redundant to pass in both the filtered study df and the whole
             # thing, but also pretty clear this way. We need to check whether
             # the user will be in-study at the next time.
+            # NOTE: Very important that this is called AFTER the above update.
+            # It is a little confusing that the beta here is the beta that the
+            # rest of the data already produced, whereas for the pis the beta
+            # is used to produce the probability at that decision time.
             study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
     return study_df, study_RLalg
 

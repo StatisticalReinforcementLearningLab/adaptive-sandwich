@@ -403,6 +403,7 @@ def analyze_dataset(
     Can't filter in a simple way and still be JAX-compatible. Check that neither
     or both supplied, and if supplied, same size. Check valid decision times.
 
+    Action prob times strictly increasing.  Should probably be contiguous but could be some weird case. Maybe warning if not.
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -942,7 +943,6 @@ def form_bread_inverse_matrix(
             running_entry_holder += mixed_theta_beta_loss_derivative
 
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
-
     bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
     return jnp.block(
         [

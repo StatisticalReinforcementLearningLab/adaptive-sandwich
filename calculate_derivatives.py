@@ -21,7 +21,7 @@ logging.basicConfig(
 # TODO: Consolidate function loading logic
 
 
-def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, user_args_dict):
+def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_user_id):
     """
     Collect a dict of arg tuples by user id into a list of lists, each containing
     all the args at a particular index across users. We make sure the list is
@@ -30,10 +30,10 @@ def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, user_args
     # Sort users to be cautious. We check if the user id is present in the user args dict
     # because we may call this on a subset of the user arg dict when we are batching
     # arguments by shape
-    sorted_user_args_dict = {
-        user_id: user_args_dict[user_id]
+    sorted_args_by_user_id = {
+        user_id: args_by_user_id[user_id]
         for user_id in sorted_user_ids
-        if user_id in user_args_dict
+        if user_id in args_by_user_id
     }
 
     # Just a quick way to get the arg count instead of iterating through args
@@ -46,7 +46,7 @@ def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, user_args
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]
     involved_user_ids = set()
-    for user_id, user_args in sorted_user_args_dict.items():
+    for user_id, user_args in sorted_args_by_user_id.items():
         if not user_args:
             continue
         involved_user_ids.add(user_id)
@@ -67,10 +67,12 @@ def get_shape(obj):
         return None
 
 
-def group_user_args_by_shape(user_arg_dict):
+def group_user_args_by_shape(user_arg_dict, empty_allowed=True):
     user_arg_dicts_by_shape = collections.defaultdict(dict)
     for user_id, args in user_arg_dict.items():
         if not args:
+            if not empty_allowed:
+                raise ValueError("There shouldn't be a user with no data at this time")
             continue
         shape_id = tuple(get_shape(arg) for arg in args)
         user_arg_dicts_by_shape[shape_id][user_id] = args
@@ -149,7 +151,7 @@ def stack_batched_arg_lists_into_tensor(batched_arg_lists):
 def pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
     loss_gradient_pi_derivative,
     action_prob_times,
-    first_applicable_time,
+    first_time_after,
 ):
     """
     This fills in zero gradients for the times for which action probabilites
@@ -161,7 +163,7 @@ def pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
     zero_gradient = np.zeros((loss_gradient_pi_derivative.shape[0], 1, 1))
     gradients_to_stack = []
     next_column_index_to_grab = 0
-    for t in range(1, first_applicable_time):
+    for t in range(1, first_time_after):
         if t in action_prob_times:
             gradients_to_stack.append(
                 np.expand_dims(
@@ -308,7 +310,7 @@ def calculate_pi_and_weight_gradients(
     user_ids = list(next(iter(action_prob_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
 
-    for calendar_t, user_args_dict in action_prob_func_args.items():
+    for calendar_t, args_by_user_id in action_prob_func_args.items():
 
         pi_gradients, weight_gradients = calculate_pi_and_weight_gradients_specific_t(
             study_df,
@@ -319,7 +321,7 @@ def calculate_pi_and_weight_gradients(
             action_prob_func,
             action_prob_func_args_beta_index,
             calendar_t,
-            user_args_dict,
+            args_by_user_id,
             sorted_user_ids,
         )
 
@@ -345,7 +347,7 @@ def calculate_pi_and_weight_gradients_specific_t(
     action_prob_func,
     action_prob_func_args_beta_index,
     calendar_t,
-    user_args_dict,
+    args_by_user_id,
     sorted_user_ids,
 ):
     logger.info(
@@ -360,7 +362,7 @@ def calculate_pi_and_weight_gradients_specific_t(
     # with some values that don't affect computations, producing one batch here.
     # This also supports very large simulations by making things fast as long
     # as there is 1 or a small number of shape batches.
-    nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(user_args_dict)
+    nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(args_by_user_id)
     logger.info(
         "Found %d sets of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
@@ -370,14 +372,14 @@ def calculate_pi_and_weight_gradients_specific_t(
     in_study_pi_gradients_by_user_id = {}
     in_study_weight_gradients_by_user_id = {}
     all_involved_user_ids = set()
-    for user_args_dict_subset in nontrivial_user_args_grouped_by_shape:
+    for args_by_user_id_subset in nontrivial_user_args_grouped_by_shape:
         # Now that we are grouping by arg shape and excluding the out of study
         # group, all the users should be involved in the study in this loop,
         # but... just keep this logic that works for heterogeneous-shaped
         # batches too.
         batched_arg_lists, involved_user_ids = (
             get_batched_arg_lists_and_involved_user_ids(
-                action_prob_func, sorted_user_ids, user_args_dict_subset
+                action_prob_func, sorted_user_ids, args_by_user_id_subset
             )
         )
         all_involved_user_ids |= involved_user_ids
@@ -560,13 +562,9 @@ def calculate_rl_loss_derivatives(
     policy_num_col_name,
     calendar_t_col_name,
 ):
-    logger.info("Calculating loss gradients and hessians with respect to beta.")
-
-    # Because we perform algorithm updates at the *end* of a timestep, the
-    # first timestep they apply to is one more than the time of the update.
-
-    # TODO: Note that we don't need the loss gradient for the first update
-    # time... include anyway?
+    logger.info(
+        "Calculating RL loss gradients and hessians with respect to beta and mixed beta/action probability derivatives for each user at all update times."
+    )
 
     # Retrieve the RL function from file
     rl_loss_module = load_module_from_source_file("rl_loss", rl_loss_func_filename)
@@ -579,11 +577,10 @@ def calculate_rl_loss_derivatives(
             "Unable to import RL loss function.  Please verify the file has the same name as the function of interest."
         ) from e
 
-    # TODO: Fallback for users missing or require complete?
     rl_update_derivatives_by_calendar_t = {}
     user_ids = list(next(iter(rl_loss_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
-    for policy_num, user_args_dict in rl_loss_func_args.items():
+    for policy_num, args_by_user_id in rl_loss_func_args.items():
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
         # Because we perform algorithm updates at the *end* of a timestep, the
@@ -598,7 +595,7 @@ def calculate_rl_loss_derivatives(
                 rl_loss_func_args_beta_index,
                 rl_loss_func_args_action_prob_index,
                 rl_loss_func_args_action_prob_times_index,
-                user_args_dict,
+                args_by_user_id,
                 sorted_user_ids,
                 first_applicable_time,
             )
@@ -635,7 +632,7 @@ def calculate_rl_loss_derivatives_specific_update(
     rl_loss_func_args_beta_index,
     rl_loss_func_args_action_prob_index,
     rl_loss_func_args_action_prob_times_index,
-    user_args_dict,
+    args_by_user_id,
     sorted_user_ids,
     first_applicable_time,
 ):
@@ -652,7 +649,7 @@ def calculate_rl_loss_derivatives_specific_update(
     # This also supports very large simulations by making things fast as long
     # as there is 1 or a small number of shape batches.
     # NOTE: Susan and Kelly think we might actually have uniqueish shapes pretty often
-    nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(user_args_dict)
+    nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(args_by_user_id)
     logger.info(
         "Found %d sets of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
@@ -663,10 +660,10 @@ def calculate_rl_loss_derivatives_specific_update(
     in_study_loss_hessians_by_user_id = {}
     in_study_loss_gradient_pi_derivatives_by_user_id = {}
     all_involved_user_ids = set()
-    for user_args_dict_subset in nontrivial_user_args_grouped_by_shape:
+    for args_by_user_id_subset in nontrivial_user_args_grouped_by_shape:
         batched_arg_lists, involved_user_ids = (
             get_batched_arg_lists_and_involved_user_ids(
-                rl_loss_func, sorted_user_ids, user_args_dict_subset
+                rl_loss_func, sorted_user_ids, args_by_user_id_subset
             )
         )
         all_involved_user_ids |= involved_user_ids
@@ -723,7 +720,7 @@ def calculate_rl_loss_derivatives_specific_update(
                 in_study_loss_gradient_pi_derivatives_by_user_id[user_id] = (
                     pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
                         in_study_loss_gradient_pi_derivatives_subset[i],
-                        user_args_dict[user_id][
+                        args_by_user_id[user_id][
                             rl_loss_func_args_action_prob_times_index
                         ],
                         first_applicable_time,
@@ -833,6 +830,8 @@ def calculate_inference_loss_derivatives(
     in_study_col_name,
     calendar_t_col_name,
 ):
+    logger.info("Calculating inference loss derivatives")
+
     # Retrieve the inference loss function from file
     inference_loss_module = load_module_from_source_file(
         "inference_loss", inference_loss_func_filename
@@ -850,61 +849,143 @@ def calculate_inference_loss_derivatives(
 
     num_args = inference_loss_func.__code__.co_argcount
     inference_loss_func_arg_names = inference_loss_func.__code__.co_varnames[:num_args]
-    num_args = len(inference_loss_func_arg_names)
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]
 
-    for user_id in user_ids:
-        filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
-        for idx, col_name in enumerate(inference_loss_func_arg_names):
-            if idx == inference_loss_func_args_theta_index:
-                batched_arg_lists[idx].append(theta_est)
-            else:
-                batched_arg_lists[idx].append(
-                    get_study_df_column(filtered_user_data, col_name, in_study_col_name)
-                )
-
-    # Note this stacking works with incremental recruitment only because we
-    # fill in states for out-of-study times such that all users have the
-    # same state matrix size
-    logger.info("Reforming batched data lists into tensors.")
-    batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
-        batched_arg_lists
-    )
-
-    logger.info("Forming loss gradients with respect to beta.")
-    loss_gradients = get_loss_gradients_batched(
-        inference_loss_func,
-        inference_loss_func_args_theta_index,
-        batch_axes,
-        *batched_arg_tensors,
-    )
-
-    logger.info("Forming loss hessians with respect to beta")
-    loss_hessians = get_loss_hessians_batched(
-        inference_loss_func,
-        inference_loss_func_args_theta_index,
-        batch_axes,
-        *batched_arg_tensors,
-    )
-    logger.info(
-        "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
-    )
-    # If there is NOT an action probability argument in the loss, we need to
-    # simply return zero gradients of the correct shape.
-    if action_prob_col_name in inference_loss_func_arg_names:
+    # We begin by constructing a dict of loss function arg tuples of the type we get from file
+    # for the RL data; because we have to group user args by shape anyway, we
+    # might as well collect them in this format and then use previous machinery
+    # to process them. There are a few extra loops but more shared code this way.
+    args_by_user_id = {}
+    using_action_probs = action_prob_col_name in inference_loss_func_arg_names
+    if using_action_probs:
         inference_loss_func_args_action_prob_index = (
             inference_loss_func_arg_names.index(action_prob_col_name)
         )
-        loss_gradient_pi_derivatives = get_loss_gradient_derivatives_wrt_pi_batched(
+        action_prob_decision_times_by_user_id = {}
+        max_calendar_time = study_df[calendar_t_col_name].max()
+    for user_id in user_ids:
+        user_args_list = []
+        filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
+        for idx, col_name in enumerate(inference_loss_func_arg_names):
+            if idx == inference_loss_func_args_theta_index:
+                user_args_list.append(theta_est)
+            else:
+                user_args_list.append(
+                    get_study_df_column(filtered_user_data, col_name, in_study_col_name)
+                )
+        args_by_user_id[user_id] = tuple(user_args_list)
+        if using_action_probs:
+            action_prob_decision_times_by_user_id[user_id] = get_study_df_column(
+                filtered_user_data, calendar_t_col_name, in_study_col_name
+            )
+
+    # Get a list of subdicts of the user args dict, with each united by having
+    # the same shapes across all arguments.  We will then vmap the gradients needed
+    # for each subdict separately, and later combine the results.  In the worst
+    # case we may have a batch per user, if, say, everyone starts on a different
+    # date, and this will be slow. If this is problematic we can pad the data
+    # with some values that don't affect computations, producing one batch here.
+    # This also supports very large simulations by making things fast as long
+    # as there is 1 or a small number of shape batches.
+    # NOTE: As opposed to the RL updates, we should expect a small number of
+    # batches here. It is only users having different numbers of decision times
+    # that contributes additional batches.
+    nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(
+        args_by_user_id, empty_allowed=False
+    )
+    logger.info(
+        "Found %d sets of users with different arg shapes.",
+        len(nontrivial_user_args_grouped_by_shape),
+    )
+
+    loss_gradients_by_user_id = {}
+    loss_hessians_by_user_id = {}
+    loss_gradient_pi_derivatives_by_user_id = {}
+    all_involved_user_ids = set()
+    sorted_user_ids = sorted(user_ids)
+    for args_by_user_id_subset in nontrivial_user_args_grouped_by_shape:
+        batched_arg_lists, involved_user_ids = (
+            get_batched_arg_lists_and_involved_user_ids(
+                inference_loss_func, sorted_user_ids, args_by_user_id_subset
+            )
+        )
+        all_involved_user_ids |= involved_user_ids
+
+        logger.info("Reforming batched data lists into tensors.")
+        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
+            batched_arg_lists
+        )
+
+        logger.info("Forming loss gradients with respect to beta.")
+        loss_gradients_subset = get_loss_gradients_batched(
             inference_loss_func,
             inference_loss_func_args_theta_index,
-            inference_loss_func_args_action_prob_index,
             batch_axes,
             *batched_arg_tensors,
         )
-    # Otherwise, actually differentiate with respect to action probabilities.
+
+        logger.info("Forming loss hessians with respect to beta")
+        loss_hessians_subset = get_loss_hessians_batched(
+            inference_loss_func,
+            inference_loss_func_args_theta_index,
+            batch_axes,
+            *batched_arg_tensors,
+        )
+        logger.info(
+            "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
+        )
+        # If there is an action probability argument in the loss,
+        # actually differentiate with respect to action probabilities
+        if using_action_probs:
+            loss_gradient_pi_derivatives_subset = (
+                get_loss_gradient_derivatives_wrt_pi_batched(
+                    inference_loss_func,
+                    inference_loss_func_args_theta_index,
+                    inference_loss_func_args_action_prob_index,
+                    batch_axes,
+                    *batched_arg_tensors,
+                )
+            )
+        # Collect the gradients for the in-study users in this group into the
+        # overall dict.
+        for i, user_id in enumerate(sorted_user_ids):
+            if user_id not in involved_user_ids:
+                continue
+            loss_gradients_by_user_id[user_id] = loss_gradients_subset[i]
+            loss_hessians_by_user_id[user_id] = loss_hessians_subset[i]
+            if using_action_probs:
+                loss_gradient_pi_derivatives_by_user_id[user_id] = (
+                    pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
+                        loss_gradient_pi_derivatives_subset[i],
+                        action_prob_decision_times_by_user_id[user_id],
+                        max_calendar_time + 1,
+                    )
+                )
+    loss_gradients = np.array(
+        [
+            loss_gradients_by_user_id[user_id]
+            for user_id in sorted_user_ids
+            if user_id in all_involved_user_ids
+        ]
+    )
+    loss_hessians = np.array(
+        [
+            loss_hessians_by_user_id[user_id]
+            for user_id in sorted_user_ids
+            if user_id in all_involved_user_ids
+        ]
+    )
+    if using_action_probs:
+        loss_gradient_pi_derivatives = np.array(
+            [
+                loss_gradient_pi_derivatives_by_user_id[user_id]
+                for user_id in sorted_user_ids
+                if user_id in all_involved_user_ids
+            ]
+        )
+        # Otherwise, we need to simply return zero gradients of the correct shape.
     else:
         num_users = len(user_ids)
         theta_dim = theta_est.size
@@ -918,8 +999,8 @@ def calculate_inference_loss_derivatives(
 
 
 def get_study_df_column(study_df, col_name, in_study_col_name):
-    # TODO: This assumes we can simply take 0 for out-of-study values. This is not
-    # appropriate in general, and needs to be fixed.
-    # See https://nowell-closser.atlassian.net/browse/ADS-28
-    study_df.loc[study_df[in_study_col_name] == 0, col_name] = 0
-    return jnp.array(study_df[col_name].to_numpy().reshape(-1, 1))
+    return jnp.array(
+        study_df.loc[study_df[in_study_col_name] == 1, col_name]
+        .to_numpy()
+        .reshape(-1, 1)
+    )

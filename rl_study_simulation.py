@@ -26,10 +26,6 @@ logging.basicConfig(
 ###############################################################
 
 
-# TODO: This function probably shouldn't contain if-statements about which RL
-# algorithm is being used.  Come up with generic interface and and abstract class
-# and have instances handle any special behavior properly.  That way, those classes
-# really encapsulate all required logic for a particular RL alg.
 def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     """
     Goal: Simulates a study with n users

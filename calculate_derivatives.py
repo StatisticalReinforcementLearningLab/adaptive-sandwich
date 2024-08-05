@@ -751,8 +751,8 @@ def calculate_rl_loss_derivatives_specific_update(
     )
 
     # If there is an action probability argument in the loss, we need to
-    # pad the derivatives calculated already with zeros for those not currently
-    # in the study. Otherwise simply return all gradients of the correct shape.
+    # pad the derivatives calculated already with zeros for those users not currently
+    # in the study. Otherwise simply return all zero gradients of the correct shape.
     if rl_loss_func_args_action_prob_index >= 0:
         loss_gradient_pi_derivatives = pad_in_study_derivatives_with_zeros(
             in_study_loss_gradient_pi_derivatives,
@@ -808,9 +808,10 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     )(*batched_arg_tensors)
 
 
-#  TODO: Is there a better way to calculate this? This seems like it should
+# TODO: Is there a better way to calculate this? This seems like it should
 # be reliable, not messing up when a policy was actually available. If study
-# df says policy was used, that should be correct.
+# df says policy was used, that should be correct.  May not play nicely with
+# pure exploration phase though.
 def get_first_applicable_time(
     study_df, policy_num, policy_num_col_name, calendar_t_col_name
 ):
@@ -985,7 +986,7 @@ def calculate_inference_loss_derivatives(
                 if user_id in all_involved_user_ids
             ]
         )
-        # Otherwise, we need to simply return zero gradients of the correct shape.
+    # Otherwise, we need to simply return zero gradients of the correct shape.
     else:
         num_users = len(user_ids)
         theta_dim = theta_est.size

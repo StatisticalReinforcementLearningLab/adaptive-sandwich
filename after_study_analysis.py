@@ -404,6 +404,10 @@ def analyze_dataset(
     or both supplied, and if supplied, same size. Check valid decision times.
 
     Action prob times strictly increasing.  Should probably be contiguous but could be some weird case. Maybe warning if not.
+
+    Do I actually need all times for all people anymore? If only in study rows are given,
+    with in the indicator always on, does that cause problems? Yes, I'm pretty sure the zero gradients
+    won't magically show up, but this seems easy to fix.
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -960,8 +964,6 @@ def form_bread_inverse_matrix(
 
 # TODO: Needs tests
 # TODO: Complete docstring
-# TODO: Don't recompute things already computed for adaptive sandwich (or vice versa)
-# TODO: verify works with incremental recruitment
 def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
     """
     Forms standard sandwich variance estimator for inference (thetahat)

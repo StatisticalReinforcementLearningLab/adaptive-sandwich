@@ -149,6 +149,7 @@ def collect_existing_analyses(input_glob):
 # TODO: Don't use theta and beta jargon?? Need a legend if I do.
 # TODO: Make run scripts that hardcode to action centering or not on both RL and inference sides
 # TODO: Need to support pure exploration phase with more flags than just in study. Maybe in study, receiving updates
+# TODO: Deal with NA, -1, etc policy numbers
 @cli.command()
 @click.option(
     "--study_df_pickle",
@@ -280,7 +281,7 @@ def analyze_dataset(
 ):
     """
     TODO: Data integrity checks.
-    Reconstruct action probabilites now or later?
+    Reconstruct action probabilities now or later?
 
     I check estimating function sum 0 later, but differentiate between
     RL and beta side? Also could move check here. Might be  nice to have all
@@ -408,6 +409,8 @@ def analyze_dataset(
     Do I actually need all times for all people anymore? If only in study rows are given,
     with in the indicator always on, does that cause problems? Yes, I'm pretty sure the zero gradients
     won't magically show up, but this seems easy to fix.
+
+    Assuming scalar types in study df.
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",

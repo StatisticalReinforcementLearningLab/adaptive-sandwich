@@ -84,12 +84,10 @@ def group_user_args_by_shape(user_arg_dict, empty_allowed=True):
 # TODO: This is complicated enough to deserve its own unit tests
 def stack_batched_arg_lists_into_tensor(batched_arg_lists):
     """
-    Stack a simple Python list of function arguments (across all users for a specific arg position)
-    into an array that can be supplied to vmap as batch arguments. vmap requires all elements of
-    such a batched array to be the same shape, as do the stacking functions we use here.  Thus
-    we take the original argument lists and pad each to constant size within itself, recording the
-    original sizes via an array of zeros so they can be unpadded later (we can trim only based the
-    size of arguments inside of vmap (see JAX sharp bits)). We also supply the axes one must
+    Stack a simple Python list of lists of function arguments (across all users for a specific arg position)
+    into a list of jnp arrays that can be supplied to vmap as batch arguments. vmap requires all elements of
+    such a batched array to be the same shape, as do the stacking functions we use here.  Thus we require
+    this be called on batches of users with the same data shape. We also supply the axes one must
     iterate over to get each users's args in a batch.
     """
 
@@ -742,7 +740,7 @@ def calculate_rl_loss_derivatives_specific_update(
             for user_id in sorted_user_ids
             if user_id in all_involved_user_ids
         ]
-    # TODO: These padding methods assume someone had study data at this time.
+    # TODO: These padding methods assume *someone* had study data at this time.
     loss_gradients = pad_in_study_derivatives_with_zeros(
         in_study_loss_gradients, sorted_user_ids, involved_user_ids
     )
@@ -978,6 +976,8 @@ def calculate_inference_loss_derivatives(
             if user_id in all_involved_user_ids
         ]
     )
+    # If using action probs, collect the mixed beta pi derivatives computed
+    # so far.
     if using_action_probs:
         loss_gradient_pi_derivatives = np.array(
             [

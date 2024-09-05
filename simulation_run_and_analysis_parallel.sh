@@ -41,7 +41,7 @@ steepness=0.0
 RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-action_centering_RL=1
+action_centering_RL=0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"

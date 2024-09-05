@@ -362,7 +362,7 @@ def calculate_pi_and_weight_gradients_specific_t(
     # as there is 1 or a small number of shape batches.
     nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(args_by_user_id)
     logger.info(
-        "Found %d sets of users with different arg shapes.",
+        "Found %d set(s) of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
     )
 
@@ -649,7 +649,7 @@ def calculate_rl_loss_derivatives_specific_update(
     # NOTE: Susan and Kelly think we might actually have uniqueish shapes pretty often
     nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(args_by_user_id)
     logger.info(
-        "Found %d sets of users with different arg shapes.",
+        "Found %d set(s) of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
     )
 
@@ -895,7 +895,7 @@ def calculate_inference_loss_derivatives(
         args_by_user_id, empty_allowed=False
     )
     logger.info(
-        "Found %d sets of users with different arg shapes.",
+        "Found %d set(s) of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
     )
 

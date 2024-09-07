@@ -141,15 +141,15 @@ python rl_study_simulation.py \
   --parallel_task_index=$SLURM_ARRAY_TASK_ID \
   --n=$n \
   --min_users=$min_users \
-  --decisions_between_updates $decisions_between_updates \
-  --recruit_n $recruit_n \
-  --recruit_t $recruit_t \
-  --synthetic_mode $synthetic_mode \
-  --steepness $steepness \
-  --RL_alg $RL_alg \
-  --err_corr $err_corr \
-  --alg_state_feats $alg_state_feats \
-  --action_centering $action_centering_RL \
+  --decisions_between_updates=$decisions_between_updates \
+  --recruit_n=$recruit_n \
+  --recruit_t=$recruit_t \
+  --synthetic_mode=$synthetic_mode \
+  --steepness=$steepness \
+  --RL_alg=$RL_alg \
+  --err_corr=$err_corr \
+  --alg_state_feats=$alg_state_feats \
+  --action_centering=$action_centering_RL \
   --save_dir=$save_dir
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
 

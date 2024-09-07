@@ -199,7 +199,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         os.mkdir(all_folder_path)
 
     logger.info("Dumping arguments to json file...")
-    with open(os.path.join(all_folder_path, "args.json"), "w") as f:
+    with open(os.path.join(all_folder_path, "args.json"), "w", encoding="utf-8") as f:
         json.dump(vars(args), f)
 
     tic = time.perf_counter()
@@ -212,16 +212,17 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     # Note how parallel_task_index is used to get different seeds
     # when multiple simulations are being run in parallel.  In that case
     # we should have N = 1 in each simulation, so that there is only
-    # one iteration of this loop with i = 1, and the seed completely determined
+    # one iteration of this loop with i = 1, and the seed will be determined
     # by the parallel task index. On the other hand, by default the parallel
     # task index is 1, so for a typical non-parallel run with N > 1 the seeds
-    # will be completely determined by the iterator i.
+    # will be determined by the iterator i.
     for i in range(1, args.N + 1):
-        # env_seed = args.parallel_task_index * i * 5000
-        # alg_seed = args.parallel_task_index * (args.N + i) * 5000
-        # TODO: Set back to fixed seeds eventually?
-        env_seed = int(time.time()) + args.parallel_task_index * i * 5000 + 1
-        alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
+        # Dynamic seeds are useful for quick testing, but for reproducibility
+        # fixed seeds should be used. Dynamic seeds are also never really useful
+        # in large simulations anyway.
+        time_bump = 0 if not args.dynamic_seeds else int(time.time())
+        env_seed = time_bump + args.parallel_task_index * i * 5000 + 1
+        alg_seed = time_bump + args.parallel_task_index * (args.N + i) * 5000
         logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()
@@ -420,6 +421,12 @@ def main():
         "--profile",
         action=argparse.BooleanOptionalAction,
         help="If supplied, the important computations will be profiled with summary output shown",
+    )
+    parser.add_argument(
+        "--dynamic_seeds",
+        type=int,
+        default=0,
+        help="Whether RL simulation uses time-based vs fixed seeds",
     )
     tmp_args = parser.parse_known_args()[0]
 

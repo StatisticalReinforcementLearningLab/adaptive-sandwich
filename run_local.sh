@@ -20,6 +20,7 @@ RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
+dynamic_seeds=1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -88,15 +89,16 @@ python rl_study_simulation.py \
   --N=1 \
   --n=$n \
   --min_users=$min_users \
-  --decisions_between_updates $decisions_between_updates \
-  --recruit_n $recruit_n \
-  --recruit_t $recruit_t \
-  --synthetic_mode $synthetic_mode \
-  --steepness $steepness \
-  --RL_alg $RL_alg \
-  --err_corr $err_corr \
-  --alg_state_feats $alg_state_feats \
-  --action_centering $action_centering_RL
+  --decisions_between_updates=$decisions_between_updates \
+  --recruit_n=$recruit_n \
+  --recruit_t=$recruit_t \
+  --synthetic_mode=$synthetic_mode \
+  --steepness=$steepness \
+  --RL_alg=$RL_alg \
+  --err_corr=$err_corr \
+  --alg_state_feats=$alg_state_feats \
+  --action_centering=$action_centering_RL \
+  --dynamic_seeds
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

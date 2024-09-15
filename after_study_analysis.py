@@ -411,6 +411,9 @@ def analyze_dataset(
     won't magically show up, but this seems easy to fix.
 
     Assuming scalar types in study df.
+
+    Make sure all policy numbers in args are in study df. Maybe some way of making sure
+    the policy numbers in study df not in args are okay?
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -726,7 +729,7 @@ def compute_variance_estimates(
     )
 
     logger.info("Forming adaptive bread inverse and inverting.")
-    max_t = study_df.calendar_t.max()
+    max_t = study_df[calendar_t_col_name].max()
     theta_dim = len(theta_est)
     joint_bread_inverse_matrix = form_bread_inverse_matrix(
         upper_left_bread_inverse,
@@ -889,7 +892,7 @@ def form_bread_inverse_matrix(
     for i in range(len(update_times)):
         lower_t = update_times_and_upper_limit[i]
         upper_t = update_times_and_upper_limit[i + 1]
-        running_entry_holder = jnp.zeros((theta_dim, theta_dim))
+        running_entry_holder = jnp.zeros((theta_dim, beta_dim))
 
         # This loop calculates the per-user quantities that will be
         # averaged for the final matrix entries
@@ -910,7 +913,6 @@ def form_bread_inverse_matrix(
                 weight_gradient_sum += algo_stats_dict[t][
                     "weight_gradients_by_user_id"
                 ][user_id]
-
             running_entry_holder += jnp.outer(theta_loss_gradient, weight_gradient_sum)
 
             # 2. We now calculate mixed derivatives of the loss wrt theta and then beta. This piece

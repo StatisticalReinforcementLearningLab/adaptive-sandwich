@@ -221,8 +221,16 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # fixed seeds should be used. Dynamic seeds are also never really useful
         # in large simulations anyway.
         time_bump = 0 if not args.dynamic_seeds else int(time.time())
-        env_seed = time_bump + args.parallel_task_index * i * 5000 + 1
-        alg_seed = time_bump + args.parallel_task_index * (args.N + i) * 5000
+        env_seed = (
+            time_bump + args.parallel_task_index * i * 5000 + 1
+            if args.env_seed_override is None
+            else args.env_seed_override
+        )
+        alg_seed = (
+            time_bump + args.parallel_task_index * (args.N + i) * 5000
+            if args.alg_seed_override is None
+            else args.alg_seed_override
+        )
         logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()
@@ -427,6 +435,16 @@ def main():
         type=int,
         default=0,
         help="Whether RL simulation uses time-based vs fixed seeds",
+    )
+    parser.add_argument(
+        "--env_seed_override",
+        type=int,
+        help="An optional fixed seed for the environment",
+    )
+    parser.add_argument(
+        "--alg_seed_override",
+        type=int,
+        help="An optional fixed seed for the algorithm",
     )
     tmp_args = parser.parse_known_args()[0]
 

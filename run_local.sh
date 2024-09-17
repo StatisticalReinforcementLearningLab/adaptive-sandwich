@@ -19,6 +19,8 @@ err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 action_centering_inference=0
+env_seed_override=-1
+alg_seed_override=-1
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.

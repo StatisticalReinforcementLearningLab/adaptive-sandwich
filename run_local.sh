@@ -21,6 +21,8 @@ err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 dynamic_seeds=1
+env_seed_override=-1
+alg_seed_override=-1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"

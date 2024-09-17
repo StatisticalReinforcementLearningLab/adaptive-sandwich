@@ -221,8 +221,17 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # env_seed = args.parallel_task_index * i * 5000
         # alg_seed = args.parallel_task_index * (args.N + i) * 5000
         # TODO: Set back to fixed seeds eventually?
-        env_seed = int(time.time()) + args.parallel_task_index * i * 5000 + 1
-        alg_seed = int(time.time()) + args.parallel_task_index * (args.N + i) * 5000
+        time_bump = int(time.time())
+        env_seed = (
+            time_bump + args.parallel_task_index * i * 5000 + 1
+            if args.env_seed_override is None
+            else args.env_seed_override
+        )
+        alg_seed = (
+            time_bump + args.parallel_task_index * (args.N + i) * 5000
+            if args.alg_seed_override is None
+            else args.alg_seed_override
+        )
         logger.info("Seeds: env=%d, alg=%d", env_seed, alg_seed)
 
         toc2 = time.perf_counter()
@@ -398,6 +407,16 @@ def main():
         "--profile",
         action=argparse.BooleanOptionalAction,
         help="If supplied, the important computations will be profiled with summary output shown",
+    )
+    parser.add_argument(
+        "--env_seed_override",
+        type=int,
+        help="An optional fixed seed for the environment",
+    )
+    parser.add_argument(
+        "--alg_seed_override",
+        type=int,
+        help="An optional fixed seed for the algorithm",
     )
     tmp_args = parser.parse_known_args()[0]
 

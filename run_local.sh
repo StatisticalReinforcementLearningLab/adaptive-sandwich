@@ -43,6 +43,8 @@ while getopts T:t:n:u:d:m:r:e:f:a:A:s:y:-: OPT; do
     A  | action_centering_inference )   needs_arg; action_centering_inference="$OPTARG" ;;
     s  | steepness )                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )               needs_arg; synthetic_mode="$OPTARG" ;;
+    L  | env_seed_override )            needs_arg; env_seed_override="$OPTARG" ;;
+    M  | alg_seed_override )            needs_arg; alg_seed_override="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -51,7 +53,7 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning RL study simulation."
-python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL
+python rl_study_simulation.py --T=$T --N=1 --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering_RL --alg_seed_override $alg_seed_override --env_seed_override $env_seed_override
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

@@ -288,10 +288,17 @@ def analyze_dataset(
     study_RLalg = pickle.load(rl_algorithm_object_pickle)
 
     # Analyze data
-    theta_est, adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
-        analyze_dataset_inner(
-            study_df, study_RLalg, bool(action_centering), in_study_column
-        )
+    (
+        theta_est,
+        adaptive_sandwich_var_estimate,
+        classical_sandwich_var_estimate,
+        joint_bread_inverse_matrix,
+        joint_meat_matrix,
+        inference_loss_gradients,
+        inference_loss_hessians,
+        inference_loss_gradient_pi_derivatives,
+    ) = analyze_dataset_inner(
+        study_df, study_RLalg, bool(action_centering), in_study_column
     )
 
     # Write analysis results to same directory as input files
@@ -302,6 +309,23 @@ def analyze_dataset(
                 "theta_est": theta_est,
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+            },
+            f,
+        )
+
+    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "theta_est": theta_est,
+                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+                "joint_bread_inverse_matrix": joint_bread_inverse_matrix,
+                "joint_meat_matrix": joint_meat_matrix,
+                "inference_loss_gradients": inference_loss_gradients,
+                "inference_loss_hessians": inference_loss_hessians,
+                "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
+                "algorithm_statistics_by_calendar_t": study_RLalg.algorithm_statistics_by_calendar_t,
+                "upper_left_bread_inverse": study_RLalg.upper_left_bread_inverse,
             },
             f,
         )
@@ -407,6 +431,11 @@ def analyze_dataset_inner(study_df, study_RLalg, action_centering, in_study_colu
         theta_est,
         joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
         get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
+        joint_bread_inverse_matrix,
+        joint_meat_matrix,
+        loss_gradients,
+        loss_hessians,
+        loss_gradient_pi_derivatives,
     )
 
 

@@ -449,20 +449,26 @@ def analyze_dataset(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
     )
 
-    adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
-        compute_variance_estimates(
-            study_df,
-            beta_dim,
-            theta_est,
-            algorithm_statistics_by_calendar_t,
-            upper_left_bread_inverse,
-            inference_loss_func_filename,
-            inference_loss_func_args_theta_index,
-            in_study_col_name,
-            user_id_col_name,
-            action_prob_col_name,
-            calendar_t_col_name,
-        )
+    (
+        adaptive_sandwich_var_estimate,
+        classical_sandwich_var_estimate,
+        joint_bread_inverse_matrix,
+        joint_meat_matrix,
+        inference_loss_gradients,
+        inference_loss_hessians,
+        inference_loss_gradient_pi_derivatives,
+    ) = compute_variance_estimates(
+        study_df,
+        beta_dim,
+        theta_est,
+        algorithm_statistics_by_calendar_t,
+        upper_left_bread_inverse,
+        inference_loss_func_filename,
+        inference_loss_func_args_theta_index,
+        in_study_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+        calendar_t_col_name,
     )
 
     # Write analysis results to same directory that input files are in
@@ -473,6 +479,23 @@ def analyze_dataset(
                 "theta_est": theta_est,
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+            },
+            f,
+        )
+
+    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "theta_est": theta_est,
+                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+                "joint_bread_inverse_matrix": joint_bread_inverse_matrix,
+                "joint_meat_matrix": joint_meat_matrix,
+                "inference_loss_gradients": inference_loss_gradients,
+                "inference_loss_hessians": inference_loss_hessians,
+                "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
+                "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
+                "upper_left_bread_inverse": upper_left_bread_inverse,
             },
             f,
         )
@@ -773,8 +796,15 @@ def compute_variance_estimates(
     logger.info("Finished forming adaptive sandwich variance estimator.")
 
     return (
+        # These are what's actually needed
         joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
         get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
+        # These are returned for debugging purposes
+        joint_bread_inverse_matrix,
+        joint_meat_matrix,
+        loss_gradients,
+        loss_hessians,
+        loss_gradient_pi_derivatives,
     )
 
 

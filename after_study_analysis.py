@@ -414,6 +414,9 @@ def analyze_dataset(
 
     Make sure all policy numbers in args are in study df. Maybe some way of making sure
     the policy numbers in study df not in args are okay?
+
+    Make sure initial policy number doesn't show up as key in update args-- this signals
+    off by one error probably.  The key is the number of the RESULTING policy.
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -566,7 +569,6 @@ def calculate_algorithm_statistics(
             action_prob_func_args_beta_index,
         )
     )
-
     rl_update_derivatives_by_calendar_t = (
         calculate_derivatives.calculate_rl_loss_derivatives(
             study_df,
@@ -591,6 +593,7 @@ def calculate_algorithm_statistics(
 
 
 # TODO: docstring
+# TODO: One of the hotspots for update time logic to be removed
 def calculate_upper_left_bread_inverse(
     study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
 ):
@@ -616,13 +619,26 @@ def calculate_upper_left_bread_inverse(
     # decision times for each user. The one complication is that we add some
     # padding of zeros for decision times before the first update to make
     # indexing simpler below.
+    # NOTE there was a bug here that ASSUMED the padding needed to happen,
+    # in particular that the algo statistics started at
+    # next_times_after_update[0].  This is not necessarily true, and is now
+    # dictated by the args passed to us.  Because I want to allow the user to
+    # pass pi args for all decision times (in fact this should be the default),
+    # I instead will make this the time I deal with that. I will just zero out
+    # any pi gradients until after the first update.  Note that isn't necessary;
+    # we could do nothing, because this is just about getting the right values
+    # at the right index.  But then we are assuming that we have pi gradients
+    # from the beginning.  Instead just take this heavy-handed approach and
+    # ensure we have the shape we want whether data starts immediately after or
+    # sometime before the first update.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(
                 [
                     t_dict["pi_gradients_by_user_id"][user_id]
-                    for t_dict in algorithm_statistics_by_calendar_t.values()
+                    for t, t_dict in algorithm_statistics_by_calendar_t.items()
+                    if t >= next_times_after_update[0]
                 ]
             ),
             pad_width=((next_times_after_update[0] - 1, 0), (0, 0)),
@@ -706,6 +722,7 @@ def calculate_upper_left_bread_inverse(
 
 
 # TODO: Docstring
+# TODO: One of the hotspots for update time logic to be removed
 def compute_variance_estimates(
     study_df,
     beta_dim,

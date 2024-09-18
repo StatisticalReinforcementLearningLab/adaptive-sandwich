@@ -1140,9 +1140,20 @@ def test_calculate_upper_left_bread_inverse_2_decs_btwn_updates_action_probs_in_
         ),
     )
 
-
 @pytest.mark.skip(reason="Need to add")
 def test_calculate_upper_left_bread_inverse_incremental_recruitment(self):
+    raise NotImplementedError()
+
+
+@pytest.mark.skip(reason="Need to add")
+def test_calculate_upper_left_bread_agnostic_to_pi_times_that_start_before_first_update(
+    self,
+):
+    # This was a bug.  We were automatically assuming the algo statistics dict
+    # started at the first time after the first update, which used to be true
+    # before we generalized things.  Now it typically starts at time 1, grabbing
+    # pi and weight gradients from the beginning.  We don't want to assume
+    # either way. Make sure both approaches work.
     raise NotImplementedError()
 
 

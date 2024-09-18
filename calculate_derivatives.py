@@ -146,6 +146,7 @@ def stack_batched_arg_lists_into_tensor(batched_arg_lists):
     )
 
 
+# TODO: Add clarity on why we need gradients at all times.
 def pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
     loss_gradient_pi_derivative,
     action_prob_times,
@@ -427,13 +428,17 @@ def calculate_pi_and_weight_gradients_specific_t(
 
         # Collect the gradients for the in-study users in this group into the
         # overall dict.
-        for i, user_id in enumerate(sorted_user_ids):
+        in_batch_index = 0
+        for user_id in sorted_user_ids:
             if user_id not in involved_user_ids:
                 continue
-            in_study_pi_gradients_by_user_id[user_id] = in_study_pi_gradients_subset[i]
+            in_study_pi_gradients_by_user_id[user_id] = in_study_pi_gradients_subset[
+                in_batch_index
+            ]
             in_study_weight_gradients_by_user_id[user_id] = (
-                in_study_weight_gradients_subset[i]
+                in_study_weight_gradients_subset[in_batch_index]
             )
+            in_batch_index += 1
 
     in_study_pi_gradients = [
         in_study_pi_gradients_by_user_id[user_id]
@@ -574,10 +579,10 @@ def calculate_rl_loss_derivatives(
         raise ValueError(
             "Unable to import RL loss function.  Please verify the file has the same name as the function of interest."
         ) from e
-
     rl_update_derivatives_by_calendar_t = {}
     user_ids = list(next(iter(rl_loss_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
+    # TODO: This is a hotspot for moving away from update times
     for policy_num, args_by_user_id in rl_loss_func_args.items():
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
@@ -659,6 +664,8 @@ def calculate_rl_loss_derivatives_specific_update(
     in_study_loss_gradient_pi_derivatives_by_user_id = {}
     all_involved_user_ids = set()
     for args_by_user_id_subset in nontrivial_user_args_grouped_by_shape:
+        # Pivot the loss args for the involved users into a list of lists, each
+        # representing all the args at a particular index across users.
         batched_arg_lists, involved_user_ids = (
             get_batched_arg_lists_and_involved_user_ids(
                 rl_loss_func, sorted_user_ids, args_by_user_id_subset
@@ -670,6 +677,8 @@ def calculate_rl_loss_derivatives_specific_update(
             continue
 
         logger.info("Reforming batched data lists into tensors.")
+        # Now just transform the previous list of lists into a jnp array for each
+        # index (a tensor for each argument).  This is for passing to vmap.
         batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
             batched_arg_lists
         )
@@ -692,7 +701,6 @@ def calculate_rl_loss_derivatives_specific_update(
         logger.info(
             "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
         )
-        # Otherwise, actually differentiate with respect to action probabilities.
         if rl_loss_func_args_action_prob_index >= 0:
             in_study_loss_gradient_pi_derivatives_subset = (
                 get_loss_gradient_derivatives_wrt_pi_batched(
@@ -705,25 +713,27 @@ def calculate_rl_loss_derivatives_specific_update(
             )
         # Collect the gradients for the in-study users in this group into the
         # overall dict.
-        for i, user_id in enumerate(sorted_user_ids):
+        in_batch_index = 0
+        for user_id in sorted_user_ids:
             if user_id not in involved_user_ids:
                 continue
             in_study_loss_gradients_by_user_id[user_id] = (
-                in_study_loss_gradients_subset[i]
+                in_study_loss_gradients_subset[in_batch_index]
             )
             in_study_loss_hessians_by_user_id[user_id] = in_study_loss_hessians_subset[
-                i
+                in_batch_index
             ]
             if rl_loss_func_args_action_prob_index >= 0:
                 in_study_loss_gradient_pi_derivatives_by_user_id[user_id] = (
                     pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
-                        in_study_loss_gradient_pi_derivatives_subset[i],
+                        in_study_loss_gradient_pi_derivatives_subset[in_batch_index],
                         args_by_user_id[user_id][
                             rl_loss_func_args_action_prob_times_index
                         ],
                         first_applicable_time,
                     )
                 )
+            in_batch_index += 1
     in_study_loss_gradients = [
         in_study_loss_gradients_by_user_id[user_id]
         for user_id in sorted_user_ids
@@ -742,10 +752,10 @@ def calculate_rl_loss_derivatives_specific_update(
         ]
     # TODO: These padding methods assume *someone* had study data at this time.
     loss_gradients = pad_in_study_derivatives_with_zeros(
-        in_study_loss_gradients, sorted_user_ids, involved_user_ids
+        in_study_loss_gradients, sorted_user_ids, all_involved_user_ids
     )
     loss_hessians = pad_in_study_derivatives_with_zeros(
-        in_study_loss_hessians, sorted_user_ids, involved_user_ids
+        in_study_loss_hessians, sorted_user_ids, all_involved_user_ids
     )
 
     # If there is an action probability argument in the loss, we need to
@@ -755,7 +765,7 @@ def calculate_rl_loss_derivatives_specific_update(
         loss_gradient_pi_derivatives = pad_in_study_derivatives_with_zeros(
             in_study_loss_gradient_pi_derivatives,
             sorted_user_ids,
-            involved_user_ids,
+            all_involved_user_ids,
         )
     else:
         num_users = len(sorted_user_ids)
@@ -949,19 +959,21 @@ def calculate_inference_loss_derivatives(
             )
         # Collect the gradients for the in-study users in this group into the
         # overall dict.
-        for i, user_id in enumerate(sorted_user_ids):
+        in_batch_index = 0
+        for user_id in sorted_user_ids:
             if user_id not in involved_user_ids:
                 continue
-            loss_gradients_by_user_id[user_id] = loss_gradients_subset[i]
-            loss_hessians_by_user_id[user_id] = loss_hessians_subset[i]
+            loss_gradients_by_user_id[user_id] = loss_gradients_subset[in_batch_index]
+            loss_hessians_by_user_id[user_id] = loss_hessians_subset[in_batch_index]
             if using_action_probs:
                 loss_gradient_pi_derivatives_by_user_id[user_id] = (
                     pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
-                        loss_gradient_pi_derivatives_subset[i],
+                        loss_gradient_pi_derivatives_subset[in_batch_index],
                         action_prob_decision_times_by_user_id[user_id],
                         max_calendar_time + 1,
                     )
                 )
+            in_batch_index += 1
     loss_gradients = np.array(
         [
             loss_gradients_by_user_id[user_id]

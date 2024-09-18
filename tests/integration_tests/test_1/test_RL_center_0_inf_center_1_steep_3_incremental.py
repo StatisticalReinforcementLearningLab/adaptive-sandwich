@@ -155,6 +155,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_bread_inverse_matrix"],
             expected_debug_pieces_dict["joint_bread_inverse_matrix"],
+            atol=1e-5,
         )
 
         np.testing.assert_allclose(

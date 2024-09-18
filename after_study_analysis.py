@@ -875,6 +875,7 @@ def form_meat_matrix(
 # TODO: doc string
 # TODO: Why am I passing in update times again? Can I just derive from study df?
 # TODO: Do the three checks in the existing after study file
+# TODO: This is a hotspot for update time logic to be removed
 def form_bread_inverse_matrix(
     upper_left_bread_inverse,
     max_t,
@@ -919,13 +920,18 @@ def form_bread_inverse_matrix(
     # The one complication is that we add some padding of zeros for decision
     # times before the first update to be in correspondence with the above data
     # structure.
+    # See the analogous comment in the construction of the RL portion of the
+    # matrix for more details on why we limit to t >= update_times[0]. In short
+    # we do not need the values before that, but want to allow them to be given.
+    # Whether they are given or not, we choose to put zeros in their place.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(
                 [
                     t_stats_dict["pi_gradients_by_user_id"][user_id]
-                    for t_stats_dict in algo_stats_dict.values()
+                    for t, t_stats_dict in algo_stats_dict.items()
+                    if t >= update_times[0]
                 ]
             ),
             pad_width=((update_times[0] - 1, 0), (0, 0)),

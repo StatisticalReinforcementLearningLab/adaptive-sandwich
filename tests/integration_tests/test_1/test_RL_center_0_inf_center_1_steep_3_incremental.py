@@ -67,15 +67,18 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         expected_analysis_dict = pickle.load(expected_analysis_pickle)
         expected_debug_pieces_dict = pickle.load(expected_debug_pieces_pickle)
 
+        ### Check base study dataframes equal. This is important so that
+        # we are even in the game, trying to produce the right inference results.
         pd.testing.assert_frame_equal(observed_study_df, expected_study_df)
 
+        # Check that we have the same theta estimate in both cases.
         np.testing.assert_allclose(
             observed_analysis_dict["theta_est"], expected_analysis_dict["theta_est"]
         )
 
         assert observed_debug_pieces_dict.keys() == expected_debug_pieces_dict.keys()
 
-        # Check RL-side derivatives and bread contribution
+        ### Check RL-side derivatives and bread contribution
 
         # Note this may start after the first update.  If the observed starts
         # before that, we don't care.
@@ -128,7 +131,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
             atol=1e-5,
         )
 
-        # Check inference-side derivatives
+        ### Check inference-side derivatives
 
         np.testing.assert_allclose(
             observed_debug_pieces_dict["inference_loss_gradients"],
@@ -146,7 +149,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
             expected_debug_pieces_dict["inference_loss_gradient_pi_derivatives"],
         )
 
-        # Check joint meat and bread inverse, uniting RL and inference
+        ### Check joint meat and bread inverse, uniting RL and inference
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_meat_matrix"],
             expected_debug_pieces_dict["joint_meat_matrix"],
@@ -158,6 +161,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
             atol=1e-5,
         )
 
+        ### Check final results
         np.testing.assert_allclose(
             observed_analysis_dict["adaptive_sandwich_var_estimate"],
             expected_analysis_dict["adaptive_sandwich_var_estimate"],

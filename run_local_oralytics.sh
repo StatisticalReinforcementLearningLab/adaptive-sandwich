@@ -29,7 +29,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimat
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:s:o:-: OPT; do
+while getopts i:c:p:C:U:E:P:b:l:B:D:j:I:h:H:s:o:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name

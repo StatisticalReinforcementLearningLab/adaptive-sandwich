@@ -414,6 +414,9 @@ def analyze_dataset(
 
     Make sure all policy numbers in args are in study df. Maybe some way of making sure
     the policy numbers in study df not in args are okay?
+
+    Make sure initial policy number doesn't show up as key in update args-- this signals
+    off by one error probably.  The key is the number of the RESULTING policy.
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -449,20 +452,26 @@ def analyze_dataset(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
     )
 
-    adaptive_sandwich_var_estimate, classical_sandwich_var_estimate = (
-        compute_variance_estimates(
-            study_df,
-            beta_dim,
-            theta_est,
-            algorithm_statistics_by_calendar_t,
-            upper_left_bread_inverse,
-            inference_loss_func_filename,
-            inference_loss_func_args_theta_index,
-            in_study_col_name,
-            user_id_col_name,
-            action_prob_col_name,
-            calendar_t_col_name,
-        )
+    (
+        adaptive_sandwich_var_estimate,
+        classical_sandwich_var_estimate,
+        joint_bread_inverse_matrix,
+        joint_meat_matrix,
+        inference_loss_gradients,
+        inference_loss_hessians,
+        inference_loss_gradient_pi_derivatives,
+    ) = compute_variance_estimates(
+        study_df,
+        beta_dim,
+        theta_est,
+        algorithm_statistics_by_calendar_t,
+        upper_left_bread_inverse,
+        inference_loss_func_filename,
+        inference_loss_func_args_theta_index,
+        in_study_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+        calendar_t_col_name,
     )
 
     # Write analysis results to same directory that input files are in
@@ -473,6 +482,23 @@ def analyze_dataset(
                 "theta_est": theta_est,
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+            },
+            f,
+        )
+
+    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "theta_est": theta_est,
+                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+                "joint_bread_inverse_matrix": joint_bread_inverse_matrix,
+                "joint_meat_matrix": joint_meat_matrix,
+                "inference_loss_gradients": inference_loss_gradients,
+                "inference_loss_hessians": inference_loss_hessians,
+                "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
+                "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
+                "upper_left_bread_inverse": upper_left_bread_inverse,
             },
             f,
         )
@@ -543,7 +569,6 @@ def calculate_algorithm_statistics(
             action_prob_func_args_beta_index,
         )
     )
-
     rl_update_derivatives_by_calendar_t = (
         calculate_derivatives.calculate_rl_loss_derivatives(
             study_df,
@@ -568,6 +593,7 @@ def calculate_algorithm_statistics(
 
 
 # TODO: docstring
+# TODO: One of the hotspots for update time logic to be removed
 def calculate_upper_left_bread_inverse(
     study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
 ):
@@ -593,13 +619,26 @@ def calculate_upper_left_bread_inverse(
     # decision times for each user. The one complication is that we add some
     # padding of zeros for decision times before the first update to make
     # indexing simpler below.
+    # NOTE there was a bug here that ASSUMED the padding needed to happen,
+    # in particular that the algo statistics started at
+    # next_times_after_update[0].  This is not necessarily true, and is now
+    # dictated by the args passed to us.  Because I want to allow the user to
+    # pass pi args for all decision times (in fact this should be the default),
+    # I instead will make this the time I deal with that. I will just zero out
+    # any pi gradients until after the first update.  Note that isn't necessary;
+    # we could do nothing, because this is just about getting the right values
+    # at the right index.  But then we are assuming that we have pi gradients
+    # from the beginning.  Instead just take this heavy-handed approach and
+    # ensure we have the shape we want whether data starts immediately after or
+    # sometime before the first update.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(
                 [
                     t_dict["pi_gradients_by_user_id"][user_id]
-                    for t_dict in algorithm_statistics_by_calendar_t.values()
+                    for t, t_dict in algorithm_statistics_by_calendar_t.items()
+                    if t >= next_times_after_update[0]
                 ]
             ),
             pad_width=((next_times_after_update[0] - 1, 0), (0, 0)),
@@ -683,6 +722,7 @@ def calculate_upper_left_bread_inverse(
 
 
 # TODO: Docstring
+# TODO: One of the hotspots for update time logic to be removed
 def compute_variance_estimates(
     study_df,
     beta_dim,
@@ -773,8 +813,15 @@ def compute_variance_estimates(
     logger.info("Finished forming adaptive sandwich variance estimator.")
 
     return (
+        # These are what's actually needed
         joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
         get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
+        # These are returned for debugging purposes
+        joint_bread_inverse_matrix,
+        joint_meat_matrix,
+        loss_gradients,
+        loss_hessians,
+        loss_gradient_pi_derivatives,
     )
 
 
@@ -828,6 +875,7 @@ def form_meat_matrix(
 # TODO: doc string
 # TODO: Why am I passing in update times again? Can I just derive from study df?
 # TODO: Do the three checks in the existing after study file
+# TODO: This is a hotspot for update time logic to be removed
 def form_bread_inverse_matrix(
     upper_left_bread_inverse,
     max_t,
@@ -872,13 +920,18 @@ def form_bread_inverse_matrix(
     # The one complication is that we add some padding of zeros for decision
     # times before the first update to be in correspondence with the above data
     # structure.
+    # See the analogous comment in the construction of the RL portion of the
+    # matrix for more details on why we limit to t >= update_times[0]. In short
+    # we do not need the values before that, but want to allow them to be given.
+    # Whether they are given or not, we choose to put zeros in their place.
     # NOTE THAT ROW INDEX i CORRESPONDS TO DECISION TIME i+1!
     pi_derivatives_by_user_id = {
         user_id: jnp.pad(
             jnp.array(
                 [
                     t_stats_dict["pi_gradients_by_user_id"][user_id]
-                    for t_stats_dict in algo_stats_dict.values()
+                    for t, t_stats_dict in algo_stats_dict.items()
+                    if t >= update_times[0]
                 ]
             ),
             pad_width=((update_times[0] - 1, 0), (0, 0)),

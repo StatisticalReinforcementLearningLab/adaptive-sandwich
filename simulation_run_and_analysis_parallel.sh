@@ -42,6 +42,7 @@ RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
+dynamic_seeds=0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -64,7 +65,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_le
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -99,6 +100,7 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:-: OPT; do
     I  | inference_loss_func_filename )               needs_arg; inference_loss_func_filename="$OPTARG" ;;
     h  | inference_loss_func_args_theta_index )       needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )            needs_arg; theta_calculation_func_filename="$OPTARG" ;;
+    F  | dynamic_seeds )                              needs_arg; dynamic_seeds="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -150,7 +152,8 @@ python rl_study_simulation.py \
   --err_corr=$err_corr \
   --alg_state_feats=$alg_state_feats \
   --action_centering=$action_centering_RL \
-  --save_dir=$save_dir
+  --save_dir=$save_dir \
+  --dynamic_seeds=$dynamic_seeds
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script

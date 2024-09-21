@@ -53,6 +53,4 @@ def oralytics_RL_loss(
 
     total_sum = term1 + term2 + term3
 
-    print(total_sum)
-
     return total_sum

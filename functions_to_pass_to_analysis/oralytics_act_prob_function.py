@@ -5011,7 +5011,6 @@ C_logistic = 3
 B = 0.515
 
 
-# %%
 def logistic_function(x: float) -> float:
 
     numerator = L_max - L_min

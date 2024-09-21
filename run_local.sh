@@ -21,6 +21,8 @@ err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 dynamic_seeds=1
+env_seed_override=-1
+alg_seed_override=-1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -41,7 +43,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_le
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:L:M:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -76,6 +78,10 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:-: OPT; do
     I  | inference_loss_func_filename )               needs_arg; inference_loss_func_filename="$OPTARG" ;;
     h  | inference_loss_func_args_theta_index )       needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )            needs_arg; theta_calculation_func_filename="$OPTARG" ;;
+    F  | dynamic_seeds )                              needs_arg; dynamic_seeds="$OPTARG" ;;
+    L  | env_seed_override )                          needs_arg; env_seed_override="$OPTARG" ;;
+    M  | alg_seed_override )                          needs_arg; alg_seed_override="$OPTARG" ;;
+
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -98,7 +104,9 @@ python rl_study_simulation.py \
   --err_corr=$err_corr \
   --alg_state_feats=$alg_state_feats \
   --action_centering=$action_centering_RL \
-  --dynamic_seeds
+  --dynamic_seeds=$dynamic_seeds \
+  --env_seed_override=$env_seed_override \
+  --alg_seed_override=$alg_seed_override
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

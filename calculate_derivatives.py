@@ -1,6 +1,5 @@
 import collections
 import logging
-import os
 
 import jax
 from jax import numpy as jnp
@@ -8,7 +7,7 @@ import numpy as np
 
 from helper_functions import (
     conditional_x_or_one_minus_x,
-    load_module_from_source_file,
+    load_function_from_same_named_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,18 +213,7 @@ def calculate_pi_and_weight_gradients(
 
     logger.info("Calculating pi and weight gradients with respect to beta.")
 
-    # Retrieve the action prob function from file
-    action_probs_module = load_module_from_source_file(
-        "action_probs", action_prob_func_filename
-    )
-    # NOTE the assumption that the function and file have the same name
-    action_prob_func_name = os.path.basename(action_prob_func_filename).split(".")[0]
-    try:
-        action_prob_func = getattr(action_probs_module, action_prob_func_name)
-    except AttributeError as e:
-        raise ValueError(
-            "Unable to import action probability function.  Please verify the file has the same name as the function of interest."
-        ) from e
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
 
     pi_and_weight_gradients_by_calendar_t = {}
 
@@ -275,7 +263,7 @@ def calculate_pi_and_weight_gradients_specific_t(
     sorted_user_ids,
 ):
     logger.info(
-        "Calculating pi and weight gradients for decision time %d",
+        "Calculating pi and weight gradients for decision time %d.",
         calendar_t,
     )
     # Get a list of subdicts of the user args dict, with each united by having
@@ -477,6 +465,7 @@ def get_weight_gradients_batched(
 
 # TODO: Docstring
 # TODO: JIT whole function? or just gradient and hessian batch functions
+# TODO: This is a hotspot for moving away from update times
 def calculate_rl_loss_derivatives(
     study_df,
     rl_loss_func_filename,
@@ -490,21 +479,11 @@ def calculate_rl_loss_derivatives(
     logger.info(
         "Calculating RL loss gradients and hessians with respect to beta and mixed beta/action probability derivatives for each user at all update times."
     )
+    rl_loss_func = load_function_from_same_named_file(rl_loss_func_filename)
 
-    # Retrieve the RL function from file
-    rl_loss_module = load_module_from_source_file("rl_loss", rl_loss_func_filename)
-    # NOTE the assumption that the function and file have the same name
-    rl_loss_func_name = os.path.basename(rl_loss_func_filename).split(".")[0]
-    try:
-        rl_loss_func = getattr(rl_loss_module, rl_loss_func_name)
-    except AttributeError as e:
-        raise ValueError(
-            "Unable to import RL loss function.  Please verify the file has the same name as the function of interest."
-        ) from e
     rl_update_derivatives_by_calendar_t = {}
     user_ids = list(next(iter(rl_loss_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
-    # TODO: This is a hotspot for moving away from update times
     for policy_num, args_by_user_id in rl_loss_func_args.items():
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
@@ -562,7 +541,7 @@ def calculate_rl_loss_derivatives_specific_update(
     first_applicable_time,
 ):
     logger.info(
-        "Calculating RL loss derivatives for the update that first applies at time %d",
+        "Calculating RL loss derivatives for the update that first applies at time %d.",
         first_applicable_time,
     )
     # Get a list of subdicts of the user args dict, with each united by having
@@ -613,7 +592,7 @@ def calculate_rl_loss_derivatives_specific_update(
             *batched_arg_tensors,
         )
 
-        logger.info("Forming loss hessians with respect to beta")
+        logger.info("Forming loss hessians with respect to beta.")
         in_study_loss_hessians_subset = get_loss_hessians_batched(
             rl_loss_func,
             rl_loss_func_args_beta_index,
@@ -621,7 +600,7 @@ def calculate_rl_loss_derivatives_specific_update(
             *batched_arg_tensors,
         )
         logger.info(
-            "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
+            "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time."
         )
         if rl_loss_func_args_action_prob_index >= 0:
             in_study_loss_gradient_pi_derivatives_subset = (
@@ -761,22 +740,12 @@ def calculate_inference_loss_derivatives(
     in_study_col_name,
     calendar_t_col_name,
 ):
-    logger.info("Calculating inference loss derivatives")
+    logger.info("Calculating inference loss derivatives.")
 
     # Retrieve the inference loss function from file
-    inference_loss_module = load_module_from_source_file(
-        "inference_loss", inference_loss_func_filename
+    inference_loss_func = load_function_from_same_named_file(
+        inference_loss_func_filename
     )
-    # NOTE the assumption that the function and file have the same name
-    inference_loss_func_name = os.path.basename(inference_loss_func_filename).split(
-        "."
-    )[0]
-    try:
-        inference_loss_func = getattr(inference_loss_module, inference_loss_func_name)
-    except AttributeError as e:
-        raise ValueError(
-            "Unable to import RL loss function.  Please verify the file has the same name as the function of interest."
-        ) from e
 
     num_args = inference_loss_func.__code__.co_argcount
     inference_loss_func_arg_names = inference_loss_func.__code__.co_varnames[:num_args]
@@ -849,7 +818,7 @@ def calculate_inference_loss_derivatives(
             batched_arg_lists
         )
 
-        logger.info("Forming loss gradients with respect to beta.")
+        logger.info("Forming loss gradients with respect to theta.")
         loss_gradients_subset = get_loss_gradients_batched(
             inference_loss_func,
             inference_loss_func_args_theta_index,
@@ -857,7 +826,7 @@ def calculate_inference_loss_derivatives(
             *batched_arg_tensors,
         )
 
-        logger.info("Forming loss hessians with respect to beta")
+        logger.info("Forming loss hessians with respect to theta.")
         loss_hessians_subset = get_loss_hessians_batched(
             inference_loss_func,
             inference_loss_func_args_theta_index,
@@ -865,7 +834,7 @@ def calculate_inference_loss_derivatives(
             *batched_arg_tensors,
         )
         logger.info(
-            "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time"
+            "Forming derivatives of loss with respect to theta and then the action probabilites vector at each time."
         )
         # If there is an action probability argument in the loss,
         # actually differentiate with respect to action probabilities
@@ -910,7 +879,7 @@ def calculate_inference_loss_derivatives(
             if user_id in all_involved_user_ids
         ]
     )
-    # If using action probs, collect the mixed beta pi derivatives computed
+    # If using action probs, collect the mixed theta pi derivatives computed
     # so far.
     if using_action_probs:
         loss_gradient_pi_derivatives = np.array(

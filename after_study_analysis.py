@@ -319,8 +319,7 @@ def analyze_dataset(
     I also assume someone has some data to contribute at each update time. Check
     for this or see if shouldn't always be true. EDIT: Is this true?
 
-    Should I have an explicit check for theta func args in study df instead of letting
-    fail?
+    Should I have an explicit check for theta func arg just being study df
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -679,9 +678,11 @@ def compute_variance_estimates(
     # to iterate through in a variety of places.
     user_ids = study_df[user_id_col_name].unique()
 
+    theta_dim = len(theta_est)
+
     logger.info("Forming adaptive sandwich variance estimator.")
 
-    logger.info("Calculating all derivatives needed with JAX")
+    logger.info("Calculating all derivatives needed with JAX.")
     loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
         calculate_derivatives.calculate_inference_loss_derivatives(
             study_df,
@@ -696,9 +697,21 @@ def compute_variance_estimates(
         )
     )
 
-    logger.info("Forming adaptive bread inverse and inverting.")
+    logger.info("Forming adaptive joint meat.")
+    # TODO: Small sample corrections
+    joint_meat_matrix = form_meat_matrix(
+        theta_dim,
+        update_times,
+        beta_dim,
+        algorithm_statistics_by_calendar_t,
+        user_ids,
+        loss_gradients,
+    )
+    logger.info("Adaptive joint meat:")
+    logger.info(joint_meat_matrix)
+
+    logger.info("Forming adaptive joint bread inverse and inverting.")
     max_t = study_df[calendar_t_col_name].max()
-    theta_dim = len(theta_est)
     joint_bread_inverse_matrix = form_bread_inverse_matrix(
         upper_left_bread_inverse,
         max_t,
@@ -716,19 +729,6 @@ def compute_variance_estimates(
     joint_bread_matrix = invert_matrix_and_check_conditioning(
         joint_bread_inverse_matrix
     )
-
-    logger.info("Forming adaptive meat.")
-    # TODO: Small sample corrections
-    joint_meat_matrix = form_meat_matrix(
-        theta_dim,
-        update_times,
-        beta_dim,
-        algorithm_statistics_by_calendar_t,
-        user_ids,
-        loss_gradients,
-    )
-    logger.info("Adaptive joint meat:")
-    logger.info(joint_meat_matrix)
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality

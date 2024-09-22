@@ -1,3 +1,4 @@
+import collections
 import numpy as np
 from jax import numpy as jnp
 
@@ -20,6 +21,7 @@ def perform_first_wave_input_checks(
     rl_loss_func_args_action_prob_index,
     rl_loss_func_args_action_prob_times_index,
     theta_est,
+    suppress_interactive_data_checks,
 ):
     # TODO: Also, maybe this wave shouldn't include loading functions
     # supplied--do action prob reconstruction, theta estimation, estimating function sum, etc. in a later wave.
@@ -37,14 +39,18 @@ def perform_first_wave_input_checks(
     require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_loss_args(
         study_df, policy_num_col_name, rl_loss_func_args
     )
-    confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
-        rl_loss_func_args_action_prob_index
-    )
+    if not suppress_interactive_data_checks:
+        confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
+            rl_loss_func_args_action_prob_index
+        )
     require_action_prob_args_in_range_0_1_if_supplied(
         rl_loss_func_args, rl_loss_func_args_action_prob_index
     )
     require_action_prob_times_given_if_index_supplied(
-        rl_loss_func_args,
+        rl_loss_func_args_action_prob_index,
+        rl_loss_func_args_action_prob_times_index,
+    )
+    require_action_prob_index_given_if_times_supplied(
         rl_loss_func_args_action_prob_index,
         rl_loss_func_args_action_prob_times_index,
     )
@@ -52,7 +58,10 @@ def perform_first_wave_input_checks(
         rl_loss_func_args, rl_loss_func_args_beta_index
     )
     require_valid_action_prob_times_given_if_index_supplied(
-        rl_loss_func_args, rl_loss_func_args_action_prob_times_index
+        study_df,
+        calendar_t_col_name,
+        rl_loss_func_args,
+        rl_loss_func_args_action_prob_times_index,
     )
 
     ### Validate action prob function and args
@@ -91,13 +100,16 @@ def perform_first_wave_input_checks(
         user_id_col_name,
         action_prob_col_name,
     )
-    require_binary_actions(study_df, action_prob_col_name)
+    require_binary_actions(study_df, in_study_col_name, action_col_name)
     require_binary_in_study_indicators(study_df, in_study_col_name)
-    require_consecutive_integer_policy_numbers(study_df, policy_num_col_name)
+    require_consecutive_integer_policy_numbers(
+        study_df, in_study_col_name, policy_num_col_name
+    )
     require_consecutive_integer_calendar_times(study_df, calendar_t_col_name)
-    require_hashable_user_ids(study_df, user_id_col_name)
+    require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name)
     require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name)
-    verify_study_df_summary_satisfactory(study_df)
+    if not suppress_interactive_data_checks:
+        verify_study_df_summary_satisfactory(study_df)
 
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
@@ -132,7 +144,7 @@ def require_action_probabilities_can_be_reconstructed(
     except AssertionError as e:
         # pylint: disable=bad-builtin
         answer = input(
-            f"The action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable.  If not, see the contract for next steps.:\n{str(e)}\n\nContinue? (y/n)\n"
+            f"The action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable.  If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n"
         )
         # pylint: enable=bad-builtin
         if answer.lower() == "y":
@@ -218,32 +230,59 @@ def require_all_named_columns_present_in_study_df(
     ), f"{action_prob_col_name} not in study df."
 
 
-def require_binary_actions(study_df, action_prob_col_name):
-    pass
+def require_binary_actions(study_df, in_study_col_name, action_col_name):
+    assert (
+        study_df[study_df[in_study_col_name] == 1][action_col_name]
+        .astype("int64")
+        .isin([0, 1])
+        .all()
+    ), "Actions are not binary."
 
 
 def require_binary_in_study_indicators(study_df, in_study_col_name):
-    pass
+    assert (
+        study_df[study_df[in_study_col_name] == 1][in_study_col_name]
+        .astype("int64")
+        .isin([0, 1])
+        .all()
+    ), "In study indicators are not binary."
 
 
-def require_consecutive_integer_policy_numbers(study_df, policy_num_col_name):
+def require_consecutive_integer_policy_numbers(
+    study_df, in_study_col_name, policy_num_col_name
+):
     # Maybe any negative number taken to be a fallback policy, everything else
     # consecutive integers. Consecutive might not be feasible tho given app
     # opening issue.
+
+    # TODO: This probably isn't going to be a requirement when we move away from
+    # update times... remove if so.
     pass
 
 
 def require_consecutive_integer_calendar_times(study_df, calendar_t_col_name):
-    pass
+    # This is a somewhat rough check of this, more like checking there are no
+    # gaps in the integers covered.  But we have other checks that all users
+    # have same times, etc.
+    # Note these times should be well-formed even when the user is not in the study.
+    assert np.array_equal(
+        study_df[calendar_t_col_name].unique(),
+        range(
+            study_df[calendar_t_col_name].min(), study_df[calendar_t_col_name].max() + 1
+        ),
+    ), "Calendar times are not consecutive integers."
 
 
-def require_hashable_user_ids(study_df, user_id_col_name):
-    pass
+def require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name):
+    isinstance(
+        study_df[study_df[in_study_col_name] == 1][user_id_col_name][0],
+        collections.abc.Hashable,
+    )
 
 
 def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name):
     # TODO: Can we even require not 0 or 1? Illustrates non-compliant RL algorithm
-    pass
+    study_df[action_prob_col_name].between(0, 1).all()
 
 
 def require_no_policy_numbers_present_in_rl_loss_args_but_not_study_df(
@@ -272,7 +311,18 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
 def confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
     rl_loss_func_args_action_prob_index,
 ):
-    pass
+    if rl_loss_func_args_action_prob_index < 0:
+        # pylint: disable=bad-builtin
+        answer = input(
+            f"\nYou specified that the RL loss function supplied does not have action probabilities as one of its arguments. Please verify this is correct (y/n):\n"
+        )
+        # pylint: enable=bad-builtin
+        if answer.lower() == "y":
+            print("Ok, proceeding.")
+        elif answer.lower() == "n":
+            raise SystemExit
+        else:
+            print("Please enter 'y' or 'n'.")
 
 
 def require_action_prob_args_in_range_0_1_if_supplied(
@@ -283,25 +333,42 @@ def require_action_prob_args_in_range_0_1_if_supplied(
 
 
 def require_action_prob_times_given_if_index_supplied(
-    rl_loss_func_args,
     rl_loss_func_args_action_prob_index,
     rl_loss_func_args_action_prob_times_index,
 ):
-    pass
+    if rl_loss_func_args_action_prob_index >= 0:
+        assert rl_loss_func_args_action_prob_times_index >= 0 and (
+            rl_loss_func_args_action_prob_times_index
+            != rl_loss_func_args_action_prob_index
+        )
 
 
+def require_action_prob_index_given_if_times_supplied(
+    rl_loss_func_args_action_prob_index,
+    rl_loss_func_args_action_prob_times_index,
+):
+    if rl_loss_func_args_action_prob_times_index >= 0:
+        assert rl_loss_func_args_action_prob_index >= 0 and (
+            rl_loss_func_args_action_prob_times_index
+            != rl_loss_func_args_action_prob_index
+        )
+
+
+# TODO: too basic?
 def require_beta_is_1D_array_in_rl_loss_args(
     rl_loss_func_args, rl_loss_func_args_beta_index
 ):
     pass
 
 
+# TODO: too basic?
 def require_beta_is_1D_array_in_action_prob_args(
     action_prob_func_args, action_prob_func_args_beta_index
 ):
     pass
 
 
+# TODO: too basic?
 def require_theta_is_1D_array(theta_est):
     pass
 
@@ -309,6 +376,8 @@ def require_theta_is_1D_array(theta_est):
 def verify_study_df_summary_satisfactory(
     study_df,
 ):
+    # TODO: Give a summary of the study dataframe and ask the user to verify that it
+    # is satisfactory.  This should help avoid gross errors.
     pass
 
 
@@ -349,10 +418,24 @@ def require_betas_match_in_action_prob_func_args_each_decision(
 
 
 def require_valid_action_prob_times_given_if_index_supplied(
-    rl_loss_func_args, rl_loss_func_args_action_prob_times_index
+    study_df,
+    calendar_t_col_name,
+    rl_loss_func_args,
+    rl_loss_func_args_action_prob_times_index,
 ):
-    # Must be strictly increasing. Possibly contiguous?
-    pass
+    min_time = study_df[calendar_t_col_name].min()
+    max_time = study_df[calendar_t_col_name].max()
+    for args_by_user in rl_loss_func_args.values():
+        for args in args_by_user.values():
+            if not args:
+                continue
+            times = args[rl_loss_func_args_action_prob_times_index]
+            assert (
+                times[i] > times[i - 1] for i in range(1, len(times))
+            ), "Non-strictly-increasing times give for action proabilities in RL loss args. Please see the contract for details."
+            assert (
+                times[0] >= min_time and times[-1] <= max_time
+            ), "Times not present in the study given for action proabilities in RL loss args. Please see the contract for details."
 
 
 def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, theta_dim):

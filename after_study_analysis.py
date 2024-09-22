@@ -372,6 +372,7 @@ def analyze_dataset(
             rl_loss_func_args_action_prob_index,
             rl_loss_func_args_action_prob_times_index,
             theta_est,
+            suppress_interactive_data_checks,
         )
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(

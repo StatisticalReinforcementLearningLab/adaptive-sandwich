@@ -11,6 +11,7 @@ from jax import numpy as jnp
 import scipy
 
 import calculate_derivatives
+import input_checks
 
 
 from helper_functions import (
@@ -280,143 +281,46 @@ def analyze_dataset(
     action_prob_col_name,
 ):
     """
-    TODO: Data integrity checks.
-    Reconstruct action probabilities now or later?
 
     I check estimating function sum 0 later, but differentiate between
-    RL and beta side? Also could move check here. Might be  nice to have all
+    RL and beta side? Also could move check here. Might be nice to have all
     checks in same place. Wherever that check is, should allow user to see
     and verify close enough to zero
 
-    Make sure study df sorted within users and across users? .sort_values(by=["user_id", "calendar_t"])
-
-    Make sure every user has entry for union of all decision times across
-    all users.
-
-    Make sure in study is never on for more than one stretch
-
-    Make sure right number of in study rows per user?? May not be precise
+    Make sure in study is never on for more than one stretch EDIT: unclear if
+    this will remain an invariant as we deal with more complicated data missingness
 
     Possibly make sure no real-looking data when in_study is off
 
-    Make sure function args for all users for all t even if not in study
-    policy num the same for all users for each calendar t.  Something that adds
-    nothing to gradients when users are not in the study is needed... maybe
-    think of way to make this happen more directly in response to in study
-    indicator. Well, can pass in zeros or NAs but not use computed gradients,
-    automatically spit out gradient zero somehow.
-
     I think I'm agnostic to indexing of calendar times but should check because
     otherwise need to add a check here to verify required format.
-
-    Verify actions binary
-
-    Verify action column present in study df
-
-    Verify policy num column present in both beta df and study df, and joinable,
-    for instance no policy nums in study df not present in beta df.  Other way
-    is acceptable maybe but could be a warning.
-
-    Verify in study column present in study df
-
-    If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
 
     Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
     Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 
     Should be clear from dataframe spec but beta must be vector (not matrix)
 
-    beta df must have policy num as first column and then one column per coordinate of beta
-    nothing else. But.. could reconsider and put array in one column
-
     Codify assumptions that make get_first_applicable_time work.  The main
     thing is an assumption that users don't get different policies at the same
-    time.
+    time.  EDIT: Well... users can have different policies at the same time. So
+    we can't codify this and have to rewrite that function.
 
-    Functions compatible with JAX 0.4.24. And DIFFERENTIABLE with grad and JITTABLE because of vmap.
-    https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html#
-    Tricky ones are control flow, indexing, and shapes not depending on args
+    Codify assumptions used for collect_batched_in_study_actions
 
-    Summarize study df and ask users to verify.
-
-    Codify assumptions used for collect_batched_actions
-
-    Use arg groups/manual checks to help verify args are used correctly
-
-    Specify that action probability function and loss function have to
-    have scalar output.  If estimating function given instead of loss, specify
-    correct vector orientation. I think (beta dim,) vector.
-
-    Write down assumptions about data handling for incremental recruitment.
-    Empty tuples for decision times when not in study and updates where no
-    data is being used for that user (probably they have not been in study yet).
-
-    For any column indices given, check any appropriate constraints for that column.
-    Probabilities between 0 and 1 (or nan).  In fact probabilites of 0 or 1 illustrate
-    a non-compliant RL algorithm so this is strict (though using nan when out of study).
-    Mentioned above, but actions binary. calendar_t an integer. user_id hashable, not a float.
-    This helps data validation but also simply that the indices are correct.
-
-    Do I need to mandate whether beta is 1 or 2d? Yes.
-
-    Theta loss makes assumptions about colnames. Theta index can be called
-    whatever, but everything else has to be a colname in study df.
-    This can be verified. Detects action probs by name. Must take Tx1 vectors only
-
-    Theta estimation function must only take study df.  It can be verified to only
-    have one arg at least, and this must be communicated.
-
-    Policy num has to be consecutive integers now... should I relax this? If not
-    check for it
-
-    Make it clear that args are needed for all users for each decision time/policy num in those
-    dicts, but with empty tuples or None or something Falsey for times out of study.
-    Can check this against study df!
-
-    Check calendar t consecutive..
-
-    Check that pi args given for all in study rows, not for others.
+    Can we check rl loss and policy arg Falsiness against study df availability indicators?
 
     Make the user give the min and max probabilities, and I'll enforce it
 
-    I am making assumptions about the times that the action probs correspond to if supplied
-    in rl loss/estimating function. I think currently I am requiring an entry for all times going into an update
-    Probably this needs to change to be for all in study times? Eh, padding is not obvious. Needs zeros
-    before and after... I could deduce from the study dataframe but I'm just gonna require entries for all times
-    that have occurred before update.  Will require padding with nans, and
-    THUS THE RL LOSS/ESTIMATING FUNCTION MUST compute correctly with nan-padded action probs.
-    This can be as simple as x = x[~numpy.isnan(x)]
-
-    Verify betas the same across all users for given decision/update time
-
-    Flag to suppress interactive checks for simulations
-
-    Functions have same name as files that contain
+    Flag to toggle interactive checks, if any
 
     I assume someone is in the study at each decision time. Check for this or
-    see if shouldn't always be true.
+    see if shouldn't always be true. EDIT: Is this true?
 
     I also assume someone has some data to contribute at each update time. Check
-    for this or see if shouldn't always be true.
+    for this or see if shouldn't always be true. EDIT: Is this true?
 
-    If you pass actionprobs, you must also pass a same shape array with the times
-    tha they apply to.  This is because padding to make the times clear is not so nice.
-    Can't filter in a simple way and still be JAX-compatible. Check that neither
-    or both supplied, and if supplied, same size. Check valid decision times.
-
-    Action prob times strictly increasing.  Should probably be contiguous but could be some weird case. Maybe warning if not.
-
-    Do I actually need all times for all people anymore? If only in study rows are given,
-    with in the indicator always on, does that cause problems? Yes, I'm pretty sure the zero gradients
-    won't magically show up, but this seems easy to fix.
-
-    Assuming scalar types in study df.
-
-    Make sure all policy numbers in args are in study df. Maybe some way of making sure
-    the policy numbers in study df not in args are okay?
-
-    Make sure initial policy number doesn't show up as key in update args-- this signals
-    off by one error probably.  The key is the number of the RESULTING policy.
+    Should I have an explicit check for theta func args in study df instead of letting
+    fail?
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -425,12 +329,36 @@ def analyze_dataset(
     )
 
     study_df = pickle.load(study_df_pickle)
+    # TODO: Should I sort? Check how slow it is, for one.
+    # study_df = pickle.load(study_df_pickle).sort_values(
+    #     by=[user_id_col_name, calendar_t_col_name]
+    # )
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     rl_loss_func_args = pickle.load(rl_loss_func_args_pickle)
 
     beta_dim = calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index)
 
     theta_est = estimate_theta(study_df, theta_calculation_func_filename)
+
+    # This does the first round of input validation, before computing any
+    # gradients
+    input_checks.perform_first_wave_input_checks(
+        study_df,
+        in_study_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+        action_prob_func_filename,
+        action_prob_func_args,
+        action_prob_func_args_beta_index,
+        rl_loss_func_args,
+        rl_loss_func_args_beta_index,
+        rl_loss_func_args_action_prob_index,
+        rl_loss_func_args_action_prob_times_index,
+        theta_est,
+    )
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,

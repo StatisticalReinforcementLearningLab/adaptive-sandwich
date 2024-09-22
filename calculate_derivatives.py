@@ -195,81 +195,6 @@ def pad_in_study_derivatives_with_zeros(
     return all_derivatives
 
 
-def pad_batched_arg_list_to_max_on_each_dimension(batched_arg_list):
-    """
-    This function makes a new version of batched_arg_list where all the elements
-    have the same size, by padding with zeros so that each argument has the prior
-    maximum size for each dimension across all users.  We also return a list
-    of arrays the sizes of which are the pre-padding array sizes for the users.
-
-    NOTE: Not used currently because the unpadding func can't be differentiated
-    easily. If we could figure out a way to do that, the benefit would be
-    vmapping over all users at once instead of just those with the same shape
-    args.
-    """
-    assert isinstance(batched_arg_list[0], (np.ndarray, jnp.ndarray))
-
-    # Find the maximum size along each axis
-    num_dims = batched_arg_list[0].ndim
-    max_size_per_dim = [0] * num_dims
-    for arg in batched_arg_list:
-        for dim in range(num_dims):
-            if arg.shape[dim] > max_size_per_dim[dim]:
-                max_size_per_dim[dim] = arg.shape[dim]
-
-    # Pad each array with zeros to those max sizes, noop if not needed, and
-    # record original sizes for later trimming
-    batched_zeros_like_list = []
-    padded_batched_arg_list = []
-    for arg in batched_arg_list:
-        batched_zeros_like_list.append(jnp.zeros_like(arg))
-        padded_batched_arg_list.append(
-            jnp.pad(
-                arg,
-                pad_width=[
-                    (0, max_size_per_dim[dim] - arg.shape[dim])
-                    for dim in range(num_dims)
-                ],
-            )
-        )
-
-    return padded_batched_arg_list, batched_zeros_like_list
-
-
-def arg_unpadding_wrapper(func, num_initial_no_pad_args, *args):
-    """
-    This is a little tricky but *args should be of size k + 2n, where the first
-    k elements are not to be unpadded and the next n elements
-    are potentially padded args. The next n are arrays in the shapes of these args
-    pre-padding (or an arbitrary 5d array that signifies no unpadding).
-    We then slice each of these first n down to the sizes of the second
-    n. We must not pass in the shapes to unpad to direclty, because the shapes of
-    any arrays in the body cannot depend on the *values* of any args, but may
-    depend on their shapes.
-
-    NOTE: This function is not used currently.  There is a fundamental challenge:
-    if batching over users, we can't give a list of different shape trim size
-    arrays as one of the batched args.  So this actually only works if there
-    isn't any trimming to be done.  The other thought was to pass in all the
-    trim size arrays to every user, but then we need an index arg the value of
-    which ultimately determines the post-trim size of some array.  Pass in a
-    thing of size the desired index? Then you run into the problem of different
-    length args across users for batching again, and so on.
-    """
-    half_num_pad_args = (len(args) - num_initial_no_pad_args) // 2
-    unpadded_args = []
-    for i, arg in enumerate(
-        args[num_initial_no_pad_args : num_initial_no_pad_args + half_num_pad_args]
-    ):
-        trim_shape = args[num_initial_no_pad_args + half_num_pad_args + i].shape
-        if len(trim_shape) != 5:
-            slice_tuple = tuple(slice(size) for size in trim_shape)
-            unpadded_args.append(arg[slice_tuple])
-        else:
-            unpadded_args.append(arg)
-    return func(*args[:num_initial_no_pad_args], *unpadded_args)
-
-
 def calculate_pi_and_weight_gradients(
     study_df,
     in_study_col_name,
@@ -503,9 +428,6 @@ def get_radon_nikodym_weight(
     beta_target_action_prob_func_args_single_user[action_prob_func_args_beta_index] = (
         beta_target
     )
-
-    # TODO: How could it be that [()] after each of the prob func calls doesn't
-    # make any difference here. ?? Understand. I expect these to be scalars...
 
     pi_beta = action_prob_func(*action_prob_func_args_single_user)
     pi_beta_target = action_prob_func(*beta_target_action_prob_func_args_single_user)

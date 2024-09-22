@@ -60,6 +60,8 @@ rl_loss_func_args_action_prob_times_index=6
 inference_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
 inference_loss_func_args_theta_index=0
 theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_action_centering.py"
+suppress_interactive_data_checks=1
+suppress_all_data_checks=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -101,6 +103,8 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:-: OPT; do
     h  | inference_loss_func_args_theta_index )       needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )            needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     F  | dynamic_seeds )                              needs_arg; dynamic_seeds="$OPTARG" ;;
+    Q  | suppress_interactive_data_checks )           needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
+    q  | suppress_all_data_checks )                   needs_arg; suppress_all_data_checks="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -181,7 +185,9 @@ python after_study_analysis.py analyze-dataset \
   --policy_num_col_name=$policy_num_col_name \
   --calendar_t_col_name=$calendar_t_col_name \
   --user_id_col_name=$user_id_col_name \
-  --action_prob_col_name=$action_prob_col_name
+  --action_prob_col_name=$action_prob_col_name \
+  --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+  --suppress_all_data_checks=$suppress_all_data_checks
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.

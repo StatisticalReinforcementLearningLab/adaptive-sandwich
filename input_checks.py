@@ -1,4 +1,6 @@
 import numpy as np
+from jax import numpy as jnp
+
 from helper_functions import load_function_from_same_named_file
 
 
@@ -123,18 +125,18 @@ def require_action_probabilities_can_be_reconstructed(
         axis=1,
     )
     try:
-        assert np.testing.assert_allclose(
+        np.testing.assert_allclose(
             in_study_df[action_prob_col_name].to_numpy(dtype="float64"),
             reconstructed_action_probs.to_numpy(dtype="float64"),
         )
     except AssertionError as e:
         # pylint: disable=bad-builtin
         answer = input(
-            f"The action probabilities could not be exactly reconstructed by the function and arguments given:\n{str(e)}\n\nContinue? (y/n)\n"
+            f"The action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable.  If not, see the contract for next steps.:\n{str(e)}\n\nContinue? (y/n)\n"
         )
         # pylint: enable=bad-builtin
         if answer.lower() == "y":
-            print("YES!!!")
+            print("Ok, proceeding.")
         elif answer.lower() == "n":
             raise SystemExit from e
         else:
@@ -166,7 +168,7 @@ def require_rl_loss_args_given_for_all_users_at_each_update(
     for policy_num in rl_loss_func_args:
         assert (
             set(rl_loss_func_args[policy_num].keys()) == all_user_ids
-        ), f"Not all users present in RL loss args for olicy number {policy_num}. Please see the contract for details."
+        ), f"Not all users present in RL loss args for policy number {policy_num}. Please see the contract for details."
 
 
 def require_action_prob_func_args_given_for_all_users_at_each_decision(
@@ -351,3 +353,88 @@ def require_valid_action_prob_times_given_if_index_supplied(
 ):
     # Must be strictly increasing. Possibly contiguous?
     pass
+
+
+def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, theta_dim):
+    # This is a test that the correct inference loss/estimating function has
+    # been given, corresponding either to the theta estimation function provided
+    # or the theta estimation procedure used to produce the theta estimate
+    # provided.
+
+    # If the theta estimate is directly provided, another possible failure mode
+    # is that the study dataframe doesn't faithfully represent the data used
+    # to produce that theta estimate.
+
+    try:
+        np.testing.assert_allclose(
+            np.sum(inference_loss_gradients, axis=0),
+            jnp.zeros(theta_dim),
+        )
+    except AssertionError as e:
+        # pylint: disable=bad-builtin
+        answer = input(
+            f"\nTheta estimating functions with args and estimates plugged in do not sum to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n"
+        )
+        # pylint: enable=bad-builtin
+        if answer.lower() == "y":
+            print("Ok, proceeding.")
+        elif answer.lower() == "n":
+            raise SystemExit from e
+        else:
+            print("Please enter 'y' or 'n'.")
+
+
+# TODO: Hotspot for replacing notion of update times
+def require_beta_estimating_functions_sum_to_zero(
+    update_times, algorithm_statistics_by_calendar_t, beta_dim
+):
+    # This is a test that the correct RL loss/estimating function has
+    # been given, along with correct arguments for each update time.
+
+    # If that is true, then the RL loss/estimating function should sum to zero
+    # for each update time when the RESULTING beta estimate and the data used
+    # to produce it are plugged in as the remaining args.
+
+    update_times = sorted(
+        [
+            t
+            for t, value in algorithm_statistics_by_calendar_t.items()
+            if "loss_gradients_by_user_id" in value
+        ]
+    )
+
+    # First we collect the specific times at which the beta estimating functions
+    # don't sum to one. This is for easier debugging.
+    failing_times = []
+    all_update_sums = []
+    for t in update_times:
+        single_update_sum = sum(
+            algorithm_statistics_by_calendar_t[t]["loss_gradients_by_user_id"].values(),
+        )
+        all_update_sums.append(single_update_sum)
+        if not np.allclose(
+            single_update_sum,
+            jnp.zeros((beta_dim, 1)),
+        ):
+            failing_times.append(t)
+
+    # Now, we actually run our assert on a concatenated sum across all update times,
+    # because we are going to ask the user to verify that the max deviation is ok if
+    # the sum across all update times is not within the default tolerance of zero.
+    try:
+        np.testing.assert_allclose(
+            np.concatenate(all_update_sums),
+            jnp.zeros(beta_dim * len(update_times)),
+        )
+    except AssertionError as e:
+        # pylint: disable=bad-builtin
+        answer = input(
+            f"\nBeta estimating function with args and provided beta estimate plugged in does not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n"
+        )
+        # pylint: enable=bad-builtin
+        if answer.lower() == "y":
+            print("Ok, proceeding.")
+        elif answer.lower() == "n":
+            raise SystemExit from e
+        else:
+            print("Please enter 'y' or 'n'.")

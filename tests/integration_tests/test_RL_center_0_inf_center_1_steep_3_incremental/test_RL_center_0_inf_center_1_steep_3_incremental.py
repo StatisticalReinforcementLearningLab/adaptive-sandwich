@@ -18,6 +18,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         inference_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py",
         env_seed_override="1726458459",
         alg_seed_override="1726463458",
+        suppress_interactive_data_checks="1",
     )
 
     assert_real_run_output_as_expected(

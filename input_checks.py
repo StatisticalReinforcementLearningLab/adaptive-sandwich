@@ -4,6 +4,9 @@ from jax import numpy as jnp
 
 from helper_functions import load_function_from_same_named_file
 
+# When we print out objects for debugging, show the whole thing.
+np.set_printoptions(threshold=np.inf)
+
 
 def perform_first_wave_input_checks(
     study_df,
@@ -478,14 +481,6 @@ def require_beta_estimating_functions_sum_to_zero(
     # for each update time when the RESULTING beta estimate and the data used
     # to produce it are plugged in as the remaining args.
 
-    update_times = sorted(
-        [
-            t
-            for t, value in algorithm_statistics_by_calendar_t.items()
-            if "loss_gradients_by_user_id" in value
-        ]
-    )
-
     # First we collect the specific times at which the beta estimating functions
     # don't sum to one. This is for easier debugging.
     failing_times = []
@@ -521,3 +516,26 @@ def require_beta_estimating_functions_sum_to_zero(
             raise SystemExit from e
         else:
             print("Please enter 'y' or 'n'.")
+
+
+# TODO: Also have interactive check if condition number merely high?
+# TODO: Hotspot for replacing notion of update times
+def require_non_singular_avg_hessians_at_each_update(
+    update_times,
+    algorithm_statistics_by_calendar_t,
+):
+
+    for t in update_times:
+        assert (
+            np.linalg.cond(algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"])
+            < 10**3
+        ), f"Poorly conditioned average loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
+
+
+def require_non_singular_avg_hessian_inference(
+    inference_loss_hessians,
+):
+    avg_inference_loss_hessian = jnp.mean(inference_loss_hessians, axis=0)
+    assert (
+        np.linalg.cond(avg_inference_loss_hessian) < 10**3
+    ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."

@@ -402,10 +402,14 @@ def analyze_dataset(
             if "loss_gradients_by_user_id" in value
         ]
     )
-    if not suppress_all_data_checks and not suppress_interactive_data_checks:
-        input_checks.require_beta_estimating_functions_sum_to_zero(
-            update_times, algorithm_statistics_by_calendar_t, beta_dim
+    if not suppress_all_data_checks:
+        input_checks.require_non_singular_avg_hessians_at_each_update(
+            update_times, algorithm_statistics_by_calendar_t
         )
+        if not suppress_interactive_data_checks:
+            input_checks.require_beta_estimating_functions_sum_to_zero(
+                update_times, algorithm_statistics_by_calendar_t, beta_dim
+            )
 
     upper_left_bread_inverse = calculate_upper_left_bread_inverse(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
@@ -729,11 +733,14 @@ def compute_variance_estimates(
         calendar_t_col_name,
     )
 
-    # Make sure theta estimate/estimating functions/study df align
-    if not suppress_all_data_checks and not suppress_interactive_data_checks:
-        input_checks.require_theta_estimating_functions_sum_to_zero(
-            inference_loss_gradients, theta_dim
+    if not suppress_all_data_checks:
+        input_checks.require_non_singular_avg_hessian_inference(
+            inference_loss_hessians,
         )
+        if not suppress_interactive_data_checks:
+            input_checks.require_theta_estimating_functions_sum_to_zero(
+                inference_loss_gradients, theta_dim
+            )
 
     logger.info("Forming adaptive joint meat.")
     # TODO: Small sample corrections
@@ -836,9 +843,9 @@ def form_bread_inverse_matrix(
     beta_dim,
     theta_dim,
     user_ids,
-    loss_gradients,
-    loss_hessians,
-    loss_gradient_derivatives_wrt_pi,
+    inference_loss_gradients,
+    inference_loss_hessians,
+    inference_loss_gradient_derivatives_wrt_pi,
 ):
     existing_rows = upper_left_bread_inverse.shape[0]
 
@@ -863,7 +870,7 @@ def form_bread_inverse_matrix(
     # computed. Note there is also a corresponding RL squeeze, but it happens closer to
     # the gradient computation.
     mixed_theta_pi_loss_derivatives_by_user_id = {
-        user_id: loss_gradient_derivatives_wrt_pi[i].squeeze()
+        user_id: inference_loss_gradient_derivatives_wrt_pi[i].squeeze()
         for i, user_id in enumerate(user_ids)
     }
 
@@ -906,7 +913,7 @@ def form_bread_inverse_matrix(
             # and the sum of the weight gradients with respect to beta for the
             # corresponding decision times
 
-            theta_loss_gradient = loss_gradients[j]
+            theta_loss_gradient = inference_loss_gradients[j]
 
             weight_gradient_sum = jnp.zeros(beta_dim)
 
@@ -957,7 +964,7 @@ def form_bread_inverse_matrix(
             running_entry_holder += mixed_theta_beta_loss_derivative
 
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
-    bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
+    bottom_right_hessian = jnp.mean(inference_loss_hessians, axis=0)
     return jnp.block(
         [
             [

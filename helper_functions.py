@@ -1,3 +1,4 @@
+import os
 import warnings
 import importlib.util
 import importlib.machinery
@@ -33,3 +34,13 @@ def load_module_from_source_file(modname, filename):
     # sys.modules[module.__name__] = module
     loader.exec_module(module)
     return module
+
+
+def load_function_from_same_named_file(filename):
+    module = load_module_from_source_file(filename, filename)
+    try:
+        return module.__dict__[os.path.basename(filename).split(".")[0]]
+    except AttributeError as e:
+        raise ValueError(
+            f"Unable to import function from {filename}.  Please verify the file has the same name as the function of interest (ignoring the extension)."
+        ) from e

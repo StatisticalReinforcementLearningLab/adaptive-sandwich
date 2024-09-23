@@ -21,6 +21,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         env_seed_override="1726458459",
         alg_seed_override="1726463458",
         decisions_between_updates="2",
+        suppress_interactive_data_checks="1",
     )
 
     assert_real_run_output_as_expected(

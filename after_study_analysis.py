@@ -11,6 +11,7 @@ from jax import numpy as jnp
 import scipy
 
 import calculate_derivatives
+import input_checks
 
 
 from helper_functions import (
@@ -259,6 +260,18 @@ def collect_existing_analyses(input_glob):
     required=True,
     help="Name of the column in the study dataframe that gives action probabilities",
 )
+@click.option(
+    "--suppress_interactive_data_checks",
+    type=bool,
+    default=False,
+    help="Flag to suppress any data checks that require user input. This is suitable for tests.",
+)
+@click.option(
+    "--suppress_all_data_checks",
+    type=bool,
+    default=False,
+    help="Flag to suppress all data checks. This is suitable for large simulations.",
+)
 def analyze_dataset(
     study_df_pickle,
     action_prob_func_filename,
@@ -278,145 +291,49 @@ def analyze_dataset(
     calendar_t_col_name,
     user_id_col_name,
     action_prob_col_name,
+    suppress_interactive_data_checks,
+    suppress_all_data_checks,
 ):
     """
-    TODO: Data integrity checks.
-    Reconstruct action probabilities now or later?
 
     I check estimating function sum 0 later, but differentiate between
-    RL and beta side? Also could move check here. Might be  nice to have all
+    RL and beta side? Also could move check here. Might be nice to have all
     checks in same place. Wherever that check is, should allow user to see
     and verify close enough to zero
 
-    Make sure study df sorted within users and across users? .sort_values(by=["user_id", "calendar_t"])
-
-    Make sure every user has entry for union of all decision times across
-    all users.
-
-    Make sure in study is never on for more than one stretch
-
-    Make sure right number of in study rows per user?? May not be precise
+    Make sure in study is never on for more than one stretch EDIT: unclear if
+    this will remain an invariant as we deal with more complicated data missingness
 
     Possibly make sure no real-looking data when in_study is off
 
-    Make sure function args for all users for all t even if not in study
-    policy num the same for all users for each calendar t.  Something that adds
-    nothing to gradients when users are not in the study is needed... maybe
-    think of way to make this happen more directly in response to in study
-    indicator. Well, can pass in zeros or NAs but not use computed gradients,
-    automatically spit out gradient zero somehow.
-
     I think I'm agnostic to indexing of calendar times but should check because
     otherwise need to add a check here to verify required format.
-
-    Verify actions binary
-
-    Verify action column present in study df
-
-    Verify policy num column present in both beta df and study df, and joinable,
-    for instance no policy nums in study df not present in beta df.  Other way
-    is acceptable maybe but could be a warning.
-
-    Verify in study column present in study df
-
-    If no action probabilites vector is specified, ask for verification that they are not used in loss/estimating function(s)
 
     Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
     Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 
     Should be clear from dataframe spec but beta must be vector (not matrix)
 
-    beta df must have policy num as first column and then one column per coordinate of beta
-    nothing else. But.. could reconsider and put array in one column
-
     Codify assumptions that make get_first_applicable_time work.  The main
     thing is an assumption that users don't get different policies at the same
-    time.
+    time.  EDIT: Well... users can have different policies at the same time. So
+    we can't codify this and have to rewrite that function.
 
-    Functions compatible with JAX 0.4.24. And DIFFERENTIABLE with grad and JITTABLE because of vmap.
-    https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html#
-    Tricky ones are control flow, indexing, and shapes not depending on args
+    Codify assumptions used for collect_batched_in_study_actions
 
-    Summarize study df and ask users to verify.
-
-    Codify assumptions used for collect_batched_actions
-
-    Use arg groups/manual checks to help verify args are used correctly
-
-    Specify that action probability function and loss function have to
-    have scalar output.  If estimating function given instead of loss, specify
-    correct vector orientation. I think (beta dim,) vector.
-
-    Write down assumptions about data handling for incremental recruitment.
-    Empty tuples for decision times when not in study and updates where no
-    data is being used for that user (probably they have not been in study yet).
-
-    For any column indices given, check any appropriate constraints for that column.
-    Probabilities between 0 and 1 (or nan).  In fact probabilites of 0 or 1 illustrate
-    a non-compliant RL algorithm so this is strict (though using nan when out of study).
-    Mentioned above, but actions binary. calendar_t an integer. user_id hashable, not a float.
-    This helps data validation but also simply that the indices are correct.
-
-    Do I need to mandate whether beta is 1 or 2d? Yes.
-
-    Theta loss makes assumptions about colnames. Theta index can be called
-    whatever, but everything else has to be a colname in study df.
-    This can be verified. Detects action probs by name. Must take Tx1 vectors only
-
-    Theta estimation function must only take study df.  It can be verified to only
-    have one arg at least, and this must be communicated.
-
-    Policy num has to be consecutive integers now... should I relax this? If not
-    check for it
-
-    Make it clear that args are needed for all users for each decision time/policy num in those
-    dicts, but with empty tuples or None or something Falsey for times out of study.
-    Can check this against study df!
-
-    Check calendar t consecutive..
-
-    Check that pi args given for all in study rows, not for others.
+    Can we check rl loss and policy arg Falsiness against study df availability indicators?
 
     Make the user give the min and max probabilities, and I'll enforce it
 
-    I am making assumptions about the times that the action probs correspond to if supplied
-    in rl loss/estimating function. I think currently I am requiring an entry for all times going into an update
-    Probably this needs to change to be for all in study times? Eh, padding is not obvious. Needs zeros
-    before and after... I could deduce from the study dataframe but I'm just gonna require entries for all times
-    that have occurred before update.  Will require padding with nans, and
-    THUS THE RL LOSS/ESTIMATING FUNCTION MUST compute correctly with nan-padded action probs.
-    This can be as simple as x = x[~numpy.isnan(x)]
-
-    Verify betas the same across all users for given decision/update time
-
-    Flag to suppress interactive checks for simulations
-
-    Functions have same name as files that contain
+    Flag to toggle interactive checks, if any
 
     I assume someone is in the study at each decision time. Check for this or
-    see if shouldn't always be true.
+    see if shouldn't always be true. EDIT: Is this true?
 
     I also assume someone has some data to contribute at each update time. Check
-    for this or see if shouldn't always be true.
+    for this or see if shouldn't always be true. EDIT: Is this true?
 
-    If you pass actionprobs, you must also pass a same shape array with the times
-    tha they apply to.  This is because padding to make the times clear is not so nice.
-    Can't filter in a simple way and still be JAX-compatible. Check that neither
-    or both supplied, and if supplied, same size. Check valid decision times.
-
-    Action prob times strictly increasing.  Should probably be contiguous but could be some weird case. Maybe warning if not.
-
-    Do I actually need all times for all people anymore? If only in study rows are given,
-    with in the indicator always on, does that cause problems? Yes, I'm pretty sure the zero gradients
-    won't magically show up, but this seems easy to fix.
-
-    Assuming scalar types in study df.
-
-    Make sure all policy numbers in args are in study df. Maybe some way of making sure
-    the policy numbers in study df not in args are okay?
-
-    Make sure initial policy number doesn't show up as key in update args-- this signals
-    off by one error probably.  The key is the number of the RESULTING policy.
+    Should I have an explicit check for theta func arg just being study df
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -425,12 +342,38 @@ def analyze_dataset(
     )
 
     study_df = pickle.load(study_df_pickle)
+    # TODO: Should I sort? Check how slow it is, for one.
+    # study_df = pickle.load(study_df_pickle).sort_values(
+    #     by=[user_id_col_name, calendar_t_col_name]
+    # )
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     rl_loss_func_args = pickle.load(rl_loss_func_args_pickle)
 
     beta_dim = calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index)
 
     theta_est = estimate_theta(study_df, theta_calculation_func_filename)
+
+    # This does the first round of input validation, before computing any
+    # gradients
+    if not suppress_all_data_checks:
+        input_checks.perform_first_wave_input_checks(
+            study_df,
+            in_study_col_name,
+            action_col_name,
+            policy_num_col_name,
+            calendar_t_col_name,
+            user_id_col_name,
+            action_prob_col_name,
+            action_prob_func_filename,
+            action_prob_func_args,
+            action_prob_func_args_beta_index,
+            rl_loss_func_args,
+            rl_loss_func_args_beta_index,
+            rl_loss_func_args_action_prob_index,
+            rl_loss_func_args_action_prob_times_index,
+            theta_est,
+            suppress_interactive_data_checks,
+        )
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
         study_df,
@@ -448,10 +391,33 @@ def analyze_dataset(
         rl_loss_func_args_action_prob_index,
         rl_loss_func_args_action_prob_times_index,
     )
+
+    # List of times that were the first applicable time for some update
+    # Sorting shouldn't be necessary, as insertion order should be chronological
+    # but we do it just in case.
+    update_times = sorted(
+        [
+            t
+            for t, value in algorithm_statistics_by_calendar_t.items()
+            if "loss_gradients_by_user_id" in value
+        ]
+    )
+    if not suppress_all_data_checks:
+        input_checks.require_non_singular_avg_hessians_at_each_update(
+            update_times, algorithm_statistics_by_calendar_t
+        )
+        if not suppress_interactive_data_checks:
+            input_checks.require_beta_estimating_functions_sum_to_zero(
+                update_times, algorithm_statistics_by_calendar_t, beta_dim
+            )
+
     upper_left_bread_inverse = calculate_upper_left_bread_inverse(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t
     )
 
+    # Note we perform the corresponding theta estimating function check inside
+    # of this function, because it can illustrate fundamental problems and we
+    # should short circuit as soon as possible if so.n
     (
         adaptive_sandwich_var_estimate,
         classical_sandwich_var_estimate,
@@ -465,6 +431,7 @@ def analyze_dataset(
         beta_dim,
         theta_est,
         algorithm_statistics_by_calendar_t,
+        update_times,
         upper_left_bread_inverse,
         inference_loss_func_filename,
         inference_loss_func_args_theta_index,
@@ -472,6 +439,8 @@ def analyze_dataset(
         user_id_col_name,
         action_prob_col_name,
         calendar_t_col_name,
+        suppress_interactive_data_checks,
+        suppress_all_data_checks,
     )
 
     # Write analysis results to same directory that input files are in
@@ -728,6 +697,7 @@ def compute_variance_estimates(
     beta_dim,
     theta_est,
     algorithm_statistics_by_calendar_t,
+    update_times,
     upper_left_bread_inverse,
     inference_loss_func_filename,
     inference_loss_func_args_theta_index,
@@ -735,42 +705,58 @@ def compute_variance_estimates(
     user_id_col_name,
     action_prob_col_name,
     calendar_t_col_name,
+    suppress_interactive_data_checks,
+    suppress_all_data_checks,
 ):
-    # List of times that were the first applicable time for some update
-    # Sorting shouldn't be necessary, as insertion order should be chronological
-    # but we do it just in case.
-    update_times = sorted(
-        [
-            t
-            for t, value in algorithm_statistics_by_calendar_t.items()
-            if "loss_gradients_by_user_id" in value
-        ]
-    )
-
     # Collect list of user ids to guarantee we have a shared, fixed order
     # to iterate through in a variety of places.
     user_ids = study_df[user_id_col_name].unique()
 
+    theta_dim = len(theta_est)
+
     logger.info("Forming adaptive sandwich variance estimator.")
 
-    logger.info("Calculating all derivatives needed with JAX")
-    loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-        calculate_derivatives.calculate_inference_loss_derivatives(
-            study_df,
-            theta_est,
-            inference_loss_func_filename,
-            inference_loss_func_args_theta_index,
-            user_ids,
-            user_id_col_name,
-            action_prob_col_name,
-            in_study_col_name,
-            calendar_t_col_name,
-        )
+    logger.info("Calculating all inference-side derivatives needed with JAX.")
+    (
+        inference_loss_gradients,
+        inference_loss_hessians,
+        inference_loss_gradient_pi_derivatives,
+    ) = calculate_derivatives.calculate_inference_loss_derivatives(
+        study_df,
+        theta_est,
+        inference_loss_func_filename,
+        inference_loss_func_args_theta_index,
+        user_ids,
+        user_id_col_name,
+        action_prob_col_name,
+        in_study_col_name,
+        calendar_t_col_name,
     )
 
-    logger.info("Forming adaptive bread inverse and inverting.")
+    if not suppress_all_data_checks:
+        input_checks.require_non_singular_avg_hessian_inference(
+            inference_loss_hessians,
+        )
+        if not suppress_interactive_data_checks:
+            input_checks.require_theta_estimating_functions_sum_to_zero(
+                inference_loss_gradients, theta_dim
+            )
+
+    logger.info("Forming adaptive joint meat.")
+    # TODO: Small sample corrections
+    joint_meat_matrix = form_meat_matrix(
+        theta_dim,
+        update_times,
+        beta_dim,
+        algorithm_statistics_by_calendar_t,
+        user_ids,
+        inference_loss_gradients,
+    )
+    logger.info("Adaptive joint meat:")
+    logger.info(joint_meat_matrix)
+
+    logger.info("Forming adaptive joint bread inverse and inverting.")
     max_t = study_df[calendar_t_col_name].max()
-    theta_dim = len(theta_est)
     joint_bread_inverse_matrix = form_bread_inverse_matrix(
         upper_left_bread_inverse,
         max_t,
@@ -779,28 +765,15 @@ def compute_variance_estimates(
         beta_dim,
         theta_dim,
         user_ids,
-        loss_gradients,
-        loss_hessians,
-        loss_gradient_pi_derivatives,
+        inference_loss_gradients,
+        inference_loss_hessians,
+        inference_loss_gradient_pi_derivatives,
     )
     logger.info("Adaptive joint bread inverse:")
     logger.info(joint_bread_inverse_matrix)
     joint_bread_matrix = invert_matrix_and_check_conditioning(
         joint_bread_inverse_matrix
     )
-
-    logger.info("Forming adaptive meat.")
-    # TODO: Small sample corrections
-    joint_meat_matrix = form_meat_matrix(
-        theta_dim,
-        update_times,
-        beta_dim,
-        algorithm_statistics_by_calendar_t,
-        user_ids,
-        loss_gradients,
-    )
-    logger.info("Adaptive joint meat:")
-    logger.info(joint_meat_matrix)
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
@@ -813,68 +786,54 @@ def compute_variance_estimates(
     logger.info("Finished forming adaptive sandwich variance estimator.")
 
     return (
-        # These are what's actually needed
+        # This bottom right corner of the joint variance matrix is the portion
+        # corresponding to just theta.
         joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
-        get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians),
+        get_classical_sandwich_var(
+            theta_dim, inference_loss_gradients, inference_loss_hessians
+        ),
         # These are returned for debugging purposes
         joint_bread_inverse_matrix,
         joint_meat_matrix,
-        loss_gradients,
-        loss_hessians,
-        loss_gradient_pi_derivatives,
+        inference_loss_gradients,
+        inference_loss_hessians,
+        inference_loss_gradient_pi_derivatives,
     )
 
 
 # TODO: doc string
+# TODO: This is a hotspot for update time logic to be removed
 def form_meat_matrix(
-    theta_dim, update_times, beta_dim, algo_stats_dict, user_ids, loss_gradients
+    theta_dim,
+    update_times,
+    beta_dim,
+    algo_stats_dict,
+    user_ids,
+    inference_loss_gradients,
 ):
-    num_rows_cols = beta_dim * len(update_times) + theta_dim
+    beta_portion = beta_dim * len(update_times)
+    num_rows_and_cols = beta_dim * len(update_times) + theta_dim
     # TODO: Why do I do this type conversion?
-    running_meat_matrix = jnp.zeros((num_rows_cols, num_rows_cols)).astype(jnp.float32)
-    estimating_function_sum = jnp.zeros((num_rows_cols, 1))
-    fallback_beta_gradient = jnp.zeros(beta_dim)
+    running_meat_matrix = jnp.zeros((num_rows_and_cols, num_rows_and_cols)).astype(
+        jnp.float32
+    )
 
     for i, user_id in enumerate(user_ids):
         user_meat_vector = jnp.concatenate(
             # beta estimating functions
-            # TODO: Pretty sure this should have zeros when not in study but verify
-            # TODO: Should arguably set things up so fallback isn't needed (0 gradients
-            # for everyone not in study) but maybe good to have regardless. Could
-            # also add a check that all update times have gradients for all users.
             [
-                algo_stats_dict[t]["loss_gradients_by_user_id"].get(
-                    user_id, fallback_beta_gradient
-                )
+                algo_stats_dict[t]["loss_gradients_by_user_id"][user_id]
                 for t in update_times
             ]
             # theta estimating function
-            + [loss_gradients[i]],
+            + [inference_loss_gradients[i]],
         ).reshape(-1, 1)
         running_meat_matrix += jnp.outer(user_meat_vector, user_meat_vector)
-        estimating_function_sum += user_meat_vector
-
-    # TODO: The check for the beta gradients should probably be upstream at the
-    # time of reformatting the RL data in the intermediate stage. Also we may want
-    # this to be more than a warning eventually.
-    if not jnp.allclose(
-        estimating_function_sum,
-        jnp.zeros((num_rows_cols, 1)),
-    ):
-        warnings.warn(
-            f"Estimating functions with estimate plugged in do not sum to within required tolerance of zero: {estimating_function_sum}"
-        )
 
     return running_meat_matrix / len(user_ids)
 
 
-# TODO: Handle get_loss_gradient generic interface.  Probably need some function that just takes a
-# study df, state feats, treat feats, and theta est
-# TODO: Also think about how to specify whether to treat something as action probabilities
-# TODO: idk if beta dim should be included in here
 # TODO: doc string
-# TODO: Why am I passing in update times again? Can I just derive from study df?
-# TODO: Do the three checks in the existing after study file
 # TODO: This is a hotspot for update time logic to be removed
 def form_bread_inverse_matrix(
     upper_left_bread_inverse,
@@ -884,9 +843,9 @@ def form_bread_inverse_matrix(
     beta_dim,
     theta_dim,
     user_ids,
-    loss_gradients,
-    loss_hessians,
-    loss_gradient_derivatives_wrt_pi,
+    inference_loss_gradients,
+    inference_loss_hessians,
+    inference_loss_gradient_derivatives_wrt_pi,
 ):
     existing_rows = upper_left_bread_inverse.shape[0]
 
@@ -911,7 +870,7 @@ def form_bread_inverse_matrix(
     # computed. Note there is also a corresponding RL squeeze, but it happens closer to
     # the gradient computation.
     mixed_theta_pi_loss_derivatives_by_user_id = {
-        user_id: loss_gradient_derivatives_wrt_pi[i].squeeze()
+        user_id: inference_loss_gradient_derivatives_wrt_pi[i].squeeze()
         for i, user_id in enumerate(user_ids)
     }
 
@@ -954,7 +913,7 @@ def form_bread_inverse_matrix(
             # and the sum of the weight gradients with respect to beta for the
             # corresponding decision times
 
-            theta_loss_gradient = loss_gradients[j]
+            theta_loss_gradient = inference_loss_gradients[j]
 
             weight_gradient_sum = jnp.zeros(beta_dim)
 
@@ -1005,7 +964,7 @@ def form_bread_inverse_matrix(
             running_entry_holder += mixed_theta_beta_loss_derivative
 
         bottom_left_row_blocks.append(running_entry_holder / len(user_ids))
-    bottom_right_hessian = jnp.mean(loss_hessians, axis=0)
+    bottom_right_hessian = jnp.mean(inference_loss_hessians, axis=0)
     return jnp.block(
         [
             [

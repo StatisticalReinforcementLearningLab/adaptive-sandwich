@@ -1,7 +1,6 @@
 import pickle
 import os
 import logging
-import warnings
 import pathlib
 import glob
 
@@ -402,14 +401,16 @@ def analyze_dataset(
             if "loss_gradients_by_user_id" in value
         ]
     )
+    # The logic could be simplified with a nested if, BUT I specifically want to
+    # do this check first, because it's more of a foundational check.
+    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+        input_checks.require_beta_estimating_functions_sum_to_zero(
+            update_times, algorithm_statistics_by_calendar_t, beta_dim
+        )
     if not suppress_all_data_checks:
         input_checks.require_non_singular_avg_hessians_at_each_update(
             update_times, algorithm_statistics_by_calendar_t
         )
-        if not suppress_interactive_data_checks:
-            input_checks.require_beta_estimating_functions_sum_to_zero(
-                update_times, algorithm_statistics_by_calendar_t, beta_dim
-            )
 
     upper_left_bread_inverse = calculate_upper_left_bread_inverse(
         study_df, user_id_col_name, beta_dim, algorithm_statistics_by_calendar_t

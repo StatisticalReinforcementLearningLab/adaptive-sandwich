@@ -15,7 +15,7 @@ import input_checks
 
 from helper_functions import (
     invert_matrix_and_check_conditioning,
-    load_module_from_source_file,
+    load_function_from_same_named_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -490,27 +490,15 @@ def calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index):
 # TODO: Docstring
 def estimate_theta(study_df, theta_calculation_func_filename):
     logger.info("Forming theta estimate.")
-    # Retrieve the RL function from file
-    theta_calculation_module = load_module_from_source_file(
-        "theta_calculation", theta_calculation_func_filename
-    )
-    # NOTE the assumption that the function and file have the same name
-    theta_calculation_func_name = os.path.basename(
+    theta_calculation_func = load_function_from_same_named_file(
         theta_calculation_func_filename
-    ).split(".")[0]
-    try:
-        theta_calculation_func = getattr(
-            theta_calculation_module, theta_calculation_func_name
-        )
-    except AttributeError as e:
-        raise ValueError(
-            "Unable to import theta estimation function.  Please verify the file has the same name as the function of interest."
-        ) from e
+    )
 
     return theta_calculation_func(study_df)
 
 
 # TODO: docstring
+# TODO: One of the hotspots for update time logic to be removed
 def calculate_algorithm_statistics(
     study_df,
     in_study_col_name,
@@ -664,7 +652,7 @@ def calculate_upper_left_bread_inverse(
                 # link to the same explanation in both places.
                 # Maybe link to a document with a picture...
                 # TODO: This assumes indexing starts at 1
-                mixed_theta_beta_loss_derivative = jnp.matmul(
+                mixed_beta_loss_derivative = jnp.matmul(
                     t_stats_dict["loss_gradient_pi_derivatives_by_user_id"][user_id][
                         :,
                         lower_t - 1 : upper_t - 1,
@@ -674,7 +662,7 @@ def calculate_upper_left_bread_inverse(
                         :,
                     ],
                 )
-                running_entry_holder += mixed_theta_beta_loss_derivative
+                running_entry_holder += mixed_beta_loss_derivative
             # TODO: Use jnp.block instead of indexing
             output_matrix = output_matrix.at[
                 (update_idx) * beta_dim : (update_idx + 1) * beta_dim,
@@ -734,14 +722,15 @@ def compute_variance_estimates(
         calendar_t_col_name,
     )
 
+    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+        input_checks.require_theta_estimating_functions_sum_to_zero(
+            inference_loss_gradients, theta_dim
+        )
+
     if not suppress_all_data_checks:
         input_checks.require_non_singular_avg_hessian_inference(
             inference_loss_hessians,
         )
-        if not suppress_interactive_data_checks:
-            input_checks.require_theta_estimating_functions_sum_to_zero(
-                inference_loss_gradients, theta_dim
-            )
 
     logger.info("Forming adaptive joint meat.")
     # TODO: Small sample corrections
@@ -778,8 +767,8 @@ def compute_variance_estimates(
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
-    # at rate sqrt(n), so in finite samples we approximate the observed variance of theta itself
-    # by dividing the variance of that limiting normal by a factor of n.  This is happening in the
+    # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat
+    # by dividing the variance of that limiting normal by a factor of n.  This is happening
     # behind the scenes in the classical function as well.
     joint_adaptive_variance = (
         joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
@@ -812,9 +801,7 @@ def form_meat_matrix(
     user_ids,
     inference_loss_gradients,
 ):
-    beta_portion = beta_dim * len(update_times)
     num_rows_and_cols = beta_dim * len(update_times) + theta_dim
-    # TODO: Why do I do this type conversion?
     running_meat_matrix = jnp.zeros((num_rows_and_cols, num_rows_and_cols)).astype(
         jnp.float32
     )

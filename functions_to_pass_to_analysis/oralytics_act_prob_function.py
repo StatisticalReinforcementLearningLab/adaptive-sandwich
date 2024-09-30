@@ -1,6 +1,5 @@
-# %%
 import jax.numpy as jnp
-import jax.scipy.special as special
+from jax.scipy import special
 
 randomvars = [
     1.764052345967664,
@@ -5039,7 +5038,11 @@ def oralytics_act_prob_function(
     dim = 15
 
     mu = beta[:dim].reshape(-1, 1)
-    var = beta[dim:].reshape(-1, dim)
+    utvar_terms = beta[dim:]
+    idx = jnp.triu_indices(dim)
+    utvar = jnp.zeros((dim, dim), dtype=jnp.float32).at[idx].set(utvar_terms)
+    var = utvar + utvar.T - jnp.diag(jnp.diag(utvar))
+    # var = beta[dim:].reshape(-1, dim)
 
     mu_adv = mu[-n_params:]
     var_adv = var[-n_params:, -n_params:]

@@ -1,4 +1,6 @@
 import collections
+import logging
+
 import numpy as np
 from jax import numpy as jnp
 
@@ -6,6 +8,13 @@ from helper_functions import load_function_from_same_named_file
 
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
 
 
 def perform_first_wave_input_checks(
@@ -40,7 +49,7 @@ def perform_first_wave_input_checks(
         rl_loss_func_args, rl_loss_func_args_beta_index
     )
     require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_loss_args(
-        study_df, policy_num_col_name, rl_loss_func_args
+        study_df, in_study_col_name, policy_num_col_name, rl_loss_func_args
     )
     if not suppress_interactive_data_checks:
         confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
@@ -80,7 +89,7 @@ def perform_first_wave_input_checks(
     require_action_prob_func_args_given_for_all_users_at_each_decision(
         study_df, user_id_col_name, action_prob_func_args
     )
-    require_action_prob_func_args_given_for_all_deicision_times(
+    require_action_prob_func_args_given_for_all_decision_times(
         study_df, calendar_t_col_name, action_prob_func_args
     )
     require_beta_is_1D_array_in_action_prob_args(
@@ -130,6 +139,7 @@ def require_action_probabilities_can_be_reconstructed(
     action_prob_func_filename,
     action_prob_func_args,
 ):
+    logger.info("Reconstructing action probabilities from function and arguments.")
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
@@ -161,6 +171,7 @@ def require_action_probabilities_can_be_reconstructed(
 def require_all_users_have_all_times_in_study_df(
     study_df, calendar_t_col_name, user_id_col_name
 ):
+    logger.info("Checking that all users have the same set of unique calendar times.")
     # Get the unique calendar times
     unique_calendar_times = set(study_df[calendar_t_col_name].unique())
 
@@ -179,6 +190,7 @@ def require_all_users_have_all_times_in_study_df(
 def require_rl_loss_args_given_for_all_users_at_each_update(
     study_df, user_id_col_name, rl_loss_func_args
 ):
+    logger.info("Checking that RL loss args are given for all users at each update.")
     all_user_ids = set(study_df[user_id_col_name].unique())
     for policy_num in rl_loss_func_args:
         assert (
@@ -191,6 +203,9 @@ def require_action_prob_func_args_given_for_all_users_at_each_decision(
     user_id_col_name,
     action_prob_func_args,
 ):
+    logger.info(
+        "Checking that action prob function args are given for all users at each decision time"
+    )
     all_user_ids = set(study_df[user_id_col_name].unique())
     for decision_time in action_prob_func_args:
         assert (
@@ -198,9 +213,12 @@ def require_action_prob_func_args_given_for_all_users_at_each_decision(
         ), f"Not all users present in RL loss args for olicy number {decision_time}. Please see the contract for details."
 
 
-def require_action_prob_func_args_given_for_all_deicision_times(
+def require_action_prob_func_args_given_for_all_decision_times(
     study_df, calendar_t_col_name, action_prob_func_args
 ):
+    logger.info(
+        "Checking that action prob function args are given for all decision times"
+    )
     all_times = set(study_df[calendar_t_col_name].unique())
 
     assert (
@@ -217,6 +235,7 @@ def require_all_named_columns_present_in_study_df(
     user_id_col_name,
     action_prob_col_name,
 ):
+    logger.info("Checking that all named columns are present in the study dataframe.")
     assert (
         in_study_col_name in study_df.columns
     ), f"{in_study_col_name} not in study df."
@@ -234,6 +253,7 @@ def require_all_named_columns_present_in_study_df(
 
 
 def require_binary_actions(study_df, in_study_col_name, action_col_name):
+    logger.info("Checking that actions are binary.")
     assert (
         study_df[study_df[in_study_col_name] == 1][action_col_name]
         .astype("int64")
@@ -243,24 +263,40 @@ def require_binary_actions(study_df, in_study_col_name, action_col_name):
 
 
 def require_binary_in_study_indicators(study_df, in_study_col_name):
+    logger.info("Checking that in-study indicators are binary.")
     assert (
         study_df[study_df[in_study_col_name] == 1][in_study_col_name]
         .astype("int64")
         .isin([0, 1])
         .all()
-    ), "In study indicators are not binary."
+    ), "In-study indicators are not binary."
 
 
 def require_consecutive_integer_policy_numbers(
     study_df, in_study_col_name, policy_num_col_name
 ):
+
     # Maybe any negative number taken to be a fallback policy, everything else
     # consecutive integers. Consecutive might not be feasible tho given app
     # opening issue.
 
     # TODO: This probably isn't going to be a requirement when we move away from
     # update times... remove if so.
-    pass
+    # TODO: This is a somewhat rough check of this, could also check nondecreasing temporally
+
+    logger.info(
+        "Checking that in-study, non-fallback policy numbers are consecutive integers."
+    )
+
+    in_study_df = study_df[study_df[in_study_col_name] == 1]
+    positive_policy_df = in_study_df[in_study_df[policy_num_col_name] >= 0]
+    assert np.array_equal(
+        positive_policy_df[policy_num_col_name].unique(),
+        range(
+            positive_policy_df[policy_num_col_name].min(),
+            positive_policy_df[policy_num_col_name].max() + 1,
+        ),
+    ), "Policy numbers are not consecutive integers."
 
 
 def require_consecutive_integer_calendar_times(study_df, calendar_t_col_name):
@@ -268,6 +304,7 @@ def require_consecutive_integer_calendar_times(study_df, calendar_t_col_name):
     # gaps in the integers covered.  But we have other checks that all users
     # have same times, etc.
     # Note these times should be well-formed even when the user is not in the study.
+    logger.info("Checking that calendar times are consecutive integers.")
     assert np.array_equal(
         study_df[calendar_t_col_name].unique(),
         range(
@@ -277,6 +314,7 @@ def require_consecutive_integer_calendar_times(study_df, calendar_t_col_name):
 
 
 def require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name):
+    logger.info("Checking that user IDs are hashable.")
     isinstance(
         study_df[study_df[in_study_col_name] == 1][user_id_col_name][0],
         collections.abc.Hashable,
@@ -284,6 +322,7 @@ def require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name):
 
 
 def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name):
+    logger.info("Checking that action probabilities are in the range [0, 1].")
     # TODO: Can we even require not 0 or 1? Illustrates non-compliant RL algorithm
     study_df[action_prob_col_name].between(0, 1).all()
 
@@ -291,15 +330,22 @@ def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name)
 def require_no_policy_numbers_present_in_rl_loss_args_but_not_study_df(
     study_df, policy_num_col_name, rl_loss_func_args
 ):
+    logger.info(
+        "Checking that policy numbers in RL loss args are present in the study dataframe."
+    )
     assert set(rl_loss_func_args.keys()).issubset(
         study_df[policy_num_col_name].unique()
     ), "There are policy numbers present in RL loss args but not in the study dataframe. Please see the contract for details."
 
 
 def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_loss_args(
-    study_df, policy_num_col_name, rl_loss_func_args
+    study_df, in_study_col_name, policy_num_col_name, rl_loss_func_args
 ):
-    min_positive_policy_num = study_df[study_df[policy_num_col_name] >= 0][
+    logger.info(
+        "Checking that all policy numbers in the study dataframe are present in the RL loss args."
+    )
+    in_study_df = study_df[study_df[in_study_col_name] == 1]
+    min_positive_policy_num = in_study_df[in_study_df[policy_num_col_name] >= 0][
         policy_num_col_name
     ].min()
     assert set(
@@ -314,6 +360,9 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
 def confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
     rl_loss_func_args_action_prob_index,
 ):
+    logger.info(
+        "Confirming that action probabilities are not in RL loss args IF their index is not specified"
+    )
     if rl_loss_func_args_action_prob_index < 0:
         # pylint: disable=bad-builtin
         answer = input(
@@ -339,6 +388,7 @@ def require_action_prob_times_given_if_index_supplied(
     rl_loss_func_args_action_prob_index,
     rl_loss_func_args_action_prob_times_index,
 ):
+    logger.info("Checking that action prob times are given if index is supplied.")
     if rl_loss_func_args_action_prob_index >= 0:
         assert rl_loss_func_args_action_prob_times_index >= 0 and (
             rl_loss_func_args_action_prob_times_index
@@ -350,6 +400,7 @@ def require_action_prob_index_given_if_times_supplied(
     rl_loss_func_args_action_prob_index,
     rl_loss_func_args_action_prob_times_index,
 ):
+    logger.info("Checking that action prob index is given if times are supplied.")
     if rl_loss_func_args_action_prob_times_index >= 0:
         assert rl_loss_func_args_action_prob_index >= 0 and (
             rl_loss_func_args_action_prob_times_index
@@ -387,6 +438,9 @@ def verify_study_df_summary_satisfactory(
 def require_betas_match_in_rl_loss_args_each_update(
     rl_loss_func_args, rl_loss_func_args_beta_index
 ):
+    logger.info(
+        "Checking that betas match across users for each update in the RL loss args."
+    )
     for policy_num in rl_loss_func_args:
         first_beta = None
         for user_id in rl_loss_func_args[policy_num]:
@@ -404,6 +458,9 @@ def require_betas_match_in_rl_loss_args_each_update(
 def require_betas_match_in_action_prob_func_args_each_decision(
     action_prob_func_args, action_prob_func_args_beta_index
 ):
+    logger.info(
+        "Checking that betas match across users for each decision time in the action prob args."
+    )
     for decision_time in action_prob_func_args:
         first_beta = None
         for user_id in action_prob_func_args[decision_time]:
@@ -426,6 +483,7 @@ def require_valid_action_prob_times_given_if_index_supplied(
     rl_loss_func_args,
     rl_loss_func_args_action_prob_times_index,
 ):
+    logger.info("Checking that action prob times are valid if index is supplied.")
     min_time = study_df[calendar_t_col_name].min()
     max_time = study_df[calendar_t_col_name].max()
     for args_by_user in rl_loss_func_args.values():
@@ -450,7 +508,7 @@ def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, the
     # If the theta estimate is directly provided, another possible failure mode
     # is that the study dataframe doesn't faithfully represent the data used
     # to produce that theta estimate.
-
+    logger.info("Checking that theta estimating functions sum to zero across users")
     try:
         np.testing.assert_allclose(
             np.sum(inference_loss_gradients, axis=0),
@@ -474,6 +532,9 @@ def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, the
 def require_beta_estimating_functions_sum_to_zero(
     update_times, algorithm_statistics_by_calendar_t, beta_dim
 ):
+    logger.info(
+        "Checking that beta estimating functions sum to zero across users for each update"
+    )
     # This is a test that the correct RL loss/estimating function has
     # been given, along with correct arguments for each update time.
 
@@ -520,22 +581,35 @@ def require_beta_estimating_functions_sum_to_zero(
 
 # TODO: Also have interactive check if condition number merely high?
 # TODO: Hotspot for replacing notion of update times
+# TODO: Remove breakpoint eventually
 def require_non_singular_avg_hessians_at_each_update(
     update_times,
     algorithm_statistics_by_calendar_t,
 ):
-
+    logger.info(
+        "Checking that average loss hessians for RL are not singular at each update time"
+    )
     for t in update_times:
-        assert (
-            np.linalg.cond(algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"])
-            < 10**3
-        ), f"Poorly conditioned average loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
+        try:
+            assert (
+                np.linalg.cond(
+                    algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"]
+                )
+                < 10**3
+            ), f"Poorly conditioned average loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
+        except AssertionError:
+            breakpoint()
 
 
+# TODO: Remove breakpoint eventually
 def require_non_singular_avg_hessian_inference(
     inference_loss_hessians,
 ):
+    logger.info("Checking that average loss hessian for inference is not singular")
     avg_inference_loss_hessian = jnp.mean(inference_loss_hessians, axis=0)
-    assert (
-        np.linalg.cond(avg_inference_loss_hessian) < 10**3
-    ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."
+    try:
+        assert (
+            np.linalg.cond(avg_inference_loss_hessian) < 10**3
+        ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."
+    except AssertionError:
+        breakpoint()

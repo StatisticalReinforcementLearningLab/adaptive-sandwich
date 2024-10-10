@@ -380,7 +380,7 @@ def analyze_dataset(
                 "theta_est": theta_est,
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-                "joint_adaptive_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+                "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
                 "joint_meat_matrix": joint_meat_matrix,
                 "inference_loss_gradients": inference_loss_gradients,
                 "inference_loss_hessians": inference_loss_hessians,

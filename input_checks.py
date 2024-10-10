@@ -294,12 +294,18 @@ def require_consecutive_integer_policy_numbers(
     )
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
-    positive_policy_df = in_study_df[in_study_df[policy_num_col_name] >= 0]
+    nonnegative_policy_df = in_study_df[in_study_df[policy_num_col_name] >= 0]
+    # Ideally we actually have integers, but for legacy reasons we will support
+    # floats as well.
+    if nonnegative_policy_df[policy_num_col_name].dtype == "float64":
+        nonnegative_policy_df[policy_num_col_name] = nonnegative_policy_df[
+            policy_num_col_name
+        ].astype("int64")
     assert np.array_equal(
-        positive_policy_df[policy_num_col_name].unique(),
+        nonnegative_policy_df[policy_num_col_name].unique(),
         range(
-            positive_policy_df[policy_num_col_name].min(),
-            positive_policy_df[policy_num_col_name].max() + 1,
+            nonnegative_policy_df[policy_num_col_name].min(),
+            nonnegative_policy_df[policy_num_col_name].max() + 1,
         ),
     ), "Policy numbers are not consecutive integers."
 

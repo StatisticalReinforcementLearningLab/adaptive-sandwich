@@ -4,6 +4,7 @@ import logging
 import numpy as np
 from jax import numpy as jnp
 
+from constants import SmallSampleCorrections
 from helper_functions import load_function_from_same_named_file
 
 # When we print out objects for debugging, show the whole thing.
@@ -34,6 +35,8 @@ def perform_first_wave_input_checks(
     rl_loss_func_args_action_prob_times_index,
     theta_est,
     suppress_interactive_data_checks,
+    small_sample_correction,
+    meat_modifier_func_filename,
 ):
     # TODO: Also, maybe this wave shouldn't include loading functions
     # supplied--do action prob reconstruction, theta estimation, estimating function sum, etc. in a later wave.
@@ -125,9 +128,11 @@ def perform_first_wave_input_checks(
 
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
-    # Note that theta function can only take study df as an argument, but this
-    # will have already failed by the time we get here when attempting to form
-    # the theta estimate.
+
+    ### Validate small sample correction
+    require_custom_small_sample_correction_function_provided_if_selected(
+        small_sample_correction, meat_modifier_func_filename
+    )
 
 
 def require_action_probabilities_can_be_reconstructed(
@@ -613,3 +618,15 @@ def require_non_singular_avg_hessian_inference(
         ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."
     except AssertionError:
         breakpoint()
+
+
+def require_custom_small_sample_correction_function_provided_if_selected(
+    small_sample_correction, meat_modifier_func_filename
+):
+    if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
+        logger.info(
+            "Checking that custom meat modifier function is actually provided if the option is selected."
+        )
+        assert (
+            meat_modifier_func_filename is not None
+        ), "No custom meat modifier function provided even though the corresponding small sample correction option was selected. Please see the contract for details."

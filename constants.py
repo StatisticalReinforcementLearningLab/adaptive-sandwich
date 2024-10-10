@@ -42,3 +42,9 @@ class RLStudyArgs:
     RECRUIT_T = "recruit_t"
     ALLOCATION_SIGMA = "allocation_sigma"
     NOISE_VAR = "noise_var"
+
+
+class SmallSampleCorrections:
+    none = "none"
+    HC1 = "HC1"
+    custom_meat_modifier = "custom_meat_modifier"

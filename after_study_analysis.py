@@ -10,6 +10,7 @@ from jax import numpy as jnp
 import scipy
 
 import calculate_derivatives
+from constants import SmallSampleCorrections
 import input_checks
 
 
@@ -31,108 +32,6 @@ logging.basicConfig(
 @click.group()
 def cli():
     pass
-
-
-@cli.command()
-@click.option(
-    "--input_glob",
-    help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
-    required=True,
-)
-def collect_existing_analyses(input_glob):
-
-    theta_estimates = []
-    adaptive_sandwich_var_estimates = []
-    classical_sandwich_var_estimates = []
-    filenames = glob.glob(input_glob)
-
-    logger.info("Found %d files under the glob %s", len(filenames), input_glob)
-    if len(filenames) == 0:
-        raise RuntimeError("Aborting because no files found. Please check path.")
-
-    for i, filename in enumerate(filenames):
-        if i and i % (len(filenames) // 10) == 0:
-            logger.info("A(nother) tenth of files processed.")
-        if not os.stat(filename).st_size:
-            raise RuntimeError(
-                "Empty analysis pickle.  This means there were probably timeouts or other failures during simulations."
-            )
-        with open(filename, "rb") as f:
-            analysis_dict = pickle.load(f)
-            (
-                theta_est,
-                adaptive_sandwich_var,
-                classical_sandwich_var,
-            ) = (
-                analysis_dict["theta_est"],
-                analysis_dict["adaptive_sandwich_var_estimate"],
-                analysis_dict["classical_sandwich_var_estimate"],
-            )
-            theta_estimates.append(theta_est)
-            adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
-            classical_sandwich_var_estimates.append(classical_sandwich_var)
-
-    theta_estimates = np.array(theta_estimates)
-    adaptive_sandwich_var_estimates = np.array(adaptive_sandwich_var_estimates)
-    classical_sandwich_var_estimates = np.array(classical_sandwich_var_estimates)
-
-    theta_estimate = np.mean(theta_estimates, axis=0)
-    empirical_var_normalized = empirical_var_normalized = np.atleast_2d(
-        np.cov(theta_estimates.T, ddof=0)
-    )
-    mean_adaptive_sandwich_var_estimate = np.mean(
-        adaptive_sandwich_var_estimates, axis=0
-    )
-    mean_classical_sandwich_var_estimate = np.mean(
-        classical_sandwich_var_estimates, axis=0
-    )
-
-    # Calculate standard error (or corresponding variance) of variance estimate for each
-    # component of theta.  This is done by finding an unbiased estimator of the standard
-    # formula for the standard error of a variance from iid observations.
-    # Population standard error formula: https://en.wikipedia.org/wiki/Variance
-    # Unbiased estimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
-    theta_component_variance_std_errors = []
-    for i in range(len(theta_estimate)):
-        component_estimates = [estimate[i] for estimate in theta_estimates]
-        second_central_moment = scipy.stats.moment(component_estimates, moment=4)
-        fourth_central_moment = scipy.stats.moment(component_estimates, moment=4)
-        n = len(theta_estimates)
-        theta_component_variance_std_errors.append(
-            np.sqrt(
-                n
-                * (
-                    ((n) ** 2 - 3) * (second_central_moment) ** 2
-                    + ((n - 1) ** 2) * fourth_central_moment
-                )
-                / ((n - 3) * (n - 2) * ((n - 1) ** 2))
-            )
-        )
-
-    approximate_standard_errors = np.empty_like(empirical_var_normalized)
-    for i, j in np.ndindex(approximate_standard_errors.shape):
-        approximate_standard_errors[i, j] = max(
-            theta_component_variance_std_errors[i],
-            theta_component_variance_std_errors[j],
-        )
-
-    print(f"\nParameter estimate:\n{theta_estimate}")
-    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
-    print(
-        f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
-    )
-    print(
-        f"\nAdaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
-    )
-    print(
-        f"\nClassical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
-    )
-    print(
-        f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
-    )
-    print(
-        f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}\n",
-    )
 
 
 # TODO: Add option to give per-user loss OR estimating function. Just loss now
@@ -160,7 +59,7 @@ def collect_existing_analyses(input_glob):
 @click.option(
     "--action_prob_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the action probability function and relevant imports.  The filename will be assumed to match the function name.",
+    help="File that contains the action probability function and relevant imports.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -178,7 +77,7 @@ def collect_existing_analyses(input_glob):
 @click.option(
     "--rl_loss_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the per-user loss function used to determine the RL parameters at each update and relevant imports.  The filename will be assumed to match the function name.",
+    help="File that contains the per-user loss function used to determine the RL parameters at each update and relevant imports.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -208,7 +107,7 @@ def collect_existing_analyses(input_glob):
 @click.option(
     "--inference_loss_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the per-user loss function used to determine the inference estimate and relevant imports.  The filename will be assumed to match the function name.",
+    help="File that contains the per-user loss function used to determine the inference estimate and relevant imports.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -220,7 +119,7 @@ def collect_existing_analyses(input_glob):
 @click.option(
     "--theta_calculation_func_filename",
     type=click.Path(exists=True),
-    help="File that allows one to actually calculate a theta estimate given the study dataframe only. One must supply either this or a precomputed theta estimate.",
+    help="Path to file that allows one to actually calculate a theta estimate given the study dataframe only. One must supply either this or a precomputed theta estimate. The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -271,6 +170,23 @@ def collect_existing_analyses(input_glob):
     default=False,
     help="Flag to suppress all data checks. This is suitable for large simulations.",
 )
+@click.option(
+    "--small_sample_correction",
+    type=click.Choice(
+        [
+            SmallSampleCorrections.none,
+            SmallSampleCorrections.HC1,
+            SmallSampleCorrections.custom_meat_modifier,
+        ]
+    ),
+    default=SmallSampleCorrections.HC1,
+    help="Type of small sample correction to apply to the variance estimate",
+)
+@click.option(
+    "--meat_modifier_func_filename",
+    type=click.Path(exists=True),
+    help="File that contains the meat matrix modifier function and relevant imports.  The filename without its extension will be assumed to match the function name.",
+)
 def analyze_dataset(
     study_df_pickle,
     action_prob_func_filename,
@@ -292,6 +208,8 @@ def analyze_dataset(
     action_prob_col_name,
     suppress_interactive_data_checks,
     suppress_all_data_checks,
+    small_sample_correction,
+    meat_modifier_func_filename,
 ):
     """
 
@@ -321,18 +239,14 @@ def analyze_dataset(
     Codify assumptions used for collect_batched_in_study_actions
 
     Can we check rl loss and policy arg Falsiness against study df availability indicators?
-
+    EDIT: I don't think so; there are reasons to have different data in these two places.
     Make the user give the min and max probabilities, and I'll enforce it
 
-    Flag to toggle interactive checks, if any
-
     I assume someone is in the study at each decision time. Check for this or
-    see if shouldn't always be true. EDIT: Is this true?
+    see if shouldn't always be true. EDIT: Is this true that I assume this?
 
     I also assume someone has some data to contribute at each update time. Check
-    for this or see if shouldn't always be true. EDIT: Is this true?
-
-    Should I have an explicit check for theta func arg just being study df
+    for this or see if shouldn't always be true. EDIT: Is it true that I assume this?
     """
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -372,6 +286,8 @@ def analyze_dataset(
             rl_loss_func_args_action_prob_times_index,
             theta_est,
             suppress_interactive_data_checks,
+            small_sample_correction,
+            meat_modifier_func_filename,
         )
 
     algorithm_statistics_by_calendar_t = calculate_algorithm_statistics(
@@ -422,7 +338,7 @@ def analyze_dataset(
     (
         adaptive_sandwich_var_estimate,
         classical_sandwich_var_estimate,
-        joint_bread_inverse_matrix,
+        joint_adaptive_bread_inverse_matrix,
         joint_meat_matrix,
         inference_loss_gradients,
         inference_loss_hessians,
@@ -442,6 +358,8 @@ def analyze_dataset(
         calendar_t_col_name,
         suppress_interactive_data_checks,
         suppress_all_data_checks,
+        small_sample_correction,
+        meat_modifier_func_filename,
     )
 
     # Write analysis results to same directory that input files are in
@@ -462,7 +380,7 @@ def analyze_dataset(
                 "theta_est": theta_est,
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-                "joint_bread_inverse_matrix": joint_bread_inverse_matrix,
+                "joint_adaptive_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
                 "joint_meat_matrix": joint_meat_matrix,
                 "inference_loss_gradients": inference_loss_gradients,
                 "inference_loss_hessians": inference_loss_hessians,
@@ -696,6 +614,8 @@ def compute_variance_estimates(
     calendar_t_col_name,
     suppress_interactive_data_checks,
     suppress_all_data_checks,
+    small_sample_correction,
+    meat_modifier_func_filename,
 ):
     # Collect list of user ids to guarantee we have a shared, fixed order
     # to iterate through in a variety of places.
@@ -733,8 +653,7 @@ def compute_variance_estimates(
         )
 
     logger.info("Forming adaptive joint meat.")
-    # TODO: Small sample corrections
-    joint_meat_matrix = form_meat_matrix(
+    joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
         theta_dim,
         update_times,
         beta_dim,
@@ -743,11 +662,11 @@ def compute_variance_estimates(
         inference_loss_gradients,
     )
     logger.info("Adaptive joint meat:")
-    logger.info(joint_meat_matrix)
+    logger.info(joint_adaptive_meat_matrix)
 
     logger.info("Forming adaptive joint bread inverse and inverting.")
     max_t = study_df[calendar_t_col_name].max()
-    joint_bread_inverse_matrix = form_bread_inverse_matrix(
+    joint_adaptive_bread_inverse_matrix = form_joint_adaptive_bread_inverse_matrix(
         upper_left_bread_inverse,
         max_t,
         algorithm_statistics_by_calendar_t,
@@ -760,31 +679,60 @@ def compute_variance_estimates(
         inference_loss_gradient_pi_derivatives,
     )
     logger.info("Adaptive joint bread inverse:")
-    logger.info(joint_bread_inverse_matrix)
-    joint_bread_matrix = invert_matrix_and_check_conditioning(
-        joint_bread_inverse_matrix
+    logger.info(joint_adaptive_bread_inverse_matrix)
+    joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
+        joint_adaptive_bread_inverse_matrix
     )
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
     # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat
-    # by dividing the variance of that limiting normal by a factor of n.  This is happening
-    # behind the scenes in the classical function as well.
+    # by dividing the variance of that limiting normal by a factor of n.
     joint_adaptive_variance = (
-        joint_bread_matrix @ joint_meat_matrix @ joint_bread_matrix.T
+        joint_adaptive_bread_matrix
+        @ joint_adaptive_meat_matrix
+        @ joint_adaptive_bread_matrix.T
     ) / len(user_ids)
     logger.info("Finished forming adaptive sandwich variance estimator.")
 
+    # This bottom right corner of the joint variance matrix is the portion
+    # corresponding to just theta.  This distinguishes this matrix from the
+    # *joint* adaptive variance matrix above, which covers both beta and theta.
+    adaptive_sandwich_var = joint_adaptive_variance[
+        -len(theta_est) :, -len(theta_est) :
+    ]
+
+    # We will also calculate the classical sandwich variance estimator for comparison.
+    # But we take it piece by piece and also extract the *inverse* of the classical bread
+    # because it is useful for extracting the non-joint adaptive meat.  This is
+    # needed in case we are adjusting this meat matrix with a small sample correction.
+    classical_bread, classical_meat, classical_bread_inverse = (
+        get_classical_sandwich_var_pieces(
+            theta_dim,
+            inference_loss_gradients,
+            inference_loss_hessians,
+        )
+    )
+
+    # Apply small sample correction if requested, and form the final variance estimates
+    adaptive_sandwich_var, classical_sandwich_var = apply_small_sample_correction(
+        adaptive_sandwich_var,
+        classical_bread,
+        classical_meat,
+        classical_bread_inverse,
+        len(user_ids),
+        theta_dim,
+        small_sample_correction,
+        meat_modifier_func_filename,
+        study_df,
+    )
+
     return (
-        # This bottom right corner of the joint variance matrix is the portion
-        # corresponding to just theta.
-        joint_adaptive_variance[-len(theta_est) :, -len(theta_est) :],
-        get_classical_sandwich_var(
-            theta_dim, inference_loss_gradients, inference_loss_hessians
-        ),
-        # These are returned for debugging purposes
-        joint_bread_inverse_matrix,
-        joint_meat_matrix,
+        adaptive_sandwich_var,
+        classical_sandwich_var,
+        # The following are returned for debugging purposes
+        joint_adaptive_bread_inverse_matrix,
+        joint_adaptive_meat_matrix,
         inference_loss_gradients,
         inference_loss_hessians,
         inference_loss_gradient_pi_derivatives,
@@ -793,7 +741,7 @@ def compute_variance_estimates(
 
 # TODO: doc string
 # TODO: This is a hotspot for update time logic to be removed
-def form_meat_matrix(
+def form_joint_adaptive_meat_matrix(
     theta_dim,
     update_times,
     beta_dim,
@@ -823,7 +771,7 @@ def form_meat_matrix(
 
 # TODO: doc string
 # TODO: This is a hotspot for update time logic to be removed
-def form_bread_inverse_matrix(
+def form_joint_adaptive_bread_inverse_matrix(
     upper_left_bread_inverse,
     max_t,
     algo_stats_dict,
@@ -969,7 +917,7 @@ def form_bread_inverse_matrix(
 
 # TODO: Needs tests
 # TODO: Complete docstring
-def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
+def get_classical_sandwich_var_pieces(theta_dim, loss_gradients, loss_hessians):
     """
     Forms standard sandwich variance estimator for inference (thetahat)
 
@@ -1005,11 +953,152 @@ def get_classical_sandwich_var(theta_dim, loss_gradients, loss_hessians):
 
     logger.info("Inverting classical bread and combining ingredients.")
     inv_hessian = invert_matrix_and_check_conditioning(normalized_hessian)
-    sandwich_var = (inv_hessian @ meat @ inv_hessian.T) / num_users
 
     logger.info("Finished forming classical sandwich variance estimator.")
 
-    return sandwich_var
+    # We return the bread and the meat, and also the inverse of the bread
+    # because it may be needed for a small-sample corrections and we want to
+    # avoid another inverse.
+    return inv_hessian, meat, normalized_hessian
+
+
+@cli.command()
+@click.option(
+    "--input_glob",
+    help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
+    required=True,
+)
+def collect_existing_analyses(input_glob):
+
+    raw_theta_estimates = []
+    raw_adaptive_sandwich_var_estimates = []
+    raw_classical_sandwich_var_estimates = []
+    filenames = glob.glob(input_glob)
+
+    logger.info("Found %d files under the glob %s", len(filenames), input_glob)
+    if len(filenames) == 0:
+        raise RuntimeError("Aborting because no files found. Please check path.")
+
+    for i, filename in enumerate(filenames):
+        if i and i % (len(filenames) // 10) == 0:
+            logger.info("A(nother) tenth of files processed.")
+        if not os.stat(filename).st_size:
+            raise RuntimeError(
+                "Empty analysis pickle.  This means there were probably timeouts or other failures during simulations."
+            )
+        with open(filename, "rb") as f:
+            analysis_dict = pickle.load(f)
+            (
+                theta_est,
+                adaptive_sandwich_var,
+                classical_sandwich_var,
+            ) = (
+                analysis_dict["theta_est"],
+                analysis_dict["adaptive_sandwich_var_estimate"],
+                analysis_dict["classical_sandwich_var_estimate"],
+            )
+            raw_theta_estimates.append(theta_est)
+            raw_adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
+            raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
+
+    theta_estimates = np.array(raw_theta_estimates)
+    adaptive_sandwich_var_estimates = np.array(raw_adaptive_sandwich_var_estimates)
+    classical_sandwich_var_estimates = np.array(raw_classical_sandwich_var_estimates)
+
+    theta_estimate = np.mean(theta_estimates, axis=0)
+    empirical_var_normalized = empirical_var_normalized = np.atleast_2d(
+        np.cov(theta_estimates.T, ddof=0)
+    )
+    mean_adaptive_sandwich_var_estimate = np.mean(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+    mean_classical_sandwich_var_estimate = np.mean(
+        classical_sandwich_var_estimates, axis=0
+    )
+
+    # Calculate standard error (or corresponding variance) of variance estimate for each
+    # component of theta.  This is done by finding an unbiased estimator of the standard
+    # formula for the standard error of a variance from iid observations.
+    # Population standard error formula: https://en.wikipedia.org/wiki/Variance
+    # Unbiased estimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
+    theta_component_variance_std_errors = []
+    for i in range(len(theta_estimate)):
+        component_estimates = [estimate[i] for estimate in theta_estimates]
+        second_central_moment = scipy.stats.moment(component_estimates, moment=4)
+        fourth_central_moment = scipy.stats.moment(component_estimates, moment=4)
+        n = len(theta_estimates)
+        theta_component_variance_std_errors.append(
+            np.sqrt(
+                n
+                * (
+                    ((n) ** 2 - 3) * (second_central_moment) ** 2
+                    + ((n - 1) ** 2) * fourth_central_moment
+                )
+                / ((n - 3) * (n - 2) * ((n - 1) ** 2))
+            )
+        )
+
+    approximate_standard_errors = np.empty_like(empirical_var_normalized)
+    for i, j in np.ndindex(approximate_standard_errors.shape):
+        approximate_standard_errors[i, j] = max(
+            theta_component_variance_std_errors[i],
+            theta_component_variance_std_errors[j],
+        )
+
+    print(f"\nParameter estimate:\n{theta_estimate}")
+    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
+    print(
+        f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}\n",
+    )
+
+
+def apply_small_sample_correction(
+    adaptive_sandwich_var,
+    classical_bread,
+    classical_meat,
+    classical_bread_inverse,
+    num_users,
+    theta_dim,
+    small_sample_correction,
+    meat_modifier_func_filename,
+    study_df,
+):
+    classical_sandwich_var = (
+        classical_bread @ classical_meat @ classical_bread.T
+    ) / num_users
+    if small_sample_correction == SmallSampleCorrections.none:
+        return adaptive_sandwich_var, classical_sandwich_var
+    if small_sample_correction == SmallSampleCorrections.HC1:
+        correction = num_users / (num_users - theta_dim)
+        return adaptive_sandwich_var * correction, classical_sandwich_var * correction
+    if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
+        meat_modifier_func = load_function_from_same_named_file(
+            meat_modifier_func_filename
+        )
+        adaptive_meat = (
+            classical_bread_inverse @ adaptive_sandwich_var @ classical_bread_inverse.T
+        )
+        return (
+            classical_bread
+            @ meat_modifier_func(adaptive_meat, study_df)
+            @ classical_bread.T,
+            classical_bread
+            @ meat_modifier_func(classical_meat, study_df)
+            @ classical_bread.T,
+        )
+    raise ValueError("Invalid small sample correction type.")
 
 
 if __name__ == "__main__":

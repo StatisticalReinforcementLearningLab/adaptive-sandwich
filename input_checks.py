@@ -4,10 +4,13 @@ import logging
 import numpy as np
 from jax import numpy as jnp
 
+from constants import SmallSampleCorrections
 from helper_functions import load_function_from_same_named_file
 
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
+
+CONDITION_NUMBER_CUTOFF = 10**3
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -34,6 +37,8 @@ def perform_first_wave_input_checks(
     rl_loss_func_args_action_prob_times_index,
     theta_est,
     suppress_interactive_data_checks,
+    small_sample_correction,
+    meat_modifier_func_filename,
 ):
     # TODO: Also, maybe this wave shouldn't include loading functions
     # supplied--do action prob reconstruction, theta estimation, estimating function sum, etc. in a later wave.
@@ -125,9 +130,11 @@ def perform_first_wave_input_checks(
 
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
-    # Note that theta function can only take study df as an argument, but this
-    # will have already failed by the time we get here when attempting to form
-    # the theta estimate.
+
+    ### Validate small sample correction
+    require_custom_small_sample_correction_function_provided_if_selected(
+        small_sample_correction, meat_modifier_func_filename
+    )
 
 
 def require_action_probabilities_can_be_reconstructed(
@@ -289,12 +296,18 @@ def require_consecutive_integer_policy_numbers(
     )
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
-    positive_policy_df = in_study_df[in_study_df[policy_num_col_name] >= 0]
+    nonnegative_policy_df = in_study_df[in_study_df[policy_num_col_name] >= 0]
+    # Ideally we actually have integers, but for legacy reasons we will support
+    # floats as well.
+    if nonnegative_policy_df[policy_num_col_name].dtype == "float64":
+        nonnegative_policy_df[policy_num_col_name] = nonnegative_policy_df[
+            policy_num_col_name
+        ].astype("int64")
     assert np.array_equal(
-        positive_policy_df[policy_num_col_name].unique(),
+        nonnegative_policy_df[policy_num_col_name].unique(),
         range(
-            positive_policy_df[policy_num_col_name].min(),
-            positive_policy_df[policy_num_col_name].max() + 1,
+            nonnegative_policy_df[policy_num_col_name].min(),
+            nonnegative_policy_df[policy_num_col_name].max() + 1,
         ),
     ), "Policy numbers are not consecutive integers."
 
@@ -529,6 +542,7 @@ def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, the
 
 
 # TODO: Hotspot for replacing notion of update times
+# TODO: Remove breakpoint eventually
 def require_beta_estimating_functions_sum_to_zero(
     update_times, algorithm_statistics_by_calendar_t, beta_dim
 ):
@@ -566,6 +580,7 @@ def require_beta_estimating_functions_sum_to_zero(
             jnp.zeros(beta_dim * len(update_times)),
         )
     except AssertionError as e:
+        breakpoint()
         # pylint: disable=bad-builtin
         answer = input(
             f"\nBeta estimating function with args and provided beta estimate plugged in does not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n"
@@ -595,8 +610,8 @@ def require_non_singular_avg_hessians_at_each_update(
                 np.linalg.cond(
                     algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"]
                 )
-                < 10**3
-            ), f"Poorly conditioned average loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
+                < CONDITION_NUMBER_CUTOFF
+            ), f"Poorly conditioned (possibly singular) loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
         except AssertionError:
             breakpoint()
 
@@ -609,7 +624,23 @@ def require_non_singular_avg_hessian_inference(
     avg_inference_loss_hessian = jnp.mean(inference_loss_hessians, axis=0)
     try:
         assert (
-            np.linalg.cond(avg_inference_loss_hessian) < 10**3
+            np.linalg.cond(avg_inference_loss_hessian) < CONDITION_NUMBER_CUTOFF
         ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."
     except AssertionError:
         breakpoint()
+
+
+# TODO: Either implement and remove NotImplementedError or remove the option.
+def require_custom_small_sample_correction_function_provided_if_selected(
+    small_sample_correction, meat_modifier_func_filename
+):
+    if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
+        raise NotImplementedError(
+            "Custom small sample correction function not yet implemented."
+        )
+        logger.info(
+            "Checking that custom meat modifier function is actually provided if the option is selected."
+        )
+        assert (
+            meat_modifier_func_filename is not None
+        ), "No custom meat modifier function provided even though the corresponding small sample correction option was selected. Please see the contract for details."

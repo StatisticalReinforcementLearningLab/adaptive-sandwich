@@ -212,16 +212,8 @@ def analyze_dataset(
     meat_modifier_func_filename,
 ):
     """
-
-    I check estimating function sum 0 later, but differentiate between
-    RL and beta side? Also could move check here. Might be nice to have all
-    checks in same place. Wherever that check is, should allow user to see
-    and verify close enough to zero
-
     Make sure in study is never on for more than one stretch EDIT: unclear if
     this will remain an invariant as we deal with more complicated data missingness
-
-    Possibly make sure no real-looking data when in_study is off
 
     I think I'm agnostic to indexing of calendar times but should check because
     otherwise need to add a check here to verify required format.
@@ -229,7 +221,7 @@ def analyze_dataset(
     Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
     Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 
-    Should be clear from dataframe spec but beta must be vector (not matrix)
+    Beta must be vector (not matrix)
 
     Codify assumptions that make get_first_applicable_time work.  The main
     thing is an assumption that users don't get different policies at the same
@@ -238,12 +230,10 @@ def analyze_dataset(
 
     Codify assumptions used for collect_batched_in_study_actions
 
-    Can we check rl loss and policy arg Falsiness against study df availability indicators?
-    EDIT: I don't think so; there are reasons to have different data in these two places.
     Make the user give the min and max probabilities, and I'll enforce it
 
     I assume someone is in the study at each decision time. Check for this or
-    see if shouldn't always be true. EDIT: Is this true that I assume this?
+    see if it shouldn't always be true. EDIT: Is this true that I assume this?
 
     I also assume someone has some data to contribute at each update time. Check
     for this or see if shouldn't always be true. EDIT: Is it true that I assume this?
@@ -1084,20 +1074,17 @@ def apply_small_sample_correction(
         correction = num_users / (num_users - theta_dim)
         return adaptive_sandwich_var * correction, classical_sandwich_var * correction
     if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
-        meat_modifier_func = load_function_from_same_named_file(
-            meat_modifier_func_filename
-        )
-        adaptive_meat = (
-            classical_bread_inverse @ adaptive_sandwich_var @ classical_bread_inverse.T
-        )
-        return (
-            classical_bread
-            @ meat_modifier_func(adaptive_meat, study_df)
-            @ classical_bread.T,
-            classical_bread
-            @ meat_modifier_func(classical_meat, study_df)
-            @ classical_bread.T,
-        )
+        # TODO: If we go this route, we need a function for making the custom H matrices to add into
+        # the meat between X and the residual per person.  This is not very hard for the classical case,
+        # though the structure of the function will probably be pretty particular. It would perhaps
+        # be most natural to have a weighted linear regression mode for inference where the features
+        # and weights are specified, and then we could automatically form the H_ii matrices ala Mancl
+        # and DeRouen.  But the larger question is how to incorporate the H's into the adaptive version
+        # of the meat.  Does it just affect the classical portion or also the adjustment? And regardless,
+        # we'd have to directly construct the adaptive meat in a way that we currently are not to inject
+        # the H's. Also, the time for this correction to happen would not be here. We would have to reach
+        # into the initial meat construction logic in each case.
+        raise NotImplementedError("Custom meat modifier not yet implemented.")
     raise ValueError("Invalid small sample correction type.")
 
 

@@ -10,6 +10,8 @@ from helper_functions import load_function_from_same_named_file
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
 
+CONDITION_NUMBER_CUTOFF = 10**3
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -540,6 +542,7 @@ def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, the
 
 
 # TODO: Hotspot for replacing notion of update times
+# TODO: Remove breakpoint eventually
 def require_beta_estimating_functions_sum_to_zero(
     update_times, algorithm_statistics_by_calendar_t, beta_dim
 ):
@@ -577,6 +580,7 @@ def require_beta_estimating_functions_sum_to_zero(
             jnp.zeros(beta_dim * len(update_times)),
         )
     except AssertionError as e:
+        breakpoint()
         # pylint: disable=bad-builtin
         answer = input(
             f"\nBeta estimating function with args and provided beta estimate plugged in does not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n"
@@ -606,8 +610,8 @@ def require_non_singular_avg_hessians_at_each_update(
                 np.linalg.cond(
                     algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"]
                 )
-                < 10**3
-            ), f"Poorly conditioned average loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
+                < CONDITION_NUMBER_CUTOFF
+            ), f"Poorly conditioned (possibly singular) loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
         except AssertionError:
             breakpoint()
 
@@ -620,16 +624,20 @@ def require_non_singular_avg_hessian_inference(
     avg_inference_loss_hessian = jnp.mean(inference_loss_hessians, axis=0)
     try:
         assert (
-            np.linalg.cond(avg_inference_loss_hessian) < 10**3
+            np.linalg.cond(avg_inference_loss_hessian) < CONDITION_NUMBER_CUTOFF
         ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."
     except AssertionError:
         breakpoint()
 
 
+# TODO: Either implement and remove NotImplementedError or remove the option.
 def require_custom_small_sample_correction_function_provided_if_selected(
     small_sample_correction, meat_modifier_func_filename
 ):
     if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
+        raise NotImplementedError(
+            "Custom small sample correction function not yet implemented."
+        )
         logger.info(
             "Checking that custom meat modifier function is actually provided if the option is selected."
         )

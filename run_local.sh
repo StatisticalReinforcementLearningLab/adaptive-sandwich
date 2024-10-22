@@ -42,10 +42,11 @@ inference_loss_func_args_theta_index=0
 theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_no_action_centering.py"
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
+small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:L:M:Q:q:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:L:M:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -85,6 +86,7 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:L:M:Q:q:-:
     M  | alg_seed_override )                          needs_arg; alg_seed_override="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )           needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                   needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    z  | small_sample_correction )                    needs_arg; small_sample_correction="$OPTARG" ;;
 
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
@@ -139,7 +141,8 @@ python after_study_analysis.py analyze-dataset \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-  --suppress_all_data_checks=$suppress_all_data_checks
+  --suppress_all_data_checks=$suppress_all_data_checks \
+  --small_sample_correction=$small_sample_correction
 
 echo "$(date +"%Y-%m-%d %T") run_local.sh: Ending after-study analysis."
 

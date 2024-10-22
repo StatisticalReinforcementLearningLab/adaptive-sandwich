@@ -60,7 +60,6 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         np.testing.assert_allclose(
             observed_analysis_dict["theta_est"], expected_analysis_dict["theta_est"]
         )
-
         assert observed_debug_pieces_dict.keys() == expected_debug_pieces_dict.keys()
 
         ### Check RL-side derivatives and bread contribution

@@ -62,12 +62,13 @@ inference_loss_func_args_theta_index=0
 theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_action_centering.py"
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
+small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -105,6 +106,7 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:B:D:j:E:I:h:H:F:-: OPT; do
     F  | dynamic_seeds )                              needs_arg; dynamic_seeds="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )           needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                   needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    z  | small_sample_correction )                    needs_arg; small_sample_correction="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -187,7 +189,8 @@ python after_study_analysis.py analyze-dataset \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-  --suppress_all_data_checks=$suppress_all_data_checks
+  --suppress_all_data_checks=$suppress_all_data_checks \
+  --small_sample_correction=$small_sample_correction
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.

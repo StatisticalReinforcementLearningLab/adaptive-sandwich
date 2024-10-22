@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -62,9 +62,9 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an oralytics RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
-  echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning RL study simulation."
+  echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning RL study simulation."
   python oralytics_sample_data/Archive/src/run_exps.py ${seed}
-  echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished RL study simulation."
+  echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished RL study simulation."
 fi
 
 # Create a convenience variable that holds the output folder for the last script.
@@ -72,7 +72,7 @@ fi
 output_folder="oralytics_sample_data/Archive/exps/write/NON_STAT_LOW_R_None_0.515_14_full_pooling/${seed}"
 
 # Do after-study analysis on the single algorithm run from above
-echo "$(date +"%Y-%m-%d %T") run_local.sh: Beginning after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
   --study_df_pickle="${output_folder}/${seed}_study_data.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
@@ -92,6 +92,6 @@ python after_study_analysis.py analyze-dataset \
   --calendar_t_col_name=$calendar_t_col_name \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name
-echo "$(date +"%Y-%m-%d %T") run_local.sh: Ending after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Ending after-study analysis."
 
-echo "$(date +"%Y-%m-%d %T") run_local.sh: Finished simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished simulation."

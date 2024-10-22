@@ -90,7 +90,7 @@ def test_form_meat_matrix():
     )
     # Correct to 5 decimal places is perfectly sufficient
     np.testing.assert_allclose(
-        after_study_analysis.form_meat_matrix(
+        after_study_analysis.form_joint_adaptive_meat_matrix(
             len(theta_est),
             update_times,
             beta_dim,
@@ -348,7 +348,7 @@ def test_form_bread_inverse_matrix_1_decision_between_updates():
         )
     )
     np.testing.assert_allclose(
-        after_study_analysis.form_bread_inverse_matrix(
+        after_study_analysis.form_joint_adaptive_bread_inverse_matrix(
             upper_left_bread_inverse,
             study_df.calendar_t.max(),
             algo_stats_dict,
@@ -675,7 +675,7 @@ def test_form_bread_inverse_matrix_2_decisions_between_updates():
         )
     )
     np.testing.assert_allclose(
-        after_study_analysis.form_bread_inverse_matrix(
+        after_study_analysis.form_joint_adaptive_bread_inverse_matrix(
             upper_left_bread_inverse,
             study_df.calendar_t.max(),
             algo_stats_dict,

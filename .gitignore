@@ -1,7 +1,6 @@
 __pycache__/*
 april12/*
 simulated_data/*
-oralytics_sample_data/*
 synthetic_env_params/.DS_Store
 .DS_Store
 *.lprof

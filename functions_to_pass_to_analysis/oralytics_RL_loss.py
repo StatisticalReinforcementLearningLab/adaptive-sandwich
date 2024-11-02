@@ -1,8 +1,4 @@
-import jax
 import jax.numpy as jnp
-import numpy as np
-import pickle as pkl
-import pandas as pd
 
 
 def oralytics_RL_loss(
@@ -52,14 +48,8 @@ def oralytics_RL_loss(
         (prior_mu - mu).T @ prior_sigma_inv @ (prior_mu - mu) / (2 * n_users)
     ).squeeze()
 
-    term3 = (
-        jnp.sum(
-            (
-                jnp.triu(phi.T @ phi)
-                + (jnp.triu(prior_sigma_inv) / n_users)
-                - jnp.triu(V)
-            )
-        )
+    term3 = jnp.sum(
+        (jnp.triu(phi.T @ phi) + (jnp.triu(prior_sigma_inv) / n_users) - jnp.triu(V))
         ** 2
     ) / (2 * init_noise_var)
 

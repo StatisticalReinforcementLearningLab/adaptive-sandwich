@@ -1,4 +1,8 @@
+import jax
 import jax.numpy as jnp
+import numpy as np
+import pickle as pkl
+import pandas as pd
 
 
 def oralytics_RL_loss(
@@ -21,7 +25,6 @@ def oralytics_RL_loss(
     dim = 15
 
     mu = beta[:dim].reshape(-1, 1)
-    # V = beta[dim:].reshape(-1, dim)
 
     utv_terms = beta[dim:]
     idx = jnp.triu_indices(dim)
@@ -41,7 +44,6 @@ def oralytics_RL_loss(
     # Check done, this is correct
     phi = jnp.hstack([state, (act_prob * state), (action - act_prob) * state])
 
-    # TODO: When checking arguments, look at tau/t
     term1 = jnp.sum((rewards - jnp.einsum("ij,jk->i", phi, mu)) ** 2) / (
         2 * init_noise_var
     )
@@ -49,19 +51,6 @@ def oralytics_RL_loss(
     term2 = (
         (prior_mu - mu).T @ prior_sigma_inv @ (prior_mu - mu) / (2 * n_users)
     ).squeeze()
-
-    # print(term1)
-    # print(term2)
-    # term3a = jnp.triu(phi.T @ phi)
-    # # print(term3a)
-    # term3b = jnp.triu(prior_sigma_inv) / n_users
-    # # print(term3b)
-    # term3c = jnp.triu(V)
-    # # print(term3c)
-    # term3matrix = term3a + term3b - term3c
-    # # print(term3matrix)
-    # term3 = (jnp.sum(term3matrix)**2) / (2 * init_noise_var)
-    # print(term3)
 
     term3 = (
         jnp.sum(

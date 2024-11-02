@@ -9,4 +9,5 @@ synthetic_env_params/.DS_Store
 .vscode
 adaptive-sandwich.code-workspace
 deploy.sh
+oralytics_sample_data/Archive/exps/*
 

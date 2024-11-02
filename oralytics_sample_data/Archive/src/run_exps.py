@@ -191,7 +191,9 @@ def create_loss_fn_dataframe(data, update):
 
         mu = jnp.array(mu)
         sigma = jnp.array(sigma)
-        utsigma = sigma[jnp.triu_indices(sigma.shape[0])]
+        sigma_inv = jnp.linalg.inv(sigma)
+        utsigma_inv = sigma_inv[jnp.triu_indices(sigma_inv.shape[0])]
+        Vt = utsigma_inv.flatten() / n_users
 
         if i == 0:
             prior_mu = mu
@@ -201,7 +203,7 @@ def create_loss_fn_dataframe(data, update):
             continue
         else:
             # flatten and combine both mu and sigma into betas
-            betas = jnp.concatenate([mu, utsigma.flatten()])
+            betas = jnp.concatenate([mu, Vt])
 
             for user in data["user_idx"].unique():
                 # Create the data dataframe
@@ -355,6 +357,7 @@ def create_action_df(data, update, loss_dict):
     df2 = pd.DataFrame(columns=["calendar_decision_t", "user_idx", "beta", "advantage"])
 
     act_prob_dict = {}
+    n_users = 70
 
     starting_policy = 5
 
@@ -386,9 +389,12 @@ def create_action_df(data, update, loss_dict):
                         ]
                         for j in range(15)
                     ]
-                    utsigma = np.array(sigma)[np.triu_indices(np.array(sigma).shape[0])]
+                    sigma_inv = jnp.linalg.inv(jnp.array(sigma))
+                    utsigma_inv = np.array(sigma_inv)[
+                        np.triu_indices(sigma_inv.shape[0])
+                    ]
                     beta = jnp.concatenate(
-                        [jnp.array(mu), jnp.array(utsigma).flatten()]
+                        [jnp.array(mu), (jnp.array(utsigma_inv).flatten()) / (n_users)]
                     )
                 else:
                     # Get beta from loss_dict dictionary first user first record
@@ -423,7 +429,7 @@ def create_action_df(data, update, loss_dict):
                         ),
                     ]
                 )
-                utime_dict[user] = (beta, state)
+                utime_dict[user] = (beta, state, n_users)
             else:
                 df2 = pd.concat(
                     [

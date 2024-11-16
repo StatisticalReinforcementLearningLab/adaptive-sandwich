@@ -44,3 +44,19 @@ def load_function_from_same_named_file(filename):
         raise ValueError(
             f"Unable to import function from {filename}.  Please verify the file has the same name as the function of interest (ignoring the extension)."
         ) from e
+
+
+def confirm_input_check_result(message, error=None):
+    answer = None
+    while answer != "y":
+        # pylint: disable=bad-builtin
+        answer = input(message).lower()
+        # pylint: enable=bad-builtin
+        if answer == "y":
+            print("\nOk, proceeding.\n")
+        elif answer == "n":
+            if error:
+                raise SystemExit from error
+            raise SystemExit
+        else:
+            print("\nPlease enter 'y' or 'n'.\n")

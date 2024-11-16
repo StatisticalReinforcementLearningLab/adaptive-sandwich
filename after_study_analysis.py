@@ -10,7 +10,7 @@ from jax import numpy as jnp
 import scipy
 
 import calculate_derivatives
-from constants import SmallSampleCorrections
+from constants import RLUpdateFunctionTypes, SmallSampleCorrections
 import input_checks
 
 
@@ -75,34 +75,40 @@ def cli():
     help="Index of the RL parameter vector beta in the tuple of action probability func args",
 )
 @click.option(
-    "--rl_loss_func_filename",
+    "--rl_update_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the per-user loss function used to determine the RL parameters at each update and relevant imports.  The filename without its extension will be assumed to match the function name.",
+    help="File that contains the per-user update function used to determine the RL parameters at each update and relevant imports.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
-    "--rl_loss_func_args_pickle",
+    "--rl_update_func_type",
+    type=click.Choice([RLUpdateFunctionTypes.LOSS, RLUpdateFunctionTypes.ESTIMATING]),
+    help="Type of function used to summarize the RL updates.  If loss, an update should correspond to choosing parameters to minimize it.  If estimating, an update should correspond to setting the function equal to zero and solving for the parameters.",
+    required=True,
+)
+@click.option(
+    "--rl_update_func_args_pickle",
     type=click.File("rb"),
-    help="Pickled dictionary that contains the RL loss function arguments for all update times for all users",
+    help="Pickled dictionary that contains the RL update function arguments for all update times for all users",
     required=True,
 )
 @click.option(
-    "--rl_loss_func_args_beta_index",
+    "--rl_update_func_args_beta_index",
     type=int,
     required=True,
-    help="Index of the RL parameter vector beta in the tuple of RL loss func args",
+    help="Index of the RL parameter vector beta in the tuple of RL update func args",
 )
 @click.option(
-    "--rl_loss_func_args_action_prob_index",
+    "--rl_update_func_args_action_prob_index",
     type=int,
     default=-1000,
-    help="Index of the action probability in the tuple of RL loss func args, if applicable",
+    help="Index of the action probability in the tuple of RL update func args, if applicable",
 )
 @click.option(
-    "--rl_loss_func_args_action_prob_times_index",
+    "--rl_update_func_args_action_prob_times_index",
     type=int,
     default=-1000,
-    help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of RL loss func args, if applicable",
+    help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of RL update func args, if applicable",
 )
 @click.option(
     "--inference_loss_func_filename",
@@ -192,11 +198,12 @@ def analyze_dataset(
     action_prob_func_filename,
     action_prob_func_args_pickle,
     action_prob_func_args_beta_index,
-    rl_loss_func_filename,
-    rl_loss_func_args_pickle,
-    rl_loss_func_args_beta_index,
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_filename,
+    rl_update_func_type,
+    rl_update_func_args_pickle,
+    rl_update_func_args_beta_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
     inference_loss_func_filename,
     inference_loss_func_args_theta_index,
     theta_calculation_func_filename,
@@ -250,9 +257,9 @@ def analyze_dataset(
     #     by=[user_id_col_name, calendar_t_col_name]
     # )
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
-    rl_loss_func_args = pickle.load(rl_loss_func_args_pickle)
+    rl_update_func_args = pickle.load(rl_update_func_args_pickle)
 
-    beta_dim = calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index)
+    beta_dim = calculate_beta_dim(rl_update_func_args, rl_update_func_args_beta_index)
 
     theta_est = estimate_theta(study_df, theta_calculation_func_filename)
 
@@ -270,10 +277,10 @@ def analyze_dataset(
             action_prob_func_filename,
             action_prob_func_args,
             action_prob_func_args_beta_index,
-            rl_loss_func_args,
-            rl_loss_func_args_beta_index,
-            rl_loss_func_args_action_prob_index,
-            rl_loss_func_args_action_prob_times_index,
+            rl_update_func_args,
+            rl_update_func_args_beta_index,
+            rl_update_func_args_action_prob_index,
+            rl_update_func_args_action_prob_times_index,
             theta_est,
             suppress_interactive_data_checks,
             small_sample_correction,
@@ -290,11 +297,12 @@ def analyze_dataset(
         action_prob_func_filename,
         action_prob_func_args,
         action_prob_func_args_beta_index,
-        rl_loss_func_filename,
-        rl_loss_func_args,
-        rl_loss_func_args_beta_index,
-        rl_loss_func_args_action_prob_index,
-        rl_loss_func_args_action_prob_times_index,
+        rl_update_func_filename,
+        rl_update_func_type,
+        rl_update_func_args,
+        rl_update_func_args_beta_index,
+        rl_update_func_args_action_prob_index,
+        rl_update_func_args_action_prob_times_index,
     )
 
     # List of times that were the first applicable time for some update
@@ -388,11 +396,11 @@ def analyze_dataset(
     )
 
 
-def calculate_beta_dim(rl_loss_func_args, rl_loss_func_args_beta_index):
-    for user_args_dict in rl_loss_func_args.values():
+def calculate_beta_dim(rl_update_func_args, rl_update_func_args_beta_index):
+    for user_args_dict in rl_update_func_args.values():
         for args in user_args_dict.values():
             if args:
-                return args[rl_loss_func_args_beta_index].size
+                return args[rl_update_func_args_beta_index].size
 
 
 # TODO: Docstring
@@ -417,11 +425,12 @@ def calculate_algorithm_statistics(
     action_prob_func_filename,
     action_prob_func_args,
     action_prob_func_args_beta_index,
-    rl_loss_func_filename,
-    rl_loss_func_args,
-    rl_loss_func_args_beta_index,
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_filename,
+    rl_update_func_type,
+    rl_update_func_args,
+    rl_update_func_args_beta_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
 ):
     pi_and_weight_gradients_by_calendar_t = (
         calculate_derivatives.calculate_pi_and_weight_gradients(
@@ -436,13 +445,14 @@ def calculate_algorithm_statistics(
         )
     )
     rl_update_derivatives_by_calendar_t = (
-        calculate_derivatives.calculate_rl_loss_derivatives(
+        calculate_derivatives.calculate_rl_update_derivatives(
             study_df,
-            rl_loss_func_filename,
-            rl_loss_func_args,
-            rl_loss_func_args_beta_index,
-            rl_loss_func_args_action_prob_index,
-            rl_loss_func_args_action_prob_times_index,
+            rl_update_func_filename,
+            rl_update_func_args,
+            rl_update_func_type,
+            rl_update_func_args_beta_index,
+            rl_update_func_args_action_prob_index,
+            rl_update_func_args_action_prob_times_index,
             policy_num_col_name,
             calendar_t_col_name,
         )
@@ -651,8 +661,8 @@ def compute_variance_estimates(
         user_ids,
         inference_loss_gradients,
     )
-    logger.info("Adaptive joint meat:")
-    logger.info(joint_adaptive_meat_matrix)
+    logger.debug("Adaptive joint meat:")
+    logger.debug(joint_adaptive_meat_matrix)
 
     logger.info("Forming adaptive joint bread inverse and inverting.")
     max_t = study_df[calendar_t_col_name].max()
@@ -668,11 +678,21 @@ def compute_variance_estimates(
         inference_loss_hessians,
         inference_loss_gradient_pi_derivatives,
     )
-    logger.info("Adaptive joint bread inverse:")
-    logger.info(joint_adaptive_bread_inverse_matrix)
+    logger.debug("Adaptive joint bread inverse:")
+    logger.debug(joint_adaptive_bread_inverse_matrix)
+
+    # joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
+    #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
+    # )
+
     joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
         joint_adaptive_bread_inverse_matrix
     )
+
+    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+        input_checks.require_adaptive_bread_inverse_is_true_inverse(
+            joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
+        )
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
@@ -696,12 +716,10 @@ def compute_variance_estimates(
     # But we take it piece by piece and also extract the *inverse* of the classical bread
     # because it is useful for extracting the non-joint adaptive meat.  This is
     # needed in case we are adjusting this meat matrix with a small sample correction.
-    classical_bread, classical_meat, classical_bread_inverse = (
-        get_classical_sandwich_var_pieces(
-            theta_dim,
-            inference_loss_gradients,
-            inference_loss_hessians,
-        )
+    classical_bread, classical_meat, _ = get_classical_sandwich_var_pieces(
+        theta_dim,
+        inference_loss_gradients,
+        inference_loss_hessians,
     )
 
     # Apply small sample correction if requested, and form the final variance estimates
@@ -709,12 +727,9 @@ def compute_variance_estimates(
         adaptive_sandwich_var,
         classical_bread,
         classical_meat,
-        classical_bread_inverse,
         len(user_ids),
         theta_dim,
         small_sample_correction,
-        meat_modifier_func_filename,
-        study_df,
     )
 
     return (
@@ -727,6 +742,70 @@ def compute_variance_estimates(
         inference_loss_hessians,
         inference_loss_gradient_pi_derivatives,
     )
+
+
+def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
+    blocks = []
+    num_beta_block_rows = (inverse_bread.shape[0] - theta_dim) // beta_dim
+
+    # Create upper rows of block of bread (just the beta portion)
+    for i in range(0, num_beta_block_rows):
+        beta_block_row = []
+        beta_diag_inverse = invert_matrix_and_check_conditioning(
+            inverse_bread[
+                beta_dim * i : beta_dim * (i + 1),
+                beta_dim * i : beta_dim * (i + 1),
+            ]
+        )
+        breakpoint()
+        for j in range(0, num_beta_block_rows):
+            if i > j:
+                beta_block_row.append(
+                    -beta_diag_inverse
+                    @ sum(
+                        inverse_bread[
+                            beta_dim * i : beta_dim * (i + 1),
+                            beta_dim * k : beta_dim * (k + 1),
+                        ]
+                        @ blocks[k][j]
+                        for k in range(j, i)
+                    )
+                )
+            elif i == j:
+                beta_block_row.append(beta_diag_inverse)
+            else:
+                beta_block_row.append(np.zeros((beta_dim, beta_dim)).astype(np.float32))
+
+        # Extra beta theta zero block. This is the last column of the row.
+        # Any other zeros in the row have already been handled above.
+        beta_block_row.append(np.zeros((beta_dim, theta_dim)))
+
+        blocks.append(beta_block_row)
+
+        theta_block_row = []
+        theta_diag_inverse = invert_matrix_and_check_conditioning(
+            inverse_bread[
+                -theta_dim:,
+                -theta_dim:,
+            ]
+        )
+        for j in range(0, num_beta_block_rows):
+            theta_block_row.append(
+                -theta_diag_inverse
+                @ sum(
+                    inverse_bread[
+                        -theta_dim:,
+                        beta_dim * k : beta_dim * (k + 1),
+                    ]
+                    @ blocks[k][j]
+                    for k in range(j, num_beta_block_rows)
+                )
+            )
+
+        theta_block_row.append(theta_diag_inverse)
+        blocks.append(theta_block_row)
+
+    return np.block(blocks)
 
 
 # TODO: doc string
@@ -792,11 +871,14 @@ def form_joint_adaptive_bread_inverse_matrix(
     # we really want via the chain rule, and also summing terms that correspond to the *same* betas
     # behind the scenes.
     # NOTE THAT COLUMN INDEX i CORRESPONDS TO DECISION TIME i+1!
-    # TODO: This squeeze is a little sketchy... It might be nice to squeeze at the time they are
-    # computed. Note there is also a corresponding RL squeeze, but it happens closer to
-    # the gradient computation.
+    # TODO: This [..., 0] might be nice to do earlier. Note there is also a corresponding RL-side
+    # [..., 0] on the pi derivatives, but it happens closer to
+    # the gradient computation.  On the other hand, it happens in a layer of the RL logic
+    # that doesn't exist on the inference side (the layer that takes in the results from each
+    # update).  As on the RL side, we [..., 0] instead of squeezing to not collapse the
+    # parameter dimension if it's 1D.
     mixed_theta_pi_loss_derivatives_by_user_id = {
-        user_id: inference_loss_gradient_derivatives_wrt_pi[i].squeeze()
+        user_id: inference_loss_gradient_derivatives_wrt_pi[i][..., 0]
         for i, user_id in enumerate(user_ids)
     }
 
@@ -1058,12 +1140,9 @@ def apply_small_sample_correction(
     adaptive_sandwich_var,
     classical_bread,
     classical_meat,
-    classical_bread_inverse,
     num_users,
     theta_dim,
     small_sample_correction,
-    meat_modifier_func_filename,
-    study_df,
 ):
     classical_sandwich_var = (
         classical_bread @ classical_meat @ classical_bread.T

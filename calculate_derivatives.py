@@ -5,6 +5,7 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 
+from constants import RLUpdateFunctionTypes
 from helper_functions import (
     conditional_x_or_one_minus_x,
     load_function_from_same_named_file,
@@ -124,7 +125,7 @@ def stack_batched_arg_lists_into_tensor(batched_arg_lists):
             ########## We have a vector (1D array) arg
             if not isinstance(batched_arg_list[0], (jnp.ndarray, np.ndarray)):
                 try:
-                    batched_arg_list = [jnp.ndarray(x) for x in batched_arg_list]
+                    batched_arg_list = [jnp.array(x) for x in batched_arg_list]
                 except Exception as e:
                     raise TypeError(
                         "Argument of sequence type that cannot be cast to JAX numpy array"
@@ -466,25 +467,26 @@ def get_weight_gradients_batched(
 # TODO: Docstring
 # TODO: JIT whole function? or just gradient and hessian batch functions
 # TODO: This is a hotspot for moving away from update times
-def calculate_rl_loss_derivatives(
+def calculate_rl_update_derivatives(
     study_df,
-    rl_loss_func_filename,
-    rl_loss_func_args,
-    rl_loss_func_args_beta_index,
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_filename,
+    rl_update_func_args,
+    rl_update_func_type,
+    rl_update_func_args_beta_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
     policy_num_col_name,
     calendar_t_col_name,
 ):
     logger.info(
         "Calculating RL loss gradients and hessians with respect to beta and mixed beta/action probability derivatives for each user at all update times."
     )
-    rl_loss_func = load_function_from_same_named_file(rl_loss_func_filename)
+    rl_update_func = load_function_from_same_named_file(rl_update_func_filename)
 
     rl_update_derivatives_by_calendar_t = {}
-    user_ids = list(next(iter(rl_loss_func_args.values())).keys())
+    user_ids = list(next(iter(rl_update_func_args.values())).keys())
     sorted_user_ids = sorted(user_ids)
-    for policy_num, args_by_user_id in rl_loss_func_args.items():
+    for policy_num, args_by_user_id in rl_update_func_args.items():
         # We store these loss gradients by the first time the resulting parameters
         # apply to, so determine this time.
         # Because we perform algorithm updates at the *end* of a timestep, the
@@ -494,11 +496,12 @@ def calculate_rl_loss_derivatives(
             study_df, policy_num, policy_num_col_name, calendar_t_col_name
         )
         loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
-            calculate_rl_loss_derivatives_specific_update(
-                rl_loss_func,
-                rl_loss_func_args_beta_index,
-                rl_loss_func_args_action_prob_index,
-                rl_loss_func_args_action_prob_times_index,
+            calculate_rl_update_derivatives_specific_update(
+                rl_update_func,
+                rl_update_func_type,
+                rl_update_func_args_beta_index,
+                rl_update_func_args_action_prob_index,
+                rl_update_func_args_action_prob_times_index,
                 args_by_user_id,
                 sorted_user_ids,
                 first_applicable_time,
@@ -515,33 +518,36 @@ def calculate_rl_loss_derivatives(
         rl_update_derivatives_by_calendar_t[first_applicable_time][
             "loss_gradient_pi_derivatives_by_user_id"
         ] = {
-            # NOTE the squeeze here... it is very important. Without it we have
+            # NOTE the [..., 0] here... it is very important. Without it we have
             # a shape (x,y,z,1) array of gradients, and the use of these
-            # probabilities assumes (x,y,z).  The squeezing should arguably
+            # probabilities assumes (x,y,z).  This should arguably
             # happen above, but the vmap call spits out a 4D array so in that
-            # sense that's the most natural return value.
+            # sense that's the most natural return value. Note that we don't
+            # simply squeeze because that would remove the beta dimension
+            # if it were one.
             # TODO: This probably has to do with the dimension of the action
             # probabilities... we may need to specify that they are scalars in the
             # loss function args, rather than 1-element vectors. Or one will
             # have to say so.  Test both of these cases.  Can probably check
             # dimensions and squeeze if necessary.
-            user_id: loss_gradient_pi_derivatives[i].squeeze()
+            user_id: loss_gradient_pi_derivatives[i][..., 0]
             for i, user_id in enumerate(sorted_user_ids)
         }
     return rl_update_derivatives_by_calendar_t
 
 
-def calculate_rl_loss_derivatives_specific_update(
-    rl_loss_func,
-    rl_loss_func_args_beta_index,
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+def calculate_rl_update_derivatives_specific_update(
+    rl_update_func,
+    rl_update_func_type,
+    rl_update_func_args_beta_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
     args_by_user_id,
     sorted_user_ids,
     first_applicable_time,
 ):
     logger.info(
-        "Calculating RL loss derivatives for the update that first applies at time %d.",
+        "Calculating RL update derivatives for the update that first applies at time %d.",
         first_applicable_time,
     )
     # Get a list of subdicts of the user args dict, with each united by having
@@ -569,7 +575,7 @@ def calculate_rl_loss_derivatives_specific_update(
         # representing all the args at a particular index across users.
         batched_arg_lists, involved_user_ids = (
             get_batched_arg_lists_and_involved_user_ids(
-                rl_loss_func, sorted_user_ids, args_by_user_id_subset
+                rl_update_func, sorted_user_ids, args_by_user_id_subset
             )
         )
         all_involved_user_ids |= involved_user_ids
@@ -586,28 +592,31 @@ def calculate_rl_loss_derivatives_specific_update(
 
         logger.info("Forming loss gradients with respect to beta.")
         in_study_loss_gradients_subset = get_loss_gradients_batched(
-            rl_loss_func,
-            rl_loss_func_args_beta_index,
+            rl_update_func,
+            rl_update_func_type,
+            rl_update_func_args_beta_index,
             batch_axes,
             *batched_arg_tensors,
         )
 
         logger.info("Forming loss hessians with respect to beta.")
         in_study_loss_hessians_subset = get_loss_hessians_batched(
-            rl_loss_func,
-            rl_loss_func_args_beta_index,
+            rl_update_func,
+            rl_update_func_type,
+            rl_update_func_args_beta_index,
             batch_axes,
             *batched_arg_tensors,
         )
         logger.info(
             "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time."
         )
-        if rl_loss_func_args_action_prob_index >= 0:
+        if rl_update_func_args_action_prob_index >= 0:
             in_study_loss_gradient_pi_derivatives_subset = (
                 get_loss_gradient_derivatives_wrt_pi_batched(
-                    rl_loss_func,
-                    rl_loss_func_args_beta_index,
-                    rl_loss_func_args_action_prob_index,
+                    rl_update_func,
+                    rl_update_func_type,
+                    rl_update_func_args_beta_index,
+                    rl_update_func_args_action_prob_index,
                     batch_axes,
                     *batched_arg_tensors,
                 )
@@ -624,12 +633,12 @@ def calculate_rl_loss_derivatives_specific_update(
             in_study_loss_hessians_by_user_id[user_id] = in_study_loss_hessians_subset[
                 in_batch_index
             ]
-            if rl_loss_func_args_action_prob_index >= 0:
+            if rl_update_func_args_action_prob_index >= 0:
                 in_study_loss_gradient_pi_derivatives_by_user_id[user_id] = (
                     pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
                         in_study_loss_gradient_pi_derivatives_subset[in_batch_index],
                         args_by_user_id[user_id][
-                            rl_loss_func_args_action_prob_times_index
+                            rl_update_func_args_action_prob_times_index
                         ],
                         first_applicable_time,
                     )
@@ -645,7 +654,7 @@ def calculate_rl_loss_derivatives_specific_update(
         for user_id in sorted_user_ids
         if user_id in all_involved_user_ids
     ]
-    if rl_loss_func_args_action_prob_index >= 0:
+    if rl_update_func_args_action_prob_index >= 0:
         in_study_loss_gradient_pi_derivatives = [
             in_study_loss_gradient_pi_derivatives_by_user_id[user_id]
             for user_id in sorted_user_ids
@@ -659,10 +668,10 @@ def calculate_rl_loss_derivatives_specific_update(
         in_study_loss_hessians, sorted_user_ids, all_involved_user_ids
     )
 
-    # If there is an action probability argument in the loss, we need to
+    # If there is an action probability argument in the RL update function, we need to
     # pad the derivatives calculated already with zeros for those users not currently
     # in the study. Otherwise simply return all zero gradients of the correct shape.
-    if rl_loss_func_args_action_prob_index >= 0:
+    if rl_update_func_args_action_prob_index >= 0:
         loss_gradient_pi_derivatives = pad_in_study_derivatives_with_zeros(
             in_study_loss_gradient_pi_derivatives,
             sorted_user_ids,
@@ -670,7 +679,7 @@ def calculate_rl_loss_derivatives_specific_update(
         )
     else:
         num_users = len(sorted_user_ids)
-        beta_dim = batched_arg_lists[rl_loss_func_args_beta_index][0].size
+        beta_dim = batched_arg_lists[rl_update_func_args_beta_index][0].size
         timesteps_included = first_applicable_time - 1
 
         loss_gradient_pi_derivatives = np.zeros(
@@ -681,40 +690,76 @@ def calculate_rl_loss_derivatives_specific_update(
 
 
 def get_loss_gradients_batched(
-    loss_func, loss_func_args_beta_index, batch_axes, *batched_arg_tensors
-):
-    return jax.vmap(
-        fun=jax.grad(loss_func, loss_func_args_beta_index),
-        in_axes=batch_axes,
-        out_axes=0,
-    )(*batched_arg_tensors)
-
-
-def get_loss_hessians_batched(
-    loss_func, loss_func_args_beta_index, batch_axes, *batched_arg_tensors
-):
-    return jax.vmap(
-        fun=jax.hessian(loss_func, loss_func_args_beta_index),
-        in_axes=batch_axes,
-        out_axes=0,
-    )(*batched_arg_tensors)
-
-
-def get_loss_gradient_derivatives_wrt_pi_batched(
-    loss_func,
-    loss_func_args_beta_index,
-    loss_func_args_action_prob_index,
+    update_func,
+    update_func_type,
+    update_func_args_beta_index,
     batch_axes,
     *batched_arg_tensors,
 ):
-    return jax.vmap(
-        fun=jax.jacrev(
-            jax.grad(loss_func, loss_func_args_beta_index),
-            loss_func_args_action_prob_index,
-        ),
-        in_axes=batch_axes,
-        out_axes=0,
-    )(*batched_arg_tensors)
+    if update_func_type == RLUpdateFunctionTypes.LOSS:
+        return jax.vmap(
+            fun=jax.grad(update_func, update_func_args_beta_index),
+            in_axes=batch_axes,
+            out_axes=0,
+        )(*batched_arg_tensors)
+    if update_func_type == RLUpdateFunctionTypes.ESTIMATING:
+        return jax.vmap(
+            fun=update_func,
+            in_axes=batch_axes,
+            out_axes=0,
+        )(*batched_arg_tensors)
+    raise ValueError("Unknown update function type.")
+
+
+def get_loss_hessians_batched(
+    update_func,
+    update_func_type,
+    update_func_args_beta_index,
+    batch_axes,
+    *batched_arg_tensors,
+):
+    if update_func_type == RLUpdateFunctionTypes.LOSS:
+        return jax.vmap(
+            fun=jax.hessian(update_func, update_func_args_beta_index),
+            in_axes=batch_axes,
+            out_axes=0,
+        )(*batched_arg_tensors)
+    if update_func_type == RLUpdateFunctionTypes.ESTIMATING:
+        return jax.vmap(
+            fun=jax.jacrev(update_func, update_func_args_beta_index),
+            in_axes=batch_axes,
+            out_axes=0,
+        )(*batched_arg_tensors)
+    raise ValueError("Unknown update function type.")
+
+
+def get_loss_gradient_derivatives_wrt_pi_batched(
+    update_func,
+    update_func_type,
+    update_func_args_beta_index,
+    update_func_args_action_prob_index,
+    batch_axes,
+    *batched_arg_tensors,
+):
+    if update_func_type == RLUpdateFunctionTypes.LOSS:
+        return jax.vmap(
+            fun=jax.jacrev(
+                jax.grad(update_func, update_func_args_beta_index),
+                update_func_args_action_prob_index,
+            ),
+            in_axes=batch_axes,
+            out_axes=0,
+        )(*batched_arg_tensors)
+    if update_func_type == RLUpdateFunctionTypes.ESTIMATING:
+        return jax.vmap(
+            fun=jax.jacrev(
+                update_func,
+                update_func_args_action_prob_index,
+            ),
+            in_axes=batch_axes,
+            out_axes=0,
+        )(*batched_arg_tensors)
+    raise ValueError("Unknown update function type.")
 
 
 # TODO: Is there a better way to calculate this? This seems like it should
@@ -772,9 +817,14 @@ def calculate_inference_loss_derivatives(
             if idx == inference_loss_func_args_theta_index:
                 user_args_list.append(theta_est)
             else:
-                user_args_list.append(
-                    get_study_df_column(filtered_user_data, col_name, in_study_col_name)
-                )
+                try:
+                    user_args_list.append(
+                        get_study_df_column(
+                            filtered_user_data, col_name, in_study_col_name
+                        )
+                    )
+                except:
+                    breakpoint()
         args_by_user_id[user_id] = tuple(user_args_list)
         if using_action_probs:
             action_prob_decision_times_by_user_id[user_id] = get_study_df_column(
@@ -821,6 +871,7 @@ def calculate_inference_loss_derivatives(
         logger.info("Forming loss gradients with respect to theta.")
         loss_gradients_subset = get_loss_gradients_batched(
             inference_loss_func,
+            RLUpdateFunctionTypes.LOSS,
             inference_loss_func_args_theta_index,
             batch_axes,
             *batched_arg_tensors,
@@ -829,12 +880,13 @@ def calculate_inference_loss_derivatives(
         logger.info("Forming loss hessians with respect to theta.")
         loss_hessians_subset = get_loss_hessians_batched(
             inference_loss_func,
+            RLUpdateFunctionTypes.LOSS,
             inference_loss_func_args_theta_index,
             batch_axes,
             *batched_arg_tensors,
         )
         logger.info(
-            "Forming derivatives of loss with respect to theta and then the action probabilites vector at each time."
+            "Forming derivatives of loss with respect to theta and then the action probabilities vector at each time."
         )
         # If there is an action probability argument in the loss,
         # actually differentiate with respect to action probabilities
@@ -842,6 +894,7 @@ def calculate_inference_loss_derivatives(
             loss_gradient_pi_derivatives_subset = (
                 get_loss_gradient_derivatives_wrt_pi_batched(
                     inference_loss_func,
+                    RLUpdateFunctionTypes.LOSS,
                     inference_loss_func_args_theta_index,
                     inference_loss_func_args_action_prob_index,
                     batch_axes,

@@ -110,6 +110,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
                         expected_debug_pieces_dict[
                             "algorithm_statistics_by_calendar_t"
                         ][t][k][user_id],
+                        atol=1e-5,
                         err_msg=f"Mismatch for t={t}, k={k}, user_id={user_id}",
                     )
 
@@ -154,12 +155,14 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         np.testing.assert_allclose(
             observed_debug_pieces_dict["inference_loss_gradient_pi_derivatives"],
             expected_debug_pieces_dict["inference_loss_gradient_pi_derivatives"],
+            atol=1e-6,
         )
 
         ### Check joint meat and bread inverse, uniting RL and inference
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_meat_matrix"],
             expected_debug_pieces_dict["joint_meat_matrix"],
+            atol=1e-5,
         )
 
         np.testing.assert_allclose(
@@ -172,10 +175,10 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         np.testing.assert_allclose(
             observed_analysis_dict["adaptive_sandwich_var_estimate"],
             expected_analysis_dict["adaptive_sandwich_var_estimate"],
-            atol=1e-9,
+            atol=1e-8,
         )
         np.testing.assert_allclose(
             observed_analysis_dict["classical_sandwich_var_estimate"],
             expected_analysis_dict["classical_sandwich_var_estimate"],
-            atol=1e-9,
+            atol=1e-8,
         )

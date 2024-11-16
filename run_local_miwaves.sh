@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -13,24 +13,23 @@ only_analysis=0
 # Arguments that only affect inference side.
 in_study_col_name="in_study_indicator"
 action_col_name="action"
-policy_num_col_name="policy_idx"
-calendar_t_col_name="calendar_decision_t"
-user_id_col_name="user_idx"
-action_prob_col_name="act_prob"
-action_prob_func_filename="functions_to_pass_to_analysis/oralytics_act_prob_function.py"
+policy_num_col_name="policy_number"
+calendar_t_col_name="calendar_time"
+user_id_col_name="user_id"
+action_prob_col_name="action_probability"
+action_prob_func_filename="functions_to_pass_to_analysis/miwaves_action_selection.py"
 action_prob_func_args_beta_index=0
-rl_update_func_filename="functions_to_pass_to_analysis/oralytics_RL_estimating_function.py"
+rl_update_func_filename="functions_to_pass_to_analysis/miwaves_RL_estimating_function.py"
 rl_update_func_type="estimating"
 rl_update_func_args_beta_index=0
-rl_update_func_args_action_prob_index=4
-rl_update_func_args_action_prob_times_index=5
-inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py"
-# inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_avg_reward_sum_loss_debug.py"
+rl_update_func_args_action_prob_index=-1
+rl_update_func_args_action_prob_times_index=-1
+inference_loss_func_filename="functions_to_pass_to_analysis/miwaves_primary_analysis_loss.py"
 inference_loss_func_args_theta_index=0
-theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis.py"
-# theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis_avg_reward_sum_debug.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/miwaves_estimate_theta_primary_analysis.py"
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
+small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -62,33 +61,34 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
     o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
-# Simulate an oralytics RL study (unless we just want to analyze previous results)
+# Simulate an miwaves RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
-  echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning RL study simulation."
-  python oralytics_sample_data/Archive/src/run_exps.py ${seed}
-  echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished RL study simulation."
+  echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning RL study simulation."
+  python miwaves_sample_data/src/run_simulation.py -p mixed_effects -s ${seed}
+  echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished RL study simulation."
 fi
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="oralytics_sample_data/Archive/exps/write/NON_STAT_LOW_R_None_0.515_14_full_pooling/${seed}"
+output_folder="miwaves_sample_data/results/num_users100_num_time_steps10_seed${seed}_delta_seed0_beta_mean[1]_beta_std[[1]]_gamma_std[[0.1]]_sigma_e20.1_policy_typemixed_effects"
 
 # Do after-study analysis on the single algorithm run from above
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/${seed}_study_data.pkl" \
+  --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/${seed}_action_data.pkl" \
+  --action_prob_func_args_pickle="${output_folder}/action_selection_function_dict.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --rl_update_func_filename=$rl_update_func_filename \
   --rl_update_func_type=$rl_update_func_type \
-  --rl_update_func_args_pickle="${output_folder}/${seed}_loss_fn_data.pkl" \
+  --rl_update_func_args_pickle="${output_folder}/estimating_equation_function_dict.pkl" \
   --rl_update_func_args_beta_index=$rl_update_func_args_beta_index \
   --rl_update_func_args_action_prob_index=$rl_update_func_args_action_prob_index \
   --rl_update_func_args_action_prob_times_index=$rl_update_func_args_action_prob_times_index \
@@ -102,7 +102,8 @@ python after_study_analysis.py analyze-dataset \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-  --suppress_all_data_checks=$suppress_all_data_checks
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Ending after-study analysis."
+  --suppress_all_data_checks=$suppress_all_data_checks \
+  --small_sample_correction=$small_sample_correction
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Ending after-study analysis."
 
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished simulation."

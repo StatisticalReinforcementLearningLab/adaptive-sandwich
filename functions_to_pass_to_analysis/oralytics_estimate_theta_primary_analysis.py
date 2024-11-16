@@ -23,7 +23,7 @@ def oralytics_estimate_theta_primary_analysis(study_df):
     linear_model.fit(
         trimmed_df,
         in_study_df["oscb"],
-        sample_weight=(1 / (trimmed_df["act_prob"] * (1 - trimmed_df["act_prob"]))),
+        # sample_weight=(1 / (trimmed_df["act_prob"] * (1 - trimmed_df["act_prob"]))),
     )
 
     return linear_model.coef_

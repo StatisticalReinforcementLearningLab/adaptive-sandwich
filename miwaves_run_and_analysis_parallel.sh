@@ -11,7 +11,7 @@
 #SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
-# sbatch --array=[0-99] simulation_run_and_analysis_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
+# sbatch --array=[0-99] miwaves_run_and_analysis_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
 
 # To analyze, run simulation_collect_analyses.sh as described in the
 # output of one of the simulation runs.
@@ -20,56 +20,41 @@
 # S BATCH -p gpu_requeue                                                       # Target Partition
 # S BATCH --gres=gpu:1                                                         # Request a GPU
 
-# Stop on nonzero exit codes and use of undefined variables, and print all commands
 set -eu
 
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Parsing options.
+echo "$(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
-# Arguments that affect RL study simulation side and then inference through
-# that.
-T=10
-decisions_between_updates=1
-recruit_t=1
-n=100
-recruit_n=$n
-min_users=1
-synthetic_mode='delayed_1_dosage'
-steepness=0.0
-RL_alg="sigmoid_LS"
-err_corr='time_corr'
-alg_state_feats="intercept,past_reward"
-action_centering_RL=0
-dynamic_seeds=0
+# Arguments that only affect simulation side.
+seed=0
+only_analysis=0
 
 # Arguments that only affect inference side.
-in_study_col_name="in_study"
+in_study_col_name="in_study_indicator"
 action_col_name="action"
-policy_num_col_name="policy_num"
-calendar_t_col_name="calendar_t"
+policy_num_col_name="policy_number"
+calendar_t_col_name="calendar_time"
 user_id_col_name="user_id"
-action_prob_col_name="action1prob"
-action_prob_func_filename="functions_to_pass_to_analysis/get_action_1_prob_pure.py"
+action_prob_col_name="action_probability"
+action_prob_func_filename="functions_to_pass_to_analysis/miwaves_action_selection.py"
 action_prob_func_args_beta_index=0
-rl_update_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
-rl_update_func_type="loss"
+rl_update_func_filename="functions_to_pass_to_analysis/miwaves_RL_estimating_function.py"
+rl_update_func_type="estimating"
 rl_update_func_args_beta_index=0
-rl_update_func_args_action_prob_index=5
-rl_update_func_args_action_prob_times_index=6
-inference_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
+rl_update_func_args_action_prob_index=-1
+rl_update_func_args_action_prob_times_index=-1
+inference_loss_func_filename="functions_to_pass_to_analysis/miwaves_primary_analysis_loss.py"
 inference_loss_func_args_theta_index=0
-theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_action_centering.py"
-suppress_interactive_data_checks=1
+theta_calculation_func_filename="functions_to_pass_to_analysis/miwaves_estimate_theta_primary_analysis.py"
+suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-# Note that the N argument is not supplied here: the number of simulations is
-# determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:H:F:Q:q:z:-: OPT; do
+while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -77,18 +62,6 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:H:F:Q:q:z:-:
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
-    T  | max_time )                                     needs_arg; T="$OPTARG" ;;
-    t  | recruit_t )                                    needs_arg; recruit_t="$OPTARG" ;;
-    n  | num_users )                                    needs_arg; n="$OPTARG" ;;
-    u  | recruit_n )                                    needs_arg; recruit_n="$OPTARG" ;;
-    d  | decisions_between_updates )                    needs_arg; decisions_between_updates="$OPTARG" ;;
-    m  | min_users )                                    needs_arg; min_users="$OPTARG" ;;
-    r  | RL_alg )                                       needs_arg; RL_alg="$OPTARG" ;;
-    e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
-    f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
-    a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
-    s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
-    y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -105,7 +78,8 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:H:F:Q:q:z:-:
     I  | inference_loss_func_filename )                 needs_arg; inference_loss_func_filename="$OPTARG" ;;
     h  | inference_loss_func_args_theta_index )         needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
-    F  | dynamic_seeds )                                needs_arg; dynamic_seeds="$OPTARG" ;;
+    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
+    o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
@@ -115,24 +89,6 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:H:F:Q:q:z:-:
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
-# Load Python 3.10, among other things
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Loading mamba and CUDA modules.
-module load Mambaforge/22.11.1-fasrc01
-module load cuda/12.2.0-fasrc01
-
-# Make virtualenv if necessary, and then activate it
-cd ~
-if ! test -d venv; then
-  echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Creating venv, as it did not exist.
-  python3 -m venv venv
-fi
-source venv/bin/activate
-
-# Now install all Python requirements.  This is incremental, so it's ok to do every time.
-cd ~/adaptive-sandwich
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Making sure Python requirements are installed.
-pip install -r simulation_requirements.txt
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: All Python requirements installed.
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
 
@@ -143,42 +99,35 @@ save_dir="${save_dir_prefix}/${SLURM_ARRAY_TASK_ID}"
 save_dir_glob="${save_dir_prefix}/*"
 mkdir -p "$save_dir"
 
-# Simulate an RL study with the supplied arguments.  (We do just one repetition)
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning RL simulations.
-python rl_study_simulation.py \
-  --T=$T \
-  --N=1 \
-  --parallel_task_index=$SLURM_ARRAY_TASK_ID \
-  --n=$n \
-  --min_users=$min_users \
-  --decisions_between_updates=$decisions_between_updates \
-  --recruit_n=$recruit_n \
-  --recruit_t=$recruit_t \
-  --synthetic_mode=$synthetic_mode \
-  --steepness=$steepness \
-  --RL_alg=$RL_alg \
-  --err_corr=$err_corr \
-  --alg_state_feats=$alg_state_feats \
-  --action_centering=$action_centering_RL \
-  --save_dir=$save_dir \
-  --dynamic_seeds=$dynamic_seeds
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished RL simulations.
+# Simulate an miwaves RL study (unless we just want to analyze previous results)
+if [ "$only_analysis" -eq "0" ]; then
+  echo "$(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel: Beginning RL study simulation."
+  python miwaves_sample_data/src/run_simulation.py \
+    -p mixed_effects \
+    -s $SLURM_ARRAY_TASK_ID \
+    -d $save_dir
+  echo "$(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel: Finished RL study simulation."
+fi
+
+# Create a convenience variable that holds the output folder for the last script.
+# This should really be output by that script or passed into it as an arg, but alas.
+output_folder="miwaves_sample_data/results/num_users100_num_time_steps10_seed${seed}_delta_seed0_beta_mean[1]_beta_std[[1]]_gamma_std[[0.1]]_sigma_e20.1_policy_typemixed_effects"
 
 # Create a convenience variable that holds the output folder for the last script
 save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
-# Analyze dataset created in the above simulation
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Beginning after-study analysis.
+# Do after-study analysis on the single algorithm run from above
+echo "$(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+  --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+  --action_prob_func_args_pickle="${output_folder}/action_selection_function_dict.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --rl_update_func_filename=$rl_update_func_filename \
   --rl_update_func_type=$rl_update_func_type \
-  --rl_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+  --rl_update_func_args_pickle="${output_folder}/estimating_equation_function_dict.pkl" \
   --rl_update_func_args_beta_index=$rl_update_func_args_beta_index \
   --rl_update_func_args_action_prob_index=$rl_update_func_args_action_prob_index \
   --rl_update_func_args_action_prob_times_index=$rl_update_func_args_action_prob_times_index \
@@ -194,7 +143,7 @@ python after_study_analysis.py analyze-dataset \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Finished after-study analysis.
+echo $(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel.sh: Finished after-study analysis.
 
-echo $(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") simulation_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"
+echo $(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel.sh: Simulation complete.
+echo "$(date +"%Y-%m-%d %T") miwaves_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"

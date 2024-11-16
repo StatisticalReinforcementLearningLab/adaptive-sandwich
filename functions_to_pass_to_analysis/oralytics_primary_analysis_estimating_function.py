@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 
-def oralytics_primary_analysis_loss(
+def oralytics_primary_analysis_estimating_function(
     theta_est,
     tod,
     bbar,
@@ -27,10 +27,8 @@ def oralytics_primary_analysis_loss(
         )
     )
 
-    # weight = 1 / (act_prob * (1 - act_prob))
-    weight = 1
+    weight = 1 / (act_prob * (1 - act_prob))
 
-    breakpoint()
     return jnp.sum(
         weight
         * (
@@ -39,5 +37,6 @@ def oralytics_primary_analysis_loss(
             - act_prob * nu_2
             - (action - act_prob) * delta
         )
-        ** 2
+        * jnp.hstack((state, act_prob, action - act_prob)),
+        axis=0,
     )

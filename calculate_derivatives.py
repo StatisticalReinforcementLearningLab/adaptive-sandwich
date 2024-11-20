@@ -817,14 +817,9 @@ def calculate_inference_loss_derivatives(
             if idx == inference_loss_func_args_theta_index:
                 user_args_list.append(theta_est)
             else:
-                try:
-                    user_args_list.append(
-                        get_study_df_column(
-                            filtered_user_data, col_name, in_study_col_name
-                        )
-                    )
-                except:
-                    breakpoint()
+                user_args_list.append(
+                    get_study_df_column(filtered_user_data, col_name, in_study_col_name)
+                )
         args_by_user_id[user_id] = tuple(user_args_list)
         if using_action_probs:
             action_prob_decision_times_by_user_id[user_id] = get_study_df_column(

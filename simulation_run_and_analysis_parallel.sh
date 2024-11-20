@@ -4,8 +4,8 @@
 #SBATCH -t 0-0:20                                                                                           # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH --mem=5G                                                                                            # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -p serial_requeue                                                                                   # Target Partition
-#SBATCH -o /n/holyscratch01/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out    # STDOUT
-#SBATCH -e /n/holyscratch01/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out    # STDERR
+#SBATCH -o /n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out       # STDOUT
+#SBATCH -e /n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out       # STDERR
 #SBATCH --mail-type=END                                                                                     # This command would send an email when the job ends.
 #SBATCH --mail-type=FAIL                                                                                    # This command would send an email when the job ends.
 #SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent

@@ -7,7 +7,15 @@ die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that only affect simulation side.
+num_users=100
+num_time_steps=10
 seed=0
+delta_seed=0
+beta_mean=1
+beta_var=1
+gamma_var=.1
+sigma_e2=.1
+policy_type="mixed_effects"
 only_analysis=0
 
 # Arguments that only affect inference side.
@@ -33,7 +41,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
+while getopts m:T:s:S:G:t:g:e:O:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -41,6 +49,16 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
+    m  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
+    T  | num_time_steps )                               needs_arg; num_time_steps="$OPTARG" ;;
+    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
+    S  | delta_seed )                                   needs_arg; delta_seed="$OPTARG" ;;
+    G  | beta_mean )                                    needs_arg; beta_mean="$OPTARG" ;;
+    t  | beta_var )                                     needs_arg; beta_var="$OPTARG" ;;
+    g  | gamma_var )                                    needs_arg; gamma_var="$OPTARG" ;;
+    e  | sigma_e2 )                                     needs_arg; sigma_e2="$OPTARG" ;;
+    O  | policy_type )                                  needs_arg; policy_type="$OPTARG" ;;
+    o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -57,8 +75,6 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
     I  | inference_loss_func_filename )                 needs_arg; inference_loss_func_filename="$OPTARG" ;;
     h  | inference_loss_func_args_theta_index )         needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
-    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
-    o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
@@ -71,13 +87,22 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 # Simulate an miwaves RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
   echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning RL study simulation."
-  python miwaves_sample_data/src/run_simulation.py -p mixed_effects -s ${seed}
+  python miwaves_sample_data/src/run_simulation.py \
+    --num_users $num_users \
+    --num_time_steps $num_time_steps \
+    --seed $seed \
+    --delta_seed $delta_seed \
+    --beta_mean $beta_mean \
+    --beta_var $beta_var \
+    --gamma_var $gamma_var \
+    --sigma_e2 $sigma_e2 \
+    --policy_type $policy_type
   echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished RL study simulation."
 fi
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="miwaves_sample_data/results/num_users100_num_time_steps10_seed${seed}_delta_seed0_beta_mean[1]_beta_std[[1]]_gamma_std[[0.1]]_sigma_e20.1_policy_typemixed_effects"
+output_folder="miwaves_sample_data/results/num_users${num_users}_num_time_steps${num_time_steps}_seed${seed}_delta_seed0_beta_mean[$(printf '%.1f' $beta_mean)]_beta_var[[$(printf '%.1f' $beta_var)]]_gamma_var[[$(printf '%.1f' $gamma_var)]]_sigma_e2$(printf '%.1f' $sigma_e2)_policy_typemixed_effects"
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning after-study analysis."

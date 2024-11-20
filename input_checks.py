@@ -10,9 +10,6 @@ from helper_functions import (
     load_function_from_same_named_file,
 )
 
-# TODO: Add a check that study df types are not object. Anything I get on inference side
-# will fail if object type.
-
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
 
@@ -125,6 +122,15 @@ def perform_first_wave_input_checks(
         user_id_col_name,
         action_prob_col_name,
     )
+    require_all_named_columns_not_object_type_in_study_df(
+        study_df,
+        in_study_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+    )
     require_binary_actions(study_df, in_study_col_name, action_col_name)
     require_binary_in_study_indicators(study_df, in_study_col_name)
     require_consecutive_integer_policy_numbers(
@@ -215,7 +221,7 @@ def require_action_prob_func_args_given_for_all_users_at_each_decision(
     action_prob_func_args,
 ):
     logger.info(
-        "Checking that action prob function args are given for all users at each decision time"
+        "Checking that action prob function args are given for all users at each decision time."
     )
     all_user_ids = set(study_df[user_id_col_name].unique())
     for decision_time in action_prob_func_args:
@@ -228,7 +234,7 @@ def require_action_prob_func_args_given_for_all_decision_times(
     study_df, calendar_t_col_name, action_prob_func_args
 ):
     logger.info(
-        "Checking that action prob function args are given for all decision times"
+        "Checking that action prob function args are given for all decision times."
     )
     all_times = set(study_df[calendar_t_col_name].unique())
 
@@ -261,6 +267,27 @@ def require_all_named_columns_present_in_study_df(
     assert (
         action_prob_col_name in study_df.columns
     ), f"{action_prob_col_name} not in study df."
+
+
+def require_all_named_columns_not_object_type_in_study_df(
+    study_df,
+    in_study_col_name,
+    action_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
+    action_prob_col_name,
+):
+    logger.info("Checking that all named columns are present in the study dataframe.")
+    for colname in (
+        in_study_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+    ):
+        assert study_df[colname].dtype != "object"
 
 
 def require_binary_actions(study_df, in_study_col_name, action_col_name):
@@ -382,7 +409,7 @@ def confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
     )
     if rl_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
-            "You specified that the RL update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct. Continue? (y/n)\n"
+            "You specified that the RL update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
         )
 
 
@@ -585,7 +612,7 @@ def require_beta_estimating_functions_sum_to_zero(
 
 # TODO: Also have interactive check if condition number merely high?
 # TODO: Hotspot for replacing notion of update times
-def require_non_singular_avg_hessians_at_each_update(
+def check_avg_hessian_condition_num_at_each_update(
     update_times,
     algorithm_statistics_by_calendar_t,
 ):

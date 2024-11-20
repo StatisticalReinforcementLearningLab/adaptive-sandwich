@@ -3,6 +3,7 @@ import os
 import logging
 import pathlib
 import glob
+import math
 
 import click
 import numpy as np
@@ -321,8 +322,7 @@ def analyze_dataset(
         input_checks.require_beta_estimating_functions_sum_to_zero(
             update_times, algorithm_statistics_by_calendar_t, beta_dim
         )
-    if not suppress_all_data_checks:
-        input_checks.require_non_singular_avg_hessians_at_each_update(
+        input_checks.check_avg_hessian_condition_num_at_each_update(
             update_times, algorithm_statistics_by_calendar_t
         )
 
@@ -757,7 +757,6 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
                 beta_dim * i : beta_dim * (i + 1),
             ]
         )
-        breakpoint()
         for j in range(0, num_beta_block_rows):
             if i > j:
                 beta_block_row.append(
@@ -1012,10 +1011,6 @@ def get_classical_sandwich_var_pieces(theta_dim, loss_gradients, loss_hessians):
 
     logger.info("Forming classical bread inverse.")
     normalized_hessian = np.mean(loss_hessians, axis=0)
-    logger.info("Classical bread (pre-inversion):")
-    logger.info(normalized_hessian)
-    logger.info("Classical meat:")
-    logger.info(meat)
 
     # degrees of freedom adjustment
     # TODO: Reinstate? Provide reference? Mentioned in sandwich package
@@ -1040,7 +1035,12 @@ def get_classical_sandwich_var_pieces(theta_dim, loss_gradients, loss_hessians):
     help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
     required=True,
 )
-def collect_existing_analyses(input_glob):
+@click.option(
+    "--index_to_check_ci_coverage",
+    type=int,
+    help="The index of the parameter to check coverage for.  If not provided, coverage will not be checked.",
+)
+def collect_existing_analyses(input_glob, index_to_check_ci_coverage):
 
     raw_theta_estimates = []
     raw_adaptive_sandwich_var_estimates = []
@@ -1134,6 +1134,44 @@ def collect_existing_analyses(input_glob):
     print(
         f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}\n",
     )
+
+    if theta_estimates[0].size == 1:
+        index_to_check_ci_coverage = 0
+    if index_to_check_ci_coverage is not None:
+        adaptive_cover_count = 0
+        classical_cover_count = 0
+        scalar_mean_theta = theta_estimate[index_to_check_ci_coverage]
+        for single_theta_est in theta_estimates:
+            scalar_single_theta = single_theta_est[index_to_check_ci_coverage]
+            adaptive_se = math.sqrt(
+                mean_adaptive_sandwich_var_estimate[index_to_check_ci_coverage][
+                    index_to_check_ci_coverage
+                ]
+            )
+            classical_se = math.sqrt(
+                mean_classical_sandwich_var_estimate[index_to_check_ci_coverage][
+                    index_to_check_ci_coverage
+                ]
+            )
+            if (
+                scalar_mean_theta - 1.96 * adaptive_se
+                <= scalar_single_theta
+                <= scalar_mean_theta + 1.96 * adaptive_se
+            ):
+                adaptive_cover_count += 1
+            if (
+                scalar_mean_theta - 1.96 * classical_se
+                <= scalar_single_theta
+                <= scalar_mean_theta + 1.96 * classical_se
+            ):
+                classical_cover_count += 1
+
+        print(
+            f"\nAdaptive sandwich 95% CI coverage:\n{adaptive_cover_count / len(theta_estimates)}",
+        )
+        print(
+            f"\nClassical sandwich 95% CI coverage:\n{classical_cover_count / len(theta_estimates)}",
+        )
 
 
 def apply_small_sample_correction(

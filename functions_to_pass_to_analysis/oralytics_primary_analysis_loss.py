@@ -30,7 +30,6 @@ def oralytics_primary_analysis_loss(
     # weight = 1 / (act_prob * (1 - act_prob))
     weight = 1
 
-    breakpoint()
     return jnp.sum(
         weight
         * (

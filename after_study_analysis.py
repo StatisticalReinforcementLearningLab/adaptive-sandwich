@@ -1052,7 +1052,7 @@ def collect_existing_analyses(input_glob, index_to_check_ci_coverage):
         raise RuntimeError("Aborting because no files found. Please check path.")
 
     for i, filename in enumerate(filenames):
-        if i and i % (len(filenames) // 10) == 0:
+        if i and len(filenames) >= 10 and i % (len(filenames) // 10) == 0:
             logger.info("A(nother) tenth of files processed.")
         if not os.stat(filename).st_size:
             raise RuntimeError(

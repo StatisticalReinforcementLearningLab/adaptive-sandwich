@@ -178,7 +178,7 @@ def require_action_probabilities_can_be_reconstructed(
         )
     except AssertionError as e:
         confirm_input_check_result(
-            f"The action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable. If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n",
+            f"\nThe action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable. If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n",
             e,
         )
 
@@ -287,7 +287,9 @@ def require_all_named_columns_not_object_type_in_study_df(
         user_id_col_name,
         action_prob_col_name,
     ):
-        assert study_df[colname].dtype != "object"
+        assert (
+            study_df[colname].dtype != "object"
+        ), f"At least {colname} is of object type in study df."
 
 
 def require_binary_actions(study_df, in_study_col_name, action_col_name):
@@ -409,7 +411,7 @@ def confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
     )
     if rl_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
-            "You specified that the RL update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
+            "\nYou specified that the RL update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
         )
 
 
@@ -560,13 +562,12 @@ def require_theta_estimating_functions_sum_to_zero(
         )
     except AssertionError as e:
         confirm_input_check_result(
-            f"Theta estimating functions do not sum to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            f"\nTheta estimating functions do not sum to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
             e,
         )
 
 
 # TODO: Hotspot for replacing notion of update times
-# TODO: Remove breakpoint eventually
 def require_beta_estimating_functions_sum_to_zero(
     update_times, algorithm_statistics_by_calendar_t, beta_dim
 ):
@@ -605,7 +606,7 @@ def require_beta_estimating_functions_sum_to_zero(
         )
     except AssertionError as e:
         confirm_input_check_result(
-            f"Beta estimating functions with args and provided beta estimate plugged in do not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            f"\nBeta estimating functions with args and provided beta estimate plugged in do not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
             e,
         )
 
@@ -630,7 +631,7 @@ def check_avg_hessian_condition_num_at_each_update(
 
     if poorly_conditioned_updates_dict:
         confirm_input_check_result(
-            f"Potentially poorly conditioned (possibly singular) average estimating function derivatives for RL at the following update times:\n{poorly_conditioned_updates_dict}\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
+            f"\nPotentially poorly conditioned average estimating function derivatives for RL at the following update times:\n{poorly_conditioned_updates_dict}\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
         )
 
 
@@ -651,7 +652,7 @@ def require_non_singular_avg_hessian_inference(
 
     if condition_number > CONDITION_NUMBER_CUTOFF:
         confirm_input_check_result(
-            f"Potentially poorly conditioned (possibly singular) average estimating function derivative for inference. Condition number:\n\n{condition_number}.\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
+            f"\nPotentially poorly conditioned (possibly singular) average estimating function derivative for inference. Condition number:\n\n{condition_number}.\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
         )
 
 
@@ -680,6 +681,6 @@ def require_adaptive_bread_inverse_is_true_inverse(
         )
     except AssertionError as e:
         confirm_input_check_result(
-            f"Joint adaptive bread is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
+            f"\nJoint adaptive bread is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
             e,
         )

@@ -8,14 +8,14 @@ def oralytics_RL_loss(
     state: jnp.array,
     action: jnp.array,
     act_prob: jnp.array,
-    decision_times: jnp.array,
+    decision_times: jnp.array,  # pylint: disable=unused-argument
     rewards: jnp.array,
     prior_mu: jnp.array,
     prior_sigma_inv: jnp.array,
     init_noise_var: float,
 ) -> float:
     """
-    Compute the loss function of the thompson sampling update
+    Compute the loss function of the Bayesian linear regression update for the RL model.
     """
 
     dim = 15

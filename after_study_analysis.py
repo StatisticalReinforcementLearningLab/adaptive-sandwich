@@ -681,18 +681,25 @@ def compute_variance_estimates(
     logger.debug("Adaptive joint bread inverse:")
     logger.debug(joint_adaptive_bread_inverse_matrix)
 
-    # joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
-    #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
-    # )
+    joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
+        joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
+    )
 
-    joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
-        joint_adaptive_bread_inverse_matrix
+    # TODO: Remove
+    joint_adaptive_bread_matrix_alt = invert_matrix_and_check_conditioning(
+        joint_adaptive_bread_inverse_matrix, try_tikhonov_if_poorly_conditioned=True
     )
 
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
+        # TODO: Remove
+        input_checks.require_adaptive_bread_inverse_is_true_inverse(
+            joint_adaptive_bread_matrix_alt, joint_adaptive_bread_inverse_matrix
+        )
+
+    breakpoint()
 
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
@@ -745,6 +752,22 @@ def compute_variance_estimates(
 
 
 def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
+    """
+    Invert the inverse bread matrix to get the bread matrix.  This is a special
+    function in order to take advantage of the block lower triangular structure.
+
+    The procedure is as follows:
+    1. Initialize the inverse matrix B = A^{-1} as a block lower triangular matrix
+       with the same block structure as A.
+
+    2. Compute the diagonal blocks B_{ii}:
+       For each diagonal block A_{ii}, calculate:
+           B_{ii} = A_{ii}^{-1}
+
+    3. Compute the off-diagonal blocks B_{ij} for i > j:
+       For each off-diagonal block B_{ij} (where i > j), compute:
+           B_{ij} = -A_{ii}^{-1} * sum(A_{ik} * B_{kj} for k in range(j, i))
+    """
     blocks = []
     num_beta_block_rows = (inverse_bread.shape[0] - theta_dim) // beta_dim
 
@@ -755,7 +778,8 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
             inverse_bread[
                 beta_dim * i : beta_dim * (i + 1),
                 beta_dim * i : beta_dim * (i + 1),
-            ]
+            ],
+            try_tikhonov_if_poorly_conditioned=True,
         )
         for j in range(0, num_beta_block_rows):
             if i > j:
@@ -775,34 +799,35 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
             else:
                 beta_block_row.append(np.zeros((beta_dim, beta_dim)).astype(np.float32))
 
-        # Extra beta theta zero block. This is the last column of the row.
+        # Extra beta * theta zero block. This is the last block of the row.
         # Any other zeros in the row have already been handled above.
         beta_block_row.append(np.zeros((beta_dim, theta_dim)))
 
         blocks.append(beta_block_row)
 
-        theta_block_row = []
-        theta_diag_inverse = invert_matrix_and_check_conditioning(
-            inverse_bread[
-                -theta_dim:,
-                -theta_dim:,
-            ]
-        )
-        for j in range(0, num_beta_block_rows):
-            theta_block_row.append(
-                -theta_diag_inverse
-                @ sum(
-                    inverse_bread[
-                        -theta_dim:,
-                        beta_dim * k : beta_dim * (k + 1),
-                    ]
-                    @ blocks[k][j]
-                    for k in range(j, num_beta_block_rows)
-                )
+    # Create the bottom block row of bread (the theta portion)
+    theta_block_row = []
+    theta_diag_inverse = invert_matrix_and_check_conditioning(
+        inverse_bread[
+            -theta_dim:,
+            -theta_dim:,
+        ]
+    )
+    for k in range(0, num_beta_block_rows):
+        theta_block_row.append(
+            -theta_diag_inverse
+            @ sum(
+                inverse_bread[
+                    -theta_dim:,
+                    beta_dim * h : beta_dim * (h + 1),
+                ]
+                @ blocks[h][k]
+                for h in range(k, num_beta_block_rows)
             )
+        )
 
-        theta_block_row.append(theta_diag_inverse)
-        blocks.append(theta_block_row)
+    theta_block_row.append(theta_diag_inverse)
+    blocks.append(theta_block_row)
 
     return np.block(blocks)
 

@@ -317,7 +317,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_out_of_study_2():
     )
 
 
-def test_calculate_rl_loss_derivatives_specific_update_no_action_centering():
+def test_calculate_rl_update_derivatives_specific_update_no_action_centering():
     """
     Study df for reference
     pd.DataFrame(
@@ -336,8 +336,9 @@ def test_calculate_rl_loss_derivatives_specific_update_no_action_centering():
     Note that the pi derivatives are squeezed after this to get rid of a dimension
     """
     np.testing.assert_equal(
-        calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        calculate_derivatives.calculate_rl_update_derivatives_specific_update(
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+            "loss",
             0,
             5,
             6,
@@ -428,7 +429,7 @@ def test_calculate_rl_loss_derivatives_specific_update_no_action_centering():
     )
 
 
-def test_calculate_rl_loss_derivatives_specific_update_no_action_probs_passed_to_function():
+def test_calculate_rl_update_derivatives_specific_update_no_action_probs_passed_to_function():
     """
     Just like previous test, but we pretend the loss function doesn't actually
     take action probabilities to get the same zero gradients. This is extra
@@ -439,8 +440,9 @@ def test_calculate_rl_loss_derivatives_specific_update_no_action_probs_passed_to
     Note that the pi derivatives are squeezed after this to get rid of a dimension
     """
     np.testing.assert_equal(
-        calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        calculate_derivatives.calculate_rl_update_derivatives_specific_update(
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+            "loss",
             0,
             -1,
             -1,
@@ -531,7 +533,7 @@ def test_calculate_rl_loss_derivatives_specific_update_no_action_probs_passed_to
     )
 
 
-def test_calculate_rl_loss_derivatives_specific_update_action_centering():
+def test_calculate_rl_update_derivatives_specific_update_action_centering():
     """
     Study df for reference
     pd.DataFrame(
@@ -608,8 +610,9 @@ def test_calculate_rl_loss_derivatives_specific_update_action_centering():
     )
 
     np.testing.assert_equal(
-        calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+        calculate_derivatives.calculate_rl_update_derivatives_specific_update(
             functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+            "loss",
             0,
             5,
             6,
@@ -718,7 +721,7 @@ def test_calculate_rl_loss_derivatives_specific_update_action_centering():
     )
 
 
-def test_calculate_rl_loss_derivatives_specific_update_with_and_without_zero_padding():
+def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_padding():
     """
     Study df for reference
     pd.DataFrame(
@@ -845,8 +848,9 @@ def test_calculate_rl_loss_derivatives_specific_update_with_and_without_zero_pad
 
     # Pass the data in from the above dataframe by just passing in in-study data,
     # no padding, and get the resulting derivatives.
-    non_zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+    non_zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
         functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        "loss",
         0,
         5,
         6,
@@ -906,8 +910,9 @@ def test_calculate_rl_loss_derivatives_specific_update_with_and_without_zero_pad
     np.testing.assert_equal(non_zero_padded_result, expected_result)
 
     # Pass the data in from the above dataframe by padding out of study values with zeros
-    zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+    zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
         functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        "loss",
         0,
         5,
         6,
@@ -1033,7 +1038,7 @@ def test_calculate_rl_loss_derivatives_specific_update_with_and_without_zero_pad
     # np.testing.assert_equal(non_zero_padded_result, zero_padded_result)
 
 
-def test_calculate_rl_loss_derivatives_specific_update_action_centering_incremental_recruitment_with_and_without_zero_padding_multiple_size_groups():
+def test_calculate_rl_update_derivatives_specific_update_action_centering_incremental_recruitment_with_and_without_zero_padding_multiple_size_groups():
     """
     Study df for reference
     pd.DataFrame(
@@ -1164,8 +1169,9 @@ def test_calculate_rl_loss_derivatives_specific_update_action_centering_incremen
 
     # Pass the data in from the above dataframe by just passing in in-study data,
     # no padding, and get the resulting derivatives.
-    non_zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+    non_zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
         functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        "loss",
         0,
         5,
         6,
@@ -1225,8 +1231,9 @@ def test_calculate_rl_loss_derivatives_specific_update_action_centering_incremen
     np.testing.assert_equal(non_zero_padded_result, expected_result)
 
     # Pass the data in from the above dataframe by padding out of study values with zeros
-    zero_padded_result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+    zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
         functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        "loss",
         0,
         5,
         6,
@@ -1349,7 +1356,7 @@ def test_calculate_rl_loss_derivatives_specific_update_action_centering_incremen
     np.testing.assert_equal(zero_padded_result, expected_result)
 
 
-def test_calculate_rl_loss_derivatives_multiple_size_groups_real_bug_case():
+def test_calculate_rl_update_derivatives_multiple_size_groups_real_bug_case():
     """
     The bug was occurring because instead of calling the padding function with
     the list of all user ids in the update, it was being called with just the
@@ -1364,8 +1371,9 @@ def test_calculate_rl_loss_derivatives_multiple_size_groups_real_bug_case():
     branch.
     """
 
-    result = calculate_derivatives.calculate_rl_loss_derivatives_specific_update(
+    result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
         functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        "loss",
         0,
         5,
         6,
@@ -3598,7 +3606,7 @@ def test_calculate_pi_and_weight_gradients():
 # Especially to exercise stacking function and get_first_applicable_time and
 # squeeze of pi gradients and rest of dict formation
 @pytest.mark.skip(reason="Nice to have")
-def test_calculate_rl_loss_derivatives():
+def test_calculate_rl_update_derivatives():
     # TODO: Mainly need show that there is a bug with incremental recruitment currently, only
     # one recruitment group worth of nonzero gradients showing up in loss gradients at each time
     # in the case in integration test 1

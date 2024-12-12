@@ -2,8 +2,16 @@ import os
 import warnings
 import importlib.util
 import importlib.machinery
+import logging
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
 
 
 def conditional_x_or_one_minus_x(x, condition):
@@ -16,13 +24,50 @@ def clip(lower_clip, upper_clip, vals):
     return clipped
 
 
-def invert_matrix_and_check_conditioning(matrix, condition_num_threshold=10**3):
+def invert_matrix_and_check_conditioning(
+    matrix, try_tikhonov_if_poorly_conditioned=False, condition_num_threshold=10**3
+):
     condition_number = np.linalg.cond(matrix)
+    inverse = np.linalg.inv(matrix)
     if condition_number > condition_num_threshold:
         warnings.warn(
             f"You are inverting a matrix with a large condition number: {condition_number}"
         )
-    return np.linalg.inv(matrix)
+        if try_tikhonov_if_poorly_conditioned:
+            supposed_identity = inverse * matrix
+            min_distance_from_identity = np.sum(
+                (supposed_identity - np.eye(matrix.shape[0])) ** 2
+            )
+            for exponent in range(1, 7):
+                lambd = 10 ** (-exponent)
+                new_matrix_to_invert = matrix.T @ matrix + lambd * np.eye(
+                    matrix.shape[1]
+                )
+                inverse_candidate = np.linalg.inv(new_matrix_to_invert) @ matrix.T
+                condition_number = np.linalg.cond(new_matrix_to_invert)
+                logger.info(
+                    "Trying Tikhonov regularization with lambda = %s to improve conditioning. New condition number of matrix to be inverted: %s",
+                    lambd,
+                    condition_number,
+                )
+
+                supposed_identity = inverse_candidate * matrix
+                distance_from_identity = np.sum(
+                    (supposed_identity - np.eye(matrix.shape[0])) ** 2
+                )
+                if distance_from_identity < min_distance_from_identity:
+                    logger.info(
+                        "Tikhonov regularization with lambda = %s got us an improved inverse.",
+                        lambd,
+                    )
+                    min_distance_from_identity = distance_from_identity
+                    inverse = inverse_candidate
+                else:
+                    logger.info(
+                        "Tikhonov regularization with lambda = %s did not improve the inverse.",
+                        lambd,
+                    )
+    return inverse
 
 
 def load_module_from_source_file(modname, filename):

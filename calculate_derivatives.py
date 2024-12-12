@@ -495,6 +495,7 @@ def calculate_rl_update_derivatives(
         first_applicable_time = get_first_applicable_time(
             study_df, policy_num, policy_num_col_name, calendar_t_col_name
         )
+        breakpoint()
         loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
             calculate_rl_update_derivatives_specific_update(
                 rl_update_func,
@@ -510,7 +511,6 @@ def calculate_rl_update_derivatives(
         rl_update_derivatives_by_calendar_t.setdefault(first_applicable_time, {})[
             "loss_gradients_by_user_id"
         ] = {user_id: loss_gradients[i] for i, user_id in enumerate(sorted_user_ids)}
-
         rl_update_derivatives_by_calendar_t[first_applicable_time][
             "avg_loss_hessian"
         ] = np.mean(loss_hessians, axis=0)

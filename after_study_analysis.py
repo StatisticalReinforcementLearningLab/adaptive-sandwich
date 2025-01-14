@@ -699,8 +699,6 @@ def compute_variance_estimates(
             joint_adaptive_bread_matrix_alt, joint_adaptive_bread_inverse_matrix
         )
 
-    breakpoint()
-
     logger.info("Combining sandwich ingredients.")
     # Note the normalization here: underlying the calculations we have asymptotic normality
     # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat

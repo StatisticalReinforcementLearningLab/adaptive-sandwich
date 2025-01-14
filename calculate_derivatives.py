@@ -495,7 +495,6 @@ def calculate_rl_update_derivatives(
         first_applicable_time = get_first_applicable_time(
             study_df, policy_num, policy_num_col_name, calendar_t_col_name
         )
-        breakpoint()
         loss_gradients, loss_hessians, loss_gradient_pi_derivatives = (
             calculate_rl_update_derivatives_specific_update(
                 rl_update_func,

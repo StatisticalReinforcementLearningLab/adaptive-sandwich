@@ -167,7 +167,7 @@ def create_loss_fn_dataframe(data, update):
     loss_dict = {}
 
     prior_mu = None
-    prior_sigma = None
+    prior_sigma_inv = None
 
     starting_policy = 5
     n_users = 70

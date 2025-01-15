@@ -1,7 +1,6 @@
 from sklearn.linear_model import LinearRegression
 
 
-# TODO: reward should be replaced with oscb
 def oralytics_estimate_theta_primary_analysis(study_df):
     covariate_names = [
         "tod",

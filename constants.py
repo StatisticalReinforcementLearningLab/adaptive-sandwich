@@ -48,3 +48,8 @@ class SmallSampleCorrections:
     none = "none"
     HC1 = "HC1"
     custom_meat_modifier = "custom_meat_modifier"
+
+
+class RLUpdateFunctionTypes:
+    LOSS = "loss"
+    ESTIMATING = "estimating"

@@ -1,40 +1,47 @@
 #!/bin/bash
 set -eu
 
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that only affect simulation side.
+num_users=100
+num_time_steps=10
 seed=0
+delta_seed=0
+beta_mean=1
+beta_var=1
+gamma_var=.1
+sigma_e2=.1
+policy_type="mixed_effects"
 only_analysis=0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study_indicator"
 action_col_name="action"
-policy_num_col_name="policy_idx"
-calendar_t_col_name="calendar_decision_t"
-user_id_col_name="user_idx"
-action_prob_col_name="act_prob"
-action_prob_func_filename="functions_to_pass_to_analysis/oralytics_act_prob_function.py"
+policy_num_col_name="policy_number"
+calendar_t_col_name="calendar_time"
+user_id_col_name="user_id"
+action_prob_col_name="action_probability"
+action_prob_func_filename="functions_to_pass_to_analysis/miwaves_action_selection.py"
 action_prob_func_args_beta_index=0
-rl_update_func_filename="functions_to_pass_to_analysis/oralytics_RL_estimating_function.py"
+rl_update_func_filename="functions_to_pass_to_analysis/miwaves_RL_estimating_function.py"
 rl_update_func_type="estimating"
 rl_update_func_args_beta_index=0
-rl_update_func_args_action_prob_index=4
-rl_update_func_args_action_prob_times_index=5
-inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py"
-# inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_avg_reward_sum_loss_debug.py"
+rl_update_func_args_action_prob_index=-1
+rl_update_func_args_action_prob_times_index=-1
+inference_loss_func_filename="functions_to_pass_to_analysis/miwaves_primary_analysis_loss.py"
 inference_loss_func_args_theta_index=0
-theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis.py"
-# theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis_avg_reward_sum_debug.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/miwaves_estimate_theta_primary_analysis.py"
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
+small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
+while getopts m:T:s:S:G:t:g:e:O:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -42,6 +49,16 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
+    m  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
+    T  | num_time_steps )                               needs_arg; num_time_steps="$OPTARG" ;;
+    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
+    S  | delta_seed )                                   needs_arg; delta_seed="$OPTARG" ;;
+    G  | beta_mean )                                    needs_arg; beta_mean="$OPTARG" ;;
+    t  | beta_var )                                     needs_arg; beta_var="$OPTARG" ;;
+    g  | gamma_var )                                    needs_arg; gamma_var="$OPTARG" ;;
+    e  | sigma_e2 )                                     needs_arg; sigma_e2="$OPTARG" ;;
+    O  | policy_type )                                  needs_arg; policy_type="$OPTARG" ;;
+    o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -58,37 +75,45 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
     I  | inference_loss_func_filename )                 needs_arg; inference_loss_func_filename="$OPTARG" ;;
     h  | inference_loss_func_args_theta_index )         needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
-    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
-    o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
 done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
-# Simulate an oralytics RL study (unless we just want to analyze previous results)
+# Simulate an miwaves RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
-  echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning RL study simulation."
-  python oralytics_sample_data/Archive/src/run_exps.py ${seed}
-  echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished RL study simulation."
+  echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning RL study simulation."
+  python miwaves_sample_data/src/run_simulation.py \
+    --num_users $num_users \
+    --num_time_steps $num_time_steps \
+    --seed $seed \
+    --delta_seed $delta_seed \
+    --beta_mean $beta_mean \
+    --beta_var $beta_var \
+    --gamma_var $gamma_var \
+    --sigma_e2 $sigma_e2 \
+    --policy_type $policy_type
+  echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished RL study simulation."
 fi
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="oralytics_sample_data/Archive/exps/write/NON_STAT_LOW_R_None_0.515_14_full_pooling/${seed}"
+output_folder="miwaves_sample_data/results/num_users${num_users}_num_time_steps${num_time_steps}_seed${seed}_delta_seed0_beta_mean[$(printf '%.1f' $beta_mean)]_beta_var[[$(printf '%.1f' $beta_var)]]_gamma_var[[$(printf '%.1f' $gamma_var)]]_sigma_e2$(printf '%.1f' $sigma_e2)_policy_typemixed_effects"
 
 # Do after-study analysis on the single algorithm run from above
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/${seed}_study_data.pkl" \
+  --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/${seed}_action_data.pkl" \
+  --action_prob_func_args_pickle="${output_folder}/action_selection_function_dict.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --rl_update_func_filename=$rl_update_func_filename \
   --rl_update_func_type=$rl_update_func_type \
-  --rl_update_func_args_pickle="${output_folder}/${seed}_loss_fn_data.pkl" \
+  --rl_update_func_args_pickle="${output_folder}/estimating_equation_function_dict.pkl" \
   --rl_update_func_args_beta_index=$rl_update_func_args_beta_index \
   --rl_update_func_args_action_prob_index=$rl_update_func_args_action_prob_index \
   --rl_update_func_args_action_prob_times_index=$rl_update_func_args_action_prob_times_index \
@@ -102,7 +127,8 @@ python after_study_analysis.py analyze-dataset \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-  --suppress_all_data_checks=$suppress_all_data_checks
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Ending after-study analysis."
+  --suppress_all_data_checks=$suppress_all_data_checks \
+  --small_sample_correction=$small_sample_correction
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Ending after-study analysis."
 
-echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished simulation."

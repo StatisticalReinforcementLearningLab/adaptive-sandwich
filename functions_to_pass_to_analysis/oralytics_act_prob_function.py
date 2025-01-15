@@ -1,5 +1,3 @@
-# %%
-import jax
 import jax.numpy as jnp
 import jax.scipy.special as special
 
@@ -5012,7 +5010,6 @@ C_logistic = 3
 B = 0.515
 
 
-# %%
 def logistic_function(x: float) -> float:
 
     numerator = L_max - L_min
@@ -5031,9 +5028,6 @@ def allocation_function(mean: float, var: float) -> float:
     return prob
 
 
-# %%
-
-
 def oralytics_act_prob_function(
     beta: jnp.ndarray,
     advantage: jnp.ndarray,
@@ -5050,7 +5044,6 @@ def oralytics_act_prob_function(
     utvar_inv = jnp.zeros((dim, dim), dtype=jnp.float32).at[idx].set(utvar_terms)
     var_inv = (n_users) * (utvar_inv + utvar_inv.T - jnp.diag(jnp.diag(utvar_inv)))
     var = jnp.linalg.inv(var_inv)
-    # var = beta[dim:].reshape(-1, dim)
 
     mu_adv = mu[-n_params:]
     var_adv = var[-n_params:, -n_params:]

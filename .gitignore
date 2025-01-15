@@ -10,4 +10,5 @@ synthetic_env_params/.DS_Store
 adaptive-sandwich.code-workspace
 deploy.sh
 oralytics_sample_data/Archive/exps/*
+miwaves_sample_data/results/*
 

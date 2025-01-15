@@ -8,7 +8,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:-: OPT; do
+while getopts i:c:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -16,7 +16,8 @@ while getopts i:-: OPT; do
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
-    i  | input_glob )                 needs_arg; input_glob="$OPTARG" ;;
+    i  | input_glob )                   needs_arg; input_glob="$OPTARG" ;;
+    c  | index_to_check_ci_coverage )   needs_arg; index_to_check_ci_coverage="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -48,7 +49,7 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requireme
 # Loop through each dataset created in the referenced simulation and do
 # after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
-python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}"
+python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}"
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.
 
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Analysis complete.

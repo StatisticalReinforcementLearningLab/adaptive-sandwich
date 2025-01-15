@@ -5,7 +5,10 @@ import numpy as np
 from jax import numpy as jnp
 
 from constants import SmallSampleCorrections
-from helper_functions import load_function_from_same_named_file
+from helper_functions import (
+    confirm_input_check_result,
+    load_function_from_same_named_file,
+)
 
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
@@ -20,6 +23,7 @@ logging.basicConfig(
 )
 
 
+# TODO: any checks needed here about rl update function type?
 def perform_first_wave_input_checks(
     study_df,
     in_study_col_name,
@@ -31,10 +35,10 @@ def perform_first_wave_input_checks(
     action_prob_func_filename,
     action_prob_func_args,
     action_prob_func_args_beta_index,
-    rl_loss_func_args,
-    rl_loss_func_args_beta_index,
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_args,
+    rl_update_func_args_beta_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
     theta_est,
     suppress_interactive_data_checks,
     small_sample_correction,
@@ -44,59 +48,60 @@ def perform_first_wave_input_checks(
     # supplied--do action prob reconstruction, theta estimation, estimating function sum, etc. in a later wave.
 
     ### Validate RL loss/estimating function and args
-    require_rl_loss_args_given_for_all_users_at_each_update(
-        study_df, user_id_col_name, rl_loss_func_args
+    require_rl_update_args_given_for_all_users_at_each_update(
+        study_df, user_id_col_name, rl_update_func_args
     )
-    require_no_policy_numbers_present_in_rl_loss_args_but_not_study_df(
-        study_df, policy_num_col_name, rl_loss_func_args
+    require_no_policy_numbers_present_in_rl_update_args_but_not_study_df(
+        study_df, policy_num_col_name, rl_update_func_args
     )
-    require_beta_is_1D_array_in_rl_loss_args(
-        rl_loss_func_args, rl_loss_func_args_beta_index
+    require_beta_is_1D_array_in_rl_update_args(
+        rl_update_func_args, rl_update_func_args_beta_index
     )
-    require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_loss_args(
-        study_df, in_study_col_name, policy_num_col_name, rl_loss_func_args
+    require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_update_args(
+        study_df, in_study_col_name, policy_num_col_name, rl_update_func_args
     )
     if not suppress_interactive_data_checks:
-        confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
-            rl_loss_func_args_action_prob_index
+        confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
+            rl_update_func_args_action_prob_index
         )
     require_action_prob_args_in_range_0_1_if_supplied(
-        rl_loss_func_args, rl_loss_func_args_action_prob_index
+        rl_update_func_args, rl_update_func_args_action_prob_index
     )
     require_action_prob_times_given_if_index_supplied(
-        rl_loss_func_args_action_prob_index,
-        rl_loss_func_args_action_prob_times_index,
+        rl_update_func_args_action_prob_index,
+        rl_update_func_args_action_prob_times_index,
     )
     require_action_prob_index_given_if_times_supplied(
-        rl_loss_func_args_action_prob_index,
-        rl_loss_func_args_action_prob_times_index,
+        rl_update_func_args_action_prob_index,
+        rl_update_func_args_action_prob_times_index,
     )
-    require_betas_match_in_rl_loss_args_each_update(
-        rl_loss_func_args, rl_loss_func_args_beta_index
+    require_betas_match_in_rl_update_args_each_update(
+        rl_update_func_args, rl_update_func_args_beta_index
     )
     require_valid_action_prob_times_given_if_index_supplied(
         study_df,
         calendar_t_col_name,
-        rl_loss_func_args,
-        rl_loss_func_args_action_prob_times_index,
+        rl_update_func_args,
+        rl_update_func_args_action_prob_times_index,
     )
 
     ### Validate action prob function and args
-    require_action_probabilities_can_be_reconstructed(
-        study_df,
-        action_prob_col_name,
-        calendar_t_col_name,
-        user_id_col_name,
-        in_study_col_name,
-        action_prob_func_filename,
-        action_prob_func_args,
-    )
     require_action_prob_func_args_given_for_all_users_at_each_decision(
         study_df, user_id_col_name, action_prob_func_args
     )
     require_action_prob_func_args_given_for_all_decision_times(
         study_df, calendar_t_col_name, action_prob_func_args
     )
+    if not suppress_interactive_data_checks:
+        require_action_probabilities_can_be_reconstructed(
+            study_df,
+            action_prob_col_name,
+            calendar_t_col_name,
+            user_id_col_name,
+            in_study_col_name,
+            action_prob_func_filename,
+            action_prob_func_args,
+        )
     require_beta_is_1D_array_in_action_prob_args(
         action_prob_func_args, action_prob_func_args_beta_index
     )
@@ -117,6 +122,15 @@ def perform_first_wave_input_checks(
         user_id_col_name,
         action_prob_col_name,
     )
+    require_all_named_columns_not_object_type_in_study_df(
+        study_df,
+        in_study_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+    )
     require_binary_actions(study_df, in_study_col_name, action_col_name)
     require_binary_in_study_indicators(study_df, in_study_col_name)
     require_consecutive_integer_policy_numbers(
@@ -125,6 +139,7 @@ def perform_first_wave_input_checks(
     require_consecutive_integer_calendar_times(study_df, calendar_t_col_name)
     require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name)
     require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name)
+
     if not suppress_interactive_data_checks:
         verify_study_df_summary_satisfactory(study_df)
 
@@ -162,17 +177,10 @@ def require_action_probabilities_can_be_reconstructed(
             reconstructed_action_probs.to_numpy(dtype="float64"),
         )
     except AssertionError as e:
-        # pylint: disable=bad-builtin
-        answer = input(
-            f"The action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable.  If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n"
+        confirm_input_check_result(
+            f"\nThe action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable. If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n",
+            e,
         )
-        # pylint: enable=bad-builtin
-        if answer.lower() == "y":
-            print("Ok, proceeding.")
-        elif answer.lower() == "n":
-            raise SystemExit from e
-        else:
-            print("Please enter 'y' or 'n'.")
 
 
 def require_all_users_have_all_times_in_study_df(
@@ -194,15 +202,17 @@ def require_all_users_have_all_times_in_study_df(
         )
 
 
-def require_rl_loss_args_given_for_all_users_at_each_update(
-    study_df, user_id_col_name, rl_loss_func_args
+def require_rl_update_args_given_for_all_users_at_each_update(
+    study_df, user_id_col_name, rl_update_func_args
 ):
-    logger.info("Checking that RL loss args are given for all users at each update.")
+    logger.info(
+        "Checking that RL update function args are given for all users at each update."
+    )
     all_user_ids = set(study_df[user_id_col_name].unique())
-    for policy_num in rl_loss_func_args:
+    for policy_num in rl_update_func_args:
         assert (
-            set(rl_loss_func_args[policy_num].keys()) == all_user_ids
-        ), f"Not all users present in RL loss args for policy number {policy_num}. Please see the contract for details."
+            set(rl_update_func_args[policy_num].keys()) == all_user_ids
+        ), f"Not all users present in RL update function args for policy number {policy_num}. Please see the contract for details."
 
 
 def require_action_prob_func_args_given_for_all_users_at_each_decision(
@@ -211,20 +221,20 @@ def require_action_prob_func_args_given_for_all_users_at_each_decision(
     action_prob_func_args,
 ):
     logger.info(
-        "Checking that action prob function args are given for all users at each decision time"
+        "Checking that action prob function args are given for all users at each decision time."
     )
     all_user_ids = set(study_df[user_id_col_name].unique())
     for decision_time in action_prob_func_args:
         assert (
             set(action_prob_func_args[decision_time].keys()) == all_user_ids
-        ), f"Not all users present in RL loss args for olicy number {decision_time}. Please see the contract for details."
+        ), f"Not all users present in RL update function args for decision time {decision_time}. Please see the contract for details."
 
 
 def require_action_prob_func_args_given_for_all_decision_times(
     study_df, calendar_t_col_name, action_prob_func_args
 ):
     logger.info(
-        "Checking that action prob function args are given for all decision times"
+        "Checking that action prob function args are given for all decision times."
     )
     all_times = set(study_df[calendar_t_col_name].unique())
 
@@ -257,6 +267,29 @@ def require_all_named_columns_present_in_study_df(
     assert (
         action_prob_col_name in study_df.columns
     ), f"{action_prob_col_name} not in study df."
+
+
+def require_all_named_columns_not_object_type_in_study_df(
+    study_df,
+    in_study_col_name,
+    action_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
+    action_prob_col_name,
+):
+    logger.info("Checking that all named columns are present in the study dataframe.")
+    for colname in (
+        in_study_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_col_name,
+    ):
+        assert (
+            study_df[colname].dtype != "object"
+        ), f"At least {colname} is of object type in study df."
 
 
 def require_binary_actions(study_df, in_study_col_name, action_col_name):
@@ -340,22 +373,22 @@ def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name)
     study_df[action_prob_col_name].between(0, 1).all()
 
 
-def require_no_policy_numbers_present_in_rl_loss_args_but_not_study_df(
-    study_df, policy_num_col_name, rl_loss_func_args
+def require_no_policy_numbers_present_in_rl_update_args_but_not_study_df(
+    study_df, policy_num_col_name, rl_update_func_args
 ):
     logger.info(
-        "Checking that policy numbers in RL loss args are present in the study dataframe."
+        "Checking that policy numbers in RL update function args are present in the study dataframe."
     )
-    assert set(rl_loss_func_args.keys()).issubset(
+    assert set(rl_update_func_args.keys()).issubset(
         study_df[policy_num_col_name].unique()
-    ), "There are policy numbers present in RL loss args but not in the study dataframe. Please see the contract for details."
+    ), "There are policy numbers present in RL update function args but not in the study dataframe. Please see the contract for details."
 
 
-def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_loss_args(
-    study_df, in_study_col_name, policy_num_col_name, rl_loss_func_args
+def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_update_args(
+    study_df, in_study_col_name, policy_num_col_name, rl_update_func_args
 ):
     logger.info(
-        "Checking that all policy numbers in the study dataframe are present in the RL loss args."
+        "Checking that all policy numbers in the study dataframe are present in the RL update function args."
     )
     in_study_df = study_df[study_df[in_study_col_name] == 1]
     min_positive_policy_num = in_study_df[in_study_df[policy_num_col_name] >= 0][
@@ -366,64 +399,56 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
             policy_num_col_name
         ].unique()
     ).issubset(
-        rl_loss_func_args.keys()
-    ), "There are policy numbers present in RL loss args but not in the study dataframe. Please see the contract for details."
+        rl_update_func_args.keys()
+    ), "There are policy numbers present in RL update function args but not in the study dataframe. Please see the contract for details."
 
 
-def confirm_action_probabilities_not_in_rl_loss_args_if_index_not_supplied(
-    rl_loss_func_args_action_prob_index,
+def confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
+    rl_update_func_args_action_prob_index,
 ):
     logger.info(
-        "Confirming that action probabilities are not in RL loss args IF their index is not specified"
+        "Confirming that action probabilities are not in RL update function args IF their index is not specified"
     )
-    if rl_loss_func_args_action_prob_index < 0:
-        # pylint: disable=bad-builtin
-        answer = input(
-            f"\nYou specified that the RL loss function supplied does not have action probabilities as one of its arguments. Please verify this is correct (y/n):\n"
+    if rl_update_func_args_action_prob_index < 0:
+        confirm_input_check_result(
+            "\nYou specified that the RL update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
         )
-        # pylint: enable=bad-builtin
-        if answer.lower() == "y":
-            print("Ok, proceeding.")
-        elif answer.lower() == "n":
-            raise SystemExit
-        else:
-            print("Please enter 'y' or 'n'.")
 
 
 def require_action_prob_args_in_range_0_1_if_supplied(
-    rl_loss_func_args, rl_loss_func_args_action_prob_index
+    rl_update_func_args, rl_update_func_args_action_prob_index
 ):
     # TODO: Can we even require not 0 or 1? Illustrates non-compliant RL algorithm
     pass
 
 
 def require_action_prob_times_given_if_index_supplied(
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
 ):
     logger.info("Checking that action prob times are given if index is supplied.")
-    if rl_loss_func_args_action_prob_index >= 0:
-        assert rl_loss_func_args_action_prob_times_index >= 0 and (
-            rl_loss_func_args_action_prob_times_index
-            != rl_loss_func_args_action_prob_index
+    if rl_update_func_args_action_prob_index >= 0:
+        assert rl_update_func_args_action_prob_times_index >= 0 and (
+            rl_update_func_args_action_prob_times_index
+            != rl_update_func_args_action_prob_index
         )
 
 
 def require_action_prob_index_given_if_times_supplied(
-    rl_loss_func_args_action_prob_index,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_args_action_prob_index,
+    rl_update_func_args_action_prob_times_index,
 ):
     logger.info("Checking that action prob index is given if times are supplied.")
-    if rl_loss_func_args_action_prob_times_index >= 0:
-        assert rl_loss_func_args_action_prob_index >= 0 and (
-            rl_loss_func_args_action_prob_times_index
-            != rl_loss_func_args_action_prob_index
+    if rl_update_func_args_action_prob_times_index >= 0:
+        assert rl_update_func_args_action_prob_index >= 0 and (
+            rl_update_func_args_action_prob_times_index
+            != rl_update_func_args_action_prob_index
         )
 
 
 # TODO: too basic?
-def require_beta_is_1D_array_in_rl_loss_args(
-    rl_loss_func_args, rl_loss_func_args_beta_index
+def require_beta_is_1D_array_in_rl_update_args(
+    rl_update_func_args, rl_update_func_args_beta_index
 ):
     pass
 
@@ -448,24 +473,26 @@ def verify_study_df_summary_satisfactory(
     pass
 
 
-def require_betas_match_in_rl_loss_args_each_update(
-    rl_loss_func_args, rl_loss_func_args_beta_index
+def require_betas_match_in_rl_update_args_each_update(
+    rl_update_func_args, rl_update_func_args_beta_index
 ):
     logger.info(
-        "Checking that betas match across users for each update in the RL loss args."
+        "Checking that betas match across users for each update in the RL update function args."
     )
-    for policy_num in rl_loss_func_args:
+    for policy_num in rl_update_func_args:
         first_beta = None
-        for user_id in rl_loss_func_args[policy_num]:
-            if not rl_loss_func_args[policy_num][user_id]:
+        for user_id in rl_update_func_args[policy_num]:
+            if not rl_update_func_args[policy_num][user_id]:
                 continue
-            beta = rl_loss_func_args[policy_num][user_id][rl_loss_func_args_beta_index]
+            beta = rl_update_func_args[policy_num][user_id][
+                rl_update_func_args_beta_index
+            ]
             if first_beta is None:
                 first_beta = beta
             else:
                 assert np.array_equal(
                     beta, first_beta
-                ), f"Betas do not match across users in the RL loss args for policy number {policy_num}. Please see the contract for details."
+                ), f"Betas do not match across users in the RL update function args for policy number {policy_num}. Please see the contract for details."
 
 
 def require_betas_match_in_action_prob_func_args_each_decision(
@@ -493,26 +520,32 @@ def require_betas_match_in_action_prob_func_args_each_decision(
 def require_valid_action_prob_times_given_if_index_supplied(
     study_df,
     calendar_t_col_name,
-    rl_loss_func_args,
-    rl_loss_func_args_action_prob_times_index,
+    rl_update_func_args,
+    rl_update_func_args_action_prob_times_index,
 ):
     logger.info("Checking that action prob times are valid if index is supplied.")
+
+    if rl_update_func_args_action_prob_times_index < 0:
+        return
+
     min_time = study_df[calendar_t_col_name].min()
     max_time = study_df[calendar_t_col_name].max()
-    for args_by_user in rl_loss_func_args.values():
+    for args_by_user in rl_update_func_args.values():
         for args in args_by_user.values():
             if not args:
                 continue
-            times = args[rl_loss_func_args_action_prob_times_index]
+            times = args[rl_update_func_args_action_prob_times_index]
             assert (
                 times[i] > times[i - 1] for i in range(1, len(times))
-            ), "Non-strictly-increasing times give for action proabilities in RL loss args. Please see the contract for details."
+            ), "Non-strictly-increasing times give for action proabilities in RL update function args. Please see the contract for details."
             assert (
                 times[0] >= min_time and times[-1] <= max_time
-            ), "Times not present in the study given for action proabilities in RL loss args. Please see the contract for details."
+            ), "Times not present in the study given for action proabilities in RL update function args. Please see the contract for details."
 
 
-def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, theta_dim):
+def require_theta_estimating_functions_sum_to_zero(
+    inference_estimating_function_values, theta_dim
+):
     # This is a test that the correct inference loss/estimating function has
     # been given, corresponding either to the theta estimation function provided
     # or the theta estimation procedure used to produce the theta estimate
@@ -524,35 +557,27 @@ def require_theta_estimating_functions_sum_to_zero(inference_loss_gradients, the
     logger.info("Checking that theta estimating functions sum to zero across users")
     try:
         np.testing.assert_allclose(
-            np.sum(inference_loss_gradients, axis=0),
+            np.sum(inference_estimating_function_values, axis=0),
             jnp.zeros(theta_dim),
         )
     except AssertionError as e:
-        # pylint: disable=bad-builtin
-        answer = input(
-            f"\nTheta estimating functions with args and estimates plugged in do not sum to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n"
+        confirm_input_check_result(
+            f"\nTheta estimating functions do not sum to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            e,
         )
-        # pylint: enable=bad-builtin
-        if answer.lower() == "y":
-            print("Ok, proceeding.")
-        elif answer.lower() == "n":
-            raise SystemExit from e
-        else:
-            print("Please enter 'y' or 'n'.")
 
 
 # TODO: Hotspot for replacing notion of update times
-# TODO: Remove breakpoint eventually
 def require_beta_estimating_functions_sum_to_zero(
     update_times, algorithm_statistics_by_calendar_t, beta_dim
 ):
     logger.info(
         "Checking that beta estimating functions sum to zero across users for each update"
     )
-    # This is a test that the correct RL loss/estimating function has
+    # This is a test that the correct RL update function/estimating function has
     # been given, along with correct arguments for each update time.
 
-    # If that is true, then the RL loss/estimating function should sum to zero
+    # If that is true, then the RL update function/estimating function should sum to zero
     # for each update time when the RESULTING beta estimate and the data used
     # to produce it are plugged in as the remaining args.
 
@@ -580,54 +605,55 @@ def require_beta_estimating_functions_sum_to_zero(
             jnp.zeros(beta_dim * len(update_times)),
         )
     except AssertionError as e:
-        breakpoint()
-        # pylint: disable=bad-builtin
-        answer = input(
-            f"\nBeta estimating function with args and provided beta estimate plugged in does not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n"
+        confirm_input_check_result(
+            f"\nBeta estimating functions with args and provided beta estimate plugged in do not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            e,
         )
-        # pylint: enable=bad-builtin
-        if answer.lower() == "y":
-            print("Ok, proceeding.")
-        elif answer.lower() == "n":
-            raise SystemExit from e
-        else:
-            print("Please enter 'y' or 'n'.")
 
 
 # TODO: Also have interactive check if condition number merely high?
 # TODO: Hotspot for replacing notion of update times
-# TODO: Remove breakpoint eventually
-def require_non_singular_avg_hessians_at_each_update(
+def check_avg_hessian_condition_num_at_each_update(
     update_times,
     algorithm_statistics_by_calendar_t,
 ):
     logger.info(
-        "Checking that average loss hessians for RL are not singular at each update time"
+        "Checking that average estimating function derivatives for RL are not singular at each update time"
     )
+    poorly_conditioned_updates_dict = {}
     for t in update_times:
-        try:
-            assert (
-                np.linalg.cond(
-                    algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"]
-                )
-                < CONDITION_NUMBER_CUTOFF
-            ), f"Poorly conditioned (possibly singular) loss hessian at update time {t}:\n\n{algorithm_statistics_by_calendar_t[t]['avg_loss_hessian']}\n\nPlease see the contract for details."
-        except AssertionError:
-            breakpoint()
+        condition_number = np.linalg.cond(
+            algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"]
+        )
+        logger.info("Condition number at update time %s: %s", t, condition_number)
+        if condition_number > CONDITION_NUMBER_CUTOFF:
+            poorly_conditioned_updates_dict[t] = condition_number
+
+    if poorly_conditioned_updates_dict:
+        confirm_input_check_result(
+            f"\nPotentially poorly conditioned average estimating function derivatives for RL at the following update times:\n{poorly_conditioned_updates_dict}\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
+        )
 
 
-# TODO: Remove breakpoint eventually
 def require_non_singular_avg_hessian_inference(
-    inference_loss_hessians,
+    inference_estimating_function_derivatives,
 ):
-    logger.info("Checking that average loss hessian for inference is not singular")
-    avg_inference_loss_hessian = jnp.mean(inference_loss_hessians, axis=0)
-    try:
-        assert (
-            np.linalg.cond(avg_inference_loss_hessian) < CONDITION_NUMBER_CUTOFF
-        ), f"Poorly conditioned (possibly singular) average loss hessian for inference:\n\n{avg_inference_loss_hessian}\n\nPlease see the contract for details."
-    except AssertionError:
-        breakpoint()
+    logger.info(
+        "Checking that average estimating function derivative for inference is not singular"
+    )
+    avg_inference_estimating_function_derivative = jnp.mean(
+        inference_estimating_function_derivatives, axis=0
+    )
+    condition_number = np.linalg.cond(avg_inference_estimating_function_derivative)
+    logger.info(
+        "Condition number for average inference estimating function derivative: %s",
+        condition_number,
+    )
+
+    if condition_number > CONDITION_NUMBER_CUTOFF:
+        confirm_input_check_result(
+            f"\nPotentially poorly conditioned (possibly singular) average estimating function derivative for inference. Condition number:\n\n{condition_number}.\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
+        )
 
 
 # TODO: Either implement and remove NotImplementedError or remove the option.
@@ -638,9 +664,23 @@ def require_custom_small_sample_correction_function_provided_if_selected(
         raise NotImplementedError(
             "Custom small sample correction function not yet implemented."
         )
-        logger.info(
-            "Checking that custom meat modifier function is actually provided if the option is selected."
+
+
+def require_adaptive_bread_inverse_is_true_inverse(
+    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
+):
+    """
+    Check that the product of the joint adaptive bread matrix and its inverse is
+    the identity matrix.  This is a direct check that the joint_adaptive_bread_inverse_matrix
+    we create is "well-conditioned".
+    """
+    try:
+        np.testing.assert_allclose(
+            joint_adaptive_bread_matrix @ joint_adaptive_bread_inverse_matrix,
+            np.eye(joint_adaptive_bread_matrix.shape[0]),
         )
-        assert (
-            meat_modifier_func_filename is not None
-        ), "No custom meat modifier function provided even though the corresponding small sample correction option was selected. Please see the contract for details."
+    except AssertionError as e:
+        confirm_input_check_result(
+            f"\nJoint adaptive bread is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
+            e,
+        )

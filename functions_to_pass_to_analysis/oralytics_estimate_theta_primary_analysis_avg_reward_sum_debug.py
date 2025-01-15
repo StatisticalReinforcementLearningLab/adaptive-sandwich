@@ -1,7 +1,6 @@
 import numpy as np
 
 
-# TODO: reward should be replaced with oscb
 def oralytics_estimate_theta_primary_analysis_avg_reward_sum_debug(study_df):
 
     num_users = study_df["user_idx"].nunique()

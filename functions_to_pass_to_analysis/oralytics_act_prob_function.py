@@ -5036,7 +5036,7 @@ def oralytics_act_prob_function(
 
     n_params = len(advantage)
 
-    dim = 10
+    dim = 15
 
     mu = beta[:dim].reshape(-1, 1)
     utvar_terms = beta[dim:]

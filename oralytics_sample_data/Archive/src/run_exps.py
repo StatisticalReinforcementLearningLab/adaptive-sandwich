@@ -1,3 +1,11 @@
+import sys
+import os
+
+import pickle as pkl
+import numpy as np
+import pandas as pd
+import jax.numpy as jnp
+
 import rl_experiments
 import rl_algorithm
 import sim_env_v1
@@ -6,17 +14,6 @@ import sim_env_v3
 import smoothing_function
 import experiment_global_vars
 import read_write_info
-
-import numpy as np
-import pandas as pd
-import sys
-import os
-
-import pickle as pkl
-import numpy as np
-import pandas as pd
-import jax
-import jax.numpy as jnp
 
 WRITE_PATH_PREFIX = read_write_info.WRITE_PATH_PREFIX
 NUM_TRIAL_USERS = experiment_global_vars.NUM_TRIAL_USERS
@@ -35,6 +32,7 @@ def get_user_list(version, study_idxs):
 def get_alg_candidate(
     alg_type, cluster_size, smoothing_func, update_cadence, cost_params, noise_var
 ):
+    alg_candidate = None
     if alg_type == "BLR_AC":
         alg_candidate = rl_algorithm.BlrActionCentering(
             cost_params, update_cadence, smoothing_func, noise_var
@@ -64,6 +62,7 @@ def get_sim_env(
     delayed_effect_scale,
     current_seed,
 ):
+    version = sim_env = None
     if sim_env_version == "v3":
         version = sim_env_v3
         sim_env = sim_env_v3.SimulationEnvironmentV3
@@ -170,7 +169,6 @@ def create_loss_fn_dataframe(data, update):
     prior_sigma_inv = None
 
     starting_policy = 5
-    n_users = 70
 
     for i in range(update["update_t"].max()):
         utime_dict = {}
@@ -193,7 +191,7 @@ def create_loss_fn_dataframe(data, update):
         sigma = jnp.array(sigma)
         sigma_inv = jnp.linalg.inv(sigma)
         utsigma_inv = sigma_inv[jnp.triu_indices(sigma_inv.shape[0])]
-        Vt = utsigma_inv.flatten() / n_users
+        Vt = utsigma_inv.flatten()
 
         if i == 0:
             prior_mu = mu
@@ -205,6 +203,9 @@ def create_loss_fn_dataframe(data, update):
             # flatten and combine both mu and sigma into betas
             betas = jnp.concatenate([mu, Vt])
 
+            num_users_entered_already = data[data["policy_idx"] < i][
+                "user_idx"
+            ].nunique()
             for user in data["user_idx"].unique():
                 # Create the data dataframe
                 temp = data[
@@ -263,7 +264,7 @@ def create_loss_fn_dataframe(data, update):
                                         i,
                                         user,
                                         betas,
-                                        n_users,
+                                        num_users_entered_already,
                                         states,
                                         actions,
                                         act_probs,
@@ -293,7 +294,7 @@ def create_loss_fn_dataframe(data, update):
                     )
                     utime_dict[user] = (
                         betas,
-                        n_users,
+                        num_users_entered_already,
                         states,
                         actions,
                         act_probs,
@@ -315,7 +316,7 @@ def create_loss_fn_dataframe(data, update):
                                         i,
                                         user,
                                         betas,
-                                        n_users,
+                                        num_users_entered_already,
                                         [],
                                         [],
                                         [],
@@ -357,7 +358,6 @@ def create_action_df(data, update, loss_dict):
     df2 = pd.DataFrame(columns=["calendar_decision_t", "user_idx", "beta", "advantage"])
 
     act_prob_dict = {}
-    n_users = 70
 
     starting_policy = 5
 
@@ -394,7 +394,7 @@ def create_action_df(data, update, loss_dict):
                         np.triu_indices(sigma_inv.shape[0])
                     ]
                     beta = jnp.concatenate(
-                        [jnp.array(mu), (jnp.array(utsigma_inv).flatten()) / (n_users)]
+                        [jnp.array(mu), jnp.array(utsigma_inv).flatten()]
                     )
                 else:
                     # Get beta from loss_dict dictionary first user first record
@@ -429,7 +429,7 @@ def create_action_df(data, update, loss_dict):
                         ),
                     ]
                 )
-                utime_dict[user] = (beta, state, n_users)
+                utime_dict[user] = (beta, state)
             else:
                 df2 = pd.concat(
                     [

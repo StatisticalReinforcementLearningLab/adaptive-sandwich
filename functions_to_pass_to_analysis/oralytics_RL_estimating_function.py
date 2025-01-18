@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 def oralytics_RL_estimating_function(
     beta: jnp.array,
-    n_users: int,
+    n_users: int,  # Note this is the number of users that have entered the study so far
     state: jnp.array,
     action: jnp.array,
     act_prob: jnp.array,
@@ -48,13 +48,12 @@ def oralytics_RL_estimating_function(
 
     matrix_3 = (
         jnp.triu(stacked_phis.T @ stacked_phis) / init_noise_var
-        + jnp.triu(prior_sigma_inv) / n_users
-        - jnp.triu(V)
+        + (jnp.triu(prior_sigma_inv) - jnp.triu(V)) / n_users
     )
     triu_indices = jnp.triu_indices_from(matrix_3)
     vector_3 = matrix_3[triu_indices].flatten()
 
     # Must be same shape as beta input (so 1D)
     # The negative sign is not necessary, but makes this strictly the derivative
-    #  of the corresponding loss function as implemented.  This is useful for testing.
+    # of the corresponding loss function as implemented.  This is useful for testing.
     return -jnp.concatenate([vector_1 + vector_2, vector_3])

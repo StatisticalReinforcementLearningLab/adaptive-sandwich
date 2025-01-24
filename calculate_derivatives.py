@@ -5,7 +5,7 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 
-from constants import RLUpdateFunctionTypes
+from constants import FunctionTypes
 from helper_functions import (
     conditional_x_or_one_minus_x,
     load_function_from_same_named_file,
@@ -157,7 +157,8 @@ def pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
     were not supplied, for users currently in the study.  Compare to the below
     padding which is about filling in full sets of zero gradients for all users
     not currently in the study. This is about filling in zero gradients for
-    times 1,2,3,4,9,10,11,12 if action probabilites are given for times 5,6,7,8.
+    times 1,2,3,4,9,10,11,12 if action probabilities are given for times 5,6,7,
+    8.
     """
     zero_gradient = np.zeros((loss_gradient_pi_derivative.shape[0], 1, 1))
     gradients_to_stack = []
@@ -695,13 +696,13 @@ def get_loss_gradients_batched(
     batch_axes,
     *batched_arg_tensors,
 ):
-    if update_func_type == RLUpdateFunctionTypes.LOSS:
+    if update_func_type == FunctionTypes.LOSS:
         return jax.vmap(
             fun=jax.grad(update_func, update_func_args_beta_index),
             in_axes=batch_axes,
             out_axes=0,
         )(*batched_arg_tensors)
-    if update_func_type == RLUpdateFunctionTypes.ESTIMATING:
+    if update_func_type == FunctionTypes.ESTIMATING:
         return jax.vmap(
             fun=update_func,
             in_axes=batch_axes,
@@ -717,13 +718,13 @@ def get_loss_hessians_batched(
     batch_axes,
     *batched_arg_tensors,
 ):
-    if update_func_type == RLUpdateFunctionTypes.LOSS:
+    if update_func_type == FunctionTypes.LOSS:
         return jax.vmap(
             fun=jax.hessian(update_func, update_func_args_beta_index),
             in_axes=batch_axes,
             out_axes=0,
         )(*batched_arg_tensors)
-    if update_func_type == RLUpdateFunctionTypes.ESTIMATING:
+    if update_func_type == FunctionTypes.ESTIMATING:
         return jax.vmap(
             fun=jax.jacrev(update_func, update_func_args_beta_index),
             in_axes=batch_axes,
@@ -740,7 +741,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     batch_axes,
     *batched_arg_tensors,
 ):
-    if update_func_type == RLUpdateFunctionTypes.LOSS:
+    if update_func_type == FunctionTypes.LOSS:
         return jax.vmap(
             fun=jax.jacrev(
                 jax.grad(update_func, update_func_args_beta_index),
@@ -749,7 +750,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
             in_axes=batch_axes,
             out_axes=0,
         )(*batched_arg_tensors)
-    if update_func_type == RLUpdateFunctionTypes.ESTIMATING:
+    if update_func_type == FunctionTypes.ESTIMATING:
         return jax.vmap(
             fun=jax.jacrev(
                 update_func,
@@ -865,7 +866,7 @@ def calculate_inference_loss_derivatives(
         logger.info("Forming loss gradients with respect to theta.")
         loss_gradients_subset = get_loss_gradients_batched(
             inference_loss_func,
-            RLUpdateFunctionTypes.LOSS,
+            FunctionTypes.LOSS,
             inference_loss_func_args_theta_index,
             batch_axes,
             *batched_arg_tensors,
@@ -874,7 +875,7 @@ def calculate_inference_loss_derivatives(
         logger.info("Forming loss hessians with respect to theta.")
         loss_hessians_subset = get_loss_hessians_batched(
             inference_loss_func,
-            RLUpdateFunctionTypes.LOSS,
+            FunctionTypes.LOSS,
             inference_loss_func_args_theta_index,
             batch_axes,
             *batched_arg_tensors,
@@ -888,7 +889,7 @@ def calculate_inference_loss_derivatives(
             loss_gradient_pi_derivatives_subset = (
                 get_loss_gradient_derivatives_wrt_pi_batched(
                     inference_loss_func,
-                    RLUpdateFunctionTypes.LOSS,
+                    FunctionTypes.LOSS,
                     inference_loss_func_args_theta_index,
                     inference_loss_func_args_action_prob_index,
                     batch_axes,

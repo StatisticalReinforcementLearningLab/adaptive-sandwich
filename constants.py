@@ -50,6 +50,6 @@ class SmallSampleCorrections:
     custom_meat_modifier = "custom_meat_modifier"
 
 
-class RLUpdateFunctionTypes:
+class FunctionTypes:
     LOSS = "loss"
     ESTIMATING = "estimating"

@@ -1,6 +1,8 @@
 import numpy as np
+import jax.numpy as jnp
 
 import functions_to_pass_to_analysis
+import functions_to_pass_to_analysis.oralytics_primary_analysis_loss
 
 
 def test_get_action_1_prob_pure_no_clip():
@@ -33,3 +35,51 @@ def test_get_action_1_prob_pure_clip():
         ),
         np.array(0.1, dtype=np.float32),
     )
+
+
+def test_oralytics_primary_analysis_loss():
+    # Example data
+    theta_est = jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+    tod = jnp.array([[1], [2], [3], [4], [5]])
+    bbar = jnp.array([[2], [3], [4], [5], [6]])
+    abar = jnp.array([[3], [4], [5], [6], [7]])
+    appengage = jnp.array([[4], [5], [6], [7], [8]])
+    bias = jnp.array([[1], [1], [1], [1], [1]])
+    action = jnp.array([[1], [0], [1], [0], [1]])
+    oscb = jnp.array([[10], [15], [20], [25], [30]])
+    act_prob = jnp.array([[0.2], [0.3], [0.4], [0.5], [0.6]])
+
+    weights = jnp.array(
+        [
+            [1 / 0.2 / 0.8],
+            [1 / 0.3 / 0.7],
+            [1 / 0.4 / 0.6],
+            [1 / 0.5 / 0.5],
+            [1 / 0.6 / 0.4],
+        ]
+    )
+    expected_loss = 0.5 * jnp.sum(
+        weights
+        * (
+            (
+                jnp.array([[10], [15], [20], [25], [30]])
+                - jnp.array(
+                    [
+                        [1, 2, 3, 4, 1, 0.2, 0.8],
+                        [2, 3, 4, 5, 1, 0.3, -0.3],
+                        [3, 4, 5, 6, 1, 0.4, 0.6],
+                        [4, 5, 6, 7, 1, 0.5, -0.5],
+                        [5, 6, 7, 8, 1, 0.6, 0.4],
+                    ]
+                )
+                @ jnp.array([[0.1], [0.2], [0.3], [0.4], [0.5], [0.6], [0.7]])
+            )
+            ** 2
+        )
+    )
+
+    loss = functions_to_pass_to_analysis.oralytics_primary_analysis_loss.oralytics_primary_analysis_loss(
+        theta_est, tod, bbar, abar, appengage, bias, action, oscb, act_prob
+    )
+
+    np.testing.assert_almost_equal(loss, expected_loss)

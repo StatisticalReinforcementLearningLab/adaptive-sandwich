@@ -9,11 +9,11 @@ def oralytics_estimate_theta_primary_analysis(study_df):
         "appengage",
         "bias",  # this is the intercept
     ]
-    # Note that the intercept is included in the features already (col of 1s)
+    # Note that the intercept is included by the features already (col of 1s)
     linear_model = LinearRegression(fit_intercept=False)
 
     in_study_bool = study_df["in_study_indicator"] == 1
-    # TODO: Figure out indicator(s)
+    # TODO: Figure out other indicator(s)
     trimmed_df = study_df.loc[in_study_bool, covariate_names + ["act_prob"]].copy()
 
     in_study_df = study_df[in_study_bool]

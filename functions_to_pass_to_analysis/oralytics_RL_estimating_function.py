@@ -3,11 +3,11 @@ import jax.numpy as jnp
 
 def oralytics_RL_estimating_function(
     beta: jnp.array,
-    n_users: int,  # Note this is the number of users that have entered the study so far
+    n_users: int,  # Note this is the number of users that have entered the study *so far*
     state: jnp.array,
     action: jnp.array,
     act_prob: jnp.array,
-    decision_times: jnp.array,
+    decision_times: jnp.array,  # pylint: disable=unused-argument
     rewards: jnp.array,
     prior_mu: jnp.array,
     prior_sigma_inv: jnp.array,

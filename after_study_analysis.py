@@ -11,7 +11,7 @@ from jax import numpy as jnp
 import scipy
 
 import calculate_derivatives
-from constants import RLUpdateFunctionTypes, SmallSampleCorrections
+from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
 
 
@@ -83,7 +83,7 @@ def cli():
 )
 @click.option(
     "--rl_update_func_type",
-    type=click.Choice([RLUpdateFunctionTypes.LOSS, RLUpdateFunctionTypes.ESTIMATING]),
+    type=click.Choice([FunctionTypes.LOSS, FunctionTypes.ESTIMATING]),
     help="Type of function used to summarize the RL updates.  If loss, an update should correspond to choosing parameters to minimize it.  If estimating, an update should correspond to setting the function equal to zero and solving for the parameters.",
     required=True,
 )
@@ -332,7 +332,7 @@ def analyze_dataset(
 
     # Note we perform the corresponding theta estimating function check inside
     # of this function, because it can illustrate fundamental problems and we
-    # should short circuit as soon as possible if so.n
+    # should short circuit as soon as possible if so.
     (
         adaptive_sandwich_var_estimate,
         classical_sandwich_var_estimate,
@@ -685,18 +685,9 @@ def compute_variance_estimates(
         joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
     )
 
-    # TODO: Remove
-    joint_adaptive_bread_matrix_alt = invert_matrix_and_check_conditioning(
-        joint_adaptive_bread_inverse_matrix, try_tikhonov_if_poorly_conditioned=True
-    )
-
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
-        )
-        # TODO: Remove
-        input_checks.require_adaptive_bread_inverse_is_true_inverse(
-            joint_adaptive_bread_matrix_alt, joint_adaptive_bread_inverse_matrix
         )
 
     logger.info("Combining sandwich ingredients.")

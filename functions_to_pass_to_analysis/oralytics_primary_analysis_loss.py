@@ -13,29 +13,12 @@ def oralytics_primary_analysis_loss(
     act_prob,
 ):
 
-    nu_1 = theta_est[:5]
-    nu_2 = theta_est[5]
-    delta = theta_est[6]
-
-    state = jnp.hstack(
-        (
-            tod,
-            bbar,
-            abar,
-            appengage,
-            bias,
-        )
+    features = jnp.hstack(
+        (tod, bbar, abar, appengage, bias, act_prob, action - act_prob)
     )
 
     weight = 1 / (act_prob * (1 - act_prob))
 
-    return jnp.sum(
-        weight
-        * (
-            oscb
-            - jnp.matmul(state, nu_1)
-            - act_prob * nu_2
-            - (action - act_prob) * delta
-        )
-        ** 2
+    return 0.5 * jnp.sum(
+        weight * ((oscb - jnp.matmul(features, theta_est).reshape(-1, 1)) ** 2)
     )

@@ -61,8 +61,6 @@ def get_pis_batched(
     )
 
 
-# TODO: RL Alg abstract base class
-# TODO: Switch back to dataclass and put subfunctions in right/consistent place
 class SigmoidLS:
     """
     Sigmoid Least Squares algorithm

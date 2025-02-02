@@ -1,0 +1,159 @@
+#!/bin/bash
+#SBATCH -n 4                                                                                                # Number of cores
+#SBATCH -N 1                                                                                                # Ensure that all cores are on one machine
+#SBATCH -t 0-0:20                                                                                           # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH --mem=5G                                                                                            # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH -p serial_requeue                                                                                   # Target Partition
+#SBATCH -o /n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out       # STDOUT
+#SBATCH -e /n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out       # STDERR
+#SBATCH --mail-type=END                                                                                     # This command would send an email when the job ends.
+#SBATCH --mail-type=FAIL                                                                                    # This command would send an email when the job ends.
+#SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent
+
+# Note this script is to be run with something like the following command:
+# sbatch --array=[0-99] oralytics_run_and_analysis_parallel.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
+
+# To analyze, run simulation_collect_analyses.sh as described in the
+# output of one of the simulation runs.
+
+# If running on GPU, the following can be used:
+# S BATCH -p gpu_requeue                                                       # Target Partition
+# S BATCH --gres=gpu:1                                                         # Request a GPU
+
+set -eu
+
+echo "$(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel: Beginning simulation."
+
+die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+# Arguments that only affect simulation side.
+seed=0
+only_analysis=0
+
+# Arguments that only affect inference side.
+in_study_col_name="in_study_indicator"
+action_col_name="action"
+policy_num_col_name="policy_idx"
+calendar_t_col_name="calendar_decision_t"
+user_id_col_name="user_idx"
+action_prob_col_name="act_prob"
+action_prob_func_filename="functions_to_pass_to_analysis/oralytics_act_prob_function.py"
+action_prob_func_args_beta_index=0
+rl_update_func_filename="functions_to_pass_to_analysis/oralytics_RL_estimating_function.py"
+rl_update_func_type="estimating"
+rl_update_func_args_beta_index=0
+rl_update_func_args_action_prob_index=4
+rl_update_func_args_action_prob_times_index=5
+inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py"
+inference_loss_func_args_theta_index=0
+theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis.py"
+suppress_interactive_data_checks=1
+suppress_all_data_checks=0
+small_sample_correction="none"
+
+# Parse single-char options as directly supported by getopts, but allow long-form
+# under - option.  The :'s signify that arguments are required for these options.
+while getopts s:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:Q:q:z:-: OPT; do
+  # support long options: https://stackoverflow.com/a/28466267/519360
+  if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
+    OPT="${OPTARG%%=*}"       # extract long option name
+    OPTARG="${OPTARG#$OPT}"   # extract long option argument (may be empty)
+    OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+  fi
+  case "$OPT" in
+    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
+    o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
+    i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
+    c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
+    p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
+    C  | calendar_t_col_name )                          needs_arg; calendar_t_col_name="$OPTARG" ;;
+    U  | user_id_col_name )                             needs_arg; user_id_col_name="$OPTARG" ;;
+    E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
+    P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
+    b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
+    l  | rl_update_func_filename )                      needs_arg; rl_update_func_filename="$OPTARG" ;;
+    Z  | rl_update_func_type )                          needs_arg; rl_update_func_type="$OPTARG" ;;
+    B  | rl_update_func_args_beta_index )               needs_arg; rl_update_func_args_beta_index="$OPTARG" ;;
+    D  | rl_update_func_args_action_prob_index )        needs_arg; rl_update_func_args_action_prob_index="$OPTARG" ;;
+    j  | rl_update_func_args_action_prob_times_index )  needs_arg; rl_update_func_args_action_prob_times_index="$OPTARG" ;;
+    I  | inference_loss_func_filename )                 needs_arg; inference_loss_func_filename="$OPTARG" ;;
+    h  | inference_loss_func_args_theta_index )         needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
+    H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
+    Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
+    q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
+    \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
+    * )                                         die "Illegal option --$OPT" ;; # bad long option
+  esac
+done
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
+# Load Python 3.10, among other things
+echo $(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: Loading mamba and CUDA modules.
+module load Mambaforge/22.11.1-fasrc01
+module load cuda/12.2.0-fasrc01
+
+# Make virtualenv if necessary, and then activate it
+cd ~
+if ! test -d venv; then
+  echo $(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: Creating venv, as it did not exist.
+  python3 -m venv venv
+fi
+source venv/bin/activate
+
+# Now install all Python requirements.  This is incremental, so it's ok to do every time.
+cd ~/adaptive-sandwich
+echo $(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: Making sure Python requirements are installed.
+pip install -r simulation_requirements.txt
+echo $(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: All Python requirements installed.
+
+save_dir_prefix="/n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
+
+if test -d save_dir_prefix; then
+  die 'Output directory already exists. Please supply a unique label, perhaps a datetime.'
+fi
+mkdir -p "$save_dir_prefix"
+
+# Simulate an oralytics RL study (unless we just want to analyze previous results)
+if [ "$only_analysis" -eq "0" ]; then
+  echo "$(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel: Beginning RL study simulation."
+  python oralytics_sample_data/Archive/src/run_exps.py \
+    $SLURM_ARRAY_TASK_ID \
+    $save_dir_prefix
+  echo "$(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel: Finished RL study simulation."
+fi
+
+# Create a convenience variable that holds the output folder for the last script
+output_folder="${save_dir_prefix}/NON_STAT_LOW_R_None_0.515_14_full_pooling/${SLURM_ARRAY_TASK_ID}"
+output_folder_glob="${save_dir_prefix}/NON_STAT_LOW_R_None_0.515_14_full_pooling/*"
+
+# Do after-study analysis on the single algorithm run from above
+echo "$(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel: Beginning after-study analysis."
+python after_study_analysis.py analyze-dataset \
+  --study_df_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_study_data.pkl" \
+  --action_prob_func_filename=$action_prob_func_filename \
+  --action_prob_func_args_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_action_data.pkl" \
+  --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+  --rl_update_func_filename=$rl_update_func_filename \
+  --rl_update_func_type=$rl_update_func_type \
+  --rl_update_func_args_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_loss_fn_data.pkl" \
+  --rl_update_func_args_beta_index=$rl_update_func_args_beta_index \
+  --rl_update_func_args_action_prob_index=$rl_update_func_args_action_prob_index \
+  --rl_update_func_args_action_prob_times_index=$rl_update_func_args_action_prob_times_index \
+  --inference_loss_func_filename=$inference_loss_func_filename \
+  --inference_loss_func_args_theta_index=$inference_loss_func_args_theta_index \
+  --theta_calculation_func_filename=$theta_calculation_func_filename \
+  --in_study_col_name=$in_study_col_name \
+  --action_col_name=$action_col_name \
+  --policy_num_col_name=$policy_num_col_name \
+  --calendar_t_col_name=$calendar_t_col_name \
+  --user_id_col_name=$user_id_col_name \
+  --action_prob_col_name=$action_prob_col_name \
+  --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+  --suppress_all_data_checks=$suppress_all_data_checks \
+  --small_sample_correction=$small_sample_correction
+echo $(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: Finished after-study analysis.
+
+echo $(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: Simulation complete.
+echo "$(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --index_to_check_ci_coverage=6"

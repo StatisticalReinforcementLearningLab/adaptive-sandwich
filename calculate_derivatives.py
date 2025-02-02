@@ -742,22 +742,26 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     *batched_arg_tensors,
 ):
     if update_func_type == FunctionTypes.LOSS:
-        return jax.vmap(
-            fun=jax.jacrev(
-                jax.grad(update_func, update_func_args_beta_index),
-                update_func_args_action_prob_index,
-            ),
-            in_axes=batch_axes,
-            out_axes=0,
+        return jax.jit(
+            jax.vmap(
+                fun=jax.jacrev(
+                    jax.grad(update_func, update_func_args_beta_index),
+                    update_func_args_action_prob_index,
+                ),
+                in_axes=batch_axes,
+                out_axes=0,
+            )
         )(*batched_arg_tensors)
     if update_func_type == FunctionTypes.ESTIMATING:
-        return jax.vmap(
-            fun=jax.jacrev(
-                update_func,
-                update_func_args_action_prob_index,
-            ),
-            in_axes=batch_axes,
-            out_axes=0,
+        return jax.jit(
+            jax.vmap(
+                fun=jax.jacrev(
+                    update_func,
+                    update_func_args_action_prob_index,
+                ),
+                in_axes=batch_axes,
+                out_axes=0,
+            )
         )(*batched_arg_tensors)
     raise ValueError("Unknown update function type.")
 

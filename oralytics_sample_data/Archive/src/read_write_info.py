@@ -1,11 +1,7 @@
-### TODO: fill in with your specific read and write path
-# READ_PATH_PREFIX = "/Users/sghosh/Research/oralytics_algorithm_design/"
-# WRITE_PATH_PREFIX = "/Users/sghosh/Research/oralytics_algorithm_design/exps/read/"
+import pathlib
 
-READ_PATH_PREFIX = (
-    "/Users/nowellclosser/code/adaptive-sandwich/oralytics_sample_data/Archive/"
-)
-WRITE_PATH_PREFIX = "/Users/nowellclosser/code/adaptive-sandwich/oralytics_sample_data/Archive/exps/write/"
+READ_PATH_PREFIX = str(pathlib.Path(__file__).parent.parent) + "/"
+WRITE_PATH_PREFIX = READ_PATH_PREFIX + "exps/write/"
 
 exp_kwargs = {
     "sim_env_version": "v3",

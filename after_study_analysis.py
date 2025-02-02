@@ -646,8 +646,6 @@ def compute_variance_estimates(
         input_checks.require_theta_estimating_functions_sum_to_zero(
             inference_loss_gradients, theta_dim
         )
-
-    if not suppress_all_data_checks:
         input_checks.require_non_singular_avg_hessian_inference(
             inference_loss_hessians,
         )

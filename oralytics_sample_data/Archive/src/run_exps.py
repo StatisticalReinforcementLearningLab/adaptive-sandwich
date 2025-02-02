@@ -608,8 +608,8 @@ def process_results(exp_dir, exp_name, exp_kwargs, current_seed):
 
 
 def main():
-    exp_dir = WRITE_PATH_PREFIX
     seed = int(sys.argv[1])
+    exp_dir = sys.argv[2] if len(sys.argv) >= 3 else WRITE_PATH_PREFIX
     exp_kwargs = read_write_info.exp_kwargs
 
     # Make exp_name from exp_kwargs

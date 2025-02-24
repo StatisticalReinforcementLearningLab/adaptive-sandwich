@@ -679,9 +679,12 @@ def compute_variance_estimates(
     logger.debug("Adaptive joint bread inverse:")
     logger.debug(joint_adaptive_bread_inverse_matrix)
 
-    joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
-        joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
-    )
+    # TODO: decide whether to in fact scrap the structure-based inversion
+    # joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
+    #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
+    # )
+
+    joint_adaptive_bread_matrix = np.linalg.inv(joint_adaptive_bread_inverse_matrix)
 
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(

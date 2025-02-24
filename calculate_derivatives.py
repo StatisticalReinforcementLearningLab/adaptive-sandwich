@@ -406,6 +406,7 @@ def collect_batched_in_study_actions(
     return jnp.array(batched_actions_list)
 
 
+# TODO: Docstring
 def get_radon_nikodym_weight(
     beta_target,
     action_prob_func,
@@ -572,7 +573,9 @@ def calculate_rl_update_derivatives_specific_update(
     all_involved_user_ids = set()
     for args_by_user_id_subset in nontrivial_user_args_grouped_by_shape:
         # Pivot the loss args for the involved users into a list of lists, each
-        # representing all the args at a particular index across users.
+        # representing all the args at a particular index across users. Note
+        # that users not in the study at this time are filtered out by this
+        # function when it checks for truthiness of the supplied args.
         batched_arg_lists, involved_user_ids = (
             get_batched_arg_lists_and_involved_user_ids(
                 rl_update_func, sorted_user_ids, args_by_user_id_subset

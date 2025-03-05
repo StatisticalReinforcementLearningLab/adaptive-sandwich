@@ -5,7 +5,7 @@ import importlib.machinery
 import logging
 
 import numpy as np
-import jax as jnp
+import jax.numpy as jnp
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

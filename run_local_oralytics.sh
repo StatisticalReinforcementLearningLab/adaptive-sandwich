@@ -19,14 +19,15 @@ user_id_col_name="user_idx"
 action_prob_col_name="act_prob"
 action_prob_func_filename="functions_to_pass_to_analysis/oralytics_act_prob_function.py"
 action_prob_func_args_beta_index=0
-rl_update_func_filename="functions_to_pass_to_analysis/oralytics_RL_estimating_function.py"
-rl_update_func_type="estimating"
-rl_update_func_args_beta_index=0
-rl_update_func_args_action_prob_index=4
-rl_update_func_args_action_prob_times_index=5
-inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py"
-# inference_loss_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_avg_reward_sum_loss_debug.py"
-inference_loss_func_args_theta_index=0
+alg_update_func_filename="functions_to_pass_to_analysis/oralytics_RL_estimating_function.py"
+alg_update_func_type="estimating"
+alg_update_func_args_beta_index=0
+alg_update_func_args_action_prob_index=4
+alg_update_func_args_action_prob_times_index=5
+inference_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py"
+# inference_func_filename="functions_to_pass_to_analysis/oralytics_primary_analysis_avg_reward_sum_loss_debug.py"
+inference_func_args_theta_index=0
+inference_func_type="loss"
 theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis.py"
 # theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimate_theta_primary_analysis_avg_reward_sum_debug.py"
 suppress_interactive_data_checks=0
@@ -34,7 +35,7 @@ suppress_all_data_checks=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
+while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -50,13 +51,14 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:H:s:o:Q:q:-: OPT; do
     E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
     b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
-    l  | rl_update_func_filename )                      needs_arg; rl_update_func_filename="$OPTARG" ;;
-    Z  | rl_update_func_type )                          needs_arg; rl_update_func_type="$OPTARG" ;;
-    B  | rl_update_func_args_beta_index )               needs_arg; rl_update_func_args_beta_index="$OPTARG" ;;
-    D  | rl_update_func_args_action_prob_index )        needs_arg; rl_update_func_args_action_prob_index="$OPTARG" ;;
-    j  | rl_update_func_args_action_prob_times_index )  needs_arg; rl_update_func_args_action_prob_times_index="$OPTARG" ;;
-    I  | inference_loss_func_filename )                 needs_arg; inference_loss_func_filename="$OPTARG" ;;
-    h  | inference_loss_func_args_theta_index )         needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
+    l  | alg_update_func_filename )                     needs_arg; alg_update_func_filename="$OPTARG" ;;
+    Z  | alg_update_func_type )                         needs_arg; alg_update_func_type="$OPTARG" ;;
+    B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
+    D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
+    j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
+    I  | inference_func_filename )                 needs_arg; inference_func_filename="$OPTARG" ;;
+    h  | inference_func_args_theta_index )         needs_arg; inference_func_args_theta_index="$OPTARG" ;;
+    g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     s  | seed )                                         needs_arg; seed="$OPTARG" ;;
     o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
@@ -86,14 +88,15 @@ python after_study_analysis.py analyze-dataset \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/${seed}_action_data.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
-  --rl_update_func_filename=$rl_update_func_filename \
-  --rl_update_func_type=$rl_update_func_type \
-  --rl_update_func_args_pickle="${output_folder}/${seed}_loss_fn_data.pkl" \
-  --rl_update_func_args_beta_index=$rl_update_func_args_beta_index \
-  --rl_update_func_args_action_prob_index=$rl_update_func_args_action_prob_index \
-  --rl_update_func_args_action_prob_times_index=$rl_update_func_args_action_prob_times_index \
-  --inference_loss_func_filename=$inference_loss_func_filename \
-  --inference_loss_func_args_theta_index=$inference_loss_func_args_theta_index \
+  --alg_update_func_filename=$alg_update_func_filename \
+  --alg_update_func_type=$alg_update_func_type \
+  --alg_update_func_args_pickle="${output_folder}/${seed}_loss_fn_data.pkl" \
+  --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+  --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+  --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --inference_func_filename=$inference_func_filename \
+  --inference_func_args_theta_index=$inference_func_args_theta_index \
+  --inference_func_type=$inference_func_type \
   --theta_calculation_func_filename=$theta_calculation_func_filename \
   --in_study_col_name=$in_study_col_name \
   --action_col_name=$action_col_name \

@@ -53,13 +53,14 @@ user_id_col_name="user_id"
 action_prob_col_name="action1prob"
 action_prob_func_filename="functions_to_pass_to_analysis/get_action_1_prob_pure.py"
 action_prob_func_args_beta_index=0
-rl_update_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
-rl_update_func_type="loss"
-rl_update_func_args_beta_index=0
-rl_update_func_args_action_prob_index=5
-rl_update_func_args_action_prob_times_index=6
-inference_loss_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
-inference_loss_func_args_theta_index=0
+alg_update_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
+alg_update_func_type="loss"
+alg_update_func_args_beta_index=0
+alg_update_func_args_action_prob_index=5
+alg_update_func_args_action_prob_times_index=6
+inference_func_filename="functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
+inference_func_args_theta_index=0
+inference_func_type="loss"
 theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_least_squares_action_centering.py"
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
@@ -69,7 +70,7 @@ small_sample_correction="none"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:H:F:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -97,13 +98,14 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:H:F:Q:q:z:-:
     E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
     b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
-    l  | rl_update_func_filename )                      needs_arg; rl_update_func_filename="$OPTARG" ;;
-    Z  | rl_update_func_type )                          needs_arg; rl_update_func_type="$OPTARG" ;;
-    B  | rl_update_func_args_beta_index )               needs_arg; rl_update_func_args_beta_index="$OPTARG" ;;
-    D  | rl_update_func_args_action_prob_index )        needs_arg; rl_update_func_args_action_prob_index="$OPTARG" ;;
-    j  | rl_update_func_args_action_prob_times_index )  needs_arg; rl_update_func_args_action_prob_times_index="$OPTARG" ;;
-    I  | inference_loss_func_filename )                 needs_arg; inference_loss_func_filename="$OPTARG" ;;
-    h  | inference_loss_func_args_theta_index )         needs_arg; inference_loss_func_args_theta_index="$OPTARG" ;;
+    l  | alg_update_func_filename )                     needs_arg; alg_update_func_filename="$OPTARG" ;;
+    Z  | alg_update_func_type )                         needs_arg; alg_update_func_type="$OPTARG" ;;
+    B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
+    D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
+    j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
+    I  | inference_func_filename )                 needs_arg; inference_func_filename="$OPTARG" ;;
+    h  | inference_func_args_theta_index )         needs_arg; inference_func_args_theta_index="$OPTARG" ;;
+    g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     F  | dynamic_seeds )                                needs_arg; dynamic_seeds="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
@@ -176,14 +178,15 @@ python after_study_analysis.py analyze-dataset \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
-  --rl_update_func_filename=$rl_update_func_filename \
-  --rl_update_func_type=$rl_update_func_type \
-  --rl_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
-  --rl_update_func_args_beta_index=$rl_update_func_args_beta_index \
-  --rl_update_func_args_action_prob_index=$rl_update_func_args_action_prob_index \
-  --rl_update_func_args_action_prob_times_index=$rl_update_func_args_action_prob_times_index \
-  --inference_loss_func_filename=$inference_loss_func_filename \
-  --inference_loss_func_args_theta_index=$inference_loss_func_args_theta_index \
+  --alg_update_func_filename=$alg_update_func_filename \
+  --alg_update_func_type=$alg_update_func_type \
+  --alg_update_func_args_pickle="${output_folder}/exp=1/alg_update_args.pkl" \
+  --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+  --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+  --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --inference_func_filename=$inference_func_filename \
+  --inference_func_args_theta_index=$inference_func_args_theta_index \
+  --inference_func_type=$inference_func_type \
   --theta_calculation_func_filename=$theta_calculation_func_filename \
   --in_study_col_name=$in_study_col_name \
   --action_col_name=$action_col_name \

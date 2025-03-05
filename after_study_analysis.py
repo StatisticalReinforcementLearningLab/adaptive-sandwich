@@ -273,7 +273,7 @@ def analyze_dataset(
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     alg_update_func_args = pickle.load(alg_update_func_args_pickle)
 
-    theta_est = estimate_theta(study_df, theta_calculation_func_filename)
+    theta_est = jnp.array(estimate_theta(study_df, theta_calculation_func_filename))
 
     # This does the first round of input validation, before computing any
     # gradients
@@ -302,32 +302,26 @@ def analyze_dataset(
     # TODO: Perhaps add a check that the supplied action probabilities in args
     # can also be reconstructed from the action probability function.
 
-    policy_num_by_decision_time_by_user = (
-        construct_policy_num_by_decision_time_by_user_map(
-            study_df, user_id_col_name, calendar_t_col_name, policy_num_col_name
-        )
-    )
     beta_index_by_policy_num = construct_beta_index_by_policy_num_map(
-        policy_num_by_decision_time_by_user,
-        policy_num_col_name,
+        study_df, policy_num_col_name, in_study_col_name
     )
 
     all_betas = collect_all_betas(
         beta_index_by_policy_num, alg_update_func_args, alg_update_func_args_beta_index
     )
 
-    action_by_decision_time_by_user_id = {}
-    policy_num_by_decision_time_by_user_id = {}
-    for user_id, user_df in study_df.groupby(user_id_col_name):
-        in_study_df = user_df[user_df[in_study_col_name] == 1]
-        action_by_decision_time_by_user_id[user_id] = dict(
-            zip(in_study_df[calendar_t_col_name], in_study_df[action_col_name])
+    action_by_decision_time_by_user_id, policy_num_by_decision_time_by_user_id = (
+        extract_action_and_policy_by_decision_time_by_user_id(
+            study_df,
+            user_id_col_name,
+            in_study_col_name,
+            calendar_t_col_name,
+            action_col_name,
+            policy_num_col_name,
         )
-        policy_num_by_decision_time_by_user_id[user_id] = dict(
-            zip(in_study_df[calendar_t_col_name], in_study_df[policy_num_col_name])
-        )
+    )
 
-    user_ids = study_df[user_id_col_name].unique()
+    user_ids = jnp.array(study_df[user_id_col_name].unique())
 
     (
         inference_func_args_by_user_id,
@@ -335,8 +329,10 @@ def analyze_dataset(
         inference_action_prob_decision_times_by_user_id,
     ) = process_inference_func_args(
         inference_func_filename,
+        inference_func_args_theta_index,
         study_df,
         user_ids,
+        theta_est,
         action_prob_col_name,
         calendar_t_col_name,
         user_id_col_name,
@@ -366,74 +362,118 @@ def analyze_dataset(
         )
     )
 
-    weighted_estimating_function_stacks = [
-        single_user_weighted_estimating_function_stacker(
-            theta_est,
-            all_betas,
-            user_id,
-        )
-        for user_id in user_ids
-    ]
-
     # roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
-    inverse_bread = construct_inverse_bread(
+    joint_adaptive_bread_inverse_matrix = construct_inverse_bread(
         single_user_weighted_estimating_function_stacker,
-        action_prob_func_args,
-        action_prob_func_args_beta_index,
-        alg_update_func_args,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_action_prob_index,
-        alg_update_func_args_action_prob_times_index,
-        study_df,
-        in_study_col_name,
-        action_col_name,
-        policy_num_col_name,
-        calendar_t_col_name,
-        user_id_col_name,
-        action_prob_col_name,
         theta_est,
+        all_betas,
+        user_ids,
     )
 
-    # TODO: reinsert estimating function sum check.  not sure about hessian
-    # condition number checks
+    # TODO: decide whether to in fact scrap the structure-based inversion
+    # joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
+    #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
+    # )
+    joint_adaptive_bread_matrix = np.linalg.inv(joint_adaptive_bread_inverse_matrix)
 
-    # Write analysis results to same directory that input files are in
-    folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
-    with open(f"{folder_path}/analysis.pkl", "wb") as f:
-        pickle.dump(
-            {
-                "theta_est": theta_est,
-                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-            },
-            f,
+    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+        input_checks.require_adaptive_bread_inverse_is_true_inverse(
+            joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
 
-    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
-        pickle.dump(
-            {
-                "theta_est": theta_est,
-                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-                "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
-                "joint_meat_matrix": joint_meat_matrix,
-                "inference_loss_gradients": inference_loss_gradients,
-                "inference_loss_hessians": inference_loss_hessians,
-                "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
-                "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
-                "upper_left_bread_inverse": upper_left_bread_inverse,
-            },
-            f,
-        )
+    breakpoint()
 
-    print(f"\nParameter estimate:\n {theta_est}")
-    print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
-    print(
-        f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
-    )
+    # # TODO: Adapt this function to new structures
+    # joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
+    #     theta_dim,
+    #     update_times,
+    #     beta_dim,
+    #     algorithm_statistics_by_calendar_t,
+    #     user_ids,
+    #     inference_loss_gradients,
+    # )
+
+    # logger.info("Combining sandwich ingredients.")
+    # # Note the normalization here: underlying the calculations we have asymptotic normality
+    # # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat
+    # # by dividing the variance of that limiting normal by a factor of n.
+    # joint_adaptive_variance = (
+    #     joint_adaptive_bread_matrix
+    #     @ joint_adaptive_meat_matrix
+    #     @ joint_adaptive_bread_matrix.T
+    # ) / len(user_ids)
+    # logger.info("Finished forming adaptive sandwich variance estimator.")
+
+    # # This bottom right corner of the joint variance matrix is the portion
+    # # corresponding to just theta.  This distinguishes this matrix from the
+    # # *joint* adaptive variance matrix above, which covers both beta and theta.
+    # adaptive_sandwich_var = joint_adaptive_variance[
+    #     -len(theta_est) :, -len(theta_est) :
+    # ]
+
+    # # We will also calculate the classical sandwich variance estimator for comparison.
+    # # But we take it piece by piece and also extract the *inverse* of the classical bread
+    # # because it is useful for extracting the non-joint adaptive meat.  This is
+    # # needed in case we are adjusting this meat matrix with a small sample correction.
+    # # TODO: Adapt classical sandwich creation to new setup
+    # classical_bread, classical_meat, _ = get_classical_sandwich_var_pieces(
+    #     theta_dim,
+    #     inference_loss_gradients,
+    #     inference_loss_hessians,
+    # )
+
+    # # Apply small sample correction if requested, and form the final variance estimates
+    # adaptive_sandwich_var, classical_sandwich_var = apply_small_sample_correction(
+    #     adaptive_sandwich_var,
+    #     classical_bread,
+    #     classical_meat,
+    #     len(user_ids),
+    #     theta_dim,
+    #     small_sample_correction,
+    # )
+
+    # # TODO: reinsert estimating function sum check.  not sure about hessian
+    # # condition number checks
+
+    # # Write analysis results to same directory that input files are in
+    # folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
+    # with open(f"{folder_path}/analysis.pkl", "wb") as f:
+    #     pickle.dump(
+    #         {
+    #             "theta_est": theta_est,
+    #             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+    #             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+    #         },
+    #         f,
+    #     )
+
+    # with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+    #     pickle.dump(
+    #         {
+    #             "theta_est": theta_est,
+    #             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+    #             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+    #             "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+    #             "joint_meat_matrix": joint_meat_matrix,
+    #             "inference_loss_gradients": inference_loss_gradients,
+    #             "inference_loss_hessians": inference_loss_hessians,
+    #             "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
+    #             "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
+    #             "upper_left_bread_inverse": upper_left_bread_inverse,
+    #         },
+    #         f,
+    #     )
+
+    # print(f"\nParameter estimate:\n {theta_est}")
+    # print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
+    # print(
+    #     f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
+    # )
 
 
-def construct_beta_index_by_policy_num_map(study_df, policy_num_col_name):
+def construct_beta_index_by_policy_num_map(
+    study_df, policy_num_col_name, in_study_col_name
+):
     """
     Constructs a mapping from non-initial, non-fallback policy numbers to the index of the
     corresponding beta in all_betas.
@@ -448,32 +488,19 @@ def construct_beta_index_by_policy_num_map(study_df, policy_num_col_name):
     gaps.
     """
 
-    unique_non_fallback_policy_nums = (
-        study_df[study_df[policy_num_col_name] >= 0, policy_num_col_name]
+    unique_sorted_non_fallback_policy_nums = sorted(
+        study_df[
+            (study_df[policy_num_col_name] >= 0) & (study_df[in_study_col_name] == 1)
+        ][policy_num_col_name]
         .unique()
         .tolist()
-        .sort()
     )
+    # This assumese only the first policy is an initial policy not produced by an update.
+    # Hence the [1:] slice.
     return {
-        policy_num: i for i, policy_num in enumerate(unique_non_fallback_policy_nums)
+        policy_num: i
+        for i, policy_num in enumerate(unique_sorted_non_fallback_policy_nums[1:])
     }
-
-
-def construct_policy_num_by_decision_time_by_user_map(
-    study_df: pandas.DataFrame,
-    user_id_col_name: str,
-    calendar_t_col_name: str,
-    policy_num_col_name: str,
-) -> dict[collections.abc.Hashable, dict[int, int]]:
-    """
-    Constructs a mapping from decision times to policy numbers for each user.
-    """
-    policy_num_by_decision_time_by_user = {}
-    for user_id, user_df in study_df.groupby(user_id_col_name):
-        policy_num_by_decision_time_by_user[user_id] = dict(
-            zip(user_df[calendar_t_col_name], user_df[policy_num_col_name])
-        )
-    return policy_num_by_decision_time_by_user
 
 
 def collect_all_betas(
@@ -499,10 +526,35 @@ def collect_all_betas(
     return jnp.array(all_betas)
 
 
+def extract_action_and_policy_by_decision_time_by_user_id(
+    study_df,
+    user_id_col_name,
+    in_study_col_name,
+    calendar_t_col_name,
+    action_col_name,
+    policy_num_col_name,
+):
+    action_by_decision_time_by_user_id = {}
+    policy_num_by_decision_time_by_user_id = {}
+    for user_id, user_df in study_df.groupby(user_id_col_name):
+        in_study_user_df = user_df[user_df[in_study_col_name] == 1]
+        action_by_decision_time_by_user_id[user_id] = dict(
+            zip(
+                in_study_user_df[calendar_t_col_name], in_study_user_df[action_col_name]
+            )
+        )
+        policy_num_by_decision_time_by_user_id[user_id] = dict(
+            zip(user_df[calendar_t_col_name], user_df[policy_num_col_name])
+        )
+    return action_by_decision_time_by_user_id, policy_num_by_decision_time_by_user_id
+
+
 def process_inference_func_args(
     inference_func_filename,
+    inference_func_args_theta_index,
     study_df,
     user_ids,
+    theta_est,
     action_prob_col_name,
     calendar_t_col_name,
     user_id_col_name,
@@ -529,10 +581,15 @@ def process_inference_func_args(
         inference_func_args_action_prob_index = inference_func_arg_names.index(
             action_prob_col_name
         )
-    for user_id in user_ids:
+
+    # Convert to list from jnp array to extraction is simplest
+    for user_id in user_ids.tolist():
         user_args_list = []
         filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
-        for col_name in enumerate(inference_func_arg_names):
+        for idx, col_name in enumerate(inference_func_arg_names):
+            if idx == inference_func_args_theta_index:
+                user_args_list.append(theta_est)
+                continue
             user_args_list.append(
                 get_in_study_df_column(filtered_user_data, col_name, in_study_col_name)
             )
@@ -953,6 +1010,47 @@ def construct_single_user_weighted_estimating_function_stacker(
         )
 
     return single_user_weighted_algorithm_estimating_function_stacker
+
+
+def get_avg_weighted_estimating_function_stack(
+    all_betas_and_theta: list[jnp.ndarray],
+    single_user_weighted_estimating_function_stacker: callable,
+    user_ids: jnp.ndarray,
+):
+    # Set up the vmap over user ids
+    vmap_fn = jax.vmap(
+        single_user_weighted_estimating_function_stacker,
+        in_axes=(None, None, 0),
+    )
+
+    # Apply vmap to theta, the betas, and the list of user ids.
+    # This will return a tensor of weighted estimating function stacks for each user,
+    # where the first axis indexes the user.
+    results = vmap_fn(
+        all_betas_and_theta[-1],
+        all_betas_and_theta[:-1],
+        user_ids,
+    )
+
+    # Compute average result over users
+    return jnp.mean(results, axis=0)
+
+
+def construct_inverse_bread(
+    single_user_weighted_estimating_function_stacker: callable,
+    theta: jnp.ndarray,
+    all_betas: jnp.ndarray,
+    user_ids: jnp.ndarray,
+):
+    return jax.jacobian(get_avg_weighted_estimating_function_stack)(
+        # Note how this is a list of jnp arrays; it cannot be a jnp array itself
+        # because theta and the betas need not be the same size.  But JAX can still
+        # differentiate with respect to the all betas and thetas at once if they
+        # are collected like so.
+        [beta for beta in all_betas] + [theta],
+        single_user_weighted_estimating_function_stacker,
+        user_ids,
+    )
 
 
 def calculate_beta_dim(alg_update_func_args, alg_update_func_args_beta_index):

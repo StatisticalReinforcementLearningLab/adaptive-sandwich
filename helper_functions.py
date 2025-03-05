@@ -5,6 +5,7 @@ import importlib.machinery
 import logging
 
 import numpy as np
+import jax as jnp
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -105,3 +106,11 @@ def confirm_input_check_result(message, error=None):
             raise SystemExit
         else:
             print("\nPlease enter 'y' or 'n'.\n")
+
+
+def get_in_study_df_column(study_df, col_name, in_study_col_name):
+    return jnp.array(
+        study_df.loc[study_df[in_study_col_name] == 1, col_name]
+        .to_numpy()
+        .reshape(-1, 1)
+    )

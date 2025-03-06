@@ -103,8 +103,8 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:
     B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
     D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
     j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
-    I  | inference_func_filename )                 needs_arg; inference_func_filename="$OPTARG" ;;
-    h  | inference_func_args_theta_index )         needs_arg; inference_func_args_theta_index="$OPTARG" ;;
+    I  | inference_func_filename )                      needs_arg; inference_func_filename="$OPTARG" ;;
+    h  | inference_func_args_theta_index )              needs_arg; inference_func_args_theta_index="$OPTARG" ;;
     g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     F  | dynamic_seeds )                                needs_arg; dynamic_seeds="$OPTARG" ;;
@@ -180,7 +180,7 @@ python after_study_analysis.py analyze-dataset \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --alg_update_func_filename=$alg_update_func_filename \
   --alg_update_func_type=$alg_update_func_type \
-  --alg_update_func_args_pickle="${output_folder}/exp=1/alg_update_args.pkl" \
+  --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \

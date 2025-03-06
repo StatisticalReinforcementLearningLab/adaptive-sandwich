@@ -5,7 +5,7 @@ import logging
 import pathlib
 import glob
 import math
-from typing import Any
+from typing import Any, Union
 
 import click
 import jax
@@ -302,8 +302,10 @@ def analyze_dataset(
     # TODO: Perhaps add a check that the supplied action probabilities in args
     # can also be reconstructed from the action probability function.
 
-    beta_index_by_policy_num = construct_beta_index_by_policy_num_map(
-        study_df, policy_num_col_name, in_study_col_name
+    beta_index_by_policy_num, initial_policy_num = (
+        construct_beta_index_by_policy_num_map(
+            study_df, policy_num_col_name, in_study_col_name
+        )
     )
 
     all_betas = collect_all_betas(
@@ -353,6 +355,7 @@ def analyze_dataset(
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
             beta_index_by_policy_num,
+            initial_policy_num,
             action_by_decision_time_by_user_id,
             policy_num_by_decision_time_by_user_id,
             action_prob_func_args,
@@ -380,8 +383,6 @@ def analyze_dataset(
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
-
-    breakpoint()
 
     # # TODO: Adapt this function to new structures
     # joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
@@ -500,7 +501,7 @@ def construct_beta_index_by_policy_num_map(
     return {
         policy_num: i
         for i, policy_num in enumerate(unique_sorted_non_fallback_policy_nums[1:])
-    }
+    }, unique_sorted_non_fallback_policy_nums[0]
 
 
 def collect_all_betas(
@@ -544,7 +545,10 @@ def extract_action_and_policy_by_decision_time_by_user_id(
             )
         )
         policy_num_by_decision_time_by_user_id[user_id] = dict(
-            zip(user_df[calendar_t_col_name], user_df[policy_num_col_name])
+            zip(
+                in_study_user_df[calendar_t_col_name],
+                in_study_user_df[policy_num_col_name],
+            )
         )
     return action_by_decision_time_by_user_id, policy_num_by_decision_time_by_user_id
 
@@ -628,7 +632,8 @@ def get_radon_nikodym_weight(
     # numerator
     pi_beta = action_prob_func(*action_prob_func_args_single_user)
 
-    # denominator
+    # denominator, where we thread in beta_target so that differentiation with respect to the
+    # original beta in the arguments leaves this alone.
     beta_target_action_prob_func_args_single_user = [*action_prob_func_args_single_user]
     beta_target_action_prob_func_args_single_user[action_prob_func_args_beta_index] = (
         beta_target
@@ -652,16 +657,17 @@ def construct_single_user_weighted_estimating_function_stacker(
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    beta_index_by_policy_num: dict[int, int],
+    beta_index_by_policy_num: dict[Union[int, float], int],
+    initial_policy_num: Union[int, float],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
     policy_num_by_decision_time_by_user_id: dict[
-        collections.abc.Hashable, dict[int, int]
+        collections.abc.Hashable, dict[int, Union[int, float]]
     ],
-    action_prob_func_args_by_decision_time_by_user_id: dict[
+    action_prob_func_args_by_user_id_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
-    update_func_args_by_policy_num_by_user_id: dict[
-        collections.abc.Hashable, dict[int, tuple[Any, ...]]
+    update_func_args_by_by_user_id_by_policy_num: dict[
+        collections.abc.Hashable, dict[Union[int, float], tuple[Any, ...]]
     ],
     inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
     inference_action_prob_decision_times_by_user_id: dict[
@@ -714,22 +720,22 @@ def construct_single_user_weighted_estimating_function_stacker(
             The index of the action probabilities argument in the inference loss function's
             arguments.
 
-        beta_index_by_policy_num (dict[int, int]):
+        beta_index_by_policy_num (dict[Union[int, float], int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_betas.
 
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping decision times to actions taken.
 
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
+        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, Union[int, float]]]):
             A dictionary mapping decision times to the policy number in use.
             This may be user-specific. Should be sorted by decision time.
 
-        action_prob_func_args_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+        action_prob_func_args_by_user_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
             A map from decision times to tuples of arguments for action probability function
             EXCEPT beta. Should be sorted by decision time.
 
-        update_func_args_by_policy_num_by_user_id (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+        update_func_args_by_by_user_id_by_policy_num (dict[Union[int, float], dict[collections.abc.Hashable, tuple[Any, ...]]]):
             A map from policy numbers to tuples containing the arguments for the algorithm
             loss or estimating functions EXCEPT beta when producing this policy.
             Should be sorted by policy number.
@@ -751,7 +757,7 @@ def construct_single_user_weighted_estimating_function_stacker(
         else alg_update_func
     )
 
-    inference_estimating_func = jax.grad(
+    inference_estimating_func = (
         jax.grad(inference_func, argnums=inference_func_args_theta_index)
         if (inference_func_type == FunctionTypes.LOSS)
         else inference_func
@@ -783,12 +789,20 @@ def construct_single_user_weighted_estimating_function_stacker(
             jnp.ndarray: A JAX NumPy array representing the weighted estimating function stack.
         """
 
+        logger.info(
+            "Computing weighted estimating function stack for user %s.", user_id
+        )
+
         # First, reformat the supplied data into more convienent structures.
+        # TODO: Isolate these into functions and unit test them.
 
         # 1. Form a dictionary mapping policy numbers to the first time they were
         # applicable (for this user). Collect the first time after the first update
         # separately for convenience.  These are both used to form the Radon-Nikodym
         # weights for the right times.
+        logger.info(
+            "Collecting policy numbers and first applicable times for each active decision time."
+        )
         min_time_by_policy_num = {}
         first_time_after_first_update = None
         for decision_time, policy_num in policy_num_by_decision_time_by_user_id[
@@ -806,30 +820,39 @@ def construct_single_user_weighted_estimating_function_stacker(
         # 2. Thread the central betas into the action probability arguments
         # for this particular user. This enables differentiation of the Radon-Nikodym
         # weights and action probabilities with respect to these shared betas.
+        logger.info("Threading in betas to action probability arguments.")
         threaded_single_user_action_prob_func_args_by_decision_time = {}
         for (
             decision_time,
-            action_prob_action_prob_args_by_user_id,
-        ) in action_prob_func_args_by_decision_time_by_user_id.items():
-            if not action_prob_action_prob_args_by_user_id[user_id]:
+            action_prob_func_args_by_user_id,
+        ) in action_prob_func_args_by_user_id_by_decision_time.items():
+            if not action_prob_func_args_by_user_id[user_id]:
                 threaded_single_user_action_prob_func_args_by_decision_time[
                     decision_time
                 ] = ()
                 continue
 
-            beta_to_introduce = all_betas[
-                beta_index_by_policy_num[
-                    policy_num_by_decision_time_by_user_id[user_id][decision_time]
-                ]
-            ]
+            policy_num = policy_num_by_decision_time_by_user_id[user_id][decision_time]
+
+            # The expectation is that fallback policies are empty, and the only other
+            # policy not represented in beta_index_by_policy_num is the initial policy.
+            # Specifically check for this to be a little more robust than simply checking
+            # for the policy number in the dictionary.
+            if policy_num == initial_policy_num:
+                threaded_single_user_action_prob_func_args_by_decision_time[
+                    decision_time
+                ] = action_prob_func_args_by_user_id[user_id]
+                continue
+
+            beta_to_introduce = all_betas[beta_index_by_policy_num[policy_num]]
             threaded_single_user_action_prob_func_args_by_decision_time[
                 decision_time
             ] = (
-                action_prob_action_prob_args_by_user_id[user_id][
+                action_prob_func_args_by_user_id[user_id][
                     :action_prob_func_args_beta_index
                 ]
                 + (beta_to_introduce,)
-                + action_prob_action_prob_args_by_user_id[user_id][
+                + action_prob_func_args_by_user_id[user_id][
                     action_prob_func_args_beta_index + 1 :
                 ]
             )
@@ -837,20 +860,26 @@ def construct_single_user_weighted_estimating_function_stacker(
         # 3. Thread the central betas into the algorithm update function arguments
         # and replace any action probabilities with reconstructed ones from the above
         # arguments with the central betas introduced.
+        logger.info(
+            "Threading in betas and beta-dependent action probabilities to algorithm update "
+            "function args."
+        )
         threaded_single_user_update_func_args_by_policy_num = {}
         for (
             policy_num,
             update_func_args_by_user_id,
-        ) in update_func_args_by_policy_num_by_user_id.items():
+        ) in update_func_args_by_by_user_id_by_policy_num.items():
             if not update_func_args_by_user_id[user_id]:
                 threaded_single_user_update_func_args_by_policy_num[policy_num] = ()
                 continue
 
             beta_to_introduce = all_betas[beta_index_by_policy_num[policy_num]]
             threaded_single_user_update_func_args_by_policy_num[policy_num] = (
-                update_func_args_by_user_id[:alg_update_func_args_beta_index]
+                update_func_args_by_user_id[user_id][:alg_update_func_args_beta_index]
                 + (beta_to_introduce,)
-                + update_func_args_by_user_id[alg_update_func_args_beta_index + 1 :]
+                + update_func_args_by_user_id[user_id][
+                    alg_update_func_args_beta_index + 1 :
+                ]
             )
 
             if alg_update_func_args_action_prob_index >= 0:
@@ -864,7 +893,7 @@ def construct_single_user_weighted_estimating_function_stacker(
                                 t
                             ]
                         )
-                        for t in action_prob_times
+                        for t in action_prob_times.flatten().tolist()
                     ]
                 ).reshape(
                     update_func_args_by_user_id[user_id][
@@ -884,6 +913,10 @@ def construct_single_user_weighted_estimating_function_stacker(
         # 3. Thread the central betas into the inference function arguments
         # and replace any action probabilities with reconstructed ones from the above
         # arguments with the central betas introduced.
+        logger.info(
+            "Threading in theta and beta-dependent action probabilities to inference update "
+            "function args."
+        )
         single_user_inference_func_args = inference_func_args_by_user_id[user_id]
 
         threaded_single_user_inference_func_args = (
@@ -899,6 +932,8 @@ def construct_single_user_weighted_estimating_function_stacker(
                         *threaded_single_user_action_prob_func_args_by_decision_time[t]
                     )
                     for t in inference_action_prob_decision_times_by_user_id[user_id]
+                    .flatten()
+                    .tolist()
                 ]
             ).reshape(
                 single_user_inference_func_args[
@@ -920,6 +955,7 @@ def construct_single_user_weighted_estimating_function_stacker(
         # when batched over users.
         # TODO: Make sure action_by_decision_time has correct structure, only
         # in-study decision times present
+        logger.info("Calculating start and end times")
         user_start_time = math.inf
         user_end_time = -math.inf
         for decision_time in action_by_decision_time_by_user_id[user_id]:
@@ -932,46 +968,55 @@ def construct_single_user_weighted_estimating_function_stacker(
         # and they behave a little differently. It might be nice to define as a function of betas as
         # column vectors so that differentation is as plug-and-play as possible, but the first step
         # is to stack all the vectors together.
-        return jnp.concatenate(
-            # Algorithm stack
+        # return jnp.concatenate(
+
+        # Algorithm stack
+        logger.info(
+            "Computing the algorithm component of the weighted estimating function stack."
+        )
+        algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights
                 # for all decision times after the first update and before the update
                 # update under consideration took effect, for which the user was in the study.
                 (
                     jnp.prod(
-                        [
-                            # Note that we do NOT use the shared betas in the first arg, for which
-                            # we don't wan't differentiation to happen with respect to. Just grab
-                            # the original beta from the update function arguments. This is the same
-                            # value, but impervious to differentiation with respect tot all_betas.
-                            # The args, on the other hand, are a function of all_betas.
-                            get_radon_nikodym_weight(
-                                action_prob_func_args_by_decision_time_by_user_id[t][
-                                    action_prob_func_args_beta_index
-                                ],
-                                action_prob_func,
-                                action_prob_func_args_beta_index,
-                                action_by_decision_time_by_user_id[user_id][t],
-                                *threaded_single_user_action_prob_func_args_by_decision_time[
-                                    t
-                                ],
-                            )
-                            for t in range(
-                                # The earliest time after the first update where the user was in the study
-                                max(
-                                    first_time_after_first_update,
-                                    user_start_time,
-                                ),
-                                # The latest time the user was in the study before the time the update
-                                # under consideration first applied. Note the + 1 because range
-                                # does not include the right endpoint.
-                                min(
-                                    min_time_by_policy_num[policy_num],
-                                    user_end_time + 1,
-                                ),
-                            )
-                        ]
+                        jnp.array(
+                            [
+                                # Note that we do NOT use the shared betas in the first arg, for which
+                                # we don't want differentiation to happen with respect to. Just grab
+                                # the original beta from the update function arguments. This is the same
+                                # value, but impervious to differentiation with respect to all_betas.
+                                # The args, on the other hand, are a function of all_betas.
+                                get_radon_nikodym_weight(
+                                    action_prob_func_args_by_user_id_by_decision_time[
+                                        t
+                                    ][user_id][action_prob_func_args_beta_index],
+                                    action_prob_func,
+                                    action_prob_func_args_beta_index,
+                                    action_by_decision_time_by_user_id[user_id][t],
+                                    *threaded_single_user_action_prob_func_args_by_decision_time[
+                                        t
+                                    ],
+                                )
+                                for t in range(
+                                    # The earliest time after the first update where the user was in the study
+                                    max(
+                                        first_time_after_first_update,
+                                        user_start_time,
+                                    ),
+                                    # The latest time the user was in the study before the time the update
+                                    # under consideration first applied. Note the + 1 because range
+                                    # does not include the right endpoint.
+                                    min(
+                                        min_time_by_policy_num.get(
+                                            policy_num, math.inf
+                                        ),
+                                        user_end_time + 1,
+                                    ),
+                                )
+                            ]
+                        )
                     )  # Now use the above to weight the algo estimating function for this update
                     * algorithm_estimating_func(*update_args)
                     # If there are no arguments for the update function, the user is not yet in the
@@ -983,14 +1028,19 @@ def construct_single_user_weighted_estimating_function_stacker(
                 )
                 for policy_num, update_args in threaded_single_user_update_func_args_by_policy_num.items()
             ]
-            # Inference contribution
-            # Here we compute a product of Radon-Nikodym weights
-            # for all decision times after the first update for which the user was in the study
-            + jnp.prod(
+        )
+        # Inference contribution
+        # Here we compute a product of Radon-Nikodym weights
+        # for all decision times after the first update for which the user was in the study
+        logger.info(
+            "Computing the inference component of the weighted estimating function stack."
+        )
+        inference_component = jnp.prod(
+            jnp.array(
                 [
-                    # Note: as a above, the first arg is the original beta, not the shared one.
+                    # Note: as above, the first arg is the original beta, not the shared one.
                     get_radon_nikodym_weight(
-                        action_prob_func_args_by_decision_time_by_user_id[t][
+                        action_prob_func_args_by_user_id_by_decision_time[t][user_id][
                             action_prob_func_args_beta_index
                         ],
                         action_prob_func,
@@ -1006,30 +1056,29 @@ def construct_single_user_weighted_estimating_function_stacker(
                     )
                 ]
             )
-            * inference_estimating_func(*threaded_single_user_inference_func_args)
-        )
+        ) * inference_estimating_func(*threaded_single_user_inference_func_args)
+
+        # TODO: Make sure shapes are appropriate... code uses a 1d vector, but math is column vector
+        return jnp.concatenate([algorithm_component, inference_component])
 
     return single_user_weighted_algorithm_estimating_function_stacker
 
 
+# TODO: Add back vmap
 def get_avg_weighted_estimating_function_stack(
     all_betas_and_theta: list[jnp.ndarray],
     single_user_weighted_estimating_function_stacker: callable,
     user_ids: jnp.ndarray,
 ):
-    # Set up the vmap over user ids
-    vmap_fn = jax.vmap(
-        single_user_weighted_estimating_function_stacker,
-        in_axes=(None, None, 0),
-    )
-
-    # Apply vmap to theta, the betas, and the list of user ids.
-    # This will return a tensor of weighted estimating function stacks for each user,
-    # where the first axis indexes the user.
-    results = vmap_fn(
-        all_betas_and_theta[-1],
-        all_betas_and_theta[:-1],
-        user_ids,
+    results = jnp.array(
+        [
+            single_user_weighted_estimating_function_stacker(
+                all_betas_and_theta[-1],
+                all_betas_and_theta[:-1],
+                user_id,
+            )
+            for user_id in user_ids.tolist()
+        ]
     )
 
     # Compute average result over users
@@ -1042,15 +1091,23 @@ def construct_inverse_bread(
     all_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
 ):
-    return jax.jacobian(get_avg_weighted_estimating_function_stack)(
+    bread_pieces = jax.jacobian(get_avg_weighted_estimating_function_stack)(
         # Note how this is a list of jnp arrays; it cannot be a jnp array itself
         # because theta and the betas need not be the same size.  But JAX can still
         # differentiate with respect to the all betas and thetas at once if they
         # are collected like so.
-        [beta for beta in all_betas] + [theta],
+        list(all_betas) + [theta],
         single_user_weighted_estimating_function_stacker,
         user_ids,
     )
+
+    # Stack the pieces together horizontally.
+    # This should always be block lower triangular.  It may be block diagonal if
+    # the derivatives of alg update estimating functions with respect to prior betas
+    # is 0 and the the derivative of the inference estimating function with respect to
+    # all the betas is 0.  Typically, this occurs in either case if the action probabilities
+    # are not used in the estimating functions.
+    return jnp.hstack(bread_pieces)
 
 
 def calculate_beta_dim(alg_update_func_args, alg_update_func_args_beta_index):

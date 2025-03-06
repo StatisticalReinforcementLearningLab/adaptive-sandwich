@@ -56,8 +56,8 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:-: OPT; do
     B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
     D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
     j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
-    I  | inference_func_filename )                 needs_arg; inference_func_filename="$OPTARG" ;;
-    h  | inference_func_args_theta_index )         needs_arg; inference_func_args_theta_index="$OPTARG" ;;
+    I  | inference_func_filename )                      needs_arg; inference_func_filename="$OPTARG" ;;
+    h  | inference_func_args_theta_index )              needs_arg; inference_func_args_theta_index="$OPTARG" ;;
     g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     s  | seed )                                         needs_arg; seed="$OPTARG" ;;

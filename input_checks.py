@@ -368,9 +368,9 @@ def require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name):
 
 
 def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name):
-    logger.info("Checking that action probabilities are in the range [0, 1].")
+    logger.info("Checking that action probabilities are in the interval (0, 1).")
     # TODO: Can we even require not 0 or 1? Illustrates non-compliant RL algorithm
-    study_df[action_prob_col_name].between(0, 1).all()
+    study_df[action_prob_col_name].between(0, 1, inclusive="neither").all()
 
 
 def require_no_policy_numbers_present_in_rl_update_args_but_not_study_df(

@@ -1,9 +1,16 @@
+from typing import Literal
+from unittest.mock import patch, MagicMock
+
+import jax
 import pandas as pd
 import numpy as np
 import pytest
+import jax.numpy as jnp
 
 import after_study_analysis
 import calculate_derivatives
+from constants import FunctionTypes
+from helper_functions import load_function_from_same_named_file
 
 
 def test_form_meat_matrix():
@@ -1305,3 +1312,316 @@ def test_custom_column_names_respected():
 @pytest.mark.skip(reason="Nice to have")
 def test_collect_algorithm_statistics():
     raise NotImplementedError()
+
+
+@pytest.fixture
+def setup_data_two_loss_functions_no_action_probs():
+    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_action_1_prob_pure.py"
+    action_prob_func_args_beta_index = 0
+    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
+    alg_update_func_type = FunctionTypes.LOSS
+    alg_update_func_args_beta_index = 0
+    alg_update_func_args_action_prob_index = -1
+    alg_update_func_args_action_prob_times_index = -1
+    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_loss_inference_no_action_centering.py"
+    inference_func_type = FunctionTypes.LOSS
+    inference_func_args_theta_index = 0
+    beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
+    initial_policy_num = 1
+    action_by_decision_time_by_user_id = {
+        1: {1: 0, 2: 1, 3: 0, 4: 1, 5: 0},
+        2: {1: 1, 2: 0, 3: 1, 4: 0, 5: 1},
+    }
+    policy_num_by_decision_time_by_user_id = {
+        1: {1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+        2: {1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+    }
+    action_prob_func_args_by_user_id_by_decision_time = {
+        decision_time: {
+            user_id: (
+                jnp.array([-(decision_time), 2.0, 3.0, 4.0], dtype="float32"),
+                0.1,
+                1.0,
+                0.9,
+                jnp.array([user_id, -1.0], dtype="float32"),
+            )
+            for user_id in (1, 2)
+        }
+        for decision_time in range(1, 6)
+    }
+    # TODO: these don't build up over policy nums as they would in reality. OK?
+    update_func_args_by_by_user_id_by_policy_num = {
+        policy_num: {
+            user_id: (
+                jnp.array([-policy_num, 2.0, 3.0, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [user_id, policy_num],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [user_id, policy_num],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                None,
+                0,
+            )
+            for user_id in (1, 2)
+        }
+        for policy_num in range(2, 6)
+    }
+
+    study_df = pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+            "action": [0, 1, 1, 0, None, None, 1, 1, 0, None],
+            "reward": [1.0, -1, 0, 0, None, None, 1, 0, 1, None],
+            "intercept": [1.0, 1, 1, 0, None, None, 1, 1, 1, None],
+            "past_reward": [0.0, 1, -1, 0, None, None, 1, 1, 0, None],
+            "in_study": [1, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+            "action1prob": [0.5, 0.6, 0.7, 0, None, None, 0.1, 0.2, 0.3, None],
+        }
+    )
+    (
+        inference_func_args_by_user_id,
+        inference_func_args_action_prob_index,
+        inference_action_prob_decision_times_by_user_id,
+    ) = after_study_analysis.process_inference_func_args(
+        inference_func_filename,
+        inference_func_args_theta_index,
+        study_df,
+        jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
+        "action1prob",
+        "calendar_t",
+        "user_id",
+        "in_study",
+    )
+    inference_action_prob_decision_times_by_user_id = {}
+
+    return (
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    )
+
+
+def test_construct_single_user_weighted_estimating_function_stacker(
+    setup_data_two_loss_functions_no_action_probs,
+):
+    (
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    ) = setup_data_two_loss_functions_no_action_probs
+
+    stacker = (
+        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+            action_prob_func_filename,
+            action_prob_func_args_beta_index,
+            alg_update_func_filename,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            inference_func_filename,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            beta_index_by_policy_num,
+            initial_policy_num,
+            action_by_decision_time_by_user_id,
+            policy_num_by_decision_time_by_user_id,
+            action_prob_func_args_by_user_id_by_decision_time,
+            update_func_args_by_by_user_id_by_policy_num,
+            inference_func_args_by_user_id,
+            inference_action_prob_decision_times_by_user_id,
+        )
+    )
+
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    all_betas = [
+        jnp.array([0.1, 0.2, 0.3, 0.4], dtype="float32"),
+        jnp.array([0.5, 0.6, 0.7, 0.8], dtype="float32"),
+        jnp.array([0.1, 0.2, 0.3, 0.4], dtype="float32"),
+        jnp.array([0.1, 0.2, 0.3, 0.4], dtype="float32"),
+    ]
+
+    result_1 = stacker(theta, all_betas, 1)
+    result_2 = stacker(theta, all_betas, 2)
+
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+
+    expected_result_1 = jnp.concatenate(
+        [
+            # Weighted beta estimating function values
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[2][1][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[0],
+                    *update_func_args_by_by_user_id_by_policy_num[2][1][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[3][1][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[1],
+                    *update_func_args_by_by_user_id_by_policy_num[3][1][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[4][1][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[2],
+                    *update_func_args_by_by_user_id_by_policy_num[4][1][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[5][1][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[3],
+                    *update_func_args_by_by_user_id_by_policy_num[5][1][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            # Weighted theta estimating function value
+            inference_estimating_func(
+                *(
+                    *inference_func_args_by_user_id[1][
+                        :inference_func_args_theta_index
+                    ],
+                    theta,
+                    *inference_func_args_by_user_id[1][
+                        inference_func_args_theta_index + 1 :
+                    ],
+                )
+            ),
+        ]
+    )
+    expected_result_2 = jnp.concatenate(
+        [
+            # Weighted beta estimating function values
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[2][2][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[0],
+                    *update_func_args_by_by_user_id_by_policy_num[2][2][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[3][2][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[1],
+                    *update_func_args_by_by_user_id_by_policy_num[3][2][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[4][2][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[2],
+                    *update_func_args_by_by_user_id_by_policy_num[4][2][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            alg_estimating_func(
+                *(
+                    *update_func_args_by_by_user_id_by_policy_num[5][2][
+                        :alg_update_func_args_beta_index
+                    ],
+                    all_betas[3],
+                    *update_func_args_by_by_user_id_by_policy_num[5][2][
+                        alg_update_func_args_beta_index + 1 :
+                    ],
+                )
+            ),
+            # Weighted theta estimating function value
+            inference_estimating_func(
+                *(
+                    *inference_func_args_by_user_id[2][
+                        :inference_func_args_theta_index
+                    ],
+                    theta,
+                    *inference_func_args_by_user_id[2][
+                        inference_func_args_theta_index + 1 :
+                    ],
+                )
+            ),
+        ]
+    )
+    np.testing.assert_allclose(result_1, expected_result_1)
+    np.testing.assert_allclose(result_2, expected_result_2)

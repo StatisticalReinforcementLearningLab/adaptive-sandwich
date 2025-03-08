@@ -1,11 +1,12 @@
+from __future__ import annotations
+
 import collections
 import pickle
 import os
 import logging
-import pathlib
 import glob
 import math
-from typing import Any, Union
+from typing import Any
 
 import click
 import jax
@@ -323,8 +324,6 @@ def analyze_dataset(
         )
     )
 
-    user_ids = jnp.array(study_df[user_id_col_name].unique())
-
     (
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
@@ -333,7 +332,6 @@ def analyze_dataset(
         inference_func_filename,
         inference_func_args_theta_index,
         study_df,
-        user_ids,
         theta_est,
         action_prob_col_name,
         calendar_t_col_name,
@@ -365,6 +363,7 @@ def analyze_dataset(
         )
     )
 
+    user_ids = jnp.array(study_df[user_id_col_name].unique())
     # roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
     joint_adaptive_bread_inverse_matrix = construct_inverse_bread(
         single_user_weighted_estimating_function_stacker,
@@ -377,12 +376,16 @@ def analyze_dataset(
     # joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
     #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
     # )
+    logger.info("Inverting joint bread inverse matrix...")
+    breakpoint()
     joint_adaptive_bread_matrix = np.linalg.inv(joint_adaptive_bread_inverse_matrix)
 
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
+
+    breakpoint()
 
     # # TODO: Adapt this function to new structures
     # joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
@@ -557,7 +560,6 @@ def process_inference_func_args(
     inference_func_filename,
     inference_func_args_theta_index,
     study_df,
-    user_ids,
     theta_est,
     action_prob_col_name,
     calendar_t_col_name,
@@ -587,7 +589,7 @@ def process_inference_func_args(
         )
 
     # Convert to list from jnp array to extraction is simplest
-    for user_id in user_ids.tolist():
+    for user_id in study_df[user_id_col_name].unique():
         user_args_list = []
         filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
         for idx, col_name in enumerate(inference_func_arg_names):
@@ -657,17 +659,17 @@ def construct_single_user_weighted_estimating_function_stacker(
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    beta_index_by_policy_num: dict[Union[int, float], int],
-    initial_policy_num: Union[int, float],
+    beta_index_by_policy_num: dict[int | float, int],
+    initial_policy_num: int | float,
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
     policy_num_by_decision_time_by_user_id: dict[
-        collections.abc.Hashable, dict[int, Union[int, float]]
+        collections.abc.Hashable, dict[int, int | float]
     ],
     action_prob_func_args_by_user_id_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
     update_func_args_by_by_user_id_by_policy_num: dict[
-        collections.abc.Hashable, dict[Union[int, float], tuple[Any, ...]]
+        collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
     inference_action_prob_decision_times_by_user_id: dict[
@@ -708,44 +710,51 @@ def construct_single_user_weighted_estimating_function_stacker(
             to in the algorithm update function's arguments.
 
         inference_func_filename (str):
-            The filename of the inference loss function to be loaded.
+            The filename of the inference loss or estimating function to be loaded.
 
         inference_func_type (str):
             The type of the inference function. FunctionTypes.LOSS or FunctionTypes.ESTIMATING.
 
         inference_func_args_theta_index (int):
-            The index of the theta parameter in the inference loss function arguments.
+            The index of the theta parameter in the inference loss or estimating function arguments.
+            This parameter must be present, so this should always be nonnegative.
 
         inference_func_args_action_prob_index (int):
-            The index of the action probabilities argument in the inference loss function's
-            arguments.
+            The index of the action probabilities argument in the inference loss or estimating
+            function's arguments. -1 if not present.
 
-        beta_index_by_policy_num (dict[Union[int, float], int]):
+        beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
-            all_betas.
+            all_betas. Note that this is only for non-initial, non-fallback policies.
+
+        initial_policy_num (int | float): The policy number of the initial policy before any
+            updates.
 
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping decision times to actions taken.
 
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, Union[int, float]]]):
+        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
             A dictionary mapping decision times to the policy number in use.
             This may be user-specific. Should be sorted by decision time.
 
         action_prob_func_args_by_user_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for action probability function
-            EXCEPT beta. Should be sorted by decision time.
+            A map from decision times to tuples of arguments for action probability function.
+            This is for all decision times for all users (ars are an empty tuple if they are not in
+            the study). Should be sorted by decision time.
 
-        update_func_args_by_by_user_id_by_policy_num (dict[Union[int, float], dict[collections.abc.Hashable, tuple[Any, ...]]]):
+        update_func_args_by_by_user_id_by_policy_num (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
             A map from policy numbers to tuples containing the arguments for the algorithm
-            loss or estimating functions EXCEPT beta when producing this policy.
-            Should be sorted by policy number.
+            loss or estimating functions when producing this policy.  This is for all non-initial,
+            non-fallback policies. Should be sorted by policy number.
 
         inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A tuple containing the arguments for the loss function EXCEPT beta for this user.
+            A tuple containing the arguments for the inference loss or estimating function for this
+            user.
 
         inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times for which action probabilities are needed.
-            Essentially just in-study times.
+            For each user, a list of decision times to which action probabilities correspond if
+            provided. Typically just in-study times if action probabilites are used in the inference
+            loss or estimating function.
     """
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_update_func = load_function_from_same_named_file(alg_update_func_filename)
@@ -768,7 +777,7 @@ def construct_single_user_weighted_estimating_function_stacker(
     # TODO: Break into smaller functions.
     def single_user_weighted_algorithm_estimating_function_stacker(
         theta: jnp.ndarray,
-        all_betas: jnp.ndarray,
+        all_betas: list[jnp.ndarray],
         user_id: collections.abc.Hashable,
     ) -> jnp.ndarray:
         """
@@ -779,8 +788,8 @@ def construct_single_user_weighted_estimating_function_stacker(
             theta (jnp.ndarray):
                 The estimate of the parameter vector.
 
-            all_betas (jnp.ndarray):
-                A 2D JAX NumPy array containing the betas produced by all updates.
+            all_betas (list[jnp.ndarray]):
+                A list of 1D JAX NumPy arrays corresponding to the betas produced by all updates.
 
             user_id (collections.abc.Hashable):
                 The user ID for which to compute the weighted estimating function stack.
@@ -974,6 +983,7 @@ def construct_single_user_weighted_estimating_function_stacker(
         logger.info(
             "Computing the algorithm component of the weighted estimating function stack."
         )
+        breakpoint
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights
@@ -1059,6 +1069,9 @@ def construct_single_user_weighted_estimating_function_stacker(
         ) * inference_estimating_func(*threaded_single_user_inference_func_args)
 
         # TODO: Make sure shapes are appropriate... code uses a 1d vector, but math is column vector
+        logger.info(
+            "Concatenating algorithm and inference components of weighted estimating function stack."
+        )
         return jnp.concatenate([algorithm_component, inference_component])
 
     return single_user_weighted_algorithm_estimating_function_stacker
@@ -1091,6 +1104,7 @@ def construct_inverse_bread(
     all_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
 ):
+    logger.info("Differentiating avg weighted estimating function stack.")
     bread_pieces = jax.jacobian(get_avg_weighted_estimating_function_stack)(
         # Note how this is a list of jnp arrays; it cannot be a jnp array itself
         # because theta and the betas need not be the same size.  But JAX can still
@@ -1102,11 +1116,12 @@ def construct_inverse_bread(
     )
 
     # Stack the pieces together horizontally.
-    # This should always be block lower triangular.  It may be block diagonal if
-    # the derivatives of alg update estimating functions with respect to prior betas
-    # is 0 and the the derivative of the inference estimating function with respect to
-    # all the betas is 0.  Typically, this occurs in either case if the action probabilities
-    # are not used in the estimating functions.
+    # This will always be block lower triangular.  If this is not the case there
+    # is an error (but it is almost certainly the package's fault, not the user's,
+    # so no live check for this.)
+    # TODO: Investigate why it's block diagonal in synthetic case... seems wrong. weights maybe
+    # don't have correct dependence on betas?
+    logger.info("Stacking bread pieces horizontally into full matrix.")
     return jnp.hstack(bread_pieces)
 
 
@@ -1115,6 +1130,7 @@ def calculate_beta_dim(alg_update_func_args, alg_update_func_args_beta_index):
         for args in user_args_dict.values():
             if args:
                 return args[alg_update_func_args_beta_index].size
+    raise ValueError("No beta found in algorithm update function arguments.")
 
 
 # TODO: Docstring

@@ -1381,16 +1381,55 @@ def setup_data_two_loss_functions_no_action_probs():
         for policy_num in range(2, 6)
     }
 
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     study_df = pd.DataFrame(
         {
             "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
             "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
-            "action": [0, 1, 1, 0, None, None, 1, 1, 0, None],
-            "reward": [1.0, -1, 0, 0, None, None, 1, 0, 1, None],
-            "intercept": [1.0, 1, 1, 0, None, None, 1, 1, 1, None],
-            "past_reward": [0.0, 1, -1, 0, None, None, 1, 1, 0, None],
+            "action": [0, 1, 1, 0, 1, 1, 1, 1, 0, 0],
+            "reward": [1.0, -1, 0, 0, 2, 2, 1, 0, 1, 3],
+            "intercept": [1.0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "past_reward": [0.0, 1, -1, 0, 0, 0, 2, 1, 0, 1],
             "in_study": [1, 1, 1, 1, 0, 0, 1, 1, 1, 0],
-            "action1prob": [0.5, 0.6, 0.7, 0, None, None, 0.1, 0.2, 0.3, None],
+            # Insert real action probs based on other data.
+            # PRO: undifferentiated weights will indeed be one.
+            # CON: Can't test that the central betas are threaded in, rather
+            # than just the betas in the args, since the values are the same.
+            # TODO: Maybe add a second test where the values are different to
+            # test the second piece.  Otherwise I need to check that the right
+            # values are being threaded in another way.
+            "action1prob": [
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[1][1]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[2][1]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[3][1]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[4][1]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[5][1]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[1][2]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[2][2]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[3][2]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[4][2]
+                ),
+                action_prob_func(
+                    *action_prob_func_args_by_user_id_by_decision_time[5][2]
+                ),
+            ],
         }
     )
     (
@@ -1435,6 +1474,16 @@ def setup_data_two_loss_functions_no_action_probs():
 def test_construct_single_user_weighted_estimating_function_stacker(
     setup_data_two_loss_functions_no_action_probs,
 ):
+    """
+    Test that the constructed function correctly computes a weighted estimating
+    function stack for each of 2 users, at least in terms of the value. For now
+    this test does not test that betas and thetas are threaded in correctly to
+    enable differentiation.
+
+    This test handles the simplest case: no incremental recruitment, no use of
+    action probabilities in the loss/estimating functions for algorithm updates
+    or inference, and only 1 decision time between updates.
+    """
     (
         action_prob_func_filename,
         action_prob_func_args_beta_index,
@@ -1483,15 +1532,15 @@ def test_construct_single_user_weighted_estimating_function_stacker(
 
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
-    all_betas = [
-        jnp.array([0.1, 0.2, 0.3, 0.4], dtype="float32"),
-        jnp.array([0.5, 0.6, 0.7, 0.8], dtype="float32"),
-        jnp.array([0.1, 0.2, 0.3, 0.4], dtype="float32"),
-        jnp.array([0.1, 0.2, 0.3, 0.4], dtype="float32"),
+    all_post_update_betas = [
+        jnp.array([-2, 2, 3, 4], dtype="float32"),
+        jnp.array([-3, 2, 3, 4], dtype="float32"),
+        jnp.array([-4, 2, 3, 4], dtype="float32"),
+        jnp.array([-5, 2, 3, 4], dtype="float32"),
     ]
 
-    result_1 = stacker(theta, all_betas, 1)
-    result_2 = stacker(theta, all_betas, 2)
+    result_1 = stacker(theta, all_post_update_betas, 1)
+    result_2 = stacker(theta, all_post_update_betas, 2)
 
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
@@ -1509,47 +1558,117 @@ def test_construct_single_user_weighted_estimating_function_stacker(
                     *update_func_args_by_by_user_id_by_policy_num[2][1][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[0],
+                    all_post_update_betas[0],
                     *update_func_args_by_by_user_id_by_policy_num[2][1][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
-            alg_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][1],
+            )
+            * alg_estimating_func(
                 *(
                     *update_func_args_by_by_user_id_by_policy_num[3][1][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[1],
+                    all_post_update_betas[1],
                     *update_func_args_by_by_user_id_by_policy_num[3][1][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
-            alg_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][1],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[1],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[3][1],
+            )
+            * alg_estimating_func(
                 *(
                     *update_func_args_by_by_user_id_by_policy_num[4][1][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[2],
+                    all_post_update_betas[2],
                     *update_func_args_by_by_user_id_by_policy_num[4][1][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
-            alg_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][1],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[1],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[3][1],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[2],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                0,
+                *action_prob_func_args_by_user_id_by_decision_time[4][1],
+            )
+            * alg_estimating_func(
                 *(
                     *update_func_args_by_by_user_id_by_policy_num[5][1][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[3],
+                    all_post_update_betas[3],
                     *update_func_args_by_by_user_id_by_policy_num[5][1][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
             # Weighted theta estimating function value
-            inference_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][1],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[1],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[3][1],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[2],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                0,
+                *action_prob_func_args_by_user_id_by_decision_time[4][1],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[3],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[5][1],
+            )
+            * inference_estimating_func(
                 *(
                     *inference_func_args_by_user_id[1][
                         :inference_func_args_theta_index
@@ -1570,47 +1689,117 @@ def test_construct_single_user_weighted_estimating_function_stacker(
                     *update_func_args_by_by_user_id_by_policy_num[2][2][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[0],
+                    all_post_update_betas[0],
                     *update_func_args_by_by_user_id_by_policy_num[2][2][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
-            alg_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][2],
+            )
+            * alg_estimating_func(
                 *(
                     *update_func_args_by_by_user_id_by_policy_num[3][2][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[1],
+                    all_post_update_betas[1],
                     *update_func_args_by_by_user_id_by_policy_num[3][2][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
-            alg_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][2],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[1],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[3][2],
+            )
+            * alg_estimating_func(
                 *(
                     *update_func_args_by_by_user_id_by_policy_num[4][2][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[2],
+                    all_post_update_betas[2],
                     *update_func_args_by_by_user_id_by_policy_num[4][2][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
-            alg_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][2],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[1],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[3][2],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[2],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                0,
+                *action_prob_func_args_by_user_id_by_decision_time[4][2],
+            )
+            * alg_estimating_func(
                 *(
                     *update_func_args_by_by_user_id_by_policy_num[5][2][
                         :alg_update_func_args_beta_index
                     ],
-                    all_betas[3],
+                    all_post_update_betas[3],
                     *update_func_args_by_by_user_id_by_policy_num[5][2][
                         alg_update_func_args_beta_index + 1 :
                     ],
                 )
             ),
             # Weighted theta estimating function value
-            inference_estimating_func(
+            after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[0],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[2][2],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[1],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                1,
+                *action_prob_func_args_by_user_id_by_decision_time[3][2],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[2],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                0,
+                *action_prob_func_args_by_user_id_by_decision_time[4][2],
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                all_post_update_betas[3],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                0,
+                *action_prob_func_args_by_user_id_by_decision_time[5][2],
+            )
+            * inference_estimating_func(
                 *(
                     *inference_func_args_by_user_id[2][
                         :inference_func_args_theta_index
@@ -1625,3 +1814,85 @@ def test_construct_single_user_weighted_estimating_function_stacker(
     )
     np.testing.assert_allclose(result_1, expected_result_1)
     np.testing.assert_allclose(result_2, expected_result_2)
+
+
+def test_get_radon_nikodym_weight():
+    def mock_action_prob_func(beta, arg1, arg2):
+        return beta[0] + arg1 + arg2
+
+    beta_target = jnp.array([0.5, 0.2, 0.3])
+    action_prob_func_args_single_user = (jnp.array([0.1, 0.2, 0.3]), 0.01, 0.02)
+    action_prob_func_args_beta_index = 0
+    action = 1
+
+    expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
+    expected_denominator_args = list(action_prob_func_args_single_user)
+    expected_denominator_args[action_prob_func_args_beta_index] = beta_target
+    expected_denominator = mock_action_prob_func(*expected_denominator_args)
+
+    expected_result = expected_numerator / expected_denominator
+
+    result = after_study_analysis.get_radon_nikodym_weight(
+        beta_target,
+        mock_action_prob_func,
+        action_prob_func_args_beta_index,
+        action,
+        *action_prob_func_args_single_user,
+    )
+
+    np.testing.assert_allclose(result, expected_result)
+
+
+def test_get_radon_nikodym_weight_action_0():
+    def mock_action_prob_func(beta, arg1, arg2):
+        return beta[0] + arg1 + arg2
+
+    beta_target = jnp.array([0.5, 0.2, 0.3])
+    action_prob_func_args_single_user = (jnp.array([0.1, 0.2, 0.3]), 0.01, 0.02)
+    action_prob_func_args_beta_index = 0
+    action = 0
+
+    expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
+    expected_denominator_args = list(action_prob_func_args_single_user)
+    expected_denominator_args[action_prob_func_args_beta_index] = beta_target
+    expected_denominator = mock_action_prob_func(
+        *expected_denominator_args
+    )  # noqa: E1120
+
+    expected_result = (1 - expected_numerator) / (1 - expected_denominator)
+    result = after_study_analysis.get_radon_nikodym_weight(
+        beta_target,
+        mock_action_prob_func,
+        action_prob_func_args_beta_index,
+        action,
+        *action_prob_func_args_single_user,
+    )
+
+    np.testing.assert_allclose(result, expected_result)
+
+
+def test_get_radon_nikodym_weight_same_beta():
+    def mock_action_prob_func(beta, arg1, arg2):
+        return beta[0] + arg1 + arg2
+
+    beta_target = jnp.array([0.1, 0.2, 0.3])
+    action_prob_func_args_single_user = (jnp.array([0.1, 0.2, 0.3]), 0.01, 0.02)
+    action_prob_func_args_beta_index = 0
+    action = 1
+
+    expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
+    expected_denominator_args = list(action_prob_func_args_single_user)
+    expected_denominator_args[action_prob_func_args_beta_index] = beta_target
+    expected_denominator = mock_action_prob_func(*expected_denominator_args)
+
+    expected_result = expected_numerator / expected_denominator
+
+    result = after_study_analysis.get_radon_nikodym_weight(
+        beta_target,
+        mock_action_prob_func,
+        action_prob_func_args_beta_index,
+        action,
+        *action_prob_func_args_single_user,
+    )
+
+    np.testing.assert_allclose(result, expected_result)

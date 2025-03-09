@@ -309,7 +309,7 @@ def analyze_dataset(
         )
     )
 
-    all_betas = collect_all_betas(
+    all_post_update_betas = collect_all_post_update_betas(
         beta_index_by_policy_num, alg_update_func_args, alg_update_func_args_beta_index
     )
 
@@ -368,7 +368,7 @@ def analyze_dataset(
     joint_adaptive_bread_inverse_matrix = construct_inverse_bread(
         single_user_weighted_estimating_function_stacker,
         theta_est,
-        all_betas,
+        all_post_update_betas,
         user_ids,
     )
 
@@ -480,7 +480,7 @@ def construct_beta_index_by_policy_num_map(
 ):
     """
     Constructs a mapping from non-initial, non-fallback policy numbers to the index of the
-    corresponding beta in all_betas.
+    corresponding beta in all_post_update_betas.
 
     This is useful because differentiating the stacked estimating functions with respect to all the
     betas is simplest if they are passed in a single list. This auxiliary data then allows us to
@@ -507,7 +507,7 @@ def construct_beta_index_by_policy_num_map(
     }, unique_sorted_non_fallback_policy_nums[0]
 
 
-def collect_all_betas(
+def collect_all_post_update_betas(
     beta_index_by_policy_num, alg_update_func_args, alg_update_func_args_beta_index
 ):
     """
@@ -517,17 +517,17 @@ def collect_all_betas(
     differentiation of the stacked estimating functions with respect to all the
     betas. Otherwise a dictionary keyed on policy number would be more natural.
     """
-    all_betas = []
+    all_post_update_betas = []
     for policy_num in sorted(beta_index_by_policy_num.keys()):
         for user_id in alg_update_func_args[policy_num]:
             if alg_update_func_args[policy_num][user_id]:
-                all_betas.append(
+                all_post_update_betas.append(
                     alg_update_func_args[policy_num][user_id][
                         alg_update_func_args_beta_index
                     ]
                 )
                 break
-    return jnp.array(all_betas)
+    return jnp.array(all_post_update_betas)
 
 
 def extract_action_and_policy_by_decision_time_by_user_id(
@@ -725,7 +725,7 @@ def construct_single_user_weighted_estimating_function_stacker(
 
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
-            all_betas. Note that this is only for non-initial, non-fallback policies.
+            all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
 
         initial_policy_num (int | float): The policy number of the initial policy before any
             updates.
@@ -777,7 +777,7 @@ def construct_single_user_weighted_estimating_function_stacker(
     # TODO: Break into smaller functions.
     def single_user_weighted_algorithm_estimating_function_stacker(
         theta: jnp.ndarray,
-        all_betas: list[jnp.ndarray],
+        all_post_update_betas: list[jnp.ndarray],
         user_id: collections.abc.Hashable,
     ) -> jnp.ndarray:
         """
@@ -788,7 +788,7 @@ def construct_single_user_weighted_estimating_function_stacker(
             theta (jnp.ndarray):
                 The estimate of the parameter vector.
 
-            all_betas (list[jnp.ndarray]):
+            all_post_update_betas (list[jnp.ndarray]):
                 A list of 1D JAX NumPy arrays corresponding to the betas produced by all updates.
 
             user_id (collections.abc.Hashable):
@@ -853,7 +853,9 @@ def construct_single_user_weighted_estimating_function_stacker(
                 ] = action_prob_func_args_by_user_id[user_id]
                 continue
 
-            beta_to_introduce = all_betas[beta_index_by_policy_num[policy_num]]
+            beta_to_introduce = all_post_update_betas[
+                beta_index_by_policy_num[policy_num]
+            ]
             threaded_single_user_action_prob_func_args_by_decision_time[
                 decision_time
             ] = (
@@ -882,7 +884,9 @@ def construct_single_user_weighted_estimating_function_stacker(
                 threaded_single_user_update_func_args_by_policy_num[policy_num] = ()
                 continue
 
-            beta_to_introduce = all_betas[beta_index_by_policy_num[policy_num]]
+            beta_to_introduce = all_post_update_betas[
+                beta_index_by_policy_num[policy_num]
+            ]
             threaded_single_user_update_func_args_by_policy_num[policy_num] = (
                 update_func_args_by_user_id[user_id][:alg_update_func_args_beta_index]
                 + (beta_to_introduce,)
@@ -996,8 +1000,8 @@ def construct_single_user_weighted_estimating_function_stacker(
                                 # Note that we do NOT use the shared betas in the first arg, for which
                                 # we don't want differentiation to happen with respect to. Just grab
                                 # the original beta from the update function arguments. This is the same
-                                # value, but impervious to differentiation with respect to all_betas.
-                                # The args, on the other hand, are a function of all_betas.
+                                # value, but impervious to differentiation with respect to all_post_update_betas.
+                                # The args, on the other hand, are a function of all_post_update_betas.
                                 get_radon_nikodym_weight(
                                     action_prob_func_args_by_user_id_by_decision_time[
                                         t
@@ -1034,7 +1038,7 @@ def construct_single_user_weighted_estimating_function_stacker(
                     # Note that after they exit, they still contribute all their data to later
                     # updates.
                     if update_args
-                    else jnp.zeros(len(all_betas[0]))
+                    else jnp.zeros(len(all_post_update_betas[0]))
                 )
                 for policy_num, update_args in threaded_single_user_update_func_args_by_policy_num.items()
             ]
@@ -1079,15 +1083,15 @@ def construct_single_user_weighted_estimating_function_stacker(
 
 # TODO: Add back vmap
 def get_avg_weighted_estimating_function_stack(
-    all_betas_and_theta: list[jnp.ndarray],
+    all_post_update_betas_and_theta: list[jnp.ndarray],
     single_user_weighted_estimating_function_stacker: callable,
     user_ids: jnp.ndarray,
 ):
     results = jnp.array(
         [
             single_user_weighted_estimating_function_stacker(
-                all_betas_and_theta[-1],
-                all_betas_and_theta[:-1],
+                all_post_update_betas_and_theta[-1],
+                all_post_update_betas_and_theta[:-1],
                 user_id,
             )
             for user_id in user_ids.tolist()
@@ -1101,7 +1105,7 @@ def get_avg_weighted_estimating_function_stack(
 def construct_inverse_bread(
     single_user_weighted_estimating_function_stacker: callable,
     theta: jnp.ndarray,
-    all_betas: jnp.ndarray,
+    all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
 ):
     logger.info("Differentiating avg weighted estimating function stack.")
@@ -1110,7 +1114,7 @@ def construct_inverse_bread(
         # because theta and the betas need not be the same size.  But JAX can still
         # differentiate with respect to the all betas and thetas at once if they
         # are collected like so.
-        list(all_betas) + [theta],
+        list(all_post_update_betas) + [theta],
         single_user_weighted_estimating_function_stacker,
         user_ids,
     )

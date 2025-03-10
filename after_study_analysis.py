@@ -25,6 +25,7 @@ from helper_functions import (
     get_in_study_df_column,
     invert_matrix_and_check_conditioning,
     load_function_from_same_named_file,
+    replace_tuple_index,
 )
 
 logger = logging.getLogger(__name__)
@@ -858,14 +859,10 @@ def construct_single_user_weighted_estimating_function_stacker(
             ]
             threaded_single_user_action_prob_func_args_by_decision_time[
                 decision_time
-            ] = (
-                action_prob_func_args_by_user_id[user_id][
-                    :action_prob_func_args_beta_index
-                ]
-                + (beta_to_introduce,)
-                + action_prob_func_args_by_user_id[user_id][
-                    action_prob_func_args_beta_index + 1 :
-                ]
+            ] = replace_tuple_index(
+                action_prob_func_args_by_user_id[user_id],
+                action_prob_func_args_beta_index,
+                beta_to_introduce,
             )
 
         # 3. Thread the central betas into the algorithm update function arguments
@@ -888,11 +885,11 @@ def construct_single_user_weighted_estimating_function_stacker(
                 beta_index_by_policy_num[policy_num]
             ]
             threaded_single_user_update_func_args_by_policy_num[policy_num] = (
-                update_func_args_by_user_id[user_id][:alg_update_func_args_beta_index]
-                + (beta_to_introduce,)
-                + update_func_args_by_user_id[user_id][
-                    alg_update_func_args_beta_index + 1 :
-                ]
+                replace_tuple_index(
+                    update_func_args_by_user_id[user_id],
+                    alg_update_func_args_beta_index,
+                    beta_to_introduce,
+                )
             )
 
             if alg_update_func_args_action_prob_index >= 0:
@@ -914,13 +911,11 @@ def construct_single_user_weighted_estimating_function_stacker(
                     ].shape
                 )
                 threaded_single_user_update_func_args_by_policy_num[policy_num] = (
-                    threaded_single_user_update_func_args_by_policy_num[policy_num][
-                        :alg_update_func_args_action_prob_index
-                    ]
-                    + (action_probs_to_introduce,)
-                    + threaded_single_user_update_func_args_by_policy_num[policy_num][
-                        alg_update_func_args_action_prob_index + 1 :
-                    ]
+                    replace_tuple_index(
+                        threaded_single_user_update_func_args_by_policy_num[policy_num],
+                        alg_update_func_args_action_prob_index,
+                        action_probs_to_introduce,
+                    )
                 )
 
         # 3. Thread the central betas into the inference function arguments
@@ -932,10 +927,10 @@ def construct_single_user_weighted_estimating_function_stacker(
         )
         single_user_inference_func_args = inference_func_args_by_user_id[user_id]
 
-        threaded_single_user_inference_func_args = (
-            single_user_inference_func_args[:inference_func_args_theta_index]
-            + (theta,)
-            + single_user_inference_func_args[inference_func_args_theta_index + 1 :]
+        threaded_single_user_inference_func_args = replace_tuple_index(
+            single_user_inference_func_args,
+            inference_func_args_theta_index,
+            theta,
         )
 
         if inference_func_args_action_prob_index >= 0:
@@ -953,14 +948,10 @@ def construct_single_user_weighted_estimating_function_stacker(
                     inference_func_args_action_prob_index
                 ].shape
             )
-            threaded_single_user_inference_func_args = (
-                threaded_single_user_inference_func_args[
-                    :inference_func_args_action_prob_index
-                ]
-                + (action_probs_to_introduce,)
-                + threaded_single_user_inference_func_args[
-                    inference_func_args_action_prob_index + 1 :
-                ]
+            threaded_single_user_inference_func_args = replace_tuple_index(
+                threaded_single_user_inference_func_args,
+                inference_func_args_action_prob_index,
+                action_probs_to_introduce,
             )
 
         # Actually do a loop since we want both the min and max
@@ -975,8 +966,6 @@ def construct_single_user_weighted_estimating_function_stacker(
             user_start_time = min(user_start_time, decision_time)
             user_end_time = max(user_end_time, decision_time)
 
-        # TODO: Handle case where action probabilities are (optionally) used in
-        # estimating function
         # TODO: Make sure shapes are appropriate... code uses a 1d vector, but math is column vector
         # and they behave a little differently. It might be nice to define as a function of betas as
         # column vectors so that differentation is as plug-and-play as possible, but the first step
@@ -987,7 +976,6 @@ def construct_single_user_weighted_estimating_function_stacker(
         logger.info(
             "Computing the algorithm component of the weighted estimating function stack."
         )
-        breakpoint
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights

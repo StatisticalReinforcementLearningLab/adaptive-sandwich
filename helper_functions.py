@@ -114,3 +114,7 @@ def get_in_study_df_column(study_df, col_name, in_study_col_name):
         .to_numpy()
         .reshape(-1, 1)
     )
+
+
+def replace_tuple_index(tupl, index, value):
+    return tupl[:index] + (value,) + tupl[index + 1 :]

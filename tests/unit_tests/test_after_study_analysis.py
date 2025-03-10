@@ -1525,65 +1525,45 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
     # Note that we don't multiply by the weights! Therefore we test that they
-    # are all 1, as they should always be in practice, with the both beta going
+    # are all 1, as they should always be in practice, with the same beta going
     # into the numerator and denominator.
     expected_result_1 = jnp.concatenate(
         [
             # Weighted beta estimating function values
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[2][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[2][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[0],
-                    *update_func_args_by_by_user_id_by_policy_num[2][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[3][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[3][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[1],
-                    *update_func_args_by_by_user_id_by_policy_num[3][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[4][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[4][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[2],
-                    *update_func_args_by_by_user_id_by_policy_num[4][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[5][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[5][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[3],
-                    *update_func_args_by_by_user_id_by_policy_num[5][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             # Weighted theta estimating function value
             inference_estimating_func(
-                *(
-                    *inference_func_args_by_user_id[1][
-                        :inference_func_args_theta_index
-                    ],
+                *replace_tuple_index(
+                    inference_func_args_by_user_id[1],
+                    inference_func_args_theta_index,
                     theta,
-                    *inference_func_args_by_user_id[1][
-                        inference_func_args_theta_index + 1 :
-                    ],
                 )
             ),
         ]
@@ -1592,59 +1572,39 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         [
             # Weighted beta estimating function values
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[2][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[2][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[0],
-                    *update_func_args_by_by_user_id_by_policy_num[2][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[3][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[3][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[1],
-                    *update_func_args_by_by_user_id_by_policy_num[3][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[4][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[4][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[2],
-                    *update_func_args_by_by_user_id_by_policy_num[4][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[5][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[5][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[3],
-                    *update_func_args_by_by_user_id_by_policy_num[5][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             # Weighted theta estimating function value
             inference_estimating_func(
-                *(
-                    *inference_func_args_by_user_id[2][
-                        :inference_func_args_theta_index
-                    ],
+                *replace_tuple_index(
+                    inference_func_args_by_user_id[2],
+                    inference_func_args_theta_index,
                     theta,
-                    *inference_func_args_by_user_id[2][
-                        inference_func_args_theta_index + 1 :
-                    ],
                 )
             ),
         ]

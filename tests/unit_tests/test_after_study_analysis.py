@@ -1738,9 +1738,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 ):
     """
     Test that the constructed function correctly computes a weighted estimating
-    function stack for each of 2 users, at least in terms of the value. For now
-    this test does not test that betas and thetas are threaded in correctly to
-    enable differentiation.
+    function stack for each of 2 users.
 
     This test handles the simplest case: no incremental recruitment, no use of
     action probabilities in the loss/estimating functions for algorithm updates
@@ -1755,7 +1753,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 
     We also have different betas in the update args vs all_post_update_betas,
     testing that the betas in all_post_update_betas are subbed in for use in the
-    estimating function evaluations.
+    estimating function evaluations, because the estimating function values
+    would be different were they not.
     """
     (
         action_prob_func_filename,

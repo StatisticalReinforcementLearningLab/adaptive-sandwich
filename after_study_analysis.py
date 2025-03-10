@@ -976,7 +976,7 @@ def construct_single_user_weighted_estimating_function_stacker(
         logger.info(
             "Computing the algorithm component of the weighted estimating function stack."
         )
-        breakpoint()
+
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights
@@ -986,11 +986,12 @@ def construct_single_user_weighted_estimating_function_stacker(
                     jnp.prod(
                         jnp.array(
                             [
-                                # Note that we do NOT use the shared betas in the first arg, for which
-                                # we don't want differentiation to happen with respect to. Just grab
-                                # the original beta from the update function arguments. This is the same
-                                # value, but impervious to differentiation with respect to all_post_update_betas.
-                                # The args, on the other hand, are a function of all_post_update_betas.
+                                # Note that we do NOT use the shared betas in the first arg, for
+                                # which we don't want differentiation to happen with respect to.
+                                # Just grab the original beta from the update function arguments.
+                                # This is the same value, but impervious to differentiation with
+                                # respect to all_post_update_betas. The args, on the other hand,
+                                # are a function of all_post_update_betas.
                                 get_radon_nikodym_weight(
                                     action_prob_func_args_by_user_id_by_decision_time[
                                         t
@@ -1003,14 +1004,17 @@ def construct_single_user_weighted_estimating_function_stacker(
                                     ],
                                 )
                                 for t in range(
-                                    # The earliest time after the first update where the user was in the study
+                                    # The earliest time after the first update where the user was in
+                                    #  the study
                                     max(
                                         first_time_after_first_update,
                                         user_start_time,
                                     ),
-                                    # The latest time the user was in the study before the time the update
-                                    # under consideration first applied. Note the + 1 because range
-                                    # does not include the right endpoint.
+                                    # The latest time the user was in the study before the time the
+                                    # update under consideration first applied. Note the + 1 because
+                                    # range does not include the right endpoint.
+                                    # TODO: Is there any reason for the policy to not be in min time
+                                    # by policy num? I can't think of one currently.
                                     min(
                                         min_time_by_policy_num.get(
                                             policy_num, math.inf

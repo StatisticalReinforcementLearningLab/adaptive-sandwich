@@ -489,7 +489,7 @@ def construct_beta_index_by_policy_num_map(
 
     If we really keep the enforcement of consecutive policy numbers, we don't actually need all
     this logic and can just pass around the initial policy number, but I'd like to have this
-    handle the increasing (non-fallback) case even though upstream we currently do require no
+    handle the merely increasing (non-fallback) case even though upstream we currently do require no
     gaps.
     """
 
@@ -976,6 +976,7 @@ def construct_single_user_weighted_estimating_function_stacker(
         logger.info(
             "Computing the algorithm component of the weighted estimating function stack."
         )
+        breakpoint()
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights

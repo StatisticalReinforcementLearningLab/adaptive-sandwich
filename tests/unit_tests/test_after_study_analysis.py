@@ -1754,7 +1754,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     differentiation.
 
     We also have different betas in the update args vs all_post_update_betas,
-    testing that the ones in all_post_update_betas are subbed in for use in the
+    testing that the betas in all_post_update_betas are subbed in for use in the
     estimating function evaluations.
     """
     (

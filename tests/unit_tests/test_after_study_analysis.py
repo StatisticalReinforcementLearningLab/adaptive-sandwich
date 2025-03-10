@@ -1792,6 +1792,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     multiplied by the right estimating functions and also that the shared betas
     are appropriately subbed in to (only) the denominators of the weights for
     differentiation.
+
+    We also have different betas in the update args vs all_post_update_betas,
+    testing that the ones in all_post_update_betas are subbed in for use in the
+    estimating function evaluations.
     """
     (
         action_prob_func_filename,
@@ -1863,14 +1867,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         [
             # Weighted beta estimating function values
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[2][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[2][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[0],
-                    *update_func_args_by_by_user_id_by_policy_num[2][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             after_study_analysis.get_radon_nikodym_weight(
@@ -1887,14 +1887,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[3][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[3][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[1],
-                    *update_func_args_by_by_user_id_by_policy_num[3][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             after_study_analysis.get_radon_nikodym_weight(
@@ -1924,14 +1920,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[4][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[4][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[2],
-                    *update_func_args_by_by_user_id_by_policy_num[4][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             after_study_analysis.get_radon_nikodym_weight(
@@ -1974,14 +1966,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[5][1][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[5][1],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[3],
-                    *update_func_args_by_by_user_id_by_policy_num[5][1][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             # Weighted theta estimating function value
@@ -2038,14 +2026,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * inference_estimating_func(
-                *(
-                    *inference_func_args_by_user_id[1][
-                        :inference_func_args_theta_index
-                    ],
+                *replace_tuple_index(
+                    inference_func_args_by_user_id[1],
+                    inference_func_args_theta_index,
                     theta,
-                    *inference_func_args_by_user_id[1][
-                        inference_func_args_theta_index + 1 :
-                    ],
                 )
             ),
         ]
@@ -2054,14 +2038,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         [
             # Weighted beta estimating function values
             alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[2][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[2][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[0],
-                    *update_func_args_by_by_user_id_by_policy_num[2][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             after_study_analysis.get_radon_nikodym_weight(
@@ -2078,14 +2058,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[3][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[3][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[1],
-                    *update_func_args_by_by_user_id_by_policy_num[3][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             after_study_analysis.get_radon_nikodym_weight(
@@ -2115,14 +2091,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[4][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[4][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[2],
-                    *update_func_args_by_by_user_id_by_policy_num[4][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             after_study_analysis.get_radon_nikodym_weight(
@@ -2165,14 +2137,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * alg_estimating_func(
-                *(
-                    *update_func_args_by_by_user_id_by_policy_num[5][2][
-                        :alg_update_func_args_beta_index
-                    ],
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[5][2],
+                    alg_update_func_args_beta_index,
                     all_post_update_betas[3],
-                    *update_func_args_by_by_user_id_by_policy_num[5][2][
-                        alg_update_func_args_beta_index + 1 :
-                    ],
                 )
             ),
             # Weighted theta estimating function value
@@ -2229,14 +2197,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 ),
             )
             * inference_estimating_func(
-                *(
-                    *inference_func_args_by_user_id[2][
-                        :inference_func_args_theta_index
-                    ],
+                *replace_tuple_index(
+                    inference_func_args_by_user_id[2],
+                    inference_func_args_theta_index,
                     theta,
-                    *inference_func_args_by_user_id[2][
-                        inference_func_args_theta_index + 1 :
-                    ],
                 )
             ),
         ]

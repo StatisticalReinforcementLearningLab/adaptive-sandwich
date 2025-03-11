@@ -8,6 +8,8 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that only affect simulation side.
 seed=0
+num_users=70
+recruitment_rate=5
 only_analysis=0
 
 # Arguments that only affect inference side.
@@ -35,7 +37,7 @@ suppress_all_data_checks=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:-: OPT; do
+while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -64,6 +66,8 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:-: OPT; do
     o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    n  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
+    r  | recruitment_rate )                             needs_arg; recruitment_rate="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -73,7 +77,10 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 # Simulate an oralytics RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
   echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning RL study simulation."
-  python oralytics_sample_data/Archive/src/run_exps.py ${seed}
+  python oralytics_sample_data/Archive/src/run_exps.py \
+    --seed ${seed} \
+    --num_users ${num_users} \
+    --recruitment_rate ${recruitment_rate}
   echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished RL study simulation."
 fi
 

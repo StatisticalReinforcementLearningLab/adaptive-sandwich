@@ -1,7 +1,9 @@
 import sys
 import os
-
+import logging
 import pickle as pkl
+
+import click
 import numpy as np
 import pandas as pd
 import jax.numpy as jnp
@@ -12,11 +14,16 @@ import sim_env_v1
 import sim_env_v2
 import sim_env_v3
 import smoothing_function
-import experiment_global_vars
 import read_write_info
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
+
 WRITE_PATH_PREFIX = read_write_info.WRITE_PATH_PREFIX
-NUM_TRIAL_USERS = experiment_global_vars.NUM_TRIAL_USERS
 
 SIM_ENV_NAMES = ["base_env_type", "delayed_effect_scale", "effect_size_scale"]
 ALG_CAND_NAMES = ["b_logistic", "update_cadence", "cluster_size"]
@@ -29,9 +36,7 @@ def get_user_list(version, study_idxs):
     return user_list
 
 
-def get_alg_candidate(
-    alg_type, cluster_size, smoothing_func, update_cadence, cost_params, noise_var
-):
+def get_alg_candidate(alg_type, smoothing_func, update_cadence, cost_params, noise_var):
     alg_candidate = None
     if alg_type == "BLR_AC":
         alg_candidate = rl_algorithm.BlrActionCentering(
@@ -51,7 +56,7 @@ def get_alg_candidate(
         )
     else:
         print("ERROR: NO ALG_TYPE FOUND - ", alg_type)
-    print("ALG TYPE: {}".format(alg_type))
+    print(f"ALG TYPE: {alg_type}")
     return alg_candidate
 
 
@@ -61,6 +66,7 @@ def get_sim_env(
     effect_size_scale,
     delayed_effect_scale,
     current_seed,
+    num_users,
 ):
     version = sim_env = None
     if sim_env_version == "v3":
@@ -77,7 +83,7 @@ def get_sim_env(
     # draw different users per trial
     print("SEED: ", current_seed)
     np.random.seed(current_seed)
-    study_idxs = np.random.choice(version.NUM_USER_MODELS, size=NUM_TRIAL_USERS)
+    study_idxs = np.random.choice(version.NUM_USER_MODELS, size=num_users)
 
     # get user ids corresponding to index
     users_list = get_user_list(version, study_idxs)
@@ -88,35 +94,32 @@ def get_sim_env(
     )
 
     print(
-        "PROCESSED ENV_TYPE: {}, EFFECT SIZE SCALE: {}".format(
-            base_env_type, effect_size_scale
-        )
+        f"PROCESSED ENV_TYPE: {base_env_type}, EFFECT SIZE SCALE: {effect_size_scale}"
     )
 
     return users_list, environment_module
 
 
-def run(exp_dir, exp_name, exp_kwargs, current_seed):
+def run(exp_dir, exp_name, exp_kwargs, current_seed, num_users, recruitment_rate):
     exp_path = os.path.join(exp_dir, exp_name, str(current_seed))
 
     if not os.path.exists(exp_path):
         os.makedirs(exp_path)
 
     ## HANDLING RL ALGORITHM CANDIDATE ##
-    cluster_size = NUM_TRIAL_USERS
     L_min, L_max = exp_kwargs["clipping_vals"]
     b_logistic = exp_kwargs["b_logistic"]
-    print("CLIPPING VALUES: [{}, {}]".format(L_min, L_max))
-    smoothing_func = smoothing_function.genearlized_logistic_func_wrapper(
+    print(f"CLIPPING VALUES: [{L_min}, {L_max}]")
+    smoothing_func = smoothing_function.generalized_logistic_func_wrapper(
         L_min, L_max, b_logistic
     )
     update_cadence = exp_kwargs["update_cadence"]
     cost_params = exp_kwargs["cost_params"]
-    print("PROCESSED CANDIDATE VALS {}".format(cost_params))
+    print(f"PROCESSED CANDIDATE VALS {cost_params}")
     noise_var = exp_kwargs["noise_var"]
     alg_type = exp_kwargs["alg_type"]
     alg_candidate = get_alg_candidate(
-        alg_type, cluster_size, smoothing_func, update_cadence, cost_params, noise_var
+        alg_type, smoothing_func, update_cadence, cost_params, noise_var
     )
 
     data_pickle_template = exp_path + "/{}_data_df.p"
@@ -133,10 +136,11 @@ def run(exp_dir, exp_name, exp_kwargs, current_seed):
         effect_size_scale,
         delayed_effect_scale,
         current_seed,
+        num_users,
     )
-    user_groups = rl_experiments.pre_process_users(users_list)
+    user_groups = rl_experiments.pre_process_users(users_list, recruitment_rate)
     data_df, update_df = rl_experiments.run_incremental_recruitment_exp(
-        user_groups, alg_candidate, environment_module
+        user_groups, recruitment_rate, alg_candidate, environment_module
     )
     data_df_pickle_location = data_pickle_template.format(current_seed)
     update_df_pickle_location = update_pickle_template.format(current_seed)
@@ -177,14 +181,14 @@ def create_loss_fn_dataframe(data, update):
 
         mu = []
         for j in range(15):
-            mu.append(temp["posterior_mu.{0}".format(j)].values[0])
+            mu.append(temp[f"posterior_mu.{j}"].values[0])
 
         sigma = []
 
         for j in range(15):
             t = []
             for k in range(15):
-                t.append(temp["posterior_var.{0}.{1}".format(j, k)].values[0])
+                t.append(temp[f"posterior_var.{j}.{k}"].values[0])
             sigma.append(t)
 
         mu = jnp.array(mu)
@@ -379,12 +383,12 @@ def create_action_df(data, update, loss_dict):
                     # Construct beta from update dataframe
                     update_0 = update[update["update_t"] == 0].reset_index(drop=True)
                     mu = [
-                        update_0["posterior_mu.{0}".format(j)].values[0]
+                        update_0[f"posterior_mu.{j}".format(j)].values[0]
                         for j in range(15)
                     ]
                     sigma = [
                         [
-                            update_0["posterior_var.{0}.{1}".format(j, k)].values[0]
+                            update_0[f"posterior_var.{j}.{k}"].values[0]
                             for k in range(15)
                         ]
                         for j in range(15)
@@ -589,38 +593,69 @@ def create_study_df(data):
     return df3
 
 
-def process_results(exp_dir, exp_name, exp_kwargs, current_seed):
+def process_results(exp_dir, exp_name, current_seed):
     exp_path = os.path.join(exp_dir, exp_name, str(current_seed))
-    data = pkl.load(open(exp_path + "/{}_data_df.p".format(current_seed), "rb"))
-    update = pkl.load(open(exp_path + "/{}_update_df.p".format(current_seed), "rb"))
+    with open(exp_path + f"/{current_seed}_data_df.p", "rb") as data_file:
+        data = pkl.load(data_file)
+    with open(exp_path + f"/{current_seed}_update_df.p", "rb") as update_file:
+        update = pkl.load(update_file)
 
     _, loss_dict = create_loss_fn_dataframe(data, update)
     _, act_prob_dict = create_action_df(data, update, loss_dict)
     study_df = create_study_df(data)
 
-    pkl.dump(
-        loss_dict, open(exp_path + "/{}_loss_fn_data.pkl".format(current_seed), "wb")
-    )
-    pkl.dump(
-        act_prob_dict, open(exp_path + "/{}_action_data.pkl".format(current_seed), "wb")
-    )
-    pkl.dump(study_df, open(exp_path + "/{}_study_data.pkl".format(current_seed), "wb"))
+    with open(exp_path + f"/{current_seed}_loss_fn_data.pkl", "wb") as f:
+        pkl.dump(loss_dict, f)
+    with open(exp_path + f"/{current_seed}_action_data.pkl", "wb") as f:
+        pkl.dump(act_prob_dict, f)
+    with open(exp_path + f"/{current_seed}_study_data.pkl", "wb") as f:
+        pkl.dump(study_df, f)
 
 
-def main():
-    seed = int(sys.argv[1])
-    exp_dir = sys.argv[2] if len(sys.argv) >= 3 else WRITE_PATH_PREFIX
-    exp_kwargs = read_write_info.exp_kwargs
+EXP_KWARGS = {
+    "sim_env_version": "v3",
+    "base_env_type": "NON_STAT",
+    "effect_size_scale": "None",
+    "delayed_effect_scale": "LOW_R",
+    "alg_type": "BLR_AC_V3",
+    "noise_var": "None",
+    "clipping_vals": [0.2, 0.8],
+    "b_logistic": 0.515,
+    "update_cadence": 14,
+    "cluster_size": "full_pooling",
+    "cost_params": [80, 40],
+}
+
+
+@click.command()
+@click.option("--seed", default=0, help="Random seed for the experiment.")
+@click.option(
+    "--exp_dir",
+    default=WRITE_PATH_PREFIX,
+    help="Directory in which to save the experiment results.",
+)
+@click.option(
+    "--num_users",
+    default=70,
+    help="The number of users in the trial. Should be a multiple of 5.",
+)
+@click.option(
+    "--recruitment_rate",
+    default=5,
+    help="The number of users recruited per two week period",
+)
+def main(seed, exp_dir, num_users, recruitment_rate):
+    exp_kwargs = EXP_KWARGS
 
     # Make exp_name from exp_kwargs
     exp_name = "_".join([str(exp_kwargs[key]) for key in OUTPUT_PATH_NAMES])
 
     print("Running experiment:", exp_name)
-    run(exp_dir, exp_name, exp_kwargs, seed)
+    run(exp_dir, exp_name, exp_kwargs, seed, num_users, recruitment_rate)
 
     print("Analyzing results")
-    process_results(exp_dir, exp_name, exp_kwargs, seed)
+    process_results(exp_dir, exp_name, seed)
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter

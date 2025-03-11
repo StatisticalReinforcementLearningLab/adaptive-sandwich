@@ -5,9 +5,6 @@ GLOBAL VALUES
 MAX_SEED_VAL = 100
 NUM_TRIALS = 70
 TRIAL_LENGTH_IN_WEEKS = 10
-# We should have NUM_USERS x NUM_DECISION_TIMES datapoints for each saved value or
-# statistic at the end of the study
-NUM_DECISION_TIMES = 70 * 2
 
 """
 V1:
@@ -25,9 +22,15 @@ V2 and V3:
 * app engagement in algorithm state
 """
 NUM_TRIAL_USERS = 70
+NUM_DECISION_TIMES = NUM_TRIAL_USERS * 2
 RECRUITMENT_RATE = 5
-FILL_IN_COLS = ['policy_idx', 'action', 'prob', 'reward', 'quality'] + ['state.tod', 'state.b.bar',\
- 'state.a.bar', 'state.app.engage', 'state.bias']
+FILL_IN_COLS = ["policy_idx", "action", "prob", "reward", "quality"] + [
+    "state.tod",
+    "state.b.bar",
+    "state.a.bar",
+    "state.app.engage",
+    "state.bias",
+]
 
 """
 Used for no pooling

@@ -364,6 +364,7 @@ def analyze_dataset(
         )
     )
 
+    logger.info("Constructing joint adaptive bread inverse matrix.")
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     # roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
     joint_adaptive_bread_inverse_matrix = construct_inverse_bread(
@@ -378,15 +379,12 @@ def analyze_dataset(
     #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
     # )
     logger.info("Inverting joint bread inverse matrix...")
-    breakpoint()
     joint_adaptive_bread_matrix = np.linalg.inv(joint_adaptive_bread_inverse_matrix)
 
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
-
-    breakpoint()
 
     # # TODO: Adapt this function to new structures
     # joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
@@ -1065,10 +1063,6 @@ def construct_single_user_weighted_estimating_function_stacker(
             )
         ) * inference_estimating_func(*threaded_single_user_inference_func_args)
 
-        # TODO: Make sure shapes are appropriate... code uses a 1d vector, but math is column vector
-        logger.info(
-            "Concatenating algorithm and inference components of weighted estimating function stack."
-        )
         return jnp.concatenate([algorithm_component, inference_component])
 
     return single_user_weighted_algorithm_estimating_function_stacker
@@ -1102,7 +1096,9 @@ def construct_inverse_bread(
     user_ids: jnp.ndarray,
 ):
     logger.info("Differentiating avg weighted estimating function stack.")
-    bread_pieces = jax.jacobian(get_avg_weighted_estimating_function_stack)(
+    # Interestingly, jax.jacobian does not seem to work here... just hangs in
+    # the oralytics case, while it works fine in the simpler synthetic case.y
+    bread_pieces = jax.jacrev(get_avg_weighted_estimating_function_stack)(
         # Note how this is a list of jnp arrays; it cannot be a jnp array itself
         # because theta and the betas need not be the same size.  But JAX can still
         # differentiate with respect to the all betas and thetas at once if they
@@ -1116,8 +1112,6 @@ def construct_inverse_bread(
     # This will always be block lower triangular.  If this is not the case there
     # is an error (but it is almost certainly the package's fault, not the user's,
     # so no live check for this.)
-    # TODO: Investigate why it's block diagonal in synthetic case... seems wrong. weights maybe
-    # don't have correct dependence on betas?
     logger.info("Stacking bread pieces horizontally into full matrix.")
     return jnp.hstack(bread_pieces)
 

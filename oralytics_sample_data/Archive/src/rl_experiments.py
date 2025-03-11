@@ -1,10 +1,8 @@
-import rl_algorithm
 import numpy as np
 import pandas as pd
 import reward_definition
 import experiment_global_vars
 
-RECRUITMENT_RATE = experiment_global_vars.RECRUITMENT_RATE
 TRIAL_LENGTH_IN_WEEKS = experiment_global_vars.TRIAL_LENGTH_IN_WEEKS
 NUM_DECISION_TIMES = experiment_global_vars.NUM_DECISION_TIMES
 FILL_IN_COLS = experiment_global_vars.FILL_IN_COLS
@@ -24,7 +22,9 @@ def create_dfs_no_pooling(users, update_cadence, rl_algorithm_feature_dim):
     N = len(users)
     batch_data_size = N * NUM_DECISION_TIMES
     ### data df ###
-    data_dict = {}
+    data_dict = dict.fromkeys(
+        ["user_idx", "user_id", "user_decision_t", "day_in_study"] + FILL_IN_COLS
+    )
     data_dict["user_idx"] = np.repeat(range(N), NUM_DECISION_TIMES)
     data_dict["user_id"] = np.repeat(users, NUM_DECISION_TIMES)
     data_dict["user_decision_t"] = np.stack(
@@ -45,12 +45,10 @@ def create_dfs_no_pooling(users, update_cadence, rl_algorithm_feature_dim):
         [np.arange(0, num_updates) for _ in range(N)], axis=0
     ).flatten()
     for i in range(rl_algorithm_feature_dim):
-        update_dict["posterior_mu.{}".format(i)] = np.full(N * num_updates, np.nan)
+        update_dict[f"posterior_mu.{i}"] = np.full(N * num_updates, np.nan)
     for i in range(rl_algorithm_feature_dim):
         for j in range(rl_algorithm_feature_dim):
-            update_dict["posterior_var.{}.{}".format(i, j)] = np.full(
-                N * num_updates, np.nan
-            )
+            update_dict[f"posterior_var.{i}.{j}"] = np.full(N * num_updates, np.nan)
     update_df = pd.DataFrame.from_dict(update_dict)
 
     return data_df, update_df
@@ -60,7 +58,18 @@ def create_dfs_full_pooling(users_groups, update_cadence, rl_algorithm_feature_d
     N = len(users_groups)
     batch_data_size = N * NUM_DECISION_TIMES
     ### data df ###
-    data_dict = {}
+    data_dict = dict.fromkeys(
+        [
+            "user_idx",
+            "user_id",
+            "user_entry_decision_t",
+            "user_last_decision_t",
+            "user_decision_t",
+            "calendar_decision_t",
+            "day_in_study",
+        ]
+        + FILL_IN_COLS
+    )
     data_dict["user_idx"] = np.repeat(
         users_groups[:, 0].astype(int), NUM_DECISION_TIMES
     )
@@ -93,17 +102,14 @@ def create_dfs_full_pooling(users_groups, update_cadence, rl_algorithm_feature_d
     num_updates = compute_num_updates(users_groups, update_cadence)
     update_dict["update_t"] = np.arange(0, num_updates)
     for i in range(rl_algorithm_feature_dim):
-        update_dict["posterior_mu.{}".format(i)] = np.full(num_updates, np.nan)
+        update_dict[f"posterior_mu.{i}"] = np.full(num_updates, np.nan)
     for i in range(rl_algorithm_feature_dim):
         for j in range(rl_algorithm_feature_dim):
-            update_dict["posterior_var.{}.{}".format(i, j)] = np.full(
-                num_updates, np.nan
-            )
+            update_dict[f"posterior_var.{i}.{j}"] = np.full(num_updates, np.nan)
     update_df = pd.DataFrame.from_dict(update_dict)
     ### estimating eqns df ###
     estimating_eqns_dict = {}
     num_updates_for_cluster = int(NUM_DECISION_TIMES / update_cadence)
-    last_group_idx = max(users_groups[:, 1].astype(int))
     estimating_eqns_dict["update_t"] = np.stack(
         [
             range(
@@ -121,12 +127,12 @@ def create_dfs_full_pooling(users_groups, update_cadence, rl_algorithm_feature_d
         users_groups[:, 2], num_updates_for_cluster
     )
     for i in range(rl_algorithm_feature_dim):
-        estimating_eqns_dict["mean_estimate.{}".format(i)] = np.full(
+        estimating_eqns_dict[f"mean_estimate.{i}"] = np.full(
             N * num_updates_for_cluster, np.nan
         )
     for i in range(rl_algorithm_feature_dim):
         for j in range(rl_algorithm_feature_dim):
-            estimating_eqns_dict["var_estimate.{}.{}".format(i, j)] = np.full(
+            estimating_eqns_dict[f"var_estimate.{i}.{j}"] = np.full(
                 N * num_updates_for_cluster, np.nan
             )
     estimating_eqns_df = pd.DataFrame.from_dict(estimating_eqns_dict)
@@ -375,10 +381,10 @@ def run_experiment(alg_candidates, sim_env):
 
 # returns a int(NUM_USERS / RECRUITMENT_RATE) x RECRUITMENT_RATE array of user indices
 # row index represents every other week that they enter the study
-def pre_process_users(total_trial_users):
+def pre_process_users(total_trial_users, recruitment_rate):
     results = []
     for j, user in enumerate(total_trial_users):
-        results.append((int(j), int(2 * (j // RECRUITMENT_RATE)) + 1, user))
+        results.append((int(j), int(2 * (j // recruitment_rate)) + 1, user))
 
     return np.array(results)
 
@@ -386,7 +392,9 @@ def pre_process_users(total_trial_users):
 ### runs experiment with full pooling and incremental recruitment
 # users_groups will be a list of tuples where tuple[0] is the user index
 # tuple[1] is the week they entered the study, tuple[2] is the user id string
-def run_incremental_recruitment_exp(user_groups, alg_candidate, sim_env):
+def run_incremental_recruitment_exp(
+    user_groups, recruitment_rate, alg_candidate, sim_env
+):
     update_cadence = alg_candidate.get_update_cadence()
     data_df, update_df, _ = create_dfs_full_pooling(
         user_groups, update_cadence, alg_candidate.get_feature_dim()
@@ -395,7 +403,7 @@ def run_incremental_recruitment_exp(user_groups, alg_candidate, sim_env):
     set_update_df_values(
         update_df, 0, alg_candidate.posterior_mean, alg_candidate.posterior_var
     )
-    current_groups = user_groups[:RECRUITMENT_RATE]
+    current_groups = user_groups[:recruitment_rate]
     update_idx = 0
     week = 1
     while len(current_groups) > 0:
@@ -418,7 +426,6 @@ def run_incremental_recruitment_exp(user_groups, alg_candidate, sim_env):
             day_in_study = (
                 8 + (week - 1) * 7 + (update_idx_within_week + decision_idx // 2)
             )
-            current_user_idxs = current_groups[:, 0].astype(int)
             # update time at the end of each week
             # alg_states = get_data_df_values_for_users(data_df, current_user_idxs, day_in_study, 'state.*')
             # actions = get_data_df_values_for_users(data_df, current_user_idxs, day_in_study, 'action').flatten()
@@ -457,6 +464,6 @@ def run_incremental_recruitment_exp(user_groups, alg_candidate, sim_env):
             # since we only add users biweekly, users finishing the study should also be
             # at a biweekly cadence
             if week > TRIAL_LENGTH_IN_WEEKS:
-                current_groups = current_groups[RECRUITMENT_RATE:]
+                current_groups = current_groups[recruitment_rate:]
 
     return data_df, update_df

@@ -367,17 +367,23 @@ def analyze_dataset(
     logger.info("Constructing joint adaptive bread inverse matrix.")
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     # roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
-    joint_adaptive_bread_inverse_matrix = construct_inverse_bread(
+    (
+        joint_adaptive_bread_inverse_matrix,
+        joint_adaptive_meat_matrix,
+        avg_estimating_function_stack,
+    ) = construct_inverse_bread_and_meat_and_avg_estimating_function_stack(
         single_user_weighted_estimating_function_stacker,
         theta_est,
         all_post_update_betas,
         user_ids,
     )
 
+    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+        input_checks.require_estimating_functions_sum_to_zero(
+            avg_estimating_function_stack
+        )
+
     # TODO: decide whether to in fact scrap the structure-based inversion
-    # joint_adaptive_bread_matrix = invert_inverse_bread_matrix(
-    #     joint_adaptive_bread_inverse_matrix, beta_dim, theta_dim
-    # )
     logger.info("Inverting joint bread inverse matrix...")
     joint_adaptive_bread_matrix = np.linalg.inv(joint_adaptive_bread_inverse_matrix)
 
@@ -386,92 +392,109 @@ def analyze_dataset(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
 
-    # # TODO: Adapt this function to new structures
-    # joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
-    #     theta_dim,
-    #     update_times,
-    #     beta_dim,
-    #     algorithm_statistics_by_calendar_t,
-    #     user_ids,
-    #     inference_loss_gradients,
-    # )
+    joint_adaptive_variance = (
+        joint_adaptive_bread_matrix
+        @ joint_adaptive_meat_matrix
+        @ joint_adaptive_bread_matrix.T
+    ) / len(user_ids)
 
-    # logger.info("Combining sandwich ingredients.")
-    # # Note the normalization here: underlying the calculations we have asymptotic normality
-    # # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat
-    # # by dividing the variance of that limiting normal by a factor of n.
-    # joint_adaptive_variance = (
-    #     joint_adaptive_bread_matrix
-    #     @ joint_adaptive_meat_matrix
-    #     @ joint_adaptive_bread_matrix.T
-    # ) / len(user_ids)
-    # logger.info("Finished forming adaptive sandwich variance estimator.")
+    # This bottom right corner of the joint variance matrix is the portion
+    # corresponding to just theta.  This distinguishes this matrix from the
+    # *joint* adaptive variance matrix above, which covers both beta and theta.
+    adaptive_sandwich_var = joint_adaptive_variance[
+        -len(theta_est) :, -len(theta_est) :
+    ]
 
-    # # This bottom right corner of the joint variance matrix is the portion
-    # # corresponding to just theta.  This distinguishes this matrix from the
-    # # *joint* adaptive variance matrix above, which covers both beta and theta.
-    # adaptive_sandwich_var = joint_adaptive_variance[
-    #     -len(theta_est) :, -len(theta_est) :
-    # ]
+    print(f"\nParameter estimate:\n {theta_est}")
+    print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var}")
 
-    # # We will also calculate the classical sandwich variance estimator for comparison.
-    # # But we take it piece by piece and also extract the *inverse* of the classical bread
-    # # because it is useful for extracting the non-joint adaptive meat.  This is
-    # # needed in case we are adjusting this meat matrix with a small sample correction.
-    # # TODO: Adapt classical sandwich creation to new setup
-    # classical_bread, classical_meat, _ = get_classical_sandwich_var_pieces(
-    #     theta_dim,
-    #     inference_loss_gradients,
-    #     inference_loss_hessians,
-    # )
 
-    # # Apply small sample correction if requested, and form the final variance estimates
-    # adaptive_sandwich_var, classical_sandwich_var = apply_small_sample_correction(
-    #     adaptive_sandwich_var,
-    #     classical_bread,
-    #     classical_meat,
-    #     len(user_ids),
-    #     theta_dim,
-    #     small_sample_correction,
-    # )
+# # TODO: Adapt this function to new structures
+# joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
+#     theta_dim,
+#     update_times,
+#     beta_dim,
+#     algorithm_statistics_by_calendar_t,
+#     user_ids,
+#     inference_loss_gradients,
+# )
 
-    # # TODO: reinsert estimating function sum check.  not sure about hessian
-    # # condition number checks
+# logger.info("Combining sandwich ingredients.")
+# # Note the normalization here: underlying the calculations we have asymptotic normality
+# # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat
+# # by dividing the variance of that limiting normal by a factor of n.
+# joint_adaptive_variance = (
+#     joint_adaptive_bread_matrix
+#     @ joint_adaptive_meat_matrix
+#     @ joint_adaptive_bread_matrix.T
+# ) / len(user_ids)
+# logger.info("Finished forming adaptive sandwich variance estimator.")
 
-    # # Write analysis results to same directory that input files are in
-    # folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
-    # with open(f"{folder_path}/analysis.pkl", "wb") as f:
-    #     pickle.dump(
-    #         {
-    #             "theta_est": theta_est,
-    #             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-    #             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-    #         },
-    #         f,
-    #     )
+# # This bottom right corner of the joint variance matrix is the portion
+# # corresponding to just theta.  This distinguishes this matrix from the
+# # *joint* adaptive variance matrix above, which covers both beta and theta.
+# adaptive_sandwich_var = joint_adaptive_variance[
+#     -len(theta_est) :, -len(theta_est) :
+# ]
 
-    # with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
-    #     pickle.dump(
-    #         {
-    #             "theta_est": theta_est,
-    #             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-    #             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-    #             "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
-    #             "joint_meat_matrix": joint_meat_matrix,
-    #             "inference_loss_gradients": inference_loss_gradients,
-    #             "inference_loss_hessians": inference_loss_hessians,
-    #             "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
-    #             "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
-    #             "upper_left_bread_inverse": upper_left_bread_inverse,
-    #         },
-    #         f,
-    #     )
+# # We will also calculate the classical sandwich variance estimator for comparison.
+# # But we take it piece by piece and also extract the *inverse* of the classical bread
+# # because it is useful for extracting the non-joint adaptive meat.  This is
+# # needed in case we are adjusting this meat matrix with a small sample correction.
+# # TODO: Adapt classical sandwich creation to new setup
+# classical_bread, classical_meat, _ = get_classical_sandwich_var_pieces(
+#     theta_dim,
+#     inference_loss_gradients,
+#     inference_loss_hessians,
+# )
 
-    # print(f"\nParameter estimate:\n {theta_est}")
-    # print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
-    # print(
-    #     f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
-    # )
+# # Apply small sample correction if requested, and form the final variance estimates
+# adaptive_sandwich_var, classical_sandwich_var = apply_small_sample_correction(
+#     adaptive_sandwich_var,
+#     classical_bread,
+#     classical_meat,
+#     len(user_ids),
+#     theta_dim,
+#     small_sample_correction,
+# )
+
+# # TODO: reinsert estimating function sum check.  not sure about hessian
+# # condition number checks
+
+# # Write analysis results to same directory that input files are in
+# folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
+# with open(f"{folder_path}/analysis.pkl", "wb") as f:
+#     pickle.dump(
+#         {
+#             "theta_est": theta_est,
+#             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+#             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+#         },
+#         f,
+#     )
+
+# with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+#     pickle.dump(
+#         {
+#             "theta_est": theta_est,
+#             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+#             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+#             "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+#             "joint_meat_matrix": joint_meat_matrix,
+#             "inference_loss_gradients": inference_loss_gradients,
+#             "inference_loss_hessians": inference_loss_hessians,
+#             "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
+#             "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
+#             "upper_left_bread_inverse": upper_left_bread_inverse,
+#         },
+#         f,
+#     )
+
+# print(f"\nParameter estimate:\n {theta_est}")
+# print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
+# print(
+#     f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
+# )
 
 
 def construct_beta_index_by_policy_num_map(
@@ -646,6 +669,30 @@ def get_radon_nikodym_weight(
     )
 
 
+def get_min_time_by_policy_num(
+    single_user_policy_num_by_decision_time, beta_index_by_policy_num
+):
+    """
+    Returns a dictionary mapping each policy number to the first time it was applicable,
+    and the first time after the first update.
+    """
+    min_time_by_policy_num = {}
+    first_time_after_first_update = None
+    for decision_time, policy_num in single_user_policy_num_by_decision_time.items():
+        if policy_num not in min_time_by_policy_num:
+            min_time_by_policy_num[policy_num] = decision_time
+
+        # Grab the first time where a non-initial, non-fallback policy is used.
+        # Assumes single_user_policy_num_by_decision_time is sorted.
+        if (
+            policy_num in beta_index_by_policy_num
+            and first_time_after_first_update is None
+        ):
+            first_time_after_first_update = decision_time
+
+    return min_time_by_policy_num, first_time_after_first_update
+
+
 def construct_single_user_weighted_estimating_function_stacker(
     action_prob_func_filename: str,
     action_prob_func_args_beta_index: int,
@@ -805,25 +852,16 @@ def construct_single_user_weighted_estimating_function_stacker(
         # TODO: Isolate these into functions and unit test them.
 
         # 1. Form a dictionary mapping policy numbers to the first time they were
-        # applicable (for this user). Collect the first time after the first update
-        # separately for convenience.  These are both used to form the Radon-Nikodym
-        # weights for the right times.
-        logger.info(
-            "Collecting policy numbers and first applicable times for each active decision time."
+        # applicable (for this user). Note that this includes ALL policies, initial
+        # fallbacks included.
+        # Collect the first time after the first update separately for convenience.
+        # These are both used to form the Radon-Nikodym weights for the right times.
+        min_time_by_policy_num, first_time_after_first_update = (
+            get_min_time_by_policy_num(
+                policy_num_by_decision_time_by_user_id[user_id],
+                beta_index_by_policy_num,
+            )
         )
-        min_time_by_policy_num = {}
-        first_time_after_first_update = None
-        for decision_time, policy_num in policy_num_by_decision_time_by_user_id[
-            user_id
-        ].items():
-            if policy_num not in min_time_by_policy_num:
-                min_time_by_policy_num[policy_num] = decision_time
-
-            if (
-                policy_num in beta_index_by_policy_num
-                and first_time_after_first_update is None
-            ):
-                first_time_after_first_update = decision_time
 
         # 2. Thread the central betas into the action probability arguments
         # for this particular user. This enables differentiation of the Radon-Nikodym
@@ -975,6 +1013,7 @@ def construct_single_user_weighted_estimating_function_stacker(
             "Computing the algorithm component of the weighted estimating function stack."
         )
 
+        breakpoint()
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights
@@ -1063,7 +1102,12 @@ def construct_single_user_weighted_estimating_function_stacker(
             )
         ) * inference_estimating_func(*threaded_single_user_inference_func_args)
 
-        return jnp.concatenate([algorithm_component, inference_component])
+        stack = jnp.concatenate([algorithm_component, inference_component])
+        # The average of these per-user stacks is what we need to differentiate with respect to to
+        # form the inverse bread, and we also want to compare that average to
+        # zero to check the estimating functions' fidelity, but the average outer product of these
+        # per-user stacks is the meat matrix, hence the two outputs.
+        return stack, jnp.outer(stack, stack)
 
     return single_user_weighted_algorithm_estimating_function_stacker
 
@@ -1074,22 +1118,28 @@ def get_avg_weighted_estimating_function_stack(
     single_user_weighted_estimating_function_stacker: callable,
     user_ids: jnp.ndarray,
 ):
-    results = jnp.array(
-        [
-            single_user_weighted_estimating_function_stacker(
-                all_post_update_betas_and_theta[-1],
-                all_post_update_betas_and_theta[:-1],
-                user_id,
-            )
-            for user_id in user_ids.tolist()
-        ]
+    results = [
+        single_user_weighted_estimating_function_stacker(
+            all_post_update_betas_and_theta[-1],
+            all_post_update_betas_and_theta[:-1],
+            user_id,
+        )
+        for user_id in user_ids.tolist()
+    ]
+
+    stacks = jnp.array([result[0] for result in results])
+    outer_products = jnp.array([result[1] for result in results])
+
+    # Note this strange return structure! We will differentiate with respect to the first output,
+    # but the second output will be passed along without modification via has_aux=True and then used
+    # for the meat matrix and the estimating functions sum check.
+    return jnp.mean(stacks, axis=0), (
+        jnp.mean(stacks, axis=0),
+        jnp.mean(outer_products, axis=0),
     )
 
-    # Compute average result over users
-    return jnp.mean(results, axis=0)
 
-
-def construct_inverse_bread(
+def construct_inverse_bread_and_meat_and_avg_estimating_function_stack(
     single_user_weighted_estimating_function_stacker: callable,
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
@@ -1098,7 +1148,9 @@ def construct_inverse_bread(
     logger.info("Differentiating avg weighted estimating function stack.")
     # Interestingly, jax.jacobian does not seem to work here... just hangs in
     # the oralytics case, while it works fine in the simpler synthetic case.y
-    bread_pieces = jax.jacrev(get_avg_weighted_estimating_function_stack)(
+    bread_pieces, (avg_estimating_function_stack, meat) = jax.jacrev(
+        get_avg_weighted_estimating_function_stack, has_aux=True
+    )(
         # Note how this is a list of jnp arrays; it cannot be a jnp array itself
         # because theta and the betas need not be the same size.  But JAX can still
         # differentiate with respect to the all betas and thetas at once if they
@@ -1113,7 +1165,7 @@ def construct_inverse_bread(
     # is an error (but it is almost certainly the package's fault, not the user's,
     # so no live check for this.)
     logger.info("Stacking bread pieces horizontally into full matrix.")
-    return jnp.hstack(bread_pieces)
+    return jnp.hstack(bread_pieces), meat, avg_estimating_function_stack
 
 
 def calculate_beta_dim(alg_update_func_args, alg_update_func_args_beta_index):

@@ -567,6 +567,28 @@ def require_theta_estimating_functions_sum_to_zero(
         )
 
 
+def require_estimating_functions_sum_to_zero(mean_estimating_function):
+    # This is a test that the correct inference loss/estimating function has
+    # been given, corresponding either to the theta estimation function provided
+    # or the theta estimation procedure used to produce the theta estimate
+    # provided.
+
+    # If the theta estimate is directly provided, another possible failure mode
+    # is that the study dataframe doesn't faithfully represent the data used
+    # to produce that theta estimate.
+    logger.info("Checking that estimating functions sum to zero across users")
+    try:
+        np.testing.assert_allclose(
+            mean_estimating_function,
+            jnp.zeros(mean_estimating_function.size),
+        )
+    except AssertionError as e:
+        confirm_input_check_result(
+            f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            e,
+        )
+
+
 # TODO: Hotspot for replacing notion of update times
 def require_beta_estimating_functions_sum_to_zero(
     update_times, algorithm_statistics_by_calendar_t, beta_dim

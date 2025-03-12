@@ -1460,6 +1460,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     makes the weights not one, allowing us to test that the *right* weights are
     multiplied by the right estimating functions and also that the shared betas
     are appropriately subbed in to (only) the numerators of the weights.
+
+    This test does compare that given loss functions on both sides, they are
+    differentiated properly, as I actually load the corresponding estimating
+    functions directly below and work with them instead of differentiating the
+    losses in the test to form expected values.
     """
     (
         action_prob_func_filename,
@@ -1522,12 +1527,313 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     result_1 = stacker(theta, all_post_update_betas, 1)
     result_2 = stacker(theta, all_post_update_betas, 2)
 
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+    alg_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_rl.py"
+    inference_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_inference_no_action_centering.py"
 
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+    alg_estimating_func = load_function_from_same_named_file(
+        alg_estimating_func_filename
+    )
+    inference_estimating_func = load_function_from_same_named_file(
+        inference_estimating_func_filename
+    )
+
+    # Note that we don't multiply by the weights! Therefore we test that they
+    # are all 1, as they should always be in practice, with the same beta going
+    # into the numerator and denominator.
+    expected_weighted_stack_1 = jnp.concatenate(
+        [
+            # Weighted beta estimating function values
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[2][1],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[0],
+                )
+            ),
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[3][1],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[1],
+                )
+            ),
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[4][1],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[2],
+                )
+            ),
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[5][1],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[3],
+                )
+            ),
+            # Weighted theta estimating function value
+            inference_estimating_func(
+                *replace_tuple_index(
+                    inference_func_args_by_user_id[1],
+                    inference_func_args_theta_index,
+                    theta,
+                )
+            ),
+        ]
+    )
+    expected_weighted_stack_2 = jnp.concatenate(
+        [
+            # Weighted beta estimating function values
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[2][2],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[0],
+                )
+            ),
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[3][2],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[1],
+                )
+            ),
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[4][2],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[2],
+                )
+            ),
+            alg_estimating_func(
+                *replace_tuple_index(
+                    update_func_args_by_by_user_id_by_policy_num[5][2],
+                    alg_update_func_args_beta_index,
+                    all_post_update_betas[3],
+                )
+            ),
+            # Weighted theta estimating function value
+            inference_estimating_func(
+                *replace_tuple_index(
+                    inference_func_args_by_user_id[2],
+                    inference_func_args_theta_index,
+                    theta,
+                )
+            ),
+        ]
+    )
+    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1)
+    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
+    np.testing.assert_allclose(
+        result_1[1], np.outer(expected_weighted_stack_1, expected_weighted_stack_1)
+    )
+    np.testing.assert_allclose(
+        result_2[1], np.outer(expected_weighted_stack_2, expected_weighted_stack_2)
+    )
+
+
+@pytest.fixture
+def setup_data_two_estimating_functions_no_action_probs():
+    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_action_1_prob_pure.py"
+    action_prob_func_args_beta_index = 0
+    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_rl.py"
+    alg_update_func_type = FunctionTypes.ESTIMATING
+    alg_update_func_args_beta_index = 0
+    alg_update_func_args_action_prob_index = -1
+    alg_update_func_args_action_prob_times_index = -1
+    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_inference_no_action_centering.py"
+    inference_func_type = FunctionTypes.ESTIMATING
+    inference_func_args_theta_index = 0
+    beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
+    initial_policy_num = 1
+    action_by_decision_time_by_user_id = {
+        1: {1: 0, 2: 1, 3: 0, 4: 1, 5: 0},
+        2: {1: 1, 2: 0, 3: 1, 4: 0, 5: 1},
+    }
+    policy_num_by_decision_time_by_user_id = {
+        1: {1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+        2: {1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+    }
+    action_prob_func_args_by_user_id_by_decision_time = {
+        decision_time: {
+            # Note that only the last element of beta are used in the particular act
+            # prob function used here. Important to have a different two components
+            # for each decision time for robustness of the test. Further, originally
+            # the different values here and in the threaded in betas actually resulted
+            # in the same action probability by bad luck, but this is fixed now.
+            user_id: (
+                jnp.array([-(decision_time), 2.0, decision_time, 4.0], dtype="float32"),
+                0.1,
+                1.0,
+                0.9,
+                jnp.array([user_id, -1.0], dtype="float32"),
+            )
+            for user_id in (1, 2)
+        }
+        for decision_time in range(1, 6)
+    }
+    # These don't build up over time as they would in reality. This is fine.
+    update_func_args_by_by_user_id_by_policy_num = {
+        policy_num: {
+            user_id: (
+                jnp.array([-policy_num, 2.0, policy_num, 4.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [user_id, policy_num],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [user_id, policy_num],
+                        [1.0, 1.0],
+                        [1.0, -1.0],
+                    ],
+                    dtype="float32",
+                ),
+                jnp.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                jnp.array([[1.0], [-1.0], [0.0]], dtype="float32"),
+                jnp.array([[0.5], [0.6], [0.7]], dtype="float32"),
+                None,
+                0,
+            )
+            for user_id in (1, 2)
+        }
+        for policy_num in range(2, 6)
+    }
+
+    study_df = pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+            "action": [0, 1, 1, 0, 1, 1, 1, 1, 0, 0],
+            "reward": [1.0, -1, 0, 0, 2, 2, 1, 0, 1, 3],
+            "intercept": [1.0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "past_reward": [0.0, 1, -1, 0, 0, 0, 2, 1, 0, 1],
+            "in_study": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            # These action probabilities are irrelevant for weights
+            # Only the passed betas and the action probability func args matter.
+            "action1prob": [0.5] * 10,
+        }
+    )
+    (
+        inference_func_args_by_user_id,
+        inference_func_args_action_prob_index,
+        inference_action_prob_decision_times_by_user_id,
+    ) = after_study_analysis.process_inference_func_args(
+        inference_func_filename,
+        inference_func_args_theta_index,
+        study_df,
+        jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
+        "action1prob",
+        "calendar_t",
+        "user_id",
+        "in_study",
+    )
+    inference_action_prob_decision_times_by_user_id = {}
+
+    return (
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    )
+
+
+def test_construct_single_user_weighted_estimating_function_stacker_estimating_functions_given(
+    setup_data_two_estimating_functions_no_action_probs,  # pylint: disable=redefined-outer-name
+):
+    """
+    Just like the above test, but I give two estimating functions instead of
+    loss functions to verify that use case works too (it should be simpler, no differentiation.)
+    """
+    (
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    ) = setup_data_two_estimating_functions_no_action_probs
+
+    stacker = (
+        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+            action_prob_func_filename,
+            action_prob_func_args_beta_index,
+            alg_update_func_filename,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            inference_func_filename,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            beta_index_by_policy_num,
+            initial_policy_num,
+            action_by_decision_time_by_user_id,
+            policy_num_by_decision_time_by_user_id,
+            action_prob_func_args_by_user_id_by_decision_time,
+            update_func_args_by_by_user_id_by_policy_num,
+            inference_func_args_by_user_id,
+            inference_action_prob_decision_times_by_user_id,
+        )
+    )
+
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    # Note for this test these must match the betas in the action probability
+    # function args, so that all weights end up being 1, as we do not multiply
+    # by them below.
+    all_post_update_betas = [
+        jnp.array([-2, 2, 2, 4], dtype="float32"),
+        jnp.array([-3, 2, 3, 4], dtype="float32"),
+        jnp.array([-4, 2, 4, 4], dtype="float32"),
+        jnp.array([-5, 2, 5, 4], dtype="float32"),
+    ]
+
+    result_1 = stacker(theta, all_post_update_betas, 1)
+    result_2 = stacker(theta, all_post_update_betas, 2)
+
+    alg_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_rl.py"
+    inference_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_inference_no_action_centering.py"
+
+    alg_estimating_func = load_function_from_same_named_file(
+        alg_estimating_func_filename
+    )
+    inference_estimating_func = load_function_from_same_named_file(
+        inference_estimating_func_filename
+    )
 
     # Note that we don't multiply by the weights! Therefore we test that they
     # are all 1, as they should always be in practice, with the same beta going
@@ -3113,6 +3419,707 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
         result_1[1], np.outer(expected_weighted_stack_1, expected_weighted_stack_1)
+    )
+    np.testing.assert_allclose(
+        result_2[1],
+        np.outer(
+            expected_weighted_stack_2,
+            expected_weighted_stack_2,
+        ),
+        rtol=1e-6,
+    )
+
+
+@pytest.fixture
+def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
+    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_action_1_prob_pure.py"
+    action_prob_func_args_beta_index = 0
+    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_loss_rl.py"
+    alg_update_func_type = FunctionTypes.LOSS
+    alg_update_func_args_beta_index = 0
+    alg_update_func_args_action_prob_index = 5
+    alg_update_func_args_action_prob_times_index = 6
+    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py"
+    inference_func_type = FunctionTypes.LOSS
+    inference_func_args_theta_index = 0
+    beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
+    initial_policy_num = 1
+    action_by_decision_time_by_user_id = {
+        1: {1: 0, 2: 1, 3: 1, 4: 0, 5: 1},
+        2: {1: 0, 2: 1, 3: 1, 4: 0, 5: 1},
+    }
+    policy_num_by_decision_time_by_user_id = {
+        1: {1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+        2: {1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+    }
+    action_prob_func_args_by_user_id_by_decision_time = {
+        decision_time: {
+            user_id: (
+                jnp.array(
+                    [-(decision_time), 17.0, decision_time, 19.0], dtype="float32"
+                ),
+                0.1,
+                1.0,
+                0.9,
+                jnp.array([user_id, -1.0], dtype="float32"),
+            )
+            for user_id in (1, 2)
+        }
+        for decision_time in range(1, 6)
+    }
+    # These DO build up over time now.  The inference ones will be different since
+    # these aren't derived from the study df, but that's okay.
+    update_func_args_by_by_user_id_by_policy_num = {
+        policy_num: {
+            user_id: (
+                jnp.array([-policy_num, 17.0, policy_num, 19.0], dtype="float32"),
+                jnp.array(
+                    [
+                        [user_id, -1.0],
+                        [user_id, 1.0],
+                        [user_id, -1.0],
+                        [user_id, 1.0],
+                        [user_id, -1.0],
+                    ][: policy_num - 1],
+                    dtype="float32",
+                ),
+                jnp.array(
+                    [
+                        [user_id, -1.0],
+                        [user_id, 1.0],
+                        [user_id, -1.0],
+                        [user_id, 1.0],
+                        [user_id, -1.0],
+                    ][: policy_num - 1],
+                    dtype="float32",
+                ),
+                jnp.array([0, 1, 1, 0, 1][: policy_num - 1], dtype="float32").reshape(
+                    -1, 1
+                ),
+                (
+                    jnp.array(
+                        [[1], [-1], [0], [0], [2]][: policy_num - 1],
+                        dtype="float32",
+                    )
+                    if user_id == 1
+                    else jnp.array(
+                        [[2], [1], [0], [1], [3]][: policy_num - 1],
+                        dtype="float32",
+                    )
+                ),
+                # Note that we DO NOT want these used in the estimating function
+                # args. They should be replaced by probs computed from act prob
+                # func args using the decision times arg.
+                jnp.array(
+                    (np.add([0.1, 0.2, 0.3, 0.4, 0.5], [0.1 * (user_id - 1)] * 5))[
+                        : policy_num - 1
+                    ]
+                ).reshape(-1, 1),
+                jnp.array([1, 2, 3, 4, 5][: policy_num - 1]),
+                1,  # This turns action centering on
+            )
+            for user_id in (1, 2)
+        }
+        for policy_num in range(2, 6)
+    }
+
+    study_df = pd.DataFrame(
+        {
+            "user_id": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "calendar_t": [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
+            "action": [0, 1, 1, 0, 1, 0, 1, 1, 0, 1],
+            "reward": [1.0, -1, 0, 0, 2, 2, 1, 0, 1, 3],
+            "intercept": [1.0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "past_reward": [0.0, 1, -1, 0, 0, 0, 2, 1, 0, 1],
+            "in_study": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            # These action probabilities are irrelevant for weights, but this
+            # test is checking that these are *not* the values used in the est
+            # function args on either side, instead computing the probs from
+            # action prob function arguments.
+            "action1prob": [0.1, 0.2, 0.3, 0.4, 0.5, 0.2, 0.3, 0.4, 0.5, 0.6],
+        }
+    )
+    (
+        inference_func_args_by_user_id,
+        inference_func_args_action_prob_index,
+        inference_action_prob_decision_times_by_user_id,
+    ) = after_study_analysis.process_inference_func_args(
+        inference_func_filename,
+        inference_func_args_theta_index,
+        study_df,
+        jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
+        "action1prob",
+        "calendar_t",
+        "user_id",
+        "in_study",
+    )
+
+    return (
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    )
+
+
+def test_construct_single_user_weighted_estimating_function_stacker_use_action_probs_both_sides(
+    setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides,  # pylint: disable=redefined-outer-name
+):
+    """
+    Test that the constructed function correctly computes a weighted estimating
+    function stack for each of 2 users.
+
+    This test handles the simplest case: no incremental recruitment, no use of
+    action probabilities in the loss/estimating functions for algorithm updates
+    or inference, and only 1 decision time between updates.
+
+    **This test intentionally breaks the assumption that the betas in the action
+    probability function args match those in all_post_update_betas, which
+    makes the weights not 1, allowing us to test that the *right* weights are
+    multiplied by the right estimating functions and also that the shared betas
+    are appropriately subbed in to (only) the numerators of the weights for
+    differentiation.
+
+    We also have different betas in the update args vs all_post_update_betas,
+    testing that the betas in all_post_update_betas are subbed in for use in the
+    estimating function evaluations, because the estimating function values
+    would be different were they not.
+    """
+    (
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    ) = setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides
+
+    stacker = (
+        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+            action_prob_func_filename,
+            action_prob_func_args_beta_index,
+            alg_update_func_filename,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            inference_func_filename,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            beta_index_by_policy_num,
+            initial_policy_num,
+            action_by_decision_time_by_user_id,
+            policy_num_by_decision_time_by_user_id,
+            action_prob_func_args_by_user_id_by_decision_time,
+            update_func_args_by_by_user_id_by_policy_num,
+            inference_func_args_by_user_id,
+            inference_action_prob_decision_times_by_user_id,
+        )
+    )
+
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    all_post_update_betas = [
+        jnp.array([-2, 2, 2, 4], dtype="float32"),
+        jnp.array([-3, 2, 3, 4], dtype="float32"),
+        jnp.array([-4, 2, 4, 4], dtype="float32"),
+        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+    ]
+
+    result_1 = stacker(theta, all_post_update_betas, 1)
+    result_2 = stacker(theta, all_post_update_betas, 2)
+
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+
+    reconstructed_action_probs = {
+        1: [
+            action_prob_func(*action_prob_func_args_by_user_id_by_decision_time[1][1]),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                )
+            ),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                )
+            ),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[4][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[2],
+                )
+            ),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[5][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[3],
+                )
+            ),
+        ],
+        2: [
+            action_prob_func(*action_prob_func_args_by_user_id_by_decision_time[1][2]),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                )
+            ),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                )
+            ),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[4][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[2],
+                )
+            ),
+            action_prob_func(
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[5][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[3],
+                )
+            ),
+        ],
+    }
+
+    expected_weighted_stack_1 = jnp.concatenate(
+        [
+            # Weighted beta estimating function values
+            alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[2][1],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[0],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[1][:1]).reshape(-1, 1),
+                )
+            ),
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[3][1],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[1],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[1][:2]).reshape(-1, 1),
+                )
+            ),
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[3][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][3],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                ),
+            )
+            * alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[4][1],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[2],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[1][:3]).reshape(-1, 1),
+                )
+            ),
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[3][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][3],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[4][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][4],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[4][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[2],
+                ),
+            )
+            * alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[5][1],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[3],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[1][:4]).reshape(-1, 1),
+                )
+            ),
+            # Weighted theta estimating function value
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[3][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][3],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[4][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][4],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[4][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[2],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[5][1][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[1][5],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[5][1],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[3],
+                ),
+            )
+            * inference_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        inference_func_args_by_user_id[1],
+                        inference_func_args_theta_index,
+                        theta,
+                    ),
+                    inference_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[1]).reshape(-1, 1),
+                )
+            ),
+        ]
+    )
+    expected_weighted_stack_2 = jnp.concatenate(
+        [
+            # Weighted beta estimating function values
+            alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[2][2],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[0],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[2][:1]).reshape(-1, 1),
+                )
+            ),
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[3][2],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[1],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[2][:2]).reshape(-1, 1),
+                )
+            ),
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[3][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][3],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                ),
+            )
+            * alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[4][2],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[2],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[2][:3]).reshape(-1, 1),
+                )
+            ),
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[3][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][3],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[4][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][4],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[4][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[2],
+                ),
+            )
+            * alg_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        update_func_args_by_by_user_id_by_policy_num[5][2],
+                        alg_update_func_args_beta_index,
+                        all_post_update_betas[3],
+                    ),
+                    alg_update_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[2][:4]).reshape(-1, 1),
+                )
+            ),
+            # Weighted theta estimating function value
+            after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[2][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][2],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[2][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[0],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[3][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][3],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[3][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[1],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[4][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][4],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[4][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[2],
+                ),
+            )
+            * after_study_analysis.get_radon_nikodym_weight(
+                action_prob_func_args_by_user_id_by_decision_time[5][2][
+                    action_prob_func_args_beta_index
+                ],
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                action_by_decision_time_by_user_id[2][5],
+                *replace_tuple_index(
+                    action_prob_func_args_by_user_id_by_decision_time[5][2],
+                    action_prob_func_args_beta_index,
+                    all_post_update_betas[3],
+                ),
+            )
+            * inference_estimating_func(
+                *replace_tuple_index(
+                    replace_tuple_index(
+                        inference_func_args_by_user_id[2],
+                        inference_func_args_theta_index,
+                        theta,
+                    ),
+                    inference_func_args_action_prob_index,
+                    jnp.array(reconstructed_action_probs[2]).reshape(-1, 1),
+                )
+            ),
+        ]
+    )
+
+    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1, rtol=1e-6)
+    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
+    np.testing.assert_allclose(
+        result_1[1],
+        np.outer(expected_weighted_stack_1, expected_weighted_stack_1),
+        rtol=1e-6,
     )
     np.testing.assert_allclose(
         result_2[1],

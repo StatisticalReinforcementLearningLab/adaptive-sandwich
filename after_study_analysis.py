@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import pathlib
 import pickle
 import os
 import logging
@@ -43,10 +44,6 @@ def cli():
     pass
 
 
-# TODO: Add option to give per-user loss OR estimating function. Just loss now
-# TODO: take in theta instead of forming it, and use to check estimating function.
-#       Yet we still want to support large simulation case where we DO calculate theta.
-#       I think you have to pass in theta-forming function OR theta itself.
 # TODO: Take in requirements files for action prob and loss and take derivatives
 # in corresponding sandbox. For now we just assume the dependencies in this package
 # suffice.
@@ -54,8 +51,6 @@ def cli():
 # More generally, handle decision times being different across different users? Would like
 # to consolidate.
 # TODO: Check all help strings for accuracy.
-# TODO: Don't use theta and beta jargon?? Need a legend if I do.
-# TODO: Make run scripts that hardcode to action centering or not on both RL and inference sides
 # TODO: Need to support pure exploration phase with more flags than just in study. Maybe in study, receiving updates
 # TODO: Deal with NA, -1, etc policy numbers
 @cli.command()
@@ -246,13 +241,6 @@ def analyze_dataset(
 
     Beta must be vector (not matrix)
 
-    Codify assumptions that make get_first_applicable_time work.  The main
-    thing is an assumption that users don't get different policies at the same
-    time.  EDIT: Well... users can have different policies at the same time. So
-    we can't codify this and have to rewrite that function.
-
-    Codify assumptions used for collect_batched_in_study_actions
-
     Make the user give the min and max probabilities, and I'll enforce it
 
     I assume someone is in the study at each decision time. Check for this or
@@ -383,16 +371,26 @@ def analyze_dataset(
             avg_estimating_function_stack
         )
 
+    # TODO: Calculate this. Need just the theta portion of the estimating function stack and
+    # also the derivative of its unweighted version with respect to theta.  Should figure out how
+    # to collect while constructing inverse bread.  First is easy, derivative not so clear.
+    # I think I can collect the avg outer product of the just the unweighted inference estimating
+    # function values as another auxiliary value above, and for the bread simply take the average
+    # jacobian of the inference estimating function with respect to theta.
+    classical_sandwich_var_estimate = None
+
     # TODO: decide whether to in fact scrap the structure-based inversion
     logger.info("Inverting joint bread inverse matrix...")
-    joint_adaptive_bread_matrix = np.linalg.inv(joint_adaptive_bread_inverse_matrix)
+    joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
+        joint_adaptive_bread_inverse_matrix, try_tikhonov_if_poorly_conditioned=True
+    )
 
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
 
-    joint_adaptive_variance = (
+    joint_adaptive_var_estimate = (
         joint_adaptive_bread_matrix
         @ joint_adaptive_meat_matrix
         @ joint_adaptive_bread_matrix.T
@@ -401,100 +399,39 @@ def analyze_dataset(
     # This bottom right corner of the joint variance matrix is the portion
     # corresponding to just theta.  This distinguishes this matrix from the
     # *joint* adaptive variance matrix above, which covers both beta and theta.
-    adaptive_sandwich_var = joint_adaptive_variance[
+    adaptive_sandwich_var_estimate = joint_adaptive_var_estimate[
         -len(theta_est) :, -len(theta_est) :
     ]
 
+    # Write analysis results to same directory that input files are in
+    folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
+    with open(f"{folder_path}/analysis.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "theta_est": theta_est,
+                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+            },
+            f,
+        )
+
+    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+        pickle.dump(
+            {
+                "theta_est": theta_est,
+                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+                "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+                "joint_meat_matrix": joint_adaptive_meat_matrix,
+            },
+            f,
+        )
+
     print(f"\nParameter estimate:\n {theta_est}")
-    print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var}")
-
-
-# # TODO: Adapt this function to new structures
-# joint_adaptive_meat_matrix = form_joint_adaptive_meat_matrix(
-#     theta_dim,
-#     update_times,
-#     beta_dim,
-#     algorithm_statistics_by_calendar_t,
-#     user_ids,
-#     inference_loss_gradients,
-# )
-
-# logger.info("Combining sandwich ingredients.")
-# # Note the normalization here: underlying the calculations we have asymptotic normality
-# # at rate sqrt(n), so in finite samples we approximate the observed variance of theta_hat
-# # by dividing the variance of that limiting normal by a factor of n.
-# joint_adaptive_variance = (
-#     joint_adaptive_bread_matrix
-#     @ joint_adaptive_meat_matrix
-#     @ joint_adaptive_bread_matrix.T
-# ) / len(user_ids)
-# logger.info("Finished forming adaptive sandwich variance estimator.")
-
-# # This bottom right corner of the joint variance matrix is the portion
-# # corresponding to just theta.  This distinguishes this matrix from the
-# # *joint* adaptive variance matrix above, which covers both beta and theta.
-# adaptive_sandwich_var = joint_adaptive_variance[
-#     -len(theta_est) :, -len(theta_est) :
-# ]
-
-# # We will also calculate the classical sandwich variance estimator for comparison.
-# # But we take it piece by piece and also extract the *inverse* of the classical bread
-# # because it is useful for extracting the non-joint adaptive meat.  This is
-# # needed in case we are adjusting this meat matrix with a small sample correction.
-# # TODO: Adapt classical sandwich creation to new setup
-# classical_bread, classical_meat, _ = get_classical_sandwich_var_pieces(
-#     theta_dim,
-#     inference_loss_gradients,
-#     inference_loss_hessians,
-# )
-
-# # Apply small sample correction if requested, and form the final variance estimates
-# adaptive_sandwich_var, classical_sandwich_var = apply_small_sample_correction(
-#     adaptive_sandwich_var,
-#     classical_bread,
-#     classical_meat,
-#     len(user_ids),
-#     theta_dim,
-#     small_sample_correction,
-# )
-
-# # TODO: reinsert estimating function sum check.  not sure about hessian
-# # condition number checks
-
-# # Write analysis results to same directory that input files are in
-# folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
-# with open(f"{folder_path}/analysis.pkl", "wb") as f:
-#     pickle.dump(
-#         {
-#             "theta_est": theta_est,
-#             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-#             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-#         },
-#         f,
-#     )
-
-# with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
-#     pickle.dump(
-#         {
-#             "theta_est": theta_est,
-#             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-#             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-#             "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
-#             "joint_meat_matrix": joint_meat_matrix,
-#             "inference_loss_gradients": inference_loss_gradients,
-#             "inference_loss_hessians": inference_loss_hessians,
-#             "inference_loss_gradient_pi_derivatives": inference_loss_gradient_pi_derivatives,
-#             "algorithm_statistics_by_calendar_t": algorithm_statistics_by_calendar_t,
-#             "upper_left_bread_inverse": upper_left_bread_inverse,
-#         },
-#         f,
-#     )
-
-# print(f"\nParameter estimate:\n {theta_est}")
-# print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
-# print(
-#     f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
-# )
+    print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
+    print(
+        f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
+    )
 
 
 def construct_beta_index_by_policy_num_map(
@@ -610,7 +547,7 @@ def process_inference_func_args(
             action_prob_col_name
         )
 
-    # Convert to list from jnp array to extraction is simplest
+    # Convert to list from jnp array so extraction is simplest
     for user_id in study_df[user_id_col_name].unique():
         user_args_list = []
         filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
@@ -1013,7 +950,6 @@ def construct_single_user_weighted_estimating_function_stacker(
             "Computing the algorithm component of the weighted estimating function stack."
         )
 
-        breakpoint()
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights
@@ -1473,7 +1409,7 @@ def compute_variance_estimates(
         @ joint_adaptive_meat_matrix
         @ joint_adaptive_bread_matrix.T
     ) / len(user_ids)
-    logger.info("Finished forming adaptive sandwich variance estimator.")
+    logger.info("Finished forming joint adaptive sandwich variance estimator.")
 
     # This bottom right corner of the joint variance matrix is the portion
     # corresponding to just theta.  This distinguishes this matrix from the

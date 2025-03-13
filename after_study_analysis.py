@@ -358,8 +358,10 @@ def analyze_dataset(
     (
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
+        classical_bread_inverse_matrix,
+        classical_meat_matrix,
         avg_estimating_function_stack,
-    ) = construct_inverse_bread_and_meat_and_avg_estimating_function_stack(
+    ) = construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
         single_user_weighted_estimating_function_stacker,
         theta_est,
         all_post_update_betas,
@@ -371,13 +373,13 @@ def analyze_dataset(
             avg_estimating_function_stack
         )
 
-    # TODO: Calculate this. Need just the theta portion of the estimating function stack and
-    # also the derivative of its unweighted version with respect to theta.  Should figure out how
-    # to collect while constructing inverse bread.  First is easy, derivative not so clear.
-    # I think I can collect the avg outer product of the just the unweighted inference estimating
-    # function values as another auxiliary value above, and for the bread simply take the average
-    # jacobian of the inference estimating function with respect to theta.
-    classical_sandwich_var_estimate = None
+    logger.info("Forming classical sandwich variance estimate...")
+    classical_bread_matrix = invert_matrix_and_check_conditioning(
+        classical_bread_inverse_matrix
+    )
+    classical_sandwich_var_estimate = (
+        classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
+    ) / len(user_ids)
 
     # TODO: decide whether to in fact scrap the structure-based inversion
     logger.info("Inverting joint bread inverse matrix...")
@@ -390,6 +392,7 @@ def analyze_dataset(
             joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
         )
 
+    logger.info("Forming joint adaptive sandwich variance estimate...")
     joint_adaptive_var_estimate = (
         joint_adaptive_bread_matrix
         @ joint_adaptive_meat_matrix
@@ -403,6 +406,7 @@ def analyze_dataset(
         -len(theta_est) :, -len(theta_est) :
     ]
 
+    logger.info("Writing results to file...")
     # Write analysis results to same directory that input files are in
     folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
     with open(f"{folder_path}/analysis.pkl", "wb") as f:
@@ -1038,18 +1042,31 @@ def construct_single_user_weighted_estimating_function_stacker(
             )
         ) * inference_estimating_func(*threaded_single_user_inference_func_args)
 
-        stack = jnp.concatenate([algorithm_component, inference_component])
-        # The average of these per-user stacks is what we need to differentiate with respect to to
-        # form the inverse bread, and we also want to compare that average to
-        # zero to check the estimating functions' fidelity, but the average outer product of these
-        # per-user stacks is the meat matrix, hence the two outputs.
-        return stack, jnp.outer(stack, stack)
+        weighted_stack = jnp.concatenate([algorithm_component, inference_component])
+        # Note the 4 outputs:
+        #
+        # 1. The first is simply the weighted estimating function stack for this user. The average of
+        # these is what we differentiate with respect to theta to form the inverse adaptive bread
+        # matrix, and we also compare that average to zero to check the estimating functions'
+        # fidelity.
+        # 2. The average outer product of these per-user stacks is the meat matrix, hence the second
+        # output.
+        # 3. The third output is averaged across users to obtain the classical meat matrix.
+        # 4. The fourth output is averaged across users to obtatin the inverse classical bread matrix.
+        return (
+            weighted_stack,
+            jnp.outer(weighted_stack, weighted_stack),
+            jnp.outer(inference_component, inference_component),
+            jax.jacrev(
+                inference_estimating_func, argnums=inference_func_args_theta_index
+            )(*threaded_single_user_inference_func_args),
+        )
 
     return single_user_weighted_algorithm_estimating_function_stacker
 
 
 # TODO: Add back vmap
-def get_avg_weighted_estimating_function_stack(
+def get_avg_weighted_estimating_function_stack_and_aux_values(
     all_post_update_betas_and_theta: list[jnp.ndarray],
     single_user_weighted_estimating_function_stacker: callable,
     user_ids: jnp.ndarray,
@@ -1065,17 +1082,22 @@ def get_avg_weighted_estimating_function_stack(
 
     stacks = jnp.array([result[0] for result in results])
     outer_products = jnp.array([result[1] for result in results])
+    inference_only_outer_products = jnp.array([result[2] for result in results])
+    inference_hessians = jnp.array([result[3] for result in results])
 
     # Note this strange return structure! We will differentiate with respect to the first output,
     # but the second output will be passed along without modification via has_aux=True and then used
-    # for the meat matrix and the estimating functions sum check.
+    # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
+    # bread matrices.
     return jnp.mean(stacks, axis=0), (
         jnp.mean(stacks, axis=0),
         jnp.mean(outer_products, axis=0),
+        jnp.mean(inference_only_outer_products, axis=0),
+        jnp.mean(inference_hessians, axis=0),
     )
 
 
-def construct_inverse_bread_and_meat_and_avg_estimating_function_stack(
+def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
     single_user_weighted_estimating_function_stacker: callable,
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
@@ -1084,8 +1106,13 @@ def construct_inverse_bread_and_meat_and_avg_estimating_function_stack(
     logger.info("Differentiating avg weighted estimating function stack.")
     # Interestingly, jax.jacobian does not seem to work here... just hangs in
     # the oralytics case, while it works fine in the simpler synthetic case.y
-    bread_pieces, (avg_estimating_function_stack, meat) = jax.jacrev(
-        get_avg_weighted_estimating_function_stack, has_aux=True
+    adaptive_bread_inverse_pieces, (
+        avg_estimating_function_stack,
+        adaptive_meat,
+        classical_meat,
+        classical_bread_inverse,
+    ) = jax.jacrev(
+        get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(
         # Note how this is a list of jnp arrays; it cannot be a jnp array itself
         # because theta and the betas need not be the same size.  But JAX can still
@@ -1101,7 +1128,13 @@ def construct_inverse_bread_and_meat_and_avg_estimating_function_stack(
     # is an error (but it is almost certainly the package's fault, not the user's,
     # so no live check for this.)
     logger.info("Stacking bread pieces horizontally into full matrix.")
-    return jnp.hstack(bread_pieces), meat, avg_estimating_function_stack
+    return (
+        jnp.hstack(adaptive_bread_inverse_pieces),
+        adaptive_meat,
+        classical_bread_inverse,
+        classical_meat,
+        avg_estimating_function_stack,
+    )
 
 
 def calculate_beta_dim(alg_update_func_args, alg_update_func_args_beta_index):

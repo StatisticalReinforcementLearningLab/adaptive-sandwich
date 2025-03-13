@@ -23,6 +23,7 @@ logging.basicConfig(
 )
 
 
+# TODO: Clean up some of these checks in light of bread calculation overhaul.
 # TODO: any checks needed here about rl update function type?
 def perform_first_wave_input_checks(
     study_df,
@@ -206,13 +207,13 @@ def require_rl_update_args_given_for_all_users_at_each_update(
     study_df, user_id_col_name, rl_update_func_args
 ):
     logger.info(
-        "Checking that RL update function args are given for all users at each update."
+        "Checking that algorithm update function args are given for all users at each update."
     )
     all_user_ids = set(study_df[user_id_col_name].unique())
     for policy_num in rl_update_func_args:
         assert (
             set(rl_update_func_args[policy_num].keys()) == all_user_ids
-        ), f"Not all users present in RL update function args for policy number {policy_num}. Please see the contract for details."
+        ), f"Not all users present in algorithm update function args for policy number {policy_num}. Please see the contract for details."
 
 
 def require_action_prob_func_args_given_for_all_users_at_each_decision(
@@ -227,7 +228,7 @@ def require_action_prob_func_args_given_for_all_users_at_each_decision(
     for decision_time in action_prob_func_args:
         assert (
             set(action_prob_func_args[decision_time].keys()) == all_user_ids
-        ), f"Not all users present in RL update function args for decision time {decision_time}. Please see the contract for details."
+        ), f"Not all users present in algorithm update function args for decision time {decision_time}. Please see the contract for details."
 
 
 def require_action_prob_func_args_given_for_all_decision_times(
@@ -377,18 +378,18 @@ def require_no_policy_numbers_present_in_rl_update_args_but_not_study_df(
     study_df, policy_num_col_name, rl_update_func_args
 ):
     logger.info(
-        "Checking that policy numbers in RL update function args are present in the study dataframe."
+        "Checking that policy numbers in algorithm update function args are present in the study dataframe."
     )
     assert set(rl_update_func_args.keys()).issubset(
         study_df[policy_num_col_name].unique()
-    ), "There are policy numbers present in RL update function args but not in the study dataframe. Please see the contract for details."
+    ), "There are policy numbers present in algorithm update function args but not in the study dataframe. Please see the contract for details."
 
 
 def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_update_args(
     study_df, in_study_col_name, policy_num_col_name, rl_update_func_args
 ):
     logger.info(
-        "Checking that all policy numbers in the study dataframe are present in the RL update function args."
+        "Checking that all policy numbers in the study dataframe are present in the algorithm update function args."
     )
     in_study_df = study_df[study_df[in_study_col_name] == 1]
     min_positive_policy_num = in_study_df[in_study_df[policy_num_col_name] >= 0][
@@ -400,18 +401,18 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
         ].unique()
     ).issubset(
         rl_update_func_args.keys()
-    ), "There are policy numbers present in RL update function args but not in the study dataframe. Please see the contract for details."
+    ), "There are policy numbers present in algorithm update function args but not in the study dataframe. Please see the contract for details."
 
 
 def confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
     rl_update_func_args_action_prob_index,
 ):
     logger.info(
-        "Confirming that action probabilities are not in RL update function args IF their index is not specified"
+        "Confirming that action probabilities are not in algorithm update function args IF their index is not specified"
     )
     if rl_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
-            "\nYou specified that the RL update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
+            "\nYou specified that the algorithm update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
         )
 
 
@@ -477,7 +478,7 @@ def require_betas_match_in_rl_update_args_each_update(
     rl_update_func_args, rl_update_func_args_beta_index
 ):
     logger.info(
-        "Checking that betas match across users for each update in the RL update function args."
+        "Checking that betas match across users for each update in the algorithm update function args."
     )
     for policy_num in rl_update_func_args:
         first_beta = None
@@ -492,7 +493,7 @@ def require_betas_match_in_rl_update_args_each_update(
             else:
                 assert np.array_equal(
                     beta, first_beta
-                ), f"Betas do not match across users in the RL update function args for policy number {policy_num}. Please see the contract for details."
+                ), f"Betas do not match across users in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
 
 
 def require_betas_match_in_action_prob_func_args_each_decision(
@@ -537,10 +538,10 @@ def require_valid_action_prob_times_given_if_index_supplied(
             times = args[rl_update_func_args_action_prob_times_index]
             assert (
                 times[i] > times[i - 1] for i in range(1, len(times))
-            ), "Non-strictly-increasing times give for action proabilities in RL update function args. Please see the contract for details."
+            ), "Non-strictly-increasing times give for action proabilities in algorithm update function args. Please see the contract for details."
             assert (
                 times[0] >= min_time and times[-1] <= max_time
-            ), "Times not present in the study given for action proabilities in RL update function args. Please see the contract for details."
+            ), "Times not present in the study given for action proabilities in algorithm update function args. Please see the contract for details."
 
 
 def require_theta_estimating_functions_sum_to_zero(
@@ -596,10 +597,10 @@ def require_beta_estimating_functions_sum_to_zero(
     logger.info(
         "Checking that beta estimating functions sum to zero across users for each update"
     )
-    # This is a test that the correct RL update function/estimating function has
+    # This is a test that the correct algorithm update function/estimating function has
     # been given, along with correct arguments for each update time.
 
-    # If that is true, then the RL update function/estimating function should sum to zero
+    # If that is true, then the algorithm update function/estimating function should sum to zero
     # for each update time when the RESULTING beta estimate and the data used
     # to produce it are plugged in as the remaining args.
 

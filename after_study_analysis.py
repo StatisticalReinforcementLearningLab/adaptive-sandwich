@@ -972,7 +972,6 @@ def construct_single_user_weighted_estimating_function_stacker(
         weighted_stack = jnp.concatenate([algorithm_component, inference_component])
         # 9. Return the stack and auxiliary outputs described below.
         # Note the 4 outputs:
-        #
         # 1. The first is simply the weighted estimating function stack for this user. The average
         # of these is what we differentiate with respect to theta to form the inverse adaptive bread
         # matrix, and we also compare that average to zero to check the estimating functions'

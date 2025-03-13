@@ -1015,7 +1015,7 @@ def thread_action_prob_func_args(
 
         policy_num = policy_num_by_decision_time_by_user_id[user_id][decision_time]
 
-        # The expectation is that fallback policies are empty, and the only other
+        # The expectation is that fallback policies have empty args, and the only other
         # policy not represented in beta_index_by_policy_num is the initial policy.
         # Specifically check for this to be a little more robust than simply checking
         # for the policy number in the dictionary.

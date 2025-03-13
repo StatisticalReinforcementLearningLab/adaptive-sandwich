@@ -694,8 +694,8 @@ def require_adaptive_bread_inverse_is_true_inverse(
 ):
     """
     Check that the product of the joint adaptive bread matrix and its inverse is
-    the identity matrix.  This is a direct check that the joint_adaptive_bread_inverse_matrix
-    we create is "well-conditioned".
+    sufficiently close to the identity matrix.  This is a direct check that the
+    joint_adaptive_bread_inverse_matrix we create is "well-conditioned".
     """
     try:
         np.testing.assert_allclose(

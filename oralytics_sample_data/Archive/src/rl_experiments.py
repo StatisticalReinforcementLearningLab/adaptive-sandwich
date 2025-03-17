@@ -188,7 +188,6 @@ def execute_decision_time(
     user_qualities = get_user_data_values_from_decision_t(
         data_df, user_idx, decision_time, "quality"
     ).flatten()
-    breakpoint()
     user_actions = get_user_data_values_from_decision_t(
         data_df, user_idx, decision_time, "action"
     ).flatten()

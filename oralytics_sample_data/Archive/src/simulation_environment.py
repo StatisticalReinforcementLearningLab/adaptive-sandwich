@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from scipy.stats import bernoulli
-from scipy.stats import poisson
-from scipy.stats import norm
+from scipy.stats import bernoulli, poisson, norm
 
-import read_write_info
 
-class SimulationEnvironment():
+class SimulationEnvironment:
     def __init__(self, users_list, user_envs, env_type):
         # must be implemented by children
         self.version = None
@@ -36,16 +33,14 @@ class SimulationEnvironment():
     def get_users(self):
         return self.users_list
 
-    def get_env_history(self, user_idx, property):
-        return self.all_user_envs[user_idx].get_user_history(property)
+    def get_env_history(self, user_idx, prop):
+        return self.all_user_envs[user_idx].get_user_history(prop)
 
     def update_responsiveness(self, user_idx, a1_cond, a2_cond, b_cond, j):
         self.all_user_envs[user_idx].update_responsiveness(a1_cond, a2_cond, b_cond, j)
 
-class SimulationEnvironmentAppEngagement(SimulationEnvironment):
-    def __init__(self, users_list, user_envs, env_type):
-        super(SimulationEnvironmentAppEngagement, self).__init__(users_list, user_envs, env_type)
 
+class SimulationEnvironmentAppEngagement(SimulationEnvironment):
     def generate_app_engagement(self, user_idx):
         return self.all_user_envs[user_idx].generate_app_engagement()
 
@@ -70,60 +65,79 @@ class SimulationEnvironmentAppEngagement(SimulationEnvironment):
                 self.set_user_last_open_app_dt(user_idx, j)
         # we do not save that current day's app engagement until after the evening dt
         else:
-            current_app_engagement = int(self.get_user_last_open_app_dt(user_idx) == j - 1)
+            current_app_engagement = int(
+                self.get_user_last_open_app_dt(user_idx) == j - 1
+            )
             self.set_user_prior_day_app_engagement(user_idx, current_app_engagement)
 
 
 # ### NORMALIZTIONS ###
 def normalize_total_brush_quality(quality):
-  return (quality - 154) / 163
+    return (quality - 154) / 163
+
 
 def normalize_day_in_study(day):
-  return (day - 35.5) / 34.5
+    return (day - 35.5) / 34.5
+
 
 def sigmoid(x):
-  return 1 / (1 + np.exp(-x))
+    return 1 / (1 + np.exp(-x))
 
-"""### Functions for Environment Models
----
-"""
-def construct_model_and_sample(user, state, action, \
-                                          bern_params, \
-                                          y_params, \
-                                          sigma_u, \
-                                          model_type, \
-                                          effect_func_bern=lambda state : 0, \
-                                          effect_func_y=lambda state : 0):
-  bern_linear_comp = state @ bern_params
-  if (action == 1):
-    bern_linear_comp += effect_func_bern(state)
-  bern_p = 1 - sigmoid(bern_linear_comp)
-  # bernoulli component
-  rv = bernoulli.rvs(bern_p)
-  if (rv):
-      y_mu = state @ y_params
-      if (action == 1):
-          y_mu += effect_func_y(state)
-      if model_type == "sqrt_norm":
-        # normal transform component
-        sample = norm.rvs(loc=y_mu, scale=sigma_u)
-        sample = sample**2
 
-        # we round to the nearest integer to produce brushing duration in seconds
-        return int(sample)
-      else:
-        # poisson component
-        l = np.exp(y_mu)
-        sample = poisson.rvs(l)
+### Functions for Environment Models
 
-        return sample
 
-  else:
-    return 0
+def construct_model_and_sample(
+    user,
+    state,
+    action,
+    bern_params,
+    y_params,
+    sigma_u,
+    model_type,
+    effect_func_bern=lambda state: 0,
+    effect_func_y=lambda state: 0,
+):
+    bern_linear_comp = state @ bern_params
+    if action == 1:
+        bern_linear_comp += effect_func_bern(state)
+    bern_p = 1 - sigmoid(bern_linear_comp)
+    # bernoulli component
+    rv = bernoulli.rvs(bern_p)
+    if rv:
+        y_mu = state @ y_params
+        if action == 1:
+            y_mu += effect_func_y(state)
+        if model_type == "sqrt_norm":
+            # normal transform component
+            sample = norm.rvs(loc=y_mu, scale=sigma_u)
+            sample = sample**2
 
-class UserEnvironment():
-    def __init__(self, user_id, model_type, user_sessions, user_effect_sizes, \
-                delayed_effect_scale_val, user_params, user_effect_func_bern, user_effect_func_y):
+            # we round to the nearest integer to produce brushing duration in seconds
+            return int(sample)
+        else:
+            # poisson component
+            l = np.exp(y_mu)
+            sample = poisson.rvs(l)
+
+            return sample
+
+    else:
+        return 0
+
+
+class UserEnvironment:
+    def __init__(
+        self,
+        user_id,
+        model_type,
+        user_sessions,
+        user_effect_sizes,
+        delayed_effect_scale_val,
+        user_params,
+        user_effect_func_bern,
+        user_effect_func_y,
+    ):
         self.user_id = user_id
         self.model_type = model_type
         # vector: size (T, D) where D is the dimension of the env. state
@@ -140,21 +154,29 @@ class UserEnvironment():
         self.user_params = user_params
         self.user_effect_func_bern = user_effect_func_bern
         self.user_effect_func_y = user_effect_func_y
-        self.reward_generating_func = lambda state, action: construct_model_and_sample(user_id, state, action, \
-                                          self.user_params[0], \
-                                          self.user_params[1], \
-                                          self.user_params[2], \
-                                          self.model_type, \
-                                          effect_func_bern=lambda state: self.user_effect_func_bern(state, self.user_effect_sizes[0]), \
-                                          effect_func_y=lambda state: self.user_effect_func_y(state, self.user_effect_sizes[1]))
+        self.reward_generating_func = lambda state, action: construct_model_and_sample(
+            user_id,
+            state,
+            action,
+            self.user_params[0],
+            self.user_params[1],
+            self.user_params[2],
+            self.model_type,
+            effect_func_bern=lambda state: self.user_effect_func_bern(
+                state, self.user_effect_sizes[0]
+            ),
+            effect_func_y=lambda state: self.user_effect_func_y(
+                state, self.user_effect_sizes[1]
+            ),
+        )
         # user environment history
-        self.user_history = {"actions":[], "outcomes":[]}
+        self.user_history = {"actions": [], "outcomes": []}
 
-    def get_user_history(self, property):
-        return self.user_history[property]
+    def get_user_history(self, prop):
+        return self.user_history[prop]
 
-    def set_user_history(self, property, value):
-        self.user_history[property].append(value)
+    def set_user_history(self, prop, value):
+        self.user_history[prop].append(value)
 
     def generate_reward(self, state, action):
         # save action and outcome
@@ -168,7 +190,9 @@ class UserEnvironment():
         # it's been atleast a week since we last shrunk
         if j % 14 == 0:
             if (b_cond and a1_cond) or a2_cond:
-                self.user_effect_sizes = self.user_effect_sizes * self.delayed_effect_scale_val
+                self.user_effect_sizes = (
+                    self.user_effect_sizes * self.delayed_effect_scale_val
+                )
                 self.times_shrunk += 1
 
             elif self.times_shrunk > 0:
@@ -176,7 +200,9 @@ class UserEnvironment():
                     self.user_effect_sizes[0] = self.og_user_effect_sizes[0]
                     self.user_effect_sizes[1] = self.og_user_effect_sizes[1]
                 else:
-                    self.user_effect_sizes = self.user_effect_sizes / self.delayed_effect_scale_val
+                    self.user_effect_sizes = (
+                        self.user_effect_sizes / self.delayed_effect_scale_val
+                    )
                 self.times_shrunk -= 1
 
     def get_states(self):
@@ -185,11 +211,28 @@ class UserEnvironment():
     def get_user_effect_sizes(self):
         return self.user_effect_sizes
 
+
 class UserEnvironmentAppEngagement(UserEnvironment):
-    def __init__(self, user_id, model_type, user_effect_sizes, delayed_effect_scale_val, \
-                user_params, user_effect_func_bern, user_effect_func_y):
-        super(UserEnvironmentAppEngagement, self).__init__(user_id, model_type, None, user_effect_sizes, \
-                  delayed_effect_scale_val, user_params, user_effect_func_bern, user_effect_func_y)
+    def __init__(
+        self,
+        user_id,
+        model_type,
+        user_effect_sizes,
+        delayed_effect_scale_val,
+        user_params,
+        user_effect_func_bern,
+        user_effect_func_y,
+    ):
+        super(UserEnvironmentAppEngagement, self).__init__(
+            user_id,
+            model_type,
+            None,
+            user_effect_sizes,
+            delayed_effect_scale_val,
+            user_params,
+            user_effect_func_bern,
+            user_effect_func_y,
+        )
         # probability of opening app, needs to be implemented by children
         self.app_open_base_prob = None
         # tracking prior day app engagement
@@ -212,16 +255,6 @@ class UserEnvironmentAppEngagement(UserEnvironment):
     def set_last_open_app_dt(self, j):
         self.last_open_app_dt = j
 
-"""## SIMULATING DELAYED EFFECTS COMPONENT
----
-"""
 
 def get_delayed_effect_scale(delayed_effect_scale):
-    if delayed_effect_scale == 'LOW_R':
-        return 0
-    elif delayed_effect_scale == 'MED_R':
-        return 0.5
-    elif delayed_effect_scale == 'HIGH_R':
-        return 0.8
-    else:
-        print("ERROR: NO DELAYED EFFECT SCALE FOUND - ", delayed_effect_scale)
+    return {"LOW_R": 0, "MED_R": 0.5, "HIGH_R": 0.8}[delayed_effect_scale]

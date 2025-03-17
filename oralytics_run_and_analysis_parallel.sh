@@ -30,7 +30,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # Arguments that only affect simulation side.
 seed=0
 num_users=70
-recruitment_rate=5
+users_per_recruitment=5
 only_analysis=0
 
 # Arguments that only affect inference side.
@@ -88,7 +88,7 @@ while getopts s:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:-: OPT; do
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
     n  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
-    r  | recruitment_rate )                             needs_arg; recruitment_rate="$OPTARG" ;;
+    r  | users_per_recruitment )                        needs_arg; users_per_recruitment="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -128,7 +128,7 @@ if [ "$only_analysis" -eq "0" ]; then
     --seed $SLURM_ARRAY_TASK_ID \
     --exp_dir $save_dir_prefix \
     --num_users $num_users \
-    --recruitment_rate $recruitment_rate
+    --users_per_recruitment $users_per_recruitment
   echo "$(date +"%Y-%m-%d %T") oralytics_run_and_analysis_parallel: Finished RL study simulation."
 fi
 

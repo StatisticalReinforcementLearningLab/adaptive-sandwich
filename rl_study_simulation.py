@@ -95,7 +95,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             study_df = study_env.update_study_df(study_df, t)
 
         # Note that we DO NOT filter to in_study == 1 here.  The way we calculate the gradients
-        # we need in batches requires same-size state inputs for each user, so we actually
+        # we need in batches benefits from same-size state inputs for each user, so we actually
         # want to pass states for when users are not in the study but zero them out.
         all_prev_data_bool = study_df["calendar_t"] <= t
         all_prev_data = study_df[all_prev_data_bool]

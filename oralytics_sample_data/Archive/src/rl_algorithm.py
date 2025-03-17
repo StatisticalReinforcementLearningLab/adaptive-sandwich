@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-RL Algorithm that uses a contextual bandit framework with Thompson sampling, full-pooling, and
-a Bayesian Linear Regression reward approximating function.
-"""
-import stat_computations
-import reward_definition
-
-import pandas as pd
 import numpy as np
-import scipy.stats as stats
+from scipy import stats
+
+import reward_definition
 
 
 class RLAlgorithm:
@@ -32,24 +26,19 @@ class RLAlgorithm:
     # need to implement
     # function that takes in a raw state and processes the current state for the algorithm
     def process_alg_state(self, env_state, b_bar, a_bar):
-        return 0
+        raise NotImplementedError()
 
     def action_selection(self, advantage_state, baseline_state):
-        return 0
+        raise NotImplementedError()
 
-    def update(self, alg_states, ayctions, pis, rewards):
-        return 0
+    def update(self, alg_states, actions, pis, rewards):
+        raise NotImplementedError()
 
     def get_feature_dim(self):
         return self.feature_dim
 
     def get_update_cadence(self):
         return self.update_cadence
-
-
-"""
-Algorithm State Space (For V1)
-"""
 
 
 ## baseline: ##
@@ -69,11 +58,6 @@ def process_alg_state_v1(env_state, b_bar, a_bar):
     advantage_state = np.copy(baseline_state)
 
     return advantage_state, baseline_state
-
-
-"""
-Algorithm State Space (For V2)
-"""
 
 
 # please refer to generate_env_state in sim_env_v2
@@ -104,11 +88,6 @@ def process_alg_state_v2(env_state, b_bar, a_bar):
     return advantage_state, baseline_state
 
 
-"""
-Algorithm State Space (For V3)
-"""
-
-
 # please refer to generate_env_state in sim_env_v3
 ## baseline: ##
 # 0 - time of day
@@ -131,14 +110,6 @@ def process_alg_state_v3(env_state):
     return advantage_state, baseline_state
 
 
-"""### Bayesian Linear Regression Thompson Sampler
----
-"""
-## POSTERIOR HELPERS ##
-# create the feature vector given state, action, and action selection probability
-
-
-# with action centering
 def create_big_phi(advantage_states, baseline_states, actions, probs):
     big_phi = np.hstack(
         (
@@ -150,17 +121,10 @@ def create_big_phi(advantage_states, baseline_states, actions, probs):
     return big_phi
 
 
-# without action centering
 def create_big_phi_no_action_centering(advantage_states, baseline_states, actions):
     big_phi = np.hstack((baseline_states, np.multiply(advantage_states.T, actions).T))
 
     return big_phi
-
-
-"""
-#### Helper Functions
----
-"""
 
 
 def compute_posterior_var(Phi, sigma_n_squared, prior_sigma):
@@ -182,64 +146,76 @@ def update_posterior_w(Phi, R, sigma_n_squared, prior_mu, prior_sigma):
     return mean, var
 
 
-## ACTION SELECTION ##
-# we calculate the posterior probability of P(R_1 > R_0) clipped
-# we make a Bernoulli draw with prob. P(R_1 > R_0) of the action
 def bayes_lr_action_selector(
-    beta_post_mean, beta_post_var, advantage_state, smoothing_func, debug=False
+    beta_post_mean, beta_post_var, advantage_state, smoothing_func
 ):
-    # using the genearlized_logistic_func, probabilities are already clipped to asymptotes
-    if debug:
-        import pdb
+    """
+    Selects an action according to smoothed Thompson sampling. We calculate the posterior
+    probability of P(R_1 > R_0), clipped, to make a Bernoulli draw with prob P(R_1 > R_0) of
+    the action.
 
-        pdb.set_trace()
+    Parameters:
+    beta_post_mean (np.ndarray):
+        Posterior mean of the beta coefficients.
+    beta_post_var (np.ndarray):
+        Posterior variance of the beta coefficients.
+    advantage_state (np.ndarray):
+        State features used to calculate the advantage.
+    smoothing_func (callable): A smoothing function which we find the expectation of. Standard
+        Thompson sampling uses the indicator of whether its arg is positive. Here we use a smoother
+        function in order to facilitate after-study analysis.
+
+    Returns:
+    tuple: A tuple containing:
+        - action (int): The selected action (0 or 1).
+        - posterior_prob (float): The posterior probability of the action.
+    """
     mu = advantage_state @ beta_post_mean
     std = np.sqrt(advantage_state @ beta_post_var @ advantage_state.T)
     posterior_prob = stats.norm.expect(func=smoothing_func, loc=mu, scale=std)
 
-    return stats.bernoulli.rvs(posterior_prob), posterior_prob
+    try:
+        return stats.bernoulli.rvs(posterior_prob), posterior_prob
+    except:
+        breakpoint()
 
 
-"""### BLR Algorithm Object
----
-"""
-
-
-class BayesianLinearRegression(RLAlgorithm):
+class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
     def __init__(self, cost_params, update_cadence, smoothing_func):
-        super(BayesianLinearRegression, self).__init__(
-            cost_params, update_cadence, smoothing_func
-        )
+        super().__init__(cost_params, update_cadence, smoothing_func)
 
         # need to be set by children classes
-        self.D_ADVANTAGE = None
+        self.D_ADVANTAGE = 0
         self.D_BASELINE = None
         self.PRIOR_MU = None
         self.PRIOR_SIGMA = None
         self.SIGMA_N_2 = None
+
         self.feature_map = None
         self.posterior_mean = None
         self.posterior_var = None
         # parameter used to control study-level period of pure exploration
         self.use_prior = True
 
-    def action_selection(self, advantage_state, debug=False):
+    def action_selection(self, advantage_state, baseline_state):
         if self.use_prior:
             return bayes_lr_action_selector(
-                self.PRIOR_MU[-self.D_ADVANTAGE :],
-                self.PRIOR_SIGMA[-self.D_ADVANTAGE :, -self.D_ADVANTAGE :],
+                self.PRIOR_MU[  # pylint: disable=unsubscriptable-object
+                    -self.D_ADVANTAGE :
+                ],
+                self.PRIOR_SIGMA[  # pylint: disable=unsubscriptable-object
+                    -self.D_ADVANTAGE :, -self.D_ADVANTAGE :
+                ],
                 advantage_state,
                 self.smoothing_func,
-                debug,
             )
-        else:
-            return bayes_lr_action_selector(
-                self.posterior_mean[-self.D_ADVANTAGE :],
-                self.posterior_var[-self.D_ADVANTAGE :, -self.D_ADVANTAGE :],
-                advantage_state,
-                self.smoothing_func,
-                debug,
-            )
+            # pylint: enable=invalid-name, too-many-arguments
+        return bayes_lr_action_selector(
+            self.posterior_mean[-self.D_ADVANTAGE :],
+            self.posterior_var[-self.D_ADVANTAGE :, -self.D_ADVANTAGE :],
+            advantage_state,
+            self.smoothing_func,
+        )
 
     def is_pure_exploration_period(self):
         return self.use_prior
@@ -248,30 +224,19 @@ class BayesianLinearRegression(RLAlgorithm):
         self.use_prior = False
 
     def update(self, alg_states, actions, pis, rewards):
-        Phi = self.feature_map(alg_states, alg_states, actions, pis)
+        Phi = self.feature_map(  # pylint: disable=not-callable
+            alg_states, alg_states, actions, pis
+        )
         posterior_mean, posterior_var = update_posterior_w(
             Phi, rewards, self.SIGMA_N_2, self.PRIOR_MU, self.PRIOR_SIGMA
         )
         self.posterior_mean = posterior_mean
         self.posterior_var = posterior_var
 
-    def compute_estimating_equation(self, user_history, n):
-        return stat_computations.compute_estimating_equation(
-            user_history,
-            n,
-            self.posterior_mean,
-            self.posterior_var,
-            self.PRIOR_MU,
-            self.PRIOR_SIGMA,
-            self.SIGMA_N_2,
-        )
-
 
 class BlrActionCentering(BayesianLinearRegression):
     def __init__(self, cost_params, update_cadence, smoothing_func, noise_var):
-        super(BlrActionCentering, self).__init__(
-            cost_params, update_cadence, smoothing_func
-        )
+        super().__init__(cost_params, update_cadence, smoothing_func)
 
         # THESE VALUES WERE SET WITH ROBAS 2 DATA
         # size of mu vector = D_baseline + D_advantage + D_advantage
@@ -302,7 +267,6 @@ class BlrActionCentering(BayesianLinearRegression):
         self.posterior_var = np.copy(self.PRIOR_SIGMA)
 
         self.SIGMA_N_2 = noise_var
-        # feature map
         self.feature_map = create_big_phi
 
     def process_alg_state(self, env_state, b_bar, a_bar):
@@ -313,7 +277,7 @@ class BlrActionCentering(BayesianLinearRegression):
 # uses a prior built on Oralytics pilot data
 class BlrACV2(BlrActionCentering):
     def __init__(self, cost_params, update_cadence, smoothing_func):
-        super(BlrACV2, self).__init__(cost_params, update_cadence, smoothing_func, None)
+        super().__init__(cost_params, update_cadence, smoothing_func, None)
 
         # THESE VALUES WERE SET WITH ORALYTICS PILOT DATA
         # size of mu vector = D_baseline=5 + D_advantage=5 + D_advantage=5
@@ -339,7 +303,7 @@ class BlrACV2(BlrActionCentering):
 # uses a prior built on ROBAS 2 data; this was the prior used in the Oralytics pilot data
 class BlrACV3(BlrActionCentering):
     def __init__(self, cost_params, update_cadence, smoothing_func):
-        super(BlrACV3, self).__init__(cost_params, update_cadence, smoothing_func, None)
+        super().__init__(cost_params, update_cadence, smoothing_func, None)
 
         # THESE VALUES WERE SET WITH ROBAS 2 DATA
         # size of mu vector = D_baseline=5 + D_advantage=5 + D_advantage=5
@@ -381,9 +345,7 @@ class BlrACV3(BlrActionCentering):
 
 class BlrNoActionCentering(BayesianLinearRegression):
     def __init__(self, cost_params, update_cadence, smoothing_func, noise_var):
-        super(BlrNoActionCentering, self).__init__(
-            cost_params, update_cadence, smoothing_func
-        )
+        super().__init__(cost_params, update_cadence, smoothing_func)
 
         # THESE VALUES WERE SET WITH ROBAS 2 DATA
         # size of mu vector = D_baseline + D_advantage
@@ -411,7 +373,7 @@ class BlrNoActionCentering(BayesianLinearRegression):
 
         self.SIGMA_N_2 = noise_var
         # feature map
-        self.feature_map = lambda adv_states, base_states, probs, actions: create_big_phi_no_action_centering(
+        self.feature_map = lambda adv_states, base_states, actions, probs: create_big_phi_no_action_centering(
             adv_states, base_states, actions
         )
 

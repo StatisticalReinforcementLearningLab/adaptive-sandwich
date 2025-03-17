@@ -438,8 +438,8 @@ def analyze_dataset(
 
 
 def construct_beta_index_by_policy_num_map(
-    study_df, policy_num_col_name, in_study_col_name
-):
+    study_df: pandas.DataFrame, policy_num_col_name: str, in_study_col_name: str
+) -> tuple[dict[int | float, int], int | float]:
     """
     Constructs a mapping from non-initial, non-fallback policy numbers to the index of the
     corresponding beta in all_post_update_betas.
@@ -1048,6 +1048,46 @@ def thread_update_func_args(
     threaded_single_user_action_prob_func_args_by_decision_time,
     action_prob_func,
 ):
+    """
+    Updates the function arguments for a specific user and policy number in a threaded environment.
+
+    Args:
+        update_func_args_by_by_user_id_by_policy_num (dict): A dictionary where keys are policy
+            numbers and values are dictionaries mapping user IDs to their respective update function
+            arguments.
+
+        user_id (int): The ID of the user for whom the update function arguments are being
+            processed.
+
+        all_post_update_betas (list): A list of beta values to be introduced into arguments to
+            facilitate differentiation.  They will be the same value as what they replace, but this
+            introduces direct dependence on the parameter we will differentiate with respect to.
+
+        beta_index_by_policy_num (dict): A dictionary mapping policy numbers to their respective
+            beta indices in all_post_update_betas.
+
+        alg_update_func_args_beta_index (int): The index in the update function arguments tuple
+            where the beta value should be inserted.
+
+        alg_update_func_args_action_prob_index (int): The index in the update function arguments
+            tuple where new beta-threaded action probabilities should be inserted, if applicable.
+            -1 otherwise.
+
+        alg_update_func_args_action_prob_times_index (int): If action probabilities are supplied
+            to the update function, this is the index in the arguments where an array of times for
+            which the given action probabilities apply is provided.
+
+        threaded_single_user_action_prob_func_args_by_decision_time (dict): A dictionary mapping
+            decision times to the function arguments required to compute action probabilities this
+            user, and with the shared betas thread in.
+
+        action_prob_func (callable): A function that computes action probabilities given the
+            appropriate arguments.
+
+    Returns:
+        dict: A dictionary where keys are policy numbers and values are the updated function
+            arguments tuples for the specified user.
+    """
     threaded_single_user_update_func_args_by_policy_num = {}
     for (
         policy_num,
@@ -1136,7 +1176,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     all_post_update_betas_and_theta: list[jnp.ndarray],
     single_user_weighted_estimating_function_stacker: callable,
     user_ids: jnp.ndarray,
-):
+) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
     results = [
         single_user_weighted_estimating_function_stacker(
             all_post_update_betas_and_theta[-1],

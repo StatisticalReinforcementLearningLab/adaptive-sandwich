@@ -1,11 +1,10 @@
 import numpy as np
 from scipy.special import expit
 
-"""### Smoothing Functions
----
-"""
+
 ### traditional Thompson Sampling ###
-BASIC_THOMPSON_SAMPLING_FUNC = lambda x: x > 0
+def BASIC_THOMPSON_SAMPLING_FUNC(x):
+    return x > 0
 
 
 ### generalized logistic function ###

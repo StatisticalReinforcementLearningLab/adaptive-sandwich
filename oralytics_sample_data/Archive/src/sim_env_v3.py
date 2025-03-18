@@ -133,7 +133,7 @@ class UserEnvironmentV3(simulation_environment.UserEnvironmentAppEngagement):
     ):
         # Note: in the base UserEnvironment, it uses simulated user_effect_sizes,
         # but we replace it with adv_params, user's fitted advantage parameters
-        super(UserEnvironmentV3, self).__init__(
+        super().__init__(
             user_id,
             model_type,
             adv_params,

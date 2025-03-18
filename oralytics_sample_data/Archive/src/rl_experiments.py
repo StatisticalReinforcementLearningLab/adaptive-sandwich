@@ -109,18 +109,21 @@ def create_base_data_df(
     return data_df
 
 
-# regex pattern '.*' gets you everything
-def get_all_previous_in_study_df_values(data_df, decision_time, regex_pattern):
+def get_all_in_study_data_so_far(data_df, calendar_decision_time, regex_pattern):
     result = data_df.loc[
-        (data_df["calendar_decision_t"] <= decision_time) & (data_df["in_study"] == 1)
+        (data_df["calendar_decision_t"] <= calendar_decision_time)
+        & (data_df["in_study"] == 1)
     ].filter(regex=(regex_pattern))
     return result.values.flatten() if result.shape[1] == 1 else result.values
 
 
-def get_user_data_values_from_decision_t(data_df, user_idx, decision_t, regex_pattern):
+def get_all_in_study_single_user_data_prior_to_decision_t(
+    data_df, user_idx, calendar_decision_time, regex_pattern
+):
     result = data_df.loc[
         (data_df["user_idx"] == user_idx)
-        & (data_df["calendar_decision_t"] < decision_t)
+        & (data_df["calendar_decision_t"] < calendar_decision_time)
+        & (data_df["in_study"] == 1)
     ].filter(regex=(regex_pattern))
     return result.values.flatten() if result.shape[1] == 1 else result.values
 
@@ -128,7 +131,7 @@ def get_user_data_values_from_decision_t(data_df, user_idx, decision_t, regex_pa
 def set_data_df_values_for_user(
     data_df,
     user_idx,
-    decision_time,
+    calendar_decision_time,
     policy_idx,
     action,
     prob,
@@ -138,30 +141,42 @@ def set_data_df_values_for_user(
 ):
     data_df.loc[
         (data_df["user_idx"] == user_idx)
-        & (data_df["calendar_decision_t"] == decision_time),
+        & (data_df["calendar_decision_t"] == calendar_decision_time),
         FILL_IN_COLS,
     ] = np.concatenate([[policy_idx, action, prob, reward, quality], alg_state])
 
 
 # if user did not open the app at all before the decision time, then we simulate
-# the algorithm selecting action based off of a stale state (i.e., b_bar is the b_bar from when the user last opened their app)
-# if user did open the app, then the algorithm selecting action based off of a fresh state (i.e., b_bar stays the same)
+# the algorithm selecting action based off of a stale state (i.e., b_bar is the b_bar from when the
+# user last opened their app) if user did open the app, then the algorithm selecting action based
+# off of a fresh state (i.e., b_bar stays the same)
 def get_alg_state_from_app_opening(
-    user_last_open_app_dt, data_df, user_idx, j, advantage_state
+    user_last_open_app_dt,
+    data_df,
+    user_idx,
+    user_start_calendar_time,
+    user_decision_time,
+    advantage_state,
 ):
+    if DECISIONS_PER_DAY != 2:
+        raise ValueError("This function is only implemented for 2 decisions per day")
 
     # if morning dt we check if users opened the app in the morning
     # if evening dt we check if users opened the app in the morning and in the evening
-    if j % 2 == 0:
-        user_opened_app_today = user_last_open_app_dt == j
+    if user_decision_time % DECISIONS_PER_DAY == 0:
+        user_opened_app_today = user_last_open_app_dt == user_decision_time
     else:
         # we only simulate users opening the app for morning dts
-        user_opened_app_today = user_last_open_app_dt == j - 1
+        user_opened_app_today = user_last_open_app_dt == user_decision_time - 1
     if not user_opened_app_today:
         # impute b_bar with stale b_bar and prior day app engagement = 0
-        stale_b_bar = get_user_data_values_from_decision_t(
-            data_df, user_idx, user_last_open_app_dt + 1, "state.b.bar"
-        ).flatten()[-1]
+        try:
+            calendar_last_open_app_dt = user_start_calendar_time + user_last_open_app_dt
+            stale_b_bar = get_all_in_study_single_user_data_prior_to_decision_t(
+                data_df, user_idx, calendar_last_open_app_dt + 1, "state.b.bar"
+            )[-1]
+        except:
+            breakpoint()
         # refer to rl_algorithm.py process_alg_state functions for V2, V3
         advantage_state[1] = stale_b_bar
         advantage_state[3] = 0
@@ -169,9 +184,12 @@ def get_alg_state_from_app_opening(
     return advantage_state
 
 
-def get_previous_day_qualities_and_actions(j, Qs, As):
-    if j > 1:
-        if j % 2 == 0:
+def get_previous_day_qualities_and_actions(user_decision_time, Qs, As):
+    if DECISIONS_PER_DAY != 2:
+        raise ValueError("This function is only implemented for 2 decisions per day")
+
+    if user_decision_time > 1:
+        if user_decision_time % 2 == 0:
             return Qs, As
         else:
             # current evening dt does not use most recent quality or action
@@ -182,32 +200,46 @@ def get_previous_day_qualities_and_actions(j, Qs, As):
 
 
 def execute_decision_time(
-    data_df, user_idx, decision_time, algorithm, sim_env, policy_idx
+    data_df, user_idx, calendar_decision_time, algorithm, sim_env, policy_idx
 ):
-    env_state = sim_env.generate_current_state(user_idx, decision_time)
-    user_qualities = get_user_data_values_from_decision_t(
-        data_df, user_idx, decision_time, "quality"
-    ).flatten()
-    user_actions = get_user_data_values_from_decision_t(
-        data_df, user_idx, decision_time, "action"
-    ).flatten()
+    # The environment deals in user decision times, starting at 0 for each person
+    # We entertain that instead of refactoring, though I prefer dealing in calendar
+    # time outisde of the environment.
+    user_start_time = data_df.loc[(data_df["user_idx"] == user_idx)][
+        "user_entry_decision_t"
+    ].values[0]
+    user_decision_time = calendar_decision_time - user_start_time
+    env_state = sim_env.generate_current_state(user_idx, user_decision_time)
+
+    user_qualities = get_all_in_study_single_user_data_prior_to_decision_t(
+        data_df, user_idx, calendar_decision_time, "quality"
+    )
+    user_actions = get_all_in_study_single_user_data_prior_to_decision_t(
+        data_df, user_idx, calendar_decision_time, "action"
+    )
+
     Qs, As = get_previous_day_qualities_and_actions(
-        decision_time, user_qualities, user_actions
+        user_decision_time, user_qualities, user_actions
     )
     b_bar, a_bar = reward_definition.get_b_bar_a_bar(Qs, As)
     advantage_state, _ = algorithm.process_alg_state(env_state, b_bar, a_bar)
 
-    # Simulate app opening issue
+    # Simulate app opening issue (from a state development perspective, not a policy version
+    # perspective)
     if sim_env.get_version() == "V2" or sim_env.get_version() == "V3":
+        # Grab the last USER decision time the user opened the app.
         user_last_open_app_dt = sim_env.get_user_last_open_app_dt(user_idx)
         alg_state = get_alg_state_from_app_opening(
-            user_last_open_app_dt, data_df, user_idx, decision_time, advantage_state
+            user_last_open_app_dt,
+            data_df,
+            user_idx,
+            user_start_time,
+            user_decision_time,
+            advantage_state,
         )
     else:
         alg_state = advantage_state
 
-    if np.any(np.isnan(advantage_state)):
-        breakpoint()
     action, action_prob = algorithm.action_selection(
         advantage_state=alg_state, baseline_state=alg_state
     )
@@ -218,7 +250,7 @@ def execute_decision_time(
     set_data_df_values_for_user(
         data_df,
         user_idx,
-        decision_time,
+        calendar_decision_time,
         policy_idx,
         action,
         action_prob,
@@ -227,13 +259,13 @@ def execute_decision_time(
         alg_state,
     )
     # Update responsiveness if after the first week
-    if decision_time >= 7 * DECISIONS_PER_DAY:
+    if calendar_decision_time >= 7 * DECISIONS_PER_DAY:
         sim_env.update_responsiveness(
             user_idx,
             reward_definition.calculate_a1_condition(a_bar),
             reward_definition.calculate_a2_condition(a_bar),
             reward_definition.calculate_b_condition(b_bar),
-            decision_time,
+            calendar_decision_time,
         )
 
 
@@ -283,7 +315,7 @@ def run_incremental_recruitment_exp(
     # Loop over all decision times, recruiting and retiring users as dictated by
     # users_per_recruitment and per_user_weeks_in_trial, and updating the algorithm when the pure
     # exploration has ended and the cadence for updates has been reached.
-    num_decision_times_between_updates = algorithm.get_update_cadence()
+    num_decision_times_between_updates = algorithm.update_cadence
     for calendar_t in range(data_df.calendar_decision_t.max() + 1):
         logger.info("Simulating calendar decision time: %s", calendar_t)
         for user_idx in range(len(template_users_list)):
@@ -302,7 +334,7 @@ def run_incremental_recruitment_exp(
                 )
 
             # Check if an update is warranted.
-        if calendar_t % num_decision_times_between_updates == 0:
+        if calendar_t > 0 and calendar_t % num_decision_times_between_updates == 0:
             # Check if we have enough users to end the pure exploration period.
             if (
                 algorithm.is_pure_exploration_period()
@@ -323,12 +355,10 @@ def run_incremental_recruitment_exp(
 
             # Update the algorithm.
             logger.info("Updating algorithm.")
-            alg_states = get_all_previous_in_study_df_values(
-                data_df, calendar_t, "state.*"
-            )
-            actions = get_all_previous_in_study_df_values(data_df, calendar_t, "action")
-            pis = get_all_previous_in_study_df_values(data_df, calendar_t, "prob")
-            rewards = get_all_previous_in_study_df_values(data_df, calendar_t, "reward")
+            alg_states = get_all_in_study_data_so_far(data_df, calendar_t, "state.*")
+            actions = get_all_in_study_data_so_far(data_df, calendar_t, "action")
+            pis = get_all_in_study_data_so_far(data_df, calendar_t, "prob")
+            rewards = get_all_in_study_data_so_far(data_df, calendar_t, "reward")
             algorithm.update(alg_states, actions, pis, rewards)
             policy_idx += 1
             update_dict[policy_idx] = np.concatenate(
@@ -341,11 +371,11 @@ def run_incremental_recruitment_exp(
     ]
     columns = (
         ["update_idx"]
-        + [f"posterior_mu.{i}" for i in range(algorithm.get_feature_dim)]
+        + [f"posterior_mu.{i}" for i in range(algorithm.feature_dim)]
         + [
             f"posterior_var.{i}.{j}"
-            for i in range(algorithm.get_feature_dim)
-            for j in range(algorithm.get_feature_dim)
+            for i in range(algorithm.feature_dim)
+            for j in range(algorithm.feature_dim)
         ]
     )
     update_df = pd.DataFrame(update_data, columns=columns)

@@ -71,7 +71,6 @@ class SimulationEnvironmentAppEngagement(SimulationEnvironment):
             self.set_user_prior_day_app_engagement(user_idx, current_app_engagement)
 
 
-# ### NORMALIZTIONS ###
 def normalize_total_brush_quality(quality):
     return (quality - 154) / 163
 
@@ -223,7 +222,7 @@ class UserEnvironmentAppEngagement(UserEnvironment):
         user_effect_func_bern,
         user_effect_func_y,
     ):
-        super(UserEnvironmentAppEngagement, self).__init__(
+        super().__init__(
             user_id,
             model_type,
             None,

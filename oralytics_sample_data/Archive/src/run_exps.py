@@ -173,10 +173,6 @@ def collect_alg_update_function_args(data_df, update_df):
     prior_mu = None
     prior_sigma_inv = None
 
-    # TODO: Adjust this logic if we stop doing extra updates. Actually, it
-    # needs to adjust based on dynamic recruitment rate anyway.
-    starting_policy = 5
-
     for i in range(update_df["update_idx"].max()):
         utime_dict = {}
 
@@ -206,150 +202,147 @@ def collect_alg_update_function_args(data_df, update_df):
             prior_mu = mu
             prior_sigma_inv = jnp.linalg.inv(sigma)
             continue
-        elif i < starting_policy:
-            continue
-        else:
             # flatten and combine both mu and sigma into betas
-            betas = jnp.concatenate([mu, Vt])
+        betas = jnp.concatenate([mu, Vt])
 
-            num_users_entered_already = data_df[data_df["policy_idx"] < i][
-                "user_idx"
-            ].nunique()
-            for user in data_df["user_idx"].unique():
-                # Create the data dataframe
-                temp = data_df[
-                    (data_df["policy_idx"] < i) & (data_df["user_idx"] == user)
-                ].reset_index(drop=True)
+        num_users_entered_already = data_df[data_df["policy_idx"] < i][
+            "user_idx"
+        ].nunique()
+        for user in data_df["user_idx"].unique():
+            # Create the data dataframe
+            temp = data_df[
+                (data_df["policy_idx"] < i) & (data_df["user_idx"] == user)
+            ].reset_index(drop=True)
 
-                # Check if the user has any data
-                if temp.shape[0] != 0:
-                    # Sort by calendar_decision_t
-                    temp = temp.sort_values(by="calendar_decision_t")
+            # Check if the user has any data
+            if temp.shape[0] != 0:
+                # Sort by calendar_decision_t
+                temp = temp.sort_values(by="calendar_decision_t")
 
-                    # Phi = []
-                    states = []
-                    actions = []
-                    act_probs = []
-                    decision_times = []
-                    rewards = jnp.array(temp["reward"].values)
-                    for j in range(temp.shape[0]):
-                        state = np.array(
-                            temp.loc[j][
+                # Phi = []
+                states = []
+                actions = []
+                act_probs = []
+                decision_times = []
+                rewards = jnp.array(temp["reward"].values)
+                for j in range(temp.shape[0]):
+                    state = np.array(
+                        temp.loc[j][
+                            [
+                                "state.tod",
+                                "state.b.bar",
+                                "state.a.bar",
+                                "state.app.engage",
+                                "state.bias",
+                            ]
+                        ].values,
+                        dtype=np.float32,
+                    )
+                    action = temp.loc[j]["action"]
+                    act_prob = temp.loc[j]["prob"]
+                    # TODO: Potentially adjust the 13 to be dynamic based on settings
+                    decision_time = temp.loc[j]["calendar_decision_t"] - 13
+
+                    states.append(state)
+                    actions.append(action)
+                    act_probs.append(act_prob)
+                    decision_times.append(decision_time)
+
+                states = jnp.array(states)
+                actions = jnp.array(actions).reshape(-1, 1)
+                act_probs = jnp.array(act_probs).reshape(-1, 1)
+                decision_times = jnp.array(decision_times).reshape(-1, 1)
+
+                df = pd.concat(
+                    [
+                        df,
+                        pd.DataFrame(
+                            [
                                 [
-                                    "state.tod",
-                                    "state.b.bar",
-                                    "state.a.bar",
-                                    "state.app.engage",
-                                    "state.bias",
+                                    i,
+                                    user,
+                                    betas,
+                                    num_users_entered_already,
+                                    states,
+                                    actions,
+                                    act_probs,
+                                    decision_times,
+                                    rewards,
+                                    prior_mu,
+                                    prior_sigma_inv,
+                                    3396.449,
                                 ]
-                            ].values,
-                            dtype=np.float32,
-                        )
-                        action = temp.loc[j]["action"]
-                        act_prob = temp.loc[j]["prob"]
-                        # TODO: Potentially adjust the 13 to be dynamic based on settings
-                        decision_time = temp.loc[j]["calendar_decision_t"] - 13
+                            ],
+                            columns=[
+                                "update_idx",
+                                "user_idx",
+                                "betas",
+                                "n_users",
+                                "states",
+                                "actions",
+                                "act_probs",
+                                "decision_times",
+                                "rewards",
+                                "prior_mu",
+                                "prior_sigma_inv",
+                                "init_noise_var",
+                            ],
+                        ),
+                    ]
+                )
+                utime_dict[user] = (
+                    betas,
+                    num_users_entered_already,
+                    states,
+                    actions,
+                    act_probs,
+                    decision_times,
+                    rewards,
+                    prior_mu,
+                    prior_sigma_inv,
+                    3396.449,
+                )
 
-                        states.append(state)
-                        actions.append(action)
-                        act_probs.append(act_prob)
-                        decision_times.append(decision_time)
-
-                    states = jnp.array(states)
-                    actions = jnp.array(actions).reshape(-1, 1)
-                    act_probs = jnp.array(act_probs).reshape(-1, 1)
-                    decision_times = jnp.array(decision_times).reshape(-1, 1)
-
-                    df = pd.concat(
-                        [
-                            df,
-                            pd.DataFrame(
+            # Otherwise add a row with no data
+            else:
+                df = pd.concat(
+                    [
+                        df,
+                        pd.DataFrame(
+                            [
                                 [
-                                    [
-                                        i,
-                                        user,
-                                        betas,
-                                        num_users_entered_already,
-                                        states,
-                                        actions,
-                                        act_probs,
-                                        decision_times,
-                                        rewards,
-                                        prior_mu,
-                                        prior_sigma_inv,
-                                        3396.449,
-                                    ]
-                                ],
-                                columns=[
-                                    "update_idx",
-                                    "user_idx",
-                                    "betas",
-                                    "n_users",
-                                    "states",
-                                    "actions",
-                                    "act_probs",
-                                    "decision_times",
-                                    "rewards",
-                                    "prior_mu",
-                                    "prior_sigma_inv",
-                                    "init_noise_var",
-                                ],
-                            ),
-                        ]
-                    )
-                    utime_dict[user] = (
-                        betas,
-                        num_users_entered_already,
-                        states,
-                        actions,
-                        act_probs,
-                        decision_times,
-                        rewards,
-                        prior_mu,
-                        prior_sigma_inv,
-                        3396.449,
-                    )
-
-                # Otherwise add a row with no data
-                else:
-                    df = pd.concat(
-                        [
-                            df,
-                            pd.DataFrame(
-                                [
-                                    [
-                                        i,
-                                        user,
-                                        betas,
-                                        num_users_entered_already,
-                                        [],
-                                        [],
-                                        [],
-                                        [],
-                                        [],
-                                        prior_mu,
-                                        prior_sigma_inv,
-                                        3396.449,
-                                    ]
-                                ],
-                                columns=[
-                                    "update_idx",
-                                    "user_idx",
-                                    "betas",
-                                    "n_users",
-                                    "states",
-                                    "actions",
-                                    "act_probs",
-                                    "decision_times",
-                                    "rewards",
-                                    "prior_mu",
-                                    "prior_sigma_inv",
-                                    "init_noise_var",
-                                ],
-                            ),
-                        ]
-                    )
-                    utime_dict[user] = ()
+                                    i,
+                                    user,
+                                    betas,
+                                    num_users_entered_already,
+                                    [],
+                                    [],
+                                    [],
+                                    [],
+                                    [],
+                                    prior_mu,
+                                    prior_sigma_inv,
+                                    3396.449,
+                                ]
+                            ],
+                            columns=[
+                                "update_idx",
+                                "user_idx",
+                                "betas",
+                                "n_users",
+                                "states",
+                                "actions",
+                                "act_probs",
+                                "decision_times",
+                                "rewards",
+                                "prior_mu",
+                                "prior_sigma_inv",
+                                "init_noise_var",
+                            ],
+                        ),
+                    ]
+                )
+                utime_dict[user] = ()
 
         update_func_args_dict[i] = utime_dict
 
@@ -363,10 +356,6 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
     df2 = pd.DataFrame(columns=["calendar_decision_t", "user_idx", "beta", "advantage"])
 
     act_prob_dict = {}
-
-    # TODO: Adjust this logic if we stop doing extra updates. May need to
-    # adjust based on dynamic recruitment rate anyway
-    starting_policy = 5
 
     for i in range(
         data_df["calendar_decision_t"].min(), data_df["calendar_decision_t"].max() + 1
@@ -382,7 +371,7 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
             if record.shape[0] != 0:
                 # Fetch the policy number and associated beta
                 policy = record["policy_idx"].values[0]
-                if policy < starting_policy:
+                if policy < 1:
                     # Construct beta from update dataframe
                     update_0 = update_df[update_df["update_idx"] == 0].reset_index(
                         drop=True

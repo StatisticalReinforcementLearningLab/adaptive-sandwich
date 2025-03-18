@@ -34,12 +34,6 @@ class RLAlgorithm:
     def update(self, alg_states, actions, pis, rewards):
         raise NotImplementedError()
 
-    def get_feature_dim(self):
-        return self.feature_dim
-
-    def get_update_cadence(self):
-        return self.update_cadence
-
 
 ## baseline: ##
 # 0 - time of day
@@ -174,10 +168,7 @@ def bayes_lr_action_selector(
     std = np.sqrt(advantage_state @ beta_post_var @ advantage_state.T)
     posterior_prob = stats.norm.expect(func=smoothing_func, loc=mu, scale=std)
 
-    try:
-        return stats.bernoulli.rvs(posterior_prob), posterior_prob
-    except:
-        breakpoint()
+    return stats.bernoulli.rvs(posterior_prob), posterior_prob
 
 
 class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method

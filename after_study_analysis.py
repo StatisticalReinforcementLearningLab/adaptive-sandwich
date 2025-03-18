@@ -1209,7 +1209,9 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
 ):
-    logger.info("Differentiating avg weighted estimating function stack.")
+    logger.info(
+        "Differentiating avg weighted estimating function stack and collecting auxiliary values."
+    )
     # Interestingly, jax.jacobian does not seem to work here... just hangs in
     # the oralytics case, while it works fine in the simpler synthetic case.
     joint_adaptive_bread_inverse_pieces, (
@@ -1233,7 +1235,6 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     # The bread will always be block lower triangular.  If this is not the case there
     # is an error (but it is almost certainly the package's fault, not the user's,
     # so no live check for this.)
-    logger.info("Stacking bread pieces horizontally into full matrix.")
     return (
         jnp.hstack(joint_adaptive_bread_inverse_pieces),
         joint_adaptive_meat,

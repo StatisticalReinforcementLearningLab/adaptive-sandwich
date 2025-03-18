@@ -173,10 +173,10 @@ def collect_alg_update_function_args(data_df, update_df):
     prior_mu = None
     prior_sigma_inv = None
 
-    for i in range(update_df["update_idx"].max()):
+    for update_idx in range(update_df["update_idx"].max() + 1):
         utime_dict = {}
 
-        temp = update_df[update_df["update_idx"] == i]
+        temp = update_df[update_df["update_idx"] == update_idx]
 
         mu = []
         # TODO: Potentially adjust the 15 to be dynamic based on settings
@@ -198,20 +198,22 @@ def collect_alg_update_function_args(data_df, update_df):
         utsigma_inv = sigma_inv[jnp.triu_indices(sigma_inv.shape[0])]
         Vt = utsigma_inv.flatten()
 
-        if i == 0:
+        if update_idx == 0:
             prior_mu = mu
             prior_sigma_inv = jnp.linalg.inv(sigma)
             continue
             # flatten and combine both mu and sigma into betas
         betas = jnp.concatenate([mu, Vt])
 
-        num_users_entered_already = data_df[data_df["policy_idx"] < i][
-            "user_idx"
-        ].nunique()
+        num_users_entered_already = data_df[
+            (data_df["policy_idx"] < update_idx) & (data_df["in_study"] == 1)
+        ]["user_idx"].nunique()
         for user in data_df["user_idx"].unique():
             # Create the data dataframe
             temp = data_df[
-                (data_df["policy_idx"] < i) & (data_df["user_idx"] == user)
+                (data_df["policy_idx"] < update_idx)
+                & (data_df["user_idx"] == user)
+                & (data_df["in_study"] == 1)
             ].reset_index(drop=True)
 
             # Check if the user has any data
@@ -240,8 +242,7 @@ def collect_alg_update_function_args(data_df, update_df):
                     )
                     action = temp.loc[j]["action"]
                     act_prob = temp.loc[j]["prob"]
-                    # TODO: Potentially adjust the 13 to be dynamic based on settings
-                    decision_time = temp.loc[j]["calendar_decision_t"] - 13
+                    decision_time = temp.loc[j]["calendar_decision_t"]
 
                     states.append(state)
                     actions.append(action)
@@ -259,7 +260,7 @@ def collect_alg_update_function_args(data_df, update_df):
                         pd.DataFrame(
                             [
                                 [
-                                    i,
+                                    update_idx,
                                     user,
                                     betas,
                                     num_users_entered_already,
@@ -311,7 +312,7 @@ def collect_alg_update_function_args(data_df, update_df):
                         pd.DataFrame(
                             [
                                 [
-                                    i,
+                                    update_idx,
                                     user,
                                     betas,
                                     num_users_entered_already,
@@ -344,7 +345,7 @@ def collect_alg_update_function_args(data_df, update_df):
                 )
                 utime_dict[user] = ()
 
-        update_func_args_dict[i] = utime_dict
+        update_func_args_dict[update_idx] = utime_dict
 
     df.reset_index(drop=True, inplace=True)
 
@@ -357,26 +358,27 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
 
     act_prob_dict = {}
 
-    for i in range(
+    for calendar_decision_t in range(
         data_df["calendar_decision_t"].min(), data_df["calendar_decision_t"].max() + 1
     ):
-        temp = data_df[data_df["calendar_decision_t"] == i].reset_index(drop=True)
+        temp = data_df[
+            data_df["calendar_decision_t"] == calendar_decision_t
+        ].reset_index(drop=True)
 
         utime_dict = {}
 
         for user in data_df["user_idx"].unique():
             record = temp[temp["user_idx"] == user].reset_index(drop=True)
 
-            # Check if the user has any data
-            if record.shape[0] != 0:
+            # Check if the user was in the study
+            if record.in_study.item():
                 # Fetch the policy number and associated beta
                 policy = record["policy_idx"].values[0]
-                if policy < 1:
-                    # Construct beta from update dataframe
+                if policy == 0:
+                    # Construct beta from update dataframe, where first "update" is the prior
                     update_0 = update_df[update_df["update_idx"] == 0].reset_index(
                         drop=True
                     )
-                    # TODO: Perhaps refer to feature dim variable instead of hardcoding 15
                     mu = [
                         update_0[f"posterior_mu.{j}".format(j)].values[0]
                         for j in range(15)
@@ -417,9 +419,8 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
                 df2 = pd.concat(
                     [
                         df2,
-                        # TODO: Think about whether this 13 needs to be dynamic.
                         pd.DataFrame(
-                            [[i - 13, user, beta, state]],
+                            [[calendar_decision_t, user, beta, state]],
                             columns=[
                                 "calendar_decision_t",
                                 "user_idx",
@@ -430,13 +431,13 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
                     ]
                 )
                 utime_dict[user] = (beta, state)
+            # User is not in study, so produce an appropriate empty arg tuple.
             else:
                 df2 = pd.concat(
                     [
                         df2,
-                        # TODO: Think about whether this 13 needs to be dynamic.
                         pd.DataFrame(
-                            [[i - 13, user, [], []]],
+                            [[calendar_decision_t, user, [], []]],
                             columns=[
                                 "calendar_decision_t",
                                 "user_idx",
@@ -448,8 +449,7 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
                 )
                 utime_dict[user] = ()
 
-        # TODO: Think about whether this 13 needs to be dynamic.
-        act_prob_dict[i - 13] = utime_dict
+        act_prob_dict[calendar_decision_t] = utime_dict
 
     df2.reset_index(drop=True, inplace=True)
 
@@ -470,8 +470,6 @@ def create_study_df(data):
     # - act_prob: the action selection probability for the user at the given calendar decision time
     # - reward: the reward received by the user at the given calendar decision time
     # - state: the state of the user at the given calendar decision time
-
-    starting_policy = 5
 
     df3 = pd.DataFrame(
         columns=[
@@ -499,14 +497,10 @@ def create_study_df(data):
         for user in data["user_idx"].unique():
             record = temp[temp["user_idx"] == user].reset_index(drop=True)
 
-            # Check if the user has any data
-            if record.shape[0] != 0:
+            # Check if the user is in the study
+            if record.in_study.item():
                 # Fetch the policy number and associated beta
                 policy = record["policy_idx"].values[0]
-
-                # TODO: Adjust starting policy logic to be dynamic (and if we stop doing extra updates)
-                if policy < starting_policy:
-                    policy = 4
 
                 # Fetch the state
                 state = jnp.array(
@@ -525,11 +519,10 @@ def create_study_df(data):
                 df3 = pd.concat(
                     [
                         df3,
-                        # TODO: Think about whether this 13 needs to be dynamic.
                         pd.DataFrame(
                             [
                                 [
-                                    i - 13,
+                                    i,
                                     user,
                                     1,
                                     record["action"].values[0],
@@ -568,7 +561,7 @@ def create_study_df(data):
                         df3,
                         # TODO: Think about whether this 13 needs to be dynamic.
                         pd.DataFrame(
-                            [[i - 13, user, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+                            [[i, user, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
                             columns=[
                                 "calendar_decision_t",
                                 "user_idx",

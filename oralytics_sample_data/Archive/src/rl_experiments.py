@@ -170,13 +170,10 @@ def get_alg_state_from_app_opening(
         user_opened_app_today = user_last_open_app_dt == user_decision_time - 1
     if not user_opened_app_today:
         # impute b_bar with stale b_bar and prior day app engagement = 0
-        try:
-            calendar_last_open_app_dt = user_start_calendar_time + user_last_open_app_dt
-            stale_b_bar = get_all_in_study_single_user_data_prior_to_decision_t(
-                data_df, user_idx, calendar_last_open_app_dt + 1, "state.b.bar"
-            )[-1]
-        except:
-            breakpoint()
+        calendar_last_open_app_dt = user_start_calendar_time + user_last_open_app_dt
+        stale_b_bar = get_all_in_study_single_user_data_prior_to_decision_t(
+            data_df, user_idx, calendar_last_open_app_dt + 1, "state.b.bar"
+        )[-1]
         # refer to rl_algorithm.py process_alg_state functions for V2, V3
         advantage_state[1] = stale_b_bar
         advantage_state[3] = 0

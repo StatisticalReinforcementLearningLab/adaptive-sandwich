@@ -531,17 +531,17 @@ def require_valid_action_prob_times_given_if_index_supplied(
 
     min_time = study_df[calendar_t_col_name].min()
     max_time = study_df[calendar_t_col_name].max()
-    for args_by_user in rl_update_func_args.values():
-        for args in args_by_user.values():
+    for policy_idx, args_by_user in rl_update_func_args.items():
+        for user_id, args in args_by_user.items():
             if not args:
                 continue
             times = args[rl_update_func_args_action_prob_times_index]
             assert (
                 times[i] > times[i - 1] for i in range(1, len(times))
-            ), "Non-strictly-increasing times give for action proabilities in algorithm update function args. Please see the contract for details."
+            ), f"Non-strictly-increasing times were given for action probabilities in the algorithm update function args for user {user_id} and policy {policy_idx}. Please see the contract for details."
             assert (
                 times[0] >= min_time and times[-1] <= max_time
-            ), "Times not present in the study given for action proabilities in algorithm update function args. Please see the contract for details."
+            ), f"Times not present in the study were given for action probabilities in the algorithm update function args. The min and max times in the study dataframe are {min_time} and {max_time}, while user {user_id} has times {times} supplied for policy {policy_idx}. Please see the contract for details."
 
 
 def require_theta_estimating_functions_sum_to_zero(

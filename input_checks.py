@@ -13,8 +13,6 @@ from helper_functions import (
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
 
-CONDITION_NUMBER_CUTOFF = 10**3
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -45,9 +43,6 @@ def perform_first_wave_input_checks(
     small_sample_correction,
     meat_modifier_func_filename,
 ):
-    # TODO: Also, maybe this wave shouldn't include loading functions
-    # supplied--do action prob reconstruction, theta estimation, estimating function sum, etc. in a later wave.
-
     ### Validate RL loss/estimating function and args
     require_rl_update_args_given_for_all_users_at_each_update(
         study_df, user_id_col_name, rl_update_func_args
@@ -111,6 +106,9 @@ def perform_first_wave_input_checks(
     )
 
     ### Validate study_df
+    if not suppress_interactive_data_checks:
+        verify_study_df_summary_satisfactory(study_df)
+
     require_all_users_have_all_times_in_study_df(
         study_df, calendar_t_col_name, user_id_col_name
     )
@@ -140,9 +138,6 @@ def perform_first_wave_input_checks(
     require_consecutive_integer_calendar_times(study_df, calendar_t_col_name)
     require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name)
     require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name)
-
-    if not suppress_interactive_data_checks:
-        verify_study_df_summary_satisfactory(study_df)
 
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
@@ -370,7 +365,6 @@ def require_hashable_user_ids(study_df, in_study_col_name, user_id_col_name):
 
 def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name):
     logger.info("Checking that action probabilities are in the interval (0, 1).")
-    # TODO: Can we even require not 0 or 1? Illustrates non-compliant RL algorithm
     study_df[action_prob_col_name].between(0, 1, inclusive="neither").all()
 
 
@@ -469,9 +463,32 @@ def require_theta_is_1D_array(theta_est):
 def verify_study_df_summary_satisfactory(
     study_df,
 ):
-    # TODO: Give a summary of the study dataframe and ask the user to verify that it
-    # is satisfactory.  This should help avoid gross errors.
-    pass
+    num_users = study_df["user_id"].nunique()
+    num_non_initial_or_fallback_policies = study_df[study_df["policy_num"] > 0][
+        "policy_num"
+    ].nunique()
+    num_decision_times_with_fallback_policies = len(
+        study_df[study_df["policy_num"] < 0]
+    )
+    num_decision_times = study_df["calendar_t"].nunique()
+    avg_decisions_per_user = len(study_df) / num_users
+    num_decision_times_with_multiple_policies = (
+        study_df[study_df["policy_num"] >= 0]
+        .groupby("calendar_t")["policy_num"]
+        .nunique()
+        > 1
+    ).sum()
+
+    confirm_input_check_result(
+        f"\nYou provided a study dataframe reflecting a study with {num_users} users,"
+        f" {num_non_initial_or_fallback_policies} policy updates, {num_decision_times}"
+        f" decision times for an average of {avg_decisions_per_user} decisions per user, fallback"
+        f" policies used for {num_decision_times_with_fallback_policies} decision times"
+        f"({num_decision_times_with_fallback_policies * 100 / num_decision_times}%), and"
+        f" {num_decision_times_with_multiple_policies} decision times"
+        f"({num_decision_times_with_multiple_policies * 100 / num_decision_times}%) for which"
+        f" multiple non-fallback policies were in place. \n\nDoes this seem correct? (y/n)\n"
+    )
 
 
 def require_betas_match_in_rl_update_args_each_update(
@@ -544,138 +561,55 @@ def require_valid_action_prob_times_given_if_index_supplied(
             ), f"Times not present in the study were given for action probabilities in the algorithm update function args. The min and max times in the study dataframe are {min_time} and {max_time}, while user {user_id} has times {times} supplied for policy {policy_idx}. Please see the contract for details."
 
 
-def require_theta_estimating_functions_sum_to_zero(
-    inference_estimating_function_values, theta_dim
+def require_estimating_functions_sum_to_zero(
+    mean_estimating_function_stack: jnp.ndarray, beta_dim: int, theta_dim: int
 ):
-    # This is a test that the correct inference loss/estimating function has
-    # been given, corresponding either to the theta estimation function provided
-    # or the theta estimation procedure used to produce the theta estimate
-    # provided.
+    """
+    This is a test that the correct loss/estimating functions have
+    been given for the algorithm update and inference. If that is true, then the
+    loss/estimating functions should sum to approximately zero across users.
 
-    # If the theta estimate is directly provided, another possible failure mode
-    # is that the study dataframe doesn't faithfully represent the data used
-    # to produce that theta estimate.
-    logger.info("Checking that theta estimating functions sum to zero across users")
-    try:
-        np.testing.assert_allclose(
-            np.sum(inference_estimating_function_values, axis=0),
-            jnp.zeros(theta_dim),
-        )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nTheta estimating functions do not sum to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
-            e,
-        )
+    Inputs:
+    mean_estimating_function_stack:
+        The mean of the estimating function stack (a component for each algorithm update and
+        inference) across users. This should be a 1D array.
+    beta_dim:
+        The dimension of the beta vectors that parameterize the RL algorithm.
+    theta_dim:
+        The dimension of the theta vector that we estimate during after-study analysis.
 
+    Returns:
+    None
+    """
 
-def require_estimating_functions_sum_to_zero(mean_estimating_function):
-    # This is a test that the correct inference loss/estimating function has
-    # been given, corresponding either to the theta estimation function provided
-    # or the theta estimation procedure used to produce the theta estimate
-    # provided.
-
-    # If the theta estimate is directly provided, another possible failure mode
-    # is that the study dataframe doesn't faithfully represent the data used
-    # to produce that theta estimate.
     logger.info("Checking that estimating functions sum to zero across users")
     try:
         np.testing.assert_allclose(
-            mean_estimating_function,
-            jnp.zeros(mean_estimating_function.size),
+            jnp.zeros(mean_estimating_function_stack.size),
+            mean_estimating_function_stack,
+            rtol=1e-5,
+            atol=1e-5,
         )
     except AssertionError as e:
+        logger.info(
+            "Estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
+        )
+        # If this is not true there is an interal problem in the package.
+        assert (mean_estimating_function_stack.size - theta_dim) % beta_dim == 0
+        num_updates = (mean_estimating_function_stack.size - theta_dim) // beta_dim
+        for i in range(num_updates):
+            logger.info(
+                "Mean estimating function contribution for update %s:\n%s",
+                i + 1,
+                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
+            )
+        logger.info(
+            "Mean estimating function contribution for inference:\n%s",
+            mean_estimating_function_stack[-theta_dim:],
+        )
         confirm_input_check_result(
-            f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result, taking into account the above breakdown by update number and inference. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
             e,
-        )
-
-
-# TODO: Hotspot for replacing notion of update times
-def require_beta_estimating_functions_sum_to_zero(
-    update_times, algorithm_statistics_by_calendar_t, beta_dim
-):
-    logger.info(
-        "Checking that beta estimating functions sum to zero across users for each update"
-    )
-    # This is a test that the correct algorithm update function/estimating function has
-    # been given, along with correct arguments for each update time.
-
-    # If that is true, then the algorithm update function/estimating function should sum to zero
-    # for each update time when the RESULTING beta estimate and the data used
-    # to produce it are plugged in as the remaining args.
-
-    # First we collect the specific times at which the beta estimating functions
-    # don't sum to one. This is for easier debugging.
-    failing_times = []
-    all_update_sums = []
-    for t in update_times:
-        single_update_sum = sum(
-            algorithm_statistics_by_calendar_t[t]["loss_gradients_by_user_id"].values(),
-        )
-        all_update_sums.append(single_update_sum)
-        if not np.allclose(
-            single_update_sum,
-            jnp.zeros((beta_dim, 1)),
-        ):
-            failing_times.append(t)
-
-    # Now, we actually run our assert on a concatenated sum across all update times,
-    # because we are going to ask the user to verify that the max deviation is ok if
-    # the sum across all update times is not within the default tolerance of zero.
-    try:
-        np.testing.assert_allclose(
-            np.concatenate(all_update_sums),
-            jnp.zeros(beta_dim * len(update_times)),
-        )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nBeta estimating functions with args and provided beta estimate plugged in do not sum across users to within default tolerance of the zero vector for the updates first applying at times {failing_times}. Please decide if the maximum element-wise deviation from zero of the following concatenated vector sum across all update times is acceptably low. If not, there are several possible failure modes and next steps mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
-            e,
-        )
-
-
-# TODO: Also have interactive check if condition number merely high?
-# TODO: Hotspot for replacing notion of update times
-def check_avg_hessian_condition_num_at_each_update(
-    update_times,
-    algorithm_statistics_by_calendar_t,
-):
-    logger.info(
-        "Checking that average estimating function derivatives for RL are not singular at each update time"
-    )
-    poorly_conditioned_updates_dict = {}
-    for t in update_times:
-        condition_number = np.linalg.cond(
-            algorithm_statistics_by_calendar_t[t]["avg_loss_hessian"]
-        )
-        logger.info("Condition number at update time %s: %s", t, condition_number)
-        if condition_number > CONDITION_NUMBER_CUTOFF:
-            poorly_conditioned_updates_dict[t] = condition_number
-
-    if poorly_conditioned_updates_dict:
-        confirm_input_check_result(
-            f"\nPotentially poorly conditioned average estimating function derivatives for RL at the following update times:\n{poorly_conditioned_updates_dict}\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
-        )
-
-
-def require_non_singular_avg_hessian_inference(
-    inference_estimating_function_derivatives,
-):
-    logger.info(
-        "Checking that average estimating function derivative for inference is not singular"
-    )
-    avg_inference_estimating_function_derivative = jnp.mean(
-        inference_estimating_function_derivatives, axis=0
-    )
-    condition_number = np.linalg.cond(avg_inference_estimating_function_derivative)
-    logger.info(
-        "Condition number for average inference estimating function derivative: %s",
-        condition_number,
-    )
-
-    if condition_number > CONDITION_NUMBER_CUTOFF:
-        confirm_input_check_result(
-            f"\nPotentially poorly conditioned (possibly singular) average estimating function derivative for inference. Condition number:\n\n{condition_number}.\n\nPlease see the contract for details.\n\nContinue? (y/n)\n"
         )
 
 
@@ -701,6 +635,8 @@ def require_adaptive_bread_inverse_is_true_inverse(
         np.testing.assert_allclose(
             joint_adaptive_bread_matrix @ joint_adaptive_bread_inverse_matrix,
             np.eye(joint_adaptive_bread_matrix.shape[0]),
+            rtol=1e-5,
+            atol=1e-5,
         )
     except AssertionError as e:
         confirm_input_check_result(

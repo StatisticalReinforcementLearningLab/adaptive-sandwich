@@ -367,9 +367,11 @@ def analyze_dataset(
         user_ids,
     )
 
+    beta_dim = len(all_post_update_betas[0])
+    theta_dim = len(theta_est)
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
         input_checks.require_estimating_functions_sum_to_zero(
-            avg_estimating_function_stack
+            avg_estimating_function_stack, beta_dim, theta_dim
         )
 
     logger.info("Forming classical sandwich variance estimate...")
@@ -381,9 +383,10 @@ def analyze_dataset(
     ) / len(user_ids)
 
     # TODO: decide whether to in fact scrap the structure-based inversion
+    # TODO: Could inspect condition number of each of the diagonal matrices
     logger.info("Inverting joint bread inverse matrix...")
     joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
-        joint_adaptive_bread_inverse_matrix, try_tikhonov_if_poorly_conditioned=True
+        joint_adaptive_bread_inverse_matrix
     )
 
     if not suppress_interactive_data_checks and not suppress_all_data_checks:
@@ -402,7 +405,7 @@ def analyze_dataset(
     # corresponding to just theta.  This distinguishes this matrix from the
     # *joint* adaptive variance matrix above, which covers both beta and theta.
     adaptive_sandwich_var_estimate = joint_adaptive_var_estimate[
-        -len(theta_est) :, -len(theta_est) :
+        -theta_dim:, -theta_dim:
     ]
 
     logger.info("Writing results to file...")
@@ -1191,7 +1194,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     inference_only_outer_products = jnp.array([result[2] for result in results])
     inference_hessians = jnp.array([result[3] for result in results])
 
-    # Note this strange return structure! We will differentiate with respect to the first output,
+    # Note this strange return structure! We will differentiate the first output,
     # but the second output will be passed along without modification via has_aux=True and then used
     # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
     # bread matrices.
@@ -1210,7 +1213,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     user_ids: jnp.ndarray,
 ):
     logger.info(
-        "Differentiating avg weighted estimating function stack and collecting auxiliary values."
+        "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
     # Interestingly, jax.jacobian does not seem to work here... just hangs in
     # the oralytics case, while it works fine in the simpler synthetic case.

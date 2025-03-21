@@ -1,8 +1,10 @@
 import collections
 import logging
+from typing import Any
 
 import numpy as np
 from jax import numpy as jnp
+import pandas as pd
 
 from constants import SmallSampleCorrections
 from helper_functions import (
@@ -21,8 +23,7 @@ logging.basicConfig(
 )
 
 
-# TODO: Clean up some of these checks in light of bread calculation overhaul.
-# TODO: any checks needed here about rl update function type?
+# TODO: any checks needed here about alg update function type?
 def perform_first_wave_input_checks(
     study_df,
     in_study_col_name,
@@ -34,51 +35,60 @@ def perform_first_wave_input_checks(
     action_prob_func_filename,
     action_prob_func_args,
     action_prob_func_args_beta_index,
-    rl_update_func_args,
-    rl_update_func_args_beta_index,
-    rl_update_func_args_action_prob_index,
-    rl_update_func_args_action_prob_times_index,
+    alg_update_func_args,
+    alg_update_func_args_beta_index,
+    alg_update_func_args_action_prob_index,
+    alg_update_func_args_action_prob_times_index,
     theta_est,
     suppress_interactive_data_checks,
     small_sample_correction,
     meat_modifier_func_filename,
 ):
-    ### Validate RL loss/estimating function and args
-    require_rl_update_args_given_for_all_users_at_each_update(
-        study_df, user_id_col_name, rl_update_func_args
+    ### Validate algorithm loss/estimating function and args
+    require_alg_update_args_given_for_all_users_at_each_update(
+        study_df, user_id_col_name, alg_update_func_args
     )
-    require_no_policy_numbers_present_in_rl_update_args_but_not_study_df(
-        study_df, policy_num_col_name, rl_update_func_args
+    require_no_policy_numbers_present_in_alg_update_args_but_not_study_df(
+        study_df, policy_num_col_name, alg_update_func_args
     )
-    require_beta_is_1D_array_in_rl_update_args(
-        rl_update_func_args, rl_update_func_args_beta_index
+    require_beta_is_1D_array_in_alg_update_args(
+        alg_update_func_args, alg_update_func_args_beta_index
     )
-    require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_update_args(
-        study_df, in_study_col_name, policy_num_col_name, rl_update_func_args
+    require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_alg_update_args(
+        study_df, in_study_col_name, policy_num_col_name, alg_update_func_args
     )
     if not suppress_interactive_data_checks:
-        confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
-            rl_update_func_args_action_prob_index
+        confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
+            alg_update_func_args_action_prob_index
         )
     require_action_prob_args_in_range_0_1_if_supplied(
-        rl_update_func_args, rl_update_func_args_action_prob_index
+        alg_update_func_args, alg_update_func_args_action_prob_index
     )
     require_action_prob_times_given_if_index_supplied(
-        rl_update_func_args_action_prob_index,
-        rl_update_func_args_action_prob_times_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
     )
     require_action_prob_index_given_if_times_supplied(
-        rl_update_func_args_action_prob_index,
-        rl_update_func_args_action_prob_times_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
     )
-    require_betas_match_in_rl_update_args_each_update(
-        rl_update_func_args, rl_update_func_args_beta_index
+    require_betas_match_in_alg_update_args_each_update(
+        alg_update_func_args, alg_update_func_args_beta_index
+    )
+    require_action_prob_args_in_alg_update_func_correspond_to_study_df(
+        study_df,
+        action_prob_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        alg_update_func_args,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
     )
     require_valid_action_prob_times_given_if_index_supplied(
         study_df,
         calendar_t_col_name,
-        rl_update_func_args,
-        rl_update_func_args_action_prob_times_index,
+        alg_update_func_args,
+        alg_update_func_args_action_prob_times_index,
     )
 
     ### Validate action prob function and args
@@ -89,7 +99,7 @@ def perform_first_wave_input_checks(
         study_df, calendar_t_col_name, action_prob_func_args
     )
     if not suppress_interactive_data_checks:
-        require_action_probabilities_can_be_reconstructed(
+        require_action_probabilities_in_study_df_can_be_reconstructed(
             study_df,
             action_prob_col_name,
             calendar_t_col_name,
@@ -98,6 +108,14 @@ def perform_first_wave_input_checks(
             action_prob_func_filename,
             action_prob_func_args,
         )
+
+    require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
+        study_df,
+        calendar_t_col_name,
+        action_prob_func_args,
+        in_study_col_name,
+        user_id_col_name,
+    )
     require_beta_is_1D_array_in_action_prob_args(
         action_prob_func_args, action_prob_func_args_beta_index
     )
@@ -107,7 +125,13 @@ def perform_first_wave_input_checks(
 
     ### Validate study_df
     if not suppress_interactive_data_checks:
-        verify_study_df_summary_satisfactory(study_df)
+        verify_study_df_summary_satisfactory(
+            study_df,
+            user_id_col_name,
+            policy_num_col_name,
+            calendar_t_col_name,
+            in_study_col_name,
+        )
 
     require_all_users_have_all_times_in_study_df(
         study_df, calendar_t_col_name, user_id_col_name
@@ -148,7 +172,7 @@ def perform_first_wave_input_checks(
     )
 
 
-def require_action_probabilities_can_be_reconstructed(
+def require_action_probabilities_in_study_df_can_be_reconstructed(
     study_df,
     action_prob_col_name,
     calendar_t_col_name,
@@ -171,6 +195,7 @@ def require_action_probabilities_can_be_reconstructed(
         np.testing.assert_allclose(
             in_study_df[action_prob_col_name].to_numpy(dtype="float64"),
             reconstructed_action_probs.to_numpy(dtype="float64"),
+            atol=1e-6,
         )
     except AssertionError as e:
         confirm_input_check_result(
@@ -198,17 +223,65 @@ def require_all_users_have_all_times_in_study_df(
         )
 
 
-def require_rl_update_args_given_for_all_users_at_each_update(
-    study_df, user_id_col_name, rl_update_func_args
+def require_alg_update_args_given_for_all_users_at_each_update(
+    study_df, user_id_col_name, alg_update_func_args
 ):
     logger.info(
         "Checking that algorithm update function args are given for all users at each update."
     )
     all_user_ids = set(study_df[user_id_col_name].unique())
-    for policy_num in rl_update_func_args:
+    for policy_num in alg_update_func_args:
         assert (
-            set(rl_update_func_args[policy_num].keys()) == all_user_ids
+            set(alg_update_func_args[policy_num].keys()) == all_user_ids
         ), f"Not all users present in algorithm update function args for policy number {policy_num}. Please see the contract for details."
+
+
+def require_action_prob_args_in_alg_update_func_correspond_to_study_df(
+    study_df,
+    action_prob_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
+    alg_update_func_args,
+    alg_update_func_args_action_prob_index,
+    alg_update_func_args_action_prob_times_index,
+):
+    logger.info(
+        "Checking that the action probabilities supplied in the algorithm update function args, if"
+        " any, correspond to those in the study dataframe for the corresponding users and decision"
+        " times."
+    )
+    if alg_update_func_args_action_prob_index < 0:
+        return
+
+    for policy_num in alg_update_func_args:
+        for user_id in alg_update_func_args[policy_num]:
+            if not alg_update_func_args[policy_num][user_id]:
+                continue
+            arg_action_probs = alg_update_func_args[policy_num][user_id][
+                alg_update_func_args_action_prob_index
+            ]
+            action_prob_times = alg_update_func_args[policy_num][user_id][
+                alg_update_func_args_action_prob_times_index
+            ]
+            study_df_action_probs = []
+            for decision_time, arg_action_prob in zip(
+                action_prob_times, arg_action_probs
+            ):
+                study_df_action_probs.append(
+                    study_df[
+                        (study_df[calendar_t_col_name] == decision_time)
+                        & (study_df[user_id_col_name] == user_id)
+                    ][action_prob_col_name].values[0]
+                )
+
+            assert np.allclose(
+                arg_action_probs.flatten(),
+                study_df_action_probs,
+            ), (
+                f"There is a mismatch for user {user_id} between the action probabilities supplied"
+                f" in the args to the algorithm update function at policy {policy_num} and those in"
+                " the study dataframe for the supplied times. Please see the contract for details."
+            )
 
 
 def require_action_prob_func_args_given_for_all_users_at_each_decision(
@@ -237,6 +310,44 @@ def require_action_prob_func_args_given_for_all_decision_times(
     assert (
         set(action_prob_func_args.keys()) == all_times
     ), "Not all decision times present in action prob function args. Please see the contract for details."
+
+
+def require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
+    study_df: pd.DataFrame,
+    calendar_t_col_name: str,
+    action_prob_func_args: dict[str, dict[str, tuple[Any, ...]]],
+    in_study_col_name,
+    user_id_col_name,
+):
+    logger.info(
+        "Checking that action probability function args are blank for exactly the times each user"
+        " is not in the study according to the study dataframe."
+    )
+    out_of_study_df = study_df[study_df[in_study_col_name] == 0]
+    out_of_study_times_by_user_according_to_study_df = (
+        out_of_study_df.groupby(user_id_col_name)[calendar_t_col_name]
+        .apply(set)
+        .to_dict()
+    )
+
+    out_of_study_times_by_user_according_to_action_prob_func_args = (
+        collections.defaultdict(set)
+    )
+    for decision_time, action_prob_args_by_user in action_prob_func_args.items():
+        for user_id, action_prob_args in action_prob_args_by_user.items():
+            if not action_prob_args:
+                out_of_study_times_by_user_according_to_action_prob_func_args[
+                    user_id
+                ].add(decision_time)
+
+    assert (
+        out_of_study_times_by_user_according_to_study_df
+        == out_of_study_times_by_user_according_to_action_prob_func_args
+    ), (
+        "Out-of-study decision times according to the study dataframe do not match up with the"
+        " times for which action probability arguments are blank for all users. Please see the"
+        " contract for details."
+    )
 
 
 def require_all_named_columns_present_in_study_df(
@@ -368,19 +479,19 @@ def require_action_probabilities_in_range_0_to_1(study_df, action_prob_col_name)
     study_df[action_prob_col_name].between(0, 1, inclusive="neither").all()
 
 
-def require_no_policy_numbers_present_in_rl_update_args_but_not_study_df(
-    study_df, policy_num_col_name, rl_update_func_args
+def require_no_policy_numbers_present_in_alg_update_args_but_not_study_df(
+    study_df, policy_num_col_name, alg_update_func_args
 ):
     logger.info(
         "Checking that policy numbers in algorithm update function args are present in the study dataframe."
     )
-    assert set(rl_update_func_args.keys()).issubset(
+    assert set(alg_update_func_args.keys()).issubset(
         study_df[policy_num_col_name].unique()
     ), "There are policy numbers present in algorithm update function args but not in the study dataframe. Please see the contract for details."
 
 
-def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_rl_update_args(
-    study_df, in_study_col_name, policy_num_col_name, rl_update_func_args
+def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_alg_update_args(
+    study_df, in_study_col_name, policy_num_col_name, alg_update_func_args
 ):
     logger.info(
         "Checking that all policy numbers in the study dataframe are present in the algorithm update function args."
@@ -394,56 +505,56 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
             policy_num_col_name
         ].unique()
     ).issubset(
-        rl_update_func_args.keys()
+        alg_update_func_args.keys()
     ), "There are policy numbers present in algorithm update function args but not in the study dataframe. Please see the contract for details."
 
 
-def confirm_action_probabilities_not_in_rl_update_args_if_index_not_supplied(
-    rl_update_func_args_action_prob_index,
+def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
+    alg_update_func_args_action_prob_index,
 ):
     logger.info(
         "Confirming that action probabilities are not in algorithm update function args IF their index is not specified"
     )
-    if rl_update_func_args_action_prob_index < 0:
+    if alg_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
             "\nYou specified that the algorithm update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
         )
 
 
 def require_action_prob_args_in_range_0_1_if_supplied(
-    rl_update_func_args, rl_update_func_args_action_prob_index
+    alg_update_func_args, alg_update_func_args_action_prob_index
 ):
-    # TODO: Can we even require not 0 or 1? Illustrates non-compliant RL algorithm
+    # TODO: implement
     pass
 
 
 def require_action_prob_times_given_if_index_supplied(
-    rl_update_func_args_action_prob_index,
-    rl_update_func_args_action_prob_times_index,
+    alg_update_func_args_action_prob_index,
+    alg_update_func_args_action_prob_times_index,
 ):
     logger.info("Checking that action prob times are given if index is supplied.")
-    if rl_update_func_args_action_prob_index >= 0:
-        assert rl_update_func_args_action_prob_times_index >= 0 and (
-            rl_update_func_args_action_prob_times_index
-            != rl_update_func_args_action_prob_index
+    if alg_update_func_args_action_prob_index >= 0:
+        assert alg_update_func_args_action_prob_times_index >= 0 and (
+            alg_update_func_args_action_prob_times_index
+            != alg_update_func_args_action_prob_index
         )
 
 
 def require_action_prob_index_given_if_times_supplied(
-    rl_update_func_args_action_prob_index,
-    rl_update_func_args_action_prob_times_index,
+    alg_update_func_args_action_prob_index,
+    alg_update_func_args_action_prob_times_index,
 ):
     logger.info("Checking that action prob index is given if times are supplied.")
-    if rl_update_func_args_action_prob_times_index >= 0:
-        assert rl_update_func_args_action_prob_index >= 0 and (
-            rl_update_func_args_action_prob_times_index
-            != rl_update_func_args_action_prob_index
+    if alg_update_func_args_action_prob_times_index >= 0:
+        assert alg_update_func_args_action_prob_index >= 0 and (
+            alg_update_func_args_action_prob_times_index
+            != alg_update_func_args_action_prob_index
         )
 
 
 # TODO: too basic?
-def require_beta_is_1D_array_in_rl_update_args(
-    rl_update_func_args, rl_update_func_args_beta_index
+def require_beta_is_1D_array_in_alg_update_args(
+    alg_update_func_args, alg_update_func_args_beta_index
 ):
     pass
 
@@ -462,19 +573,25 @@ def require_theta_is_1D_array(theta_est):
 
 def verify_study_df_summary_satisfactory(
     study_df,
+    user_id_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    in_study_col_name,
 ):
-    num_users = study_df["user_id"].nunique()
-    num_non_initial_or_fallback_policies = study_df[study_df["policy_num"] > 0][
-        "policy_num"
-    ].nunique()
+
+    in_study_df = study_df[study_df[in_study_col_name] == 1]
+    num_users = in_study_df[user_id_col_name].nunique()
+    num_non_initial_or_fallback_policies = in_study_df[
+        in_study_df[policy_num_col_name] > 0
+    ][policy_num_col_name].nunique()
     num_decision_times_with_fallback_policies = len(
-        study_df[study_df["policy_num"] < 0]
+        in_study_df[in_study_df[policy_num_col_name] < 0]
     )
-    num_decision_times = study_df["calendar_t"].nunique()
-    avg_decisions_per_user = len(study_df) / num_users
+    num_decision_times = in_study_df[calendar_t_col_name].nunique()
+    avg_decisions_per_user = len(in_study_df) / num_users
     num_decision_times_with_multiple_policies = (
-        study_df[study_df["policy_num"] >= 0]
-        .groupby("calendar_t")["policy_num"]
+        in_study_df[in_study_df[policy_num_col_name] >= 0]
+        .groupby(calendar_t_col_name)[policy_num_col_name]
         .nunique()
         > 1
     ).sum()
@@ -491,19 +608,19 @@ def verify_study_df_summary_satisfactory(
     )
 
 
-def require_betas_match_in_rl_update_args_each_update(
-    rl_update_func_args, rl_update_func_args_beta_index
+def require_betas_match_in_alg_update_args_each_update(
+    alg_update_func_args, alg_update_func_args_beta_index
 ):
     logger.info(
         "Checking that betas match across users for each update in the algorithm update function args."
     )
-    for policy_num in rl_update_func_args:
+    for policy_num in alg_update_func_args:
         first_beta = None
-        for user_id in rl_update_func_args[policy_num]:
-            if not rl_update_func_args[policy_num][user_id]:
+        for user_id in alg_update_func_args[policy_num]:
+            if not alg_update_func_args[policy_num][user_id]:
                 continue
-            beta = rl_update_func_args[policy_num][user_id][
-                rl_update_func_args_beta_index
+            beta = alg_update_func_args[policy_num][user_id][
+                alg_update_func_args_beta_index
             ]
             if first_beta is None:
                 first_beta = beta
@@ -538,21 +655,21 @@ def require_betas_match_in_action_prob_func_args_each_decision(
 def require_valid_action_prob_times_given_if_index_supplied(
     study_df,
     calendar_t_col_name,
-    rl_update_func_args,
-    rl_update_func_args_action_prob_times_index,
+    alg_update_func_args,
+    alg_update_func_args_action_prob_times_index,
 ):
     logger.info("Checking that action prob times are valid if index is supplied.")
 
-    if rl_update_func_args_action_prob_times_index < 0:
+    if alg_update_func_args_action_prob_times_index < 0:
         return
 
     min_time = study_df[calendar_t_col_name].min()
     max_time = study_df[calendar_t_col_name].max()
-    for policy_idx, args_by_user in rl_update_func_args.items():
+    for policy_idx, args_by_user in alg_update_func_args.items():
         for user_id, args in args_by_user.items():
             if not args:
                 continue
-            times = args[rl_update_func_args_action_prob_times_index]
+            times = args[alg_update_func_args_action_prob_times_index]
             assert (
                 times[i] > times[i - 1] for i in range(1, len(times))
             ), f"Non-strictly-increasing times were given for action probabilities in the algorithm update function args for user {user_id} and policy {policy_idx}. Please see the contract for details."
@@ -566,15 +683,18 @@ def require_estimating_functions_sum_to_zero(
 ):
     """
     This is a test that the correct loss/estimating functions have
-    been given for the algorithm update and inference. If that is true, then the
-    loss/estimating functions should sum to approximately zero across users.
+    been given for both the algorithm updates and inference. If that is true, then the
+    loss/estimating functions when evaluated should sum to approximately zero across users.  These
+    values have been stacked and averaged across users in mean_estimating_function_stack, which
+    we simply compare to the zero vector.  We can isolate components for each update and inference
+    by considering the dimensions of the beta vectors and the theta vector.
 
     Inputs:
     mean_estimating_function_stack:
         The mean of the estimating function stack (a component for each algorithm update and
         inference) across users. This should be a 1D array.
     beta_dim:
-        The dimension of the beta vectors that parameterize the RL algorithm.
+        The dimension of the beta vectors that parameterize the algorithm.
     theta_dim:
         The dimension of the theta vector that we estimate during after-study analysis.
 

@@ -158,6 +158,13 @@ def get_alg_state_from_app_opening(
     user_decision_time,
     advantage_state,
 ):
+    """
+    Get the algorithm state based on the time of the last app open.
+
+    Note that we deal in both user and calendar time here, since the environment deals in user
+    decision times, but the data dataframe deals in calendar decision times.
+
+    """
     if DECISIONS_PER_DAY != 2:
         raise ValueError("This function is only implemented for 2 decisions per day")
 

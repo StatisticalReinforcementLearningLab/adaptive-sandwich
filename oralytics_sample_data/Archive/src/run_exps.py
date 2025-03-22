@@ -149,10 +149,10 @@ def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_updat
     pd.to_pickle(data_df, exp_path + f"/{seed}_data_df.p")
     pd.to_pickle(update_df, exp_path + f"/{seed}_update_df.p")
 
-    return data_df, update_df
+    return data_df, update_df, algorithm.feature_dim
 
 
-def collect_alg_update_function_args(data_df, update_df):
+def collect_alg_update_function_args(data_df, update_df, feature_dim):
     df = pd.DataFrame(
         columns=[
             "update_idx",
@@ -180,16 +180,14 @@ def collect_alg_update_function_args(data_df, update_df):
         temp = update_df[update_df["update_idx"] == update_idx]
 
         mu = []
-        # TODO: Potentially adjust the 15 to be dynamic based on settings
-        for j in range(15):
+        for j in range(feature_dim):
             mu.append(temp[f"posterior_mu.{j}"].values[0])
 
         sigma = []
 
-        # TODO: Potentially adjust the 15 to be dynamic based on settings
-        for j in range(15):
+        for j in range(feature_dim):
             t = []
-            for k in range(15):
+            for k in range(feature_dim):
                 t.append(temp[f"posterior_var.{j}.{k}"].values[0])
             sigma.append(t)
 
@@ -353,7 +351,9 @@ def collect_alg_update_function_args(data_df, update_df):
     return df, update_func_args_dict
 
 
-def collect_action_prob_function_args(data_df, update_df, update_func_args_dict):
+def collect_action_prob_function_args(
+    data_df, update_df, update_func_args_dict, feature_dim
+):
     # Now create the dataframe for the action selection function
     df2 = pd.DataFrame(columns=["calendar_decision_t", "user_idx", "beta", "advantage"])
 
@@ -382,14 +382,14 @@ def collect_action_prob_function_args(data_df, update_df, update_func_args_dict)
                     )
                     mu = [
                         update_0[f"posterior_mu.{j}".format(j)].values[0]
-                        for j in range(15)
+                        for j in range(feature_dim)
                     ]
                     sigma = [
                         [
                             update_0[f"posterior_var.{j}.{k}"].values[0]
-                            for k in range(15)
+                            for k in range(feature_dim)
                         ]
-                        for j in range(15)
+                        for j in range(feature_dim)
                     ]
                     sigma_inv = jnp.linalg.inv(jnp.array(sigma))
                     utsigma_inv = np.array(sigma_inv)[
@@ -560,7 +560,6 @@ def create_study_df(data):
                 df3 = pd.concat(
                     [
                         df3,
-                        # TODO: Think about whether this 13 needs to be dynamic.
                         pd.DataFrame(
                             [[i, user, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
                             columns=[
@@ -586,9 +585,11 @@ def create_study_df(data):
     return df3
 
 
-def process_results(data_df, update_df, exp_path, seed):
-    _, loss_dict = collect_alg_update_function_args(data_df, update_df)
-    _, act_prob_dict = collect_action_prob_function_args(data_df, update_df, loss_dict)
+def process_results(data_df, update_df, exp_path, seed, feature_dim):
+    _, loss_dict = collect_alg_update_function_args(data_df, update_df, feature_dim)
+    _, act_prob_dict = collect_action_prob_function_args(
+        data_df, update_df, loss_dict, feature_dim
+    )
     study_df = create_study_df(data_df)
 
     with open(exp_path + f"/{seed}_loss_fn_data.pkl", "wb") as f:
@@ -599,8 +600,6 @@ def process_results(data_df, update_df, exp_path, seed):
         pkl.dump(study_df, f)
 
 
-# TODO: Possibly parameterize the function to take in some or all of the
-# experiment settings on the command line.
 @click.command()
 @click.option("--seed", default=0, help="Random seed for the experiment.")
 @click.option(
@@ -650,12 +649,12 @@ def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_updat
     logger.info("Running experiment: %s", exp_name)
     # The data df collects the data generatd by the experiment. The update df
     # records the updates to the algorithm's parameters.
-    data_df, update_df = run(
+    data_df, update_df, feature_dim = run(
         exp_path, seed, num_users, users_per_recruitment, num_users_before_update
     )
 
     logger.info("Packaging results for after-study analysis.")
-    process_results(data_df, update_df, exp_path, seed)
+    process_results(data_df, update_df, exp_path, seed, feature_dim)
 
     logger.info("Experiment and post-processing complete.")
 

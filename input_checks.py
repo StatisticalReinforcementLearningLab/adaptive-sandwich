@@ -131,6 +131,7 @@ def perform_first_wave_input_checks(
             policy_num_col_name,
             calendar_t_col_name,
             in_study_col_name,
+            action_prob_col_name,
         )
 
     require_all_users_have_all_times_in_study_df(
@@ -219,7 +220,7 @@ def require_all_users_have_all_times_in_study_df(
     # Check if all users have the same set of unique calendar times
     if not user_calendar_times.apply(lambda x: x == unique_calendar_times).all():
         raise AssertionError(
-            "Not all users have the same calendar times in the study dataframe. Please see the contract for details."
+            "Not all users have all calendar times in the study dataframe. Please see the contract for details."
         )
 
 
@@ -264,9 +265,7 @@ def require_action_prob_args_in_alg_update_func_correspond_to_study_df(
                 alg_update_func_args_action_prob_times_index
             ]
             study_df_action_probs = []
-            for decision_time, arg_action_prob in zip(
-                action_prob_times, arg_action_probs
-            ):
+            for decision_time in action_prob_times:
                 study_df_action_probs.append(
                     study_df[
                         (study_df[calendar_t_col_name] == decision_time)
@@ -577,6 +576,7 @@ def verify_study_df_summary_satisfactory(
     policy_num_col_name,
     calendar_t_col_name,
     in_study_col_name,
+    action_prob_col_name,
 ):
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
@@ -595,16 +595,24 @@ def verify_study_df_summary_satisfactory(
         .nunique()
         > 1
     ).sum()
+    min_action_prob = in_study_df[action_prob_col_name].min()
+    max_action_prob = in_study_df[action_prob_col_name].max()
 
     confirm_input_check_result(
-        f"\nYou provided a study dataframe reflecting a study with {num_users} users,"
-        f" {num_non_initial_or_fallback_policies} policy updates, {num_decision_times}"
-        f" decision times for an average of {avg_decisions_per_user} decisions per user, fallback"
-        f" policies used for {num_decision_times_with_fallback_policies} decision times"
-        f"({num_decision_times_with_fallback_policies * 100 / num_decision_times}%), and"
-        f" {num_decision_times_with_multiple_policies} decision times"
-        f"({num_decision_times_with_multiple_policies * 100 / num_decision_times}%) for which"
-        f" multiple non-fallback policies were in place. \n\nDoes this seem correct? (y/n)\n"
+        f"\nYou provided a study dataframe reflecting a study with"
+        f"\n* {num_users} users"
+        f"\n* {num_non_initial_or_fallback_policies} policy updates"
+        f"\n* {num_decision_times} decision times, for an average of {avg_decisions_per_user}"
+        f" decisions per user"
+        f"\n* {num_decision_times_with_fallback_policies} decision times"
+        f" ({num_decision_times_with_fallback_policies * 100 / num_decision_times}%) for which"
+        f" fallback policies were used"
+        f"\n* {num_decision_times_with_multiple_policies} decision times"
+        f" ({num_decision_times_with_multiple_policies * 100 / num_decision_times}%)"
+        f" for which multiple non-fallback policies were used"
+        f"\n* Minimum action probability {min_action_prob}"
+        f"\n* Maximum action probability {max_action_prob}"
+        f" \n\nDoes this seem correct? (y/n)\n"
     )
 
 

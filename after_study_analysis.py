@@ -203,30 +203,30 @@ def cli():
     help="File that contains the meat matrix modifier function and relevant imports.  The filename without its extension will be assumed to match the function name.",
 )
 def analyze_dataset(
-    study_df_pickle,
-    action_prob_func_filename,
-    action_prob_func_args_pickle,
-    action_prob_func_args_beta_index,
-    alg_update_func_filename,
-    alg_update_func_type,
-    alg_update_func_args_pickle,
-    alg_update_func_args_beta_index,
-    alg_update_func_args_action_prob_index,
-    alg_update_func_args_action_prob_times_index,
-    inference_func_filename,
-    inference_func_type,
-    inference_func_args_theta_index,
-    theta_calculation_func_filename,
-    in_study_col_name,
-    action_col_name,
-    policy_num_col_name,
-    calendar_t_col_name,
-    user_id_col_name,
-    action_prob_col_name,
-    suppress_interactive_data_checks,
-    suppress_all_data_checks,
-    small_sample_correction,
-    meat_modifier_func_filename,
+    study_df_pickle: click.File,
+    action_prob_func_filename: str,
+    action_prob_func_args_pickle: click.File,
+    action_prob_func_args_beta_index: int,
+    alg_update_func_filename: str,
+    alg_update_func_type: str,
+    alg_update_func_args_pickle: click.File,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_action_prob_index: int,
+    alg_update_func_args_action_prob_times_index: int,
+    inference_func_filename: str,
+    inference_func_type: str,
+    inference_func_args_theta_index: int,
+    theta_calculation_func_filename: str,
+    in_study_col_name: str,
+    action_col_name: str,
+    policy_num_col_name: str,
+    calendar_t_col_name: str,
+    user_id_col_name: str,
+    action_prob_col_name: str,
+    suppress_interactive_data_checks: bool,
+    suppress_all_data_checks: bool,
+    small_sample_correction: str,
+    meat_modifier_func_filename: str,
 ):
     """
     Make sure in study is never on for more than one stretch EDIT: unclear if
@@ -238,9 +238,7 @@ def analyze_dataset(
     Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
     Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 
-    Beta must be vector (not matrix)
-
-    Make the user give the min and max probabilities, and I'll enforce it
+    Make the user give the min and max probabilities, and I'll enforce it?
 
     I assume someone is in the study at each decision time. Check for this or
     see if it shouldn't always be true. EDIT: Is this true that I assume this?
@@ -381,6 +379,8 @@ def analyze_dataset(
     classical_sandwich_var_estimate = (
         classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
     ) / len(user_ids)
+
+    # TODO: Small sample correction?
 
     # TODO: decide whether to in fact scrap the structure-based inversion
     # TODO: Could inspect condition number of each of the diagonal matrices
@@ -765,7 +765,6 @@ def construct_single_user_weighted_estimating_function_stacker(
         else inference_func
     )
 
-    # TODO: Break into smaller functions.
     def single_user_weighted_algorithm_estimating_function_stacker(
         theta: jnp.ndarray,
         all_post_update_betas: list[jnp.ndarray],
@@ -786,10 +785,10 @@ def construct_single_user_weighted_estimating_function_stacker(
                 The user ID for which to compute the weighted estimating function stack.
 
         Returns:
-            jnp.ndarray: A JAX NumPy array representing the weighted estimating function stack.
-            jnp.ndarray: A JAX NumPy matrix representing the users' adaptive meat contribution.
-            jnp.ndarray: A JAX NumPy matrix representing the users's classical meat contribution.
-            jnp.ndarray: A JAX NumPy matrix representing the user's classical bread contribution.
+            jnp.ndarray: A 1-D JAX NumPy array representing the weighted estimating function stack.
+            jnp.ndarray: A 2-D JAX NumPy matrix representing the user's adaptive meat contribution.
+            jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical meat contribution.
+            jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical bread contribution.
         """
 
         logger.info(
@@ -961,7 +960,7 @@ def construct_single_user_weighted_estimating_function_stacker(
                         *threaded_single_user_action_prob_func_args_by_decision_time[t],
                     )
                     # Go from the first time for the user that is after the first
-                    # update, to their last active time
+                    # update to their last active time
                     for t in range(
                         max(first_time_after_first_update, user_start_time),
                         user_end_time + 1,
@@ -973,14 +972,15 @@ def construct_single_user_weighted_estimating_function_stacker(
         # 8. Concatenate the two components to form the weighted estimating function stack for this
         # user.
         weighted_stack = jnp.concatenate([algorithm_component, inference_component])
+
         # 9. Return the stack and auxiliary outputs described below.
         # Note the 4 outputs:
         # 1. The first is simply the weighted estimating function stack for this user. The average
         # of these is what we differentiate with respect to theta to form the inverse adaptive bread
         # matrix, and we also compare that average to zero to check the estimating functions'
         # fidelity.
-        # 2. The average outer product of these per-user stacks is the meat matrix, hence the second
-        # output.
+        # 2. The average outer product of these per-user stacks across users is the meat matrix,
+        # hence the second output.
         # 3. The third output is averaged across users to obtain the classical meat matrix.
         # 4. The fourth output is averaged across users to obtatin the inverse classical bread
         # matrix.
@@ -1225,9 +1225,9 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(
-        # Note how this is a list of jnp arrays; it cannot be a jnp array itself
+        # Note how this is a list of jnp arrays; it cannot easily be a jnp array itself
         # because theta and the betas need not be the same size.  But JAX can still
-        # differentiate with respect to the all betas and thetas at once if they
+        # differentiate with respect to all betas and thetas at once if they
         # are collected like so.
         list(all_post_update_betas) + [theta],
         single_user_weighted_estimating_function_stacker,
@@ -1236,8 +1236,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary values.
     # The bread will always be block lower triangular.  If this is not the case there
-    # is an error (but it is almost certainly the package's fault, not the user's,
-    # so no live check for this.)
+    # is an error (but it is almost certainly the package's fault, not the user's).
     return (
         jnp.hstack(joint_adaptive_bread_inverse_pieces),
         joint_adaptive_meat,
@@ -1266,7 +1265,7 @@ def estimate_theta(study_df, theta_calculation_func_filename):
 @click.option(
     "--index_to_check_ci_coverage",
     type=int,
-    help="The index of the parameter to check coverage for.  If not provided, coverage will not be checked.",
+    help="The index of the parameter to check confidence interval coverage for across runs.  If not provided, coverage will not be checked.",
 )
 def collect_existing_analyses(input_glob, index_to_check_ci_coverage):
 

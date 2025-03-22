@@ -13,7 +13,6 @@ decisions_between_updates=1
 recruit_t=1
 n=100
 recruit_n=$n
-min_users=1
 synthetic_mode='delayed_1_dosage'
 steepness=0.5
 RL_alg="sigmoid_LS"
@@ -48,7 +47,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -61,7 +60,6 @@ while getopts T:t:n:u:d:m:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:
     n  | num_users )                                    needs_arg; n="$OPTARG" ;;
     u  | recruit_n )                                    needs_arg; recruit_n="$OPTARG" ;;
     d  | decisions_between_updates )                    needs_arg; decisions_between_updates="$OPTARG" ;;
-    m  | min_users )                                    needs_arg; min_users="$OPTARG" ;;
     r  | RL_alg )                                       needs_arg; RL_alg="$OPTARG" ;;
     e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
@@ -104,7 +102,6 @@ python rl_study_simulation.py \
   --T=$T \
   --N=1 \
   --n=$n \
-  --min_users=$min_users \
   --decisions_between_updates=$decisions_between_updates \
   --recruit_n=$recruit_n \
   --recruit_t=$recruit_t \

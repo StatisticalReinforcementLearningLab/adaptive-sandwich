@@ -13,7 +13,7 @@ def oralytics_primary_analysis_estimating_function(
     act_prob,
 ):
 
-    nu_1 = theta_est[:5]
+    nu_1 = theta_est[:5].reshape(-1, 1)
     nu_2 = theta_est[5]
     delta = theta_est[6]
 
@@ -29,7 +29,7 @@ def oralytics_primary_analysis_estimating_function(
 
     weight = 1 / (act_prob * (1 - act_prob))
 
-    return -jnp.sum(
+    return -2 * jnp.sum(
         weight
         * (
             oscb

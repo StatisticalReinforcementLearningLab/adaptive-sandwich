@@ -102,7 +102,7 @@ def get_sim_env(
     return users_list, sim_env
 
 
-def run(exp_path, seed, num_users, users_per_recruitment):
+def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_update):
     if not os.path.exists(exp_path):
         os.makedirs(exp_path)
 
@@ -141,6 +141,7 @@ def run(exp_path, seed, num_users, users_per_recruitment):
         algorithm,
         environment_module,
         EXP_SETTINGS["per_user_weeks_in_study"],
+        num_users_before_update,
     )
 
     # Write the picked results to file.
@@ -617,7 +618,12 @@ def process_results(data_df, update_df, exp_path, seed):
     default=5,
     help="The number of users recruited per recruitment.",
 )
-def main(seed, exp_dir, num_users, users_per_recruitment):
+@click.option(
+    "--num_users_before_update",
+    default=15,
+    help="The number of users required before the first update.",
+)
+def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_update):
     """
     Run the main experiment with the given parameters.
 
@@ -629,7 +635,9 @@ def main(seed, exp_dir, num_users, users_per_recruitment):
         num_users (int):
             The number of users to simulate in the experiment.
         users_per_recruitment (float):
-            "The number of users recruited per recruitment.
+            The number of users recruited per recruitment.
+        num_users_before_update (int):
+            The number of users required before the first update.
 
     Returns:
     None
@@ -642,7 +650,9 @@ def main(seed, exp_dir, num_users, users_per_recruitment):
     logger.info("Running experiment: %s", exp_name)
     # The data df collects the data generatd by the experiment. The update df
     # records the updates to the algorithm's parameters.
-    data_df, update_df = run(exp_path, seed, num_users, users_per_recruitment)
+    data_df, update_df = run(
+        exp_path, seed, num_users, users_per_recruitment, num_users_before_update
+    )
 
     logger.info("Packaging results for after-study analysis.")
     process_results(data_df, update_df, exp_path, seed)

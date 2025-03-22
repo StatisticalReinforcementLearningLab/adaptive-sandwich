@@ -28,7 +28,6 @@ class TestSigmoidLS_T3_n2:
             upper_clip=0.9,
             lower_clip=0.1,
             fixed_action_prob=0.5,
-            min_users=1,
             err_corr="time_corr",
             decisions_between_updates=1,
             save_dir=".",

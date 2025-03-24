@@ -42,7 +42,6 @@ def perform_first_wave_input_checks(
     theta_est,
     suppress_interactive_data_checks,
     small_sample_correction,
-    meat_modifier_func_filename,
 ):
     ### Validate algorithm loss/estimating function and args
     require_alg_update_args_given_for_all_users_at_each_update(
@@ -169,7 +168,7 @@ def perform_first_wave_input_checks(
 
     ### Validate small sample correction
     require_custom_small_sample_correction_function_provided_if_selected(
-        small_sample_correction, meat_modifier_func_filename
+        small_sample_correction
     )
 
 
@@ -422,7 +421,7 @@ def require_consecutive_integer_policy_numbers(
     study_df, in_study_col_name, policy_num_col_name
 ):
 
-    # Maybe any negative number taken to be a fallback policy, everything else
+    # TODO: Maybe any negative number taken to be a fallback policy, everything else
     # consecutive integers. Consecutive might not be feasible tho given app
     # opening issue.
 
@@ -551,23 +550,38 @@ def require_action_prob_index_given_if_times_supplied(
         )
 
 
-# TODO: too basic?
 def require_beta_is_1D_array_in_alg_update_args(
     alg_update_func_args, alg_update_func_args_beta_index
 ):
-    pass
+    for policy_num in alg_update_func_args:
+        for user_id in alg_update_func_args[policy_num]:
+            if not alg_update_func_args[policy_num][user_id]:
+                continue
+            assert (
+                alg_update_func_args[policy_num][user_id][
+                    alg_update_func_args_beta_index
+                ].ndim
+                == 1
+            ), "Beta is not a 1D array in the algorithm update function args."
 
 
-# TODO: too basic?
 def require_beta_is_1D_array_in_action_prob_args(
     action_prob_func_args, action_prob_func_args_beta_index
 ):
-    pass
+    for decision_time in action_prob_func_args:
+        for user_id in action_prob_func_args[decision_time]:
+            if not action_prob_func_args[decision_time][user_id]:
+                continue
+            assert (
+                action_prob_func_args[decision_time][user_id][
+                    action_prob_func_args_beta_index
+                ].ndim
+                == 1
+            ), "Beta is not a 1D array in the action probability function args."
 
 
-# TODO: too basic?
 def require_theta_is_1D_array(theta_est):
-    pass
+    assert theta_est.ndim == 1, "Theta is not a 1D array."
 
 
 def verify_study_df_summary_satisfactory(
@@ -743,7 +757,7 @@ def require_estimating_functions_sum_to_zero(
 
 # TODO: Either implement and remove NotImplementedError or remove the option.
 def require_custom_small_sample_correction_function_provided_if_selected(
-    small_sample_correction, meat_modifier_func_filename
+    small_sample_correction,
 ):
     if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
         raise NotImplementedError(

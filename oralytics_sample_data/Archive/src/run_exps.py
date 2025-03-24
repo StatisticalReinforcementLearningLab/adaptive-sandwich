@@ -30,8 +30,8 @@ OUTPUT_PATH_NAMES = SIM_ENV_NAMES + ALG_CAND_NAMES
 
 EXP_SETTINGS = {
     "sim_env_version": 3,
-    "base_env_type": "NON_STAT",  # This indicated non-stationarity in the environment.
-    "effect_size_scale": "None",  # Don't be alarmed, this is not a paramter for the V3 algorithm
+    "base_env_type": "NON_STAT",  # This indicates non-stationarity in the environment.
+    "effect_size_scale": "None",  # Don't be alarmed, this is not a parameter for the V3 algorithm
     "delayed_effect_scale": "LOW_R",
     "alg_type": "BLR_AC_V3",
     "noise_var": "None",  # Don't be alarmed, this is not a paramter for the V3 algorithm
@@ -41,6 +41,8 @@ EXP_SETTINGS = {
     "cluster_size": "full_pooling",
     "cost_params": [80, 40],
     "per_user_weeks_in_study": 10,
+    "num_decision_times_per_day_per_user": 2,
+    "weeks_between_recruitments": 2,
 }
 
 
@@ -132,7 +134,7 @@ def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_updat
         num_users,
     )
 
-    # Carry out the experiment.  This is the critical code.
+    # Carry out the experiment.  This is the critical piece of code.
     # The data dataframe holds all study data generated, whereas the update
     # dataframe holds the updates to the algorithm's parameters.
     data_df, update_df = rl_experiments.run_incremental_recruitment_exp(
@@ -142,6 +144,8 @@ def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_updat
         environment_module,
         EXP_SETTINGS["per_user_weeks_in_study"],
         num_users_before_update,
+        EXP_SETTINGS["num_decision_times_per_day_per_user"],
+        EXP_SETTINGS["weeks_between_recruitments"],
     )
 
     # Write the picked results to file.

@@ -21,14 +21,15 @@ FILL_IN_COLS = ["policy_idx", "action", "prob", "reward", "quality"] + [
     "state.app.engage",
     "state.bias",
 ]
-DECISIONS_PER_DAY = 2
-WEEKS_BETWEEN_RECRUITMENTS = 2
 
 
+# TODO: Needs unit tests
 def create_base_data_df(
     template_users_list: list[str],
-    per_user_weeks_in_trial: int,
+    per_user_weeks_in_study: int,
     users_per_recruitment: int,
+    num_decision_times_per_user_per_day: int,
+    weeks_between_recruitments: int,
 ) -> pd.DataFrame:
     """
     Create starter data dataframe for the experiment, filling in what
@@ -41,26 +42,34 @@ def create_base_data_df(
         List of user prototype ids. Non-unique! The index in the list will be taken to be the
         unique user index.
 
-    per_user_weeks_in_trial (int):
+    per_user_weeks_in_study (int):
         The number of weeks each user is in the study.
 
     users_per_recruitment (int):
         The number of users recruited per recruitment.
 
+    num_decision_times_per_user_per_day (int):
+        The number of decision times per day for each user.
+
+    weeks_between_recruitments (int):
+        The number of weeks between each user recruitment batch.
+
     Returns:
     pd.DataFrame: DataFrame containing all study information for all users.
     """
     num_users = len(template_users_list)
-    num_decision_times_per_user = per_user_weeks_in_trial * 7 * DECISIONS_PER_DAY
+    num_decision_times_per_user = (
+        per_user_weeks_in_study * 7 * num_decision_times_per_user_per_day
+    )
 
-    # Build a list of entry weeks for all users.  Note that we recruit users
-    # every two weeks, so that we may operate at the week level here.
+    # Build a list of entry weeks for all users.
     weeks_of_entry = [
-        WEEKS_BETWEEN_RECRUITMENTS * (user_idx // users_per_recruitment)
+        weeks_between_recruitments * (user_idx // users_per_recruitment)
         for user_idx in range(num_users)
     ]
     total_num_decision_times = (
-        max(weeks_of_entry) * 7 * DECISIONS_PER_DAY + num_decision_times_per_user
+        max(weeks_of_entry) * 7 * num_decision_times_per_user_per_day
+        + num_decision_times_per_user
     )
 
     ### data df ###
@@ -81,9 +90,8 @@ def create_base_data_df(
         template_users_list, total_num_decision_times
     )
     data_dict["user_entry_decision_t"] = (
-        WEEKS_BETWEEN_RECRUITMENTS
+        num_decision_times_per_user_per_day
         * 7
-        * DECISIONS_PER_DAY
         * np.repeat(weeks_of_entry, total_num_decision_times)
     )
     data_dict["user_last_decision_t"] = (
@@ -164,13 +172,13 @@ def get_alg_state_from_app_opening(
     Note that we deal in both user and calendar time here, since the environment deals in user
     decision times, but the data dataframe deals in calendar decision times.
 
+    Assumes two decision times per day.
+
     """
-    if DECISIONS_PER_DAY != 2:
-        raise ValueError("This function is only implemented for 2 decisions per day")
 
     # if morning dt we check if users opened the app in the morning
     # if evening dt we check if users opened the app in the morning and in the evening
-    if user_decision_time % DECISIONS_PER_DAY == 0:
+    if user_decision_time % 2 == 0:
         user_opened_app_today = user_last_open_app_dt == user_decision_time
     else:
         # we only simulate users opening the app for morning dts
@@ -189,9 +197,6 @@ def get_alg_state_from_app_opening(
 
 
 def get_previous_day_qualities_and_actions(user_decision_time, Qs, As):
-    if DECISIONS_PER_DAY != 2:
-        raise ValueError("This function is only implemented for 2 decisions per day")
-
     if user_decision_time > 1:
         if user_decision_time % 2 == 0:
             return Qs, As
@@ -204,7 +209,13 @@ def get_previous_day_qualities_and_actions(user_decision_time, Qs, As):
 
 
 def execute_decision_time(
-    data_df, user_idx, calendar_decision_time, algorithm, sim_env, policy_idx
+    data_df,
+    user_idx,
+    calendar_decision_time,
+    algorithm,
+    sim_env,
+    policy_idx,
+    num_decision_times_per_user_per_day,
 ):
     # The environment deals in user decision times, starting at 0 for each person
     # We entertain that instead of refactoring, though I prefer dealing in calendar
@@ -228,7 +239,7 @@ def execute_decision_time(
     b_bar, a_bar = reward_definition.get_b_bar_a_bar(Qs, As)
     advantage_state, _ = algorithm.process_alg_state(env_state, b_bar, a_bar)
 
-    # Simulate app opening issue (from a state development perspective, not a policy version
+    # Simulate app opening issue (from a state development perspective, not a policy overlap
     # perspective)
     if sim_env.get_version() == "V2" or sim_env.get_version() == "V3":
         # Grab the last USER decision time the user opened the app.
@@ -263,7 +274,7 @@ def execute_decision_time(
         alg_state,
     )
     # Update responsiveness if after the first week
-    if calendar_decision_time >= 7 * DECISIONS_PER_DAY:
+    if calendar_decision_time >= 7 * num_decision_times_per_user_per_day:
         sim_env.update_responsiveness(
             user_idx,
             reward_definition.calculate_a1_condition(a_bar),
@@ -273,13 +284,16 @@ def execute_decision_time(
         )
 
 
+# TODO: Needs unit tests
 def run_incremental_recruitment_exp(
     template_users_list: list[str],
     users_per_recruitment: int,
     algorithm: RLAlgorithm,
     sim_env: SimulationEnvironment,
-    per_user_weeks_in_trial: int,
+    per_user_weeks_in_study: int,
     num_users_before_update: int,
+    num_decision_times_per_user_per_day: int,
+    weeks_between_recruitments: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Run an incremental recruitment experiment where treatment is applied via the supplied algorithm
@@ -300,21 +314,37 @@ def run_incremental_recruitment_exp(
     sim_env (SimulationEnvironment):
         The simulation environment object that generates the context for the experiment.
 
-    per_user_weeks_in_trial (int):
+    per_user_weeks_in_study (int):
         The number of weeks each user is in the study.
 
     num_users_before_update (int):
         The number of users required before updating the algorithm.
+
+    num_decision_times_per_user_per_day (int):
+        The number of decision times per day for each user.
+
+    weeks_between_recruitments (int):
+        The number of weeks between each user recruitment batch.
+
 
     Returns:
     tuple[pd.DataFrame, pd.DataFrame]: A tuple containing two DataFrames:
         - data_df: DataFrame containing the data collected during the experiment.
         - update_df: DataFrame containing the updates to the algorithm's posterior mean and variance.
     """
+
+    if num_decision_times_per_user_per_day != 2:
+        raise ValueError(
+            "This function assumes two decision times per day currently. Please update all relevant"
+            "logic if you'd like to change this."
+        )
+
     data_df = create_base_data_df(
         template_users_list,
-        per_user_weeks_in_trial,
+        per_user_weeks_in_study,
         users_per_recruitment,
+        num_decision_times_per_user_per_day,
+        weeks_between_recruitments,
     )
     # Begin with prior values in update dict
     update_dict = {}
@@ -325,7 +355,7 @@ def run_incremental_recruitment_exp(
 
     # The core loop.
     # Loop over all decision times, recruiting and retiring users as dictated by
-    # users_per_recruitment and per_user_weeks_in_trial, and updating the algorithm when the pure
+    # users_per_recruitment and per_user_weeks_in_study, and updating the algorithm when the pure
     # exploration has ended and the cadence for updates has been reached.
     num_decision_times_between_updates = algorithm.update_cadence
     for calendar_t in range(data_df.calendar_decision_t.max() + 1):
@@ -343,9 +373,10 @@ def run_incremental_recruitment_exp(
                     algorithm,
                     sim_env,
                     policy_idx,
+                    num_decision_times_per_user_per_day,
                 )
 
-            # Check if an update is warranted.
+        # Check if an update is potentially warranted.
         if calendar_t > 0 and calendar_t % num_decision_times_between_updates == 0:
             # Check if we have enough users to end the pure exploration period.
             if (

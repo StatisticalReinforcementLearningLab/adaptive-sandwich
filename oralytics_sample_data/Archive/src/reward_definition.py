@@ -5,8 +5,6 @@ a Bayesian Linear Regression reward approximating function.
 """
 import numpy as np
 
-import rl_experiments
-
 ### Reward Definition ###
 GAMMA = 13 / 14
 B = 111
@@ -18,9 +16,9 @@ CONSTANT = (1 - GAMMA) / (1 - GAMMA**14)
 
 # given user_qualities and user_actions, return b_bar and a_bar
 # user_qualities and user_actions should be numpy arrays of the same size
-def get_b_bar_a_bar(user_qualities, user_actions):
+def get_b_bar_a_bar(user_qualities, user_actions, num_decisions_per_user_per_day=2):
     j = len(user_actions)
-    if j < 7 * rl_experiments.DECISIONS_PER_DAY:
+    if j < 7 * num_decisions_per_user_per_day:
         a_bar = 0 if len(user_actions) == 0 else np.mean(user_actions)
         b_bar = 0 if len(user_qualities) == 0 else np.mean(user_qualities)
     else:

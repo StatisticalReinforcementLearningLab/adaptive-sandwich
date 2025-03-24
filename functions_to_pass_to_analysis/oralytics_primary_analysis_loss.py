@@ -18,7 +18,6 @@ def oralytics_primary_analysis_loss(
     )
 
     weight = 1 / (act_prob * (1 - act_prob))
-
     return 0.5 * jnp.sum(
         weight * ((oscb - jnp.matmul(features, theta_est).reshape(-1, 1)) ** 2)
     )

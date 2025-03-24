@@ -29,7 +29,7 @@ def oralytics_primary_analysis_estimating_function(
 
     weight = 1 / (act_prob * (1 - act_prob))
 
-    return -2 * jnp.sum(
+    return -jnp.sum(
         weight
         * (
             oscb

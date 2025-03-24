@@ -197,11 +197,6 @@ def cli():
     default=SmallSampleCorrections.HC1,
     help="Type of small sample correction to apply to the variance estimate",
 )
-@click.option(
-    "--meat_modifier_func_filename",
-    type=click.Path(exists=True),
-    help="File that contains the meat matrix modifier function and relevant imports.  The filename without its extension will be assumed to match the function name.",
-)
 def analyze_dataset(
     study_df_pickle: click.File,
     action_prob_func_filename: str,
@@ -226,7 +221,6 @@ def analyze_dataset(
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
     small_sample_correction: str,
-    meat_modifier_func_filename: str,
 ):
     """
     Make sure in study is never on for more than one stretch EDIT: unclear if
@@ -283,7 +277,6 @@ def analyze_dataset(
             theta_est,
             suppress_interactive_data_checks,
             small_sample_correction,
-            meat_modifier_func_filename,
         )
 
     # TODO: Perhaps add a check that the supplied action probabilities in args
@@ -553,7 +546,6 @@ def process_inference_func_args(
             action_prob_col_name
         )
 
-    # Convert to list from jnp array so extraction is simplest
     for user_id in study_df[user_id_col_name].unique():
         user_args_list = []
         filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
@@ -870,7 +862,6 @@ def construct_single_user_weighted_estimating_function_stacker(
         )
 
         # 5. Get the start and end times for this user.
-        logger.info("Calculating start and end times for user %s.", user_id)
         user_start_time = math.inf
         user_end_time = -math.inf
         for decision_time in action_by_decision_time_by_user_id[user_id]:

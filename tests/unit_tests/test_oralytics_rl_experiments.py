@@ -1,3 +1,5 @@
+import numpy as np
+
 import rl_experiments
 
 
@@ -57,6 +59,24 @@ def test_create_base_data_df_1():
     assert data_df["user_entry_decision_t"].nunique() == last_entry_week + 1
     assert data_df["user_last_decision_t"].nunique() == last_entry_week + 1
     assert data_df["calendar_decision_t"].nunique() == total_num_decision_times
+
+    np.testing.assert_array_equal(
+        data_df["user_idx"].to_numpy(),
+        np.repeat([0, 1, 2], total_num_decision_times),
+    )
+    np.testing.assert_array_equal(
+        data_df["user_entry_decision_t"].to_numpy(),
+        np.repeat([0, 14, 28], total_num_decision_times),
+    )
+    np.testing.assert_array_equal(
+        data_df["user_last_decision_t"].to_numpy(),
+        np.repeat([41, 55, 69], total_num_decision_times),
+    )
+
+    np.testing.assert_array_equal(
+        data_df["calendar_decision_t"].to_numpy(),
+        np.tile(np.arange(total_num_decision_times), num_users),
+    )
 
     # Check that the in_study column is correctly populated
     for user_idx in range(num_users):
@@ -148,16 +168,23 @@ def test_create_base_data_df_2():
     assert list(data_df.columns) == expected_columns
 
     # Check the values in the DataFrame
-    assert data_df["user_idx"].nunique() == num_users
-    assert (
-        data_df["user_entry_decision_t"].nunique()
-        == last_entry_week / weeks_between_recruitments + 1
+    np.testing.assert_array_equal(
+        data_df["user_idx"].to_numpy(),
+        np.repeat([0, 1, 2, 3], total_num_decision_times),
     )
-    assert (
-        data_df["user_last_decision_t"].nunique()
-        == last_entry_week / weeks_between_recruitments + 1
+    np.testing.assert_array_equal(
+        data_df["user_entry_decision_t"].to_numpy(),
+        np.repeat([0, 28], total_num_decision_times * 2),
     )
-    assert data_df["calendar_decision_t"].nunique() == total_num_decision_times
+    np.testing.assert_array_equal(
+        data_df["user_last_decision_t"].to_numpy(),
+        np.repeat([139, 167], total_num_decision_times * 2),
+    )
+
+    np.testing.assert_array_equal(
+        data_df["calendar_decision_t"].to_numpy(),
+        np.tile(np.arange(total_num_decision_times), num_users),
+    )
 
     # Check that the in_study column is correctly populated
     for user_idx in range(num_users):

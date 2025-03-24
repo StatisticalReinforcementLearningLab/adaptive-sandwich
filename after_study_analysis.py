@@ -52,6 +52,17 @@ def cli():
 # TODO: Check all help strings for accuracy.
 # TODO: Need to support pure exploration phase with more flags than just in study. Maybe in study, receiving updates
 # TODO: Deal with NA, -1, etc policy numbers
+# TODO:Make sure in study is never on for more than one stretch EDIT: unclear if
+# this will remain an invariant as we deal with more complicated data missingness
+# TODO: I think I'm agnostic to indexing of calendar times but should check because
+# otherwise need to add a check here to verify required format.
+# TODO: Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
+# Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
+# TODO: Make the user give the min and max probabilities, and I'll enforce it?
+# TODO: I assume someone is in the study at each decision time. Check for this or
+# see if it shouldn't always be true. EDIT: Is this true that I assume this?
+# TODO: I also assume someone has some data to contribute at each update time. Check
+# for this or see if shouldn't always be true. EDIT: Is it true that I assume this?
 @cli.command()
 @click.option(
     "--study_df_pickle",
@@ -223,23 +234,59 @@ def analyze_dataset(
     small_sample_correction: str,
 ):
     """
-    Make sure in study is never on for more than one stretch EDIT: unclear if
-    this will remain an invariant as we deal with more complicated data missingness
+    Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
 
-    I think I'm agnostic to indexing of calendar times but should check because
-    otherwise need to add a check here to verify required format.
+    Parameters:
+    study_df_pickle (click.File):
+        Pickle file containing the study DataFrame.
+    action_prob_func_filename (str):
+        Filename of the action probability function.
+    action_prob_func_args_pickle (click.File):
+        Pickle file containing arguments for the action probability function.
+    action_prob_func_args_beta_index (int):
+        Index for beta in action probability function arguments.
+    alg_update_func_filename (str):
+        Filename of the algorithm update function.
+    alg_update_func_type (str):
+        Type of the algorithm update function.
+    alg_update_func_args_pickle (click.File):
+        Pickle file containing arguments for the algorithm update function.
+    alg_update_func_args_beta_index (int):
+        Index for beta in algorithm update function arguments.
+    alg_update_func_args_action_prob_index (int):
+        Index for action probability in algorithm update function arguments.
+    alg_update_func_args_action_prob_times_index (int):
+        Index for action probability times in algorithm update function arguments.
+    inference_func_filename (str):
+        Filename of the inference function.
+    inference_func_type (str):
+        Type of the inference function.
+    inference_func_args_theta_index (int):
+        Index for theta in inference function arguments.
+    theta_calculation_func_filename (str):
+        Filename of the theta calculation function.
+    in_study_col_name (str):
+        Column name indicating if a user is in the study in the study dataframe.
+    action_col_name (str):
+        Column name for actions in the study dataframe.
+    policy_num_col_name (str):
+        Column name for policy numbers in the study dataframe.
+    calendar_t_col_name (str):
+        Column name for calendar time in the study dataframe.
+    user_id_col_name (str):
+        Column name for user IDs in the study dataframe.
+    action_prob_col_name (str):
+        Column name for action probabilities in the study dataframe.
+    suppress_interactive_data_checks (bool):
+        Whether to suppress interactive data checks. This should be used in simulations, for example.
+    suppress_all_data_checks (bool):
+        Whether to suppress all data checks. Not recommended.
+    small_sample_correction (str): Type of small sample correction to apply.
 
-    Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
-    Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
-
-    Make the user give the min and max probabilities, and I'll enforce it?
-
-    I assume someone is in the study at each decision time. Check for this or
-    see if it shouldn't always be true. EDIT: Is this true that I assume this?
-
-    I also assume someone has some data to contribute at each update time. Check
-    for this or see if shouldn't always be true. EDIT: Is it true that I assume this?
+    Returns:
+    None: The function writes analysis results and debug pieces to files in the same directory as the input files.
     """
+
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
         datefmt="%Y-%m-%d:%H:%M:%S",
@@ -256,8 +303,6 @@ def analyze_dataset(
 
     theta_est = jnp.array(estimate_theta(study_df, theta_calculation_func_filename))
 
-    # This does the first round of input validation, before computing any
-    # gradients
     if not suppress_all_data_checks:
         input_checks.perform_first_wave_input_checks(
             study_df,
@@ -279,8 +324,7 @@ def analyze_dataset(
             small_sample_correction,
         )
 
-    # TODO: Perhaps add a check that the supplied action probabilities in args
-    # can also be reconstructed from the action probability function.
+    # Begin collecting data structures that will be used to compute the joint bread matrix.
 
     beta_index_by_policy_num, initial_policy_num = (
         construct_beta_index_by_policy_num_map(
@@ -344,7 +388,7 @@ def analyze_dataset(
 
     logger.info("Constructing joint adaptive bread inverse matrix.")
     user_ids = jnp.array(study_df[user_id_col_name].unique())
-    # roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
+    # TODO: roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
     (
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
@@ -515,14 +559,14 @@ def extract_action_and_policy_by_decision_time_by_user_id(
 
 
 def process_inference_func_args(
-    inference_func_filename,
-    inference_func_args_theta_index,
-    study_df,
-    theta_est,
-    action_prob_col_name,
-    calendar_t_col_name,
-    user_id_col_name,
-    in_study_col_name,
+    inference_func_filename: str,
+    inference_func_args_theta_index: int,
+    study_df: pandas.DataFrame,
+    theta_est: jnp.ndarray,
+    action_prob_col_name: str,
+    calendar_t_col_name: str,
+    user_id_col_name: str,
+    in_study_col_name: str,
 ) -> tuple[dict[collections.abc.Hashable, tuple[Any, ...]], int]:
     """
     Collects the inference function arguments for each user.
@@ -530,6 +574,30 @@ def process_inference_func_args(
     Note that theta and action probabilities, if present, will be replaced later
     so that the function can be differentiated with respect to shared versions
     of them.
+
+    Args:
+        inference_func_filename (str):
+            The filename of the inference function to be loaded.
+        inference_func_args_theta_index (int):
+            The index of the theta parameter in the inference function's arguments.
+        study_df (pandas.DataFrame):
+            The study DataFrame.
+        theta_est (jnp.ndarray):
+            The estimate of the parameter vector.
+        action_prob_col_name (str):
+            The name of the column in the study DataFrame that gives action probabilities.
+        calendar_t_col_name (str):
+            The name of the column in the study DataFrame that indicates calendar time.
+        user_id_col_name (str):
+            The name of the column in the study DataFrame that indicates user ID.
+        in_study_col_name (str):
+            The name of the binary column in the study DataFrame that indicates whether a user is in the study.
+    Returns:
+        tuple[dict[collections.abc.Hashable, tuple[Any, ...]], int, dict[collections.abc.Hashable, jnp.ndarray[int]]]:
+            A tuple containing
+                - the inference function arguments dictionary for each user
+                - the index of the action probabilities argument
+                - a dictionary mapping user IDs to the decision times to which action probabilities correspond
     """
 
     inference_func = load_function_from_same_named_file(inference_func_filename)
@@ -573,19 +641,39 @@ def process_inference_func_args(
 
 # TODO: Docstring
 def get_radon_nikodym_weight(
-    beta_target: jnp.ndarray,
+    beta_target: jnp.ndarray[jnp.float32],
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     action: int,
     *action_prob_func_args_single_user: tuple[Any, ...],
 ):
     """
-    Computes a ratio of action probabilities where in the denominator beta_target is substituted
-    into the rest of the action probability function arguments in place of whatever is given, and
-    in the numerator the original value is used.  Even though in practice we call this in such a way
-    that the beta value is the same in numerator and denominator, it is important to define the
-    function this way so that differentiation, which is with respect to the numerator beta, is done
-    correctly.
+    Computes a ratio of action probabilities under two sets of algorithm parameters:
+    in the denominator, beta_target is substituted in with the the rest of the supplied action
+    probability function arguments, and in the numerator the original value is used.  The action
+    actually taken at the relevant decision time is also supplied, which is used to determine
+    whether to use action 1 probabilities or action 0 probabilities in the ratio.
+
+    Even though in practice we call this in such a way that the beta value is the same in numerator
+    and denominator, it is important to define the function this way so that differentiation, which
+    is with respect to the numerator beta, is done correctly.
+
+    Args:
+        beta_target (jnp.ndarray[jnp.float32]):
+            The beta value to use in the denominator. NOT involved in differentation!
+        action_prob_func (callable):
+            The function used to compute the probability of action 1 at a given decision time for
+            a particular user given their state and the algorithm parameters.
+        action_prob_func_args_beta_index (int):
+            The index of the beta argument in the action probability function's arguments.
+        action (int):
+            The actual taken action at the relevant decision time.
+        *action_prob_func_args_single_user (tuple[Any, ...]):
+            The arguments to the action probability function for the relevant user at this time.
+
+    Returns:
+        jnp.float32: The Radon-Nikodym weight.
+
     """
 
     # numerator
@@ -758,10 +846,15 @@ def construct_single_user_weighted_estimating_function_stacker(
     )
 
     def single_user_weighted_algorithm_estimating_function_stacker(
-        theta: jnp.ndarray,
-        all_post_update_betas: list[jnp.ndarray],
+        theta: jnp.ndarray[jnp.float32],
+        all_post_update_betas: list[jnp.ndarray[jnp.float32]],
         user_id: collections.abc.Hashable,
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> tuple[
+        jnp.ndarray[jnp.float32],
+        jnp.ndarray[jnp.float32],
+        jnp.ndarray[jnp.float32],
+        jnp.ndarray[jnp.float32],
+    ]:
         """
         Computes a weighted estimating function stack for a given set of algorithm update function
         arguments, and action probability function arguments.
@@ -777,7 +870,8 @@ def construct_single_user_weighted_estimating_function_stacker(
                 The user ID for which to compute the weighted estimating function stack.
 
         Returns:
-            jnp.ndarray: A 1-D JAX NumPy array representing the weighted estimating function stack.
+            jnp.ndarray: A 1-D JAX NumPy array representing the user's weighted estimating function
+                stack.
             jnp.ndarray: A 2-D JAX NumPy matrix representing the user's adaptive meat contribution.
             jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical meat contribution.
             jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical bread contribution.

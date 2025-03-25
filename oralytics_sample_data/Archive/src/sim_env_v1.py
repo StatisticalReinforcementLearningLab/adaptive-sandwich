@@ -69,7 +69,7 @@ def generate_state_spaces_stat(user_df, num_days):
 # 3 - Prop. Non-Zero Brushing In Past 7 Days
 # 4 - Weekday vs. Weekend
 # 5 - Bias
-def generate_state_spaces_non_stat(user_df, num_days):
+def generate_state_spaces_non_stat(user_df, num_days, per_user_weeks_in_study):
     ## init ##
     D = 6
     states = np.zeros(shape=(2 * num_days, D))
@@ -77,7 +77,9 @@ def generate_state_spaces_non_stat(user_df, num_days):
         # time of day
         states[i][0] = i % 2
         # day in study
-        states[i][2] = simulation_environment.normalize_day_in_study(i // 2 + 1)
+        states[i][2] = simulation_environment.normalize_day_in_study(
+            i // 2 + 1, per_user_weeks_in_study
+        )
         # bias term
         states[i][5] = 1
 
@@ -126,6 +128,8 @@ def process_env_state(session, j, Qs, env_type="STAT"):
 
 NUM_DAYS = 70
 # dictionary where key is index and value is user_id
+
+PER_USER_WEEKS_IN_STUDY = 10
 USER_INDICES = {}
 
 # dictionary where key is user id and values are lists of sessions of trial
@@ -135,7 +139,9 @@ for i, user_id in enumerate(SIM_ENV_USERS):
     USER_INDICES[i] = user_id
     user_df = get_user_df(user_id)
     USERS_SESSIONS_STAT[user_id] = generate_state_spaces_stat(user_df, NUM_DAYS)
-    USERS_SESSIONS_NON_STAT[user_id] = generate_state_spaces_non_stat(user_df, NUM_DAYS)
+    USERS_SESSIONS_NON_STAT[user_id] = generate_state_spaces_non_stat(
+        user_df, NUM_DAYS, PER_USER_WEEKS_IN_STUDY
+    )
 
 
 def get_user_sessions(user_id, env_type):
@@ -279,7 +285,7 @@ class SimulationEnvironmentV1(simulation_environment.SimulationEnvironment):
 
         self.version = "V1"
 
-    def generate_current_state(self, user_idx, j):
+    def generate_current_state(self, user_idx, j, per_user_weeks_in_study):
         user_state = self.get_states_for_user(user_idx)[j]
         brushing_qualities = np.array(self.get_env_history(user_idx, "outcomes"))
 

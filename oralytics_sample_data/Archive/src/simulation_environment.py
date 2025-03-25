@@ -75,8 +75,11 @@ def normalize_total_brush_quality(quality):
     return (quality - 154) / 163
 
 
-def normalize_day_in_study(day):
-    return (day - 35.5) / 34.5
+def normalize_day_in_study(day, per_user_weeks_in_study):
+    total_days = per_user_weeks_in_study * 7
+    center = total_days / 2
+    scale = center - 1  # to roughly match the original -1 to 1 range
+    return (day - center) / scale
 
 
 def sigmoid(x):

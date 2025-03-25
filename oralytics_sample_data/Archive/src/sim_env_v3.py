@@ -53,7 +53,9 @@ def get_previous_day_qualities_and_actions(j, Qs, As):
 
 # Note: We assume that all participants start the study on Monday (j = 0 denotes)
 # Monday morning. Therefore the first weekend idx is j = 10 (Saturday morning)
-def generate_env_state(j, user_qualities, user_actions, app_engagement, env_type):
+def generate_env_state(
+    j, user_qualities, user_actions, app_engagement, env_type, per_user_weeks_in_study
+):
     env_state = np.ones(7) if env_type == "NON_STAT" else np.ones(6)
     # session type - either 0 or 1
     session_type = j % 2
@@ -69,9 +71,11 @@ def generate_env_state(j, user_qualities, user_actions, app_engagement, env_type
     env_state[4] = 1 if (j % 14 >= 10 and j % 14 <= 13) else 0
     # bias
     env_state[5] = 1
-    # day in study if a non-stationary environment
+    # day in study if a non-stationary environment. Apparently index starts at 1...
     if env_type == "NON_STAT":
-        env_state[6] = simulation_environment.normalize_day_in_study(1 + (j // 2))
+        env_state[6] = simulation_environment.normalize_day_in_study(
+            1 + (j // 2), per_user_weeks_in_study
+        )
 
     return env_state
 
@@ -181,7 +185,7 @@ class SimulationEnvironmentV3(
 
         self.version = "V3"
 
-    def generate_current_state(self, user_idx, j):
+    def generate_current_state(self, user_idx, j, per_user_weeks_in_study):
         # prior day app_engagement is 0 for the first day
         prior_app_engagement = self.get_user_prior_day_app_engagement(user_idx)
         self.simulate_app_opening_behavior(user_idx, j)
@@ -194,4 +198,5 @@ class SimulationEnvironmentV3(
             past_actions,
             prior_app_engagement,
             self.get_env_type(),
+            per_user_weeks_in_study,
         )

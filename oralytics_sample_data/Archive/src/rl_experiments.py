@@ -209,14 +209,42 @@ def get_previous_day_qualities_and_actions(user_decision_time, Qs, As):
 
 
 def execute_decision_time(
-    data_df,
-    user_idx,
-    calendar_decision_time,
-    algorithm,
-    sim_env,
-    policy_idx,
-    num_decision_times_per_user_per_day,
+    data_df: pd.DataFrame,
+    user_idx: int,
+    calendar_decision_time: int,
+    algorithm: RLAlgorithm,
+    sim_env: SimulationEnvironment,
+    policy_idx: int,
+    num_decision_times_per_user_per_day: int,
+    per_user_weeks_in_study: int,
 ):
+    """
+    Execute a decision time for a user, updating the data dataframe with the results.
+
+    Parameters:
+    data_df (pd.DataFrame):
+        The data dataframe containing all study information for all users.  This dataframe will be
+        updated with the results of the decision time.
+    user_idx (int):
+        The index of the user for whom the decision time is being executed. Recall that this is
+        different from the user id of the corresponding template user.
+    calendar_decision_time (int):
+        The calendar decision time.
+    algorithm (RLAlgorithm):
+        The algorithm object that contains methods for action selection and periodically updating
+        based on results so far. The action selection method is the main thing used here.
+    sim_env (SimulationEnvironment):
+        The simulation environment object that generates the context for the experiment. This is
+        mainly used to generate user states and rewards here.
+    policy_idx (int):
+        The index of the policy being used for this decision time.
+    num_decision_times_per_user_per_day (int):
+        The number of decision times per day for each user. This is assumed to be 2 for now.
+    per_user_weeks_in_study (int):
+        The number of weeks each user is in the study.
+    Returns:
+    None
+    """
     # The environment deals in user decision times, starting at 0 for each person
     # We entertain that instead of refactoring, though I prefer dealing in calendar
     # time outisde of the environment.
@@ -224,7 +252,9 @@ def execute_decision_time(
         "user_entry_decision_t"
     ].values[0]
     user_decision_time = calendar_decision_time - user_start_time
-    env_state = sim_env.generate_current_state(user_idx, user_decision_time)
+    env_state = sim_env.generate_current_state(
+        user_idx, user_decision_time, per_user_weeks_in_study
+    )
 
     user_qualities = get_all_in_study_single_user_data_prior_to_decision_t(
         data_df, user_idx, calendar_decision_time, "quality"
@@ -284,7 +314,6 @@ def execute_decision_time(
         )
 
 
-# TODO: Needs unit tests
 def run_incremental_recruitment_exp(
     template_users_list: list[str],
     users_per_recruitment: int,
@@ -374,6 +403,7 @@ def run_incremental_recruitment_exp(
                     sim_env,
                     policy_idx,
                     num_decision_times_per_user_per_day,
+                    per_user_weeks_in_study,
                 )
 
         # Check if an update is potentially warranted.

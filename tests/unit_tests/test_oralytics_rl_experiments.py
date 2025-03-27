@@ -1,3 +1,4 @@
+from itertools import cycle
 from unittest import mock
 
 import numpy as np
@@ -267,16 +268,51 @@ def test_run_incremental_recruitment_exp():
     num_decision_times_per_user_per_day = 2
     weeks_between_recruitments = 2
 
+    # Week  0  1  2  3  4  5  6  7  8  9  10 11
+    # Users 1  1  1  1  3  3  5  5  7  7  9  9
+    #       2  2  2  2  4  4  6  6  8  8  10 10
+    #             3  3  5  5  7  7  9  9
+    #             4  4  6  6  8  8  10 10
+
+    # First update should happen after week 4 and then weekly afterward,
+    # for a total of 8 updates since we don't update after the last week.
+
     def generate_current_state_side_effect(
         user_idx, user_decision_time, weeks_in_study
     ):
-        return np.array([0.0, -1.01117318, 0.0, 1.0, 0.0, 1.0, -0.97101449])
+        """
+        # Non-stationary state space
+        # 0 - time of day
+        # 1 - b_bar (normalized)
+        # 2 - a_bar (normalized)
+        # 3 - app engagement
+        # 4 - weekday vs. weekend
+        # 5 - bias
+        # 6 - day in study (normalized)
+        """
+        return np.array(
+            [
+                user_decision_time % 2,
+                user_idx / 10.0,
+                1 - user_idx / 10.0,
+                (user_decision_time + 1) % 2,
+                user_decision_time % 14 >= 10,
+                1,
+                -1 + 2 * user_decision_time / (weeks_in_study * 7 * 2),
+            ]
+        )
 
     def get_user_last_open_app_dt_side_effect(user_idx):
         return 0
 
     def generate_rewards_side_effect(user_idx, env_state, action):
-        return 84
+        # Define a list of rewards to iterate through
+        rewards_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        # Use a cycle iterator to loop through the rewards list
+        rewards_cycle = cycle(rewards_list)
+        # Calculate the reward as a function of inputs and the next value in the cycle.
+        # Not using action for simplicity
+        return next(rewards_cycle) + user_idx + 2 * env_state[1]
 
     sim_env.generate_current_state.side_effect = generate_current_state_side_effect
     sim_env.get_user_last_open_app_dt.side_effect = (
@@ -284,7 +320,13 @@ def test_run_incremental_recruitment_exp():
     )
     sim_env.generate_rewards.side_effect = generate_rewards_side_effect
 
-    data_df, update_df = rl_experiments.run_incremental_recruitment_exp(
+    (
+        data_df,
+        update_df,
+        study_df,
+        alg_update_function_args,
+        action_prob_function_args,
+    ) = rl_experiments.run_incremental_recruitment_exp(
         template_users_list,
         users_per_recruitment,
         algorithm,

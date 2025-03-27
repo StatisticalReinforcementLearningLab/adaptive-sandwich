@@ -1,6 +1,8 @@
+from collections.abc import Hashable
 import os
 import logging
 import pickle as pkl
+from typing import Any
 
 import click
 import numpy as np
@@ -104,7 +106,19 @@ def get_sim_env(
     return users_list, sim_env
 
 
-def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_update):
+def run(
+    exp_path: str,
+    seed: int,
+    num_users: int,
+    users_per_recruitment: int,
+    num_users_before_update: int,
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    dict[int, dict[Hashable, tuple[Any, ...]]],
+    dict[int, dict[Hashable, tuple[Any, ...]]],
+]:
     if not os.path.exists(exp_path):
         os.makedirs(exp_path)
 
@@ -137,7 +151,13 @@ def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_updat
     # Carry out the experiment.  This is the critical piece of code.
     # The data dataframe holds all study data generated, whereas the update
     # dataframe holds the updates to the algorithm's parameters.
-    data_df, update_df = rl_experiments.run_incremental_recruitment_exp(
+    (
+        data_df,
+        update_df,
+        study_df,
+        alg_update_function_args,
+        action_prob_function_args,
+    ) = rl_experiments.run_incremental_recruitment_exp(
         template_users_list,
         users_per_recruitment,
         algorithm,
@@ -148,12 +168,13 @@ def run(exp_path, seed, num_users, users_per_recruitment, num_users_before_updat
         EXP_SETTINGS["weeks_between_recruitments"],
     )
 
-    # Write the picked results to file.
-    logger.info("Trial simulation complete. Writing results to file.")
-    pd.to_pickle(data_df, exp_path + f"/{seed}_data_df.p")
-    pd.to_pickle(update_df, exp_path + f"/{seed}_update_df.p")
-
-    return data_df, update_df, algorithm.feature_dim
+    return (
+        data_df,
+        update_df,
+        study_df,
+        alg_update_function_args,
+        action_prob_function_args,
+    )
 
 
 def collect_alg_update_function_args(data_df, update_df, feature_dim):
@@ -425,29 +446,31 @@ def collect_action_prob_function_args(
                     [
                         df2,
                         pd.DataFrame(
-                            [[calendar_decision_t, user, beta, state]],
+                            [[calendar_decision_t, user, beta, state, feature_dim]],
                             columns=[
                                 "calendar_decision_t",
                                 "user_idx",
                                 "beta",
                                 "advantage",
+                                "feature_dim",
                             ],
                         ),
                     ]
                 )
-                utime_dict[user] = (beta, state)
+                utime_dict[user] = (beta, state, feature_dim)
             # User is not in study, so produce an appropriate empty arg tuple.
             else:
                 df2 = pd.concat(
                     [
                         df2,
                         pd.DataFrame(
-                            [[calendar_decision_t, user, [], []]],
+                            [[calendar_decision_t, user, [], [], feature_dim]],
                             columns=[
                                 "calendar_decision_t",
                                 "user_idx",
                                 "beta",
                                 "advantage",
+                                "feature_dim",
                             ],
                         ),
                     ]
@@ -459,134 +482,6 @@ def collect_action_prob_function_args(
     df2.reset_index(drop=True, inplace=True)
 
     return df2, act_prob_dict
-
-
-def create_study_df(data):
-    # Create the study dataframe
-    # T x n pandas dataframe where T is the set of all calendar decision times for which at least
-    # one user is active and n is the total number of users
-    # in the study. The dataframe should have the following columns:
-    # - calendar_decision_t: the calendar decision time
-    # - user_idx: the user index
-    # - in_study_indicator: a binary indicator for whether the user is in the study at the given
-    #   calendar decision time
-    # - action: the action taken by the user at the given calendar decision time
-    # - policy_idx: the policy index used by the user at the given calendar decision time
-    # - act_prob: the action selection probability for the user at the given calendar decision time
-    # - reward: the reward received by the user at the given calendar decision time
-    # - state: the state of the user at the given calendar decision time
-
-    df3 = pd.DataFrame(
-        columns=[
-            "calendar_decision_t",
-            "user_idx",
-            "in_study_indicator",
-            "action",
-            "policy_idx",
-            "act_prob",
-            "reward",
-            "oscb",
-            "tod",
-            "bbar",
-            "abar",
-            "appengage",
-            "bias",
-        ]
-    )
-
-    for i in range(
-        data["calendar_decision_t"].min(), data["calendar_decision_t"].max() + 1
-    ):
-        temp = data[data["calendar_decision_t"] == i].reset_index(drop=True)
-
-        for user in data["user_idx"].unique():
-            record = temp[temp["user_idx"] == user].reset_index(drop=True)
-
-            # Check if the user is in the study
-            if record.in_study.item():
-                # Fetch the policy number and associated beta
-                policy = record["policy_idx"].values[0]
-
-                # Fetch the state
-                state = jnp.array(
-                    record[
-                        [
-                            "state.tod",
-                            "state.b.bar",
-                            "state.a.bar",
-                            "state.app.engage",
-                            "state.bias",
-                        ]
-                    ].values[0],
-                    dtype=np.float32,
-                )
-
-                df3 = pd.concat(
-                    [
-                        df3,
-                        pd.DataFrame(
-                            [
-                                [
-                                    i,
-                                    user,
-                                    1,
-                                    record["action"].values[0],
-                                    policy,
-                                    record["prob"].values[0],
-                                    record["reward"].values[0],
-                                    record["quality"].values[0],
-                                    state[0].item(),
-                                    state[1].item(),
-                                    state[2].item(),
-                                    state[3].item(),
-                                    state[4].item(),
-                                ]
-                            ],
-                            columns=[
-                                "calendar_decision_t",
-                                "user_idx",
-                                "in_study_indicator",
-                                "action",
-                                "policy_idx",
-                                "act_prob",
-                                "reward",
-                                "oscb",
-                                "tod",
-                                "bbar",
-                                "abar",
-                                "appengage",
-                                "bias",
-                            ],
-                        ),
-                    ]
-                )
-            else:
-                df3 = pd.concat(
-                    [
-                        df3,
-                        pd.DataFrame(
-                            [[i, user, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
-                            columns=[
-                                "calendar_decision_t",
-                                "user_idx",
-                                "in_study_indicator",
-                                "action",
-                                "policy_idx",
-                                "act_prob",
-                                "reward",
-                                "oscb",
-                                "tod",
-                                "bbar",
-                                "abar",
-                                "appengage",
-                                "bias",
-                            ],
-                        ),
-                    ]
-                )
-    df3.reset_index(drop=True, inplace=True)
-    df3 = df3.infer_objects()
-    return df3
 
 
 def process_results(data_df, update_df, exp_path, seed, feature_dim):
@@ -651,14 +546,28 @@ def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_updat
     exp_path = os.path.join(exp_dir, exp_name, str(seed))
 
     logger.info("Running experiment: %s", exp_name)
-    # The data df collects the data generatd by the experiment. The update df
-    # records the updates to the algorithm's parameters.
-    data_df, update_df, feature_dim = run(
-        exp_path, seed, num_users, users_per_recruitment, num_users_before_update
-    )
+    # The data df collects the data generated by the experiment. The update df
+    # records the updates to the algorithm's parameters. The study df is a reformatting
+    # of the data df for the analysis package. The alg_update_function_args and
+    # action_prob_function_args are dictionaries that hold the arguments for the
+    # algorithm update function and the action probability function for each user at the relevant
+    # times.
+    (
+        data_df,
+        update_df,
+        study_df,
+        alg_update_function_args,
+        action_prob_function_args,
+    ) = run(exp_path, seed, num_users, users_per_recruitment, num_users_before_update)
 
-    logger.info("Packaging results for after-study analysis.")
-    process_results(data_df, update_df, exp_path, seed, feature_dim)
+    # Write the picked results to file.
+    pd.to_pickle(data_df, exp_path + f"/{seed}_data_df.pkl")
+    pd.to_pickle(update_df, exp_path + f"/{seed}_update_df.pkl")
+    pd.to_pickle(study_df, exp_path + f"/{seed}_study_data.pkl")
+    with open(exp_path + f"/{seed}_loss_fn_data.pkl", "wb") as f:
+        pkl.dump(alg_update_function_args, f)
+    with open(exp_path + f"/{seed}_action_data.pkl", "wb") as f:
+        pkl.dump(action_prob_function_args, f)
 
     logger.info("Experiment and post-processing complete.")
 

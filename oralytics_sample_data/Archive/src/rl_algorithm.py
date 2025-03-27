@@ -201,6 +201,11 @@ class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
                 self.smoothing_func,
             )
             # pylint: enable=invalid-name, too-many-arguments
+
+        # Interesting that we use the final D_ADVANTAGE parameters, rather than
+        # the first D_ADVANTAGE parameters, which actually are the coefficients
+        # for the advantage state features in the BLR. But I verified this is what
+        # the paper specifies.
         return bayes_lr_action_selector(
             self.posterior_mean[-self.D_ADVANTAGE :],
             self.posterior_var[-self.D_ADVANTAGE :, -self.D_ADVANTAGE :],

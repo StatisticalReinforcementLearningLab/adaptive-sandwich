@@ -1933,6 +1933,7 @@ class TestRunStudySimulation:
         )
 
 
+# TODO: Implement test or handle otherwise
 @pytest.mark.skip(reason="To be implemented")
 def test_load_data_and_simulate_studies():
     raise NotImplementedError()

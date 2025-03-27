@@ -495,16 +495,11 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
         "Checking that all policy numbers in the study dataframe are present in the algorithm update function args."
     )
     in_study_df = study_df[study_df[in_study_col_name] == 1]
-    min_positive_policy_num = in_study_df[in_study_df[policy_num_col_name] >= 0][
-        policy_num_col_name
-    ].min()
     assert set(
-        study_df[study_df[policy_num_col_name] > min_positive_policy_num][
-            policy_num_col_name
-        ].unique()
+        in_study_df[in_study_df[policy_num_col_name] > 0][policy_num_col_name].unique()
     ).issubset(
         alg_update_func_args.keys()
-    ), "There are policy numbers present in algorithm update function args but not in the study dataframe. Please see the contract for details."
+    ), "There are non-fallback, non-initial policy numbers in the study dataframe that are not in the update function args. Please see the contract for details."
 
 
 def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
@@ -626,7 +621,7 @@ def verify_study_df_summary_satisfactory(
         f" for which multiple non-fallback policies were used"
         f"\n* Minimum action probability {min_action_prob}"
         f"\n* Maximum action probability {max_action_prob}"
-        f" \n\nDoes this seem correct? (y/n)\n"
+        f" \n\nDoes this meet expectations? (y/n)\n"
     )
 
 

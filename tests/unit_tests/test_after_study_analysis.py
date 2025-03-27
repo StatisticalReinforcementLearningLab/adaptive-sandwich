@@ -2899,15 +2899,6 @@ def test_get_radon_nikodym_weight_same_beta():
     action_prob_func_args_beta_index = 0
     action = 1
 
-    expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
-    expected_denominator_args = list(action_prob_func_args_single_user)
-    expected_denominator_args[action_prob_func_args_beta_index] = beta_target
-    expected_denominator = (
-        mock_action_prob_func(  # pylint: disable=no-value-for-parameter
-            *expected_denominator_args
-        )
-    )
-
     expected_result = 1
 
     result = after_study_analysis.get_radon_nikodym_weight(

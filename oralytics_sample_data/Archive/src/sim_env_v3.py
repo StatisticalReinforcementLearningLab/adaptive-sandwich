@@ -68,7 +68,7 @@ def generate_env_state(
     # app engagement
     env_state[3] = app_engagement
     # weekday vs. weekend
-    env_state[4] = 1 if (j % 14 >= 10 and j % 14 <= 13) else 0
+    env_state[4] = j % 14 >= 10
     # bias
     env_state[5] = 1
     # day in study if a non-stationary environment. Apparently index starts at 1...

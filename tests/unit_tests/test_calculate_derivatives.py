@@ -1,4 +1,3 @@
-from functools import partial
 import pandas as pd
 import numpy as np
 import pytest
@@ -4872,7 +4871,7 @@ def test_oralytics_act_prob_derivatives_against_finite_differences():
 
     def pi_func_of_beta(_beta):
         return functions_to_pass_to_analysis.oralytics_act_prob_function.oralytics_act_prob_function(
-            _beta, advantage
+            _beta, advantage, 15
         )
 
     def weight_func_of_beta(_beta):

@@ -157,10 +157,6 @@ def set_data_df_values_for_user(
     ] = np.concatenate([[policy_idx, action, prob, reward, quality], alg_state])
 
 
-# if user did not open the app at all before the decision time, then we simulate
-# the algorithm selecting action based off of a stale state (i.e., b_bar is the b_bar from when the
-# user last opened their app) if user did open the app, then the algorithm selecting action based
-# off of a fresh state (i.e., b_bar stays the same)
 def get_alg_state_from_app_opening(
     user_last_open_app_dt,
     data_df,
@@ -171,6 +167,11 @@ def get_alg_state_from_app_opening(
 ):
     """
     Get the algorithm state based on the time of the last app open.
+
+    If the user did not open the app at all before the decision time, then we simulate
+    the algorithm selecting action based off of a stale state (i.e., b_bar is the b_bar from when
+    the user last opened their app) if user did open the app, then the algorithm selecting action
+    based on of a fresh state (i.e., b_bar stays the same)
 
     Note that we deal in both user and calendar time here, since the environment deals in user
     decision times, but the data dataframe deals in calendar decision times.
@@ -404,7 +405,9 @@ def run_incremental_recruitment_exp(
     Returns:
     tuple[pd.DataFrame, pd.DataFrame, dict[int, dict[Hashable, tuple[Any, ...]]], dict[int, dict[Hashable, tuple[Any, ...]]]]: A tuple containing two DataFrames:
         - data_df: DataFrame containing the data collected during the experiment.
-        - update_df: DataFrame containing the updates to the algorithm's posterior mean and variance.
+        - update_df: DataFrame containing the updates to the algorithm's posterior mean and
+            variance. Note that this does NOT hold the beta parameter, which involves the inverse
+            of the posterior variance.
         - alg_update_function_args: A dictionary keyed on update index and user id, containting the
             arguments to be passed to the version of the algorithm update function that is used for
             after-study analysis.
@@ -431,7 +434,8 @@ def run_incremental_recruitment_exp(
     alg_update_function_args = {}
     action_prob_function_args = {}
 
-    # Begin with prior values in update dict
+    # Begin with prior values in update dict.  Notice that this stores the variance,
+    # not its inverse as in the beta vector.
     update_dict = {}
     policy_idx = 0
     update_dict[policy_idx] = np.concatenate(

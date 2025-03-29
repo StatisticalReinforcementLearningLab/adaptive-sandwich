@@ -61,5 +61,34 @@ def test_finite_difference_hessian_non_square():
     np.testing.assert_allclose(computed_hessian, expected_hessian, atol=1e-5)
 
 
+def perform_bayesian_linear_regression(
+    prior_mean, prior_variance, features, target, noise_variance
+):
+    """
+    Perform Bayesian linear regression using a conjugate prior.
+
+    Args:
+        prior_mean (np.ndarray): The mean of the prior distribution.
+        prior_variance (np.ndarray): The variance of the prior distribution.
+        data (np.ndarray): The observed data.
+
+    Returns:
+        np.ndarray: The posterior mean.
+    """
+    # Assuming data is a 2D array with shape (n_samples, n_features)
+    X = features
+    y = target
+
+    # Compute posterior parameters
+    posterior_variance = np.linalg.inv(
+        np.linalg.inv(prior_variance) + X.T @ X / noise_variance
+    )
+    posterior_mean = posterior_variance @ (
+        np.linalg.inv(prior_variance) @ prior_mean + X.T @ y / noise_variance
+    )
+
+    return posterior_mean, posterior_variance
+
+
 if __name__ == "__main__":
     pytest.main()

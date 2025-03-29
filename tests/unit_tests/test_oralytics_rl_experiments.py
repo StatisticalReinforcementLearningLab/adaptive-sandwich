@@ -7,6 +7,7 @@ import pandas as pd
 import rl_algorithm
 import rl_experiments
 import smoothing_function
+from tests.unit_tests.test_utils import perform_bayesian_linear_regression
 
 
 def test_create_base_data_df_1():
@@ -230,34 +231,16 @@ def test_create_base_data_df_2():
         assert data_df[col].isna().all()
 
 
-EXP_SETTINGS = {
-    "sim_env_version": 3,
-    "base_env_type": "NON_STAT",  # This indicates non-stationarity in the environment.
-    "effect_size_scale": "None",  # Don't be alarmed, this is not a parameter for the V3 algorithm
-    "delayed_effect_scale": "LOW_R",
-    "alg_type": "BLR_AC_V3",
-    "noise_var": "None",  # Don't be alarmed, this is not a paramter for the V3 algorithm
-    "clipping_vals": [0.2, 0.8],
-    "b_logistic": 0.515,
-    "num_decision_times_between_updates": 14,
-    "cluster_size": "full_pooling",
-    "cost_params": [80, 40],
-    "per_user_weeks_in_study": 10,
-    "num_decision_times_per_day_per_user": 2,
-    "weeks_between_recruitments": 2,
-}
-
-
 def test_run_incremental_recruitment_exp():
 
-    L_min, L_max = EXP_SETTINGS["clipping_vals"]
+    L_min, L_max = [0.2, 0.8]
     algorithm = rl_algorithm.BlrACV3(
-        EXP_SETTINGS["cost_params"],
-        EXP_SETTINGS["num_decision_times_between_updates"],
+        [80, 40],
+        14,
         smoothing_function.generalized_logistic_func_wrapper(
             L_min,
             L_max,
-            EXP_SETTINGS["b_logistic"],
+            0.515,
         ),
     )
     template_users_list = ["user1", "user2"] * 5
@@ -303,6 +286,9 @@ def test_run_incremental_recruitment_exp():
         )
 
     def get_user_last_open_app_dt_side_effect(user_idx):
+        """
+        This isn't realistic but I don't really care what the states end up being.
+        """
         return 0
 
     def generate_rewards_side_effect(user_idx, env_state, action):
@@ -337,11 +323,34 @@ def test_run_incremental_recruitment_exp():
         weeks_between_recruitments,
     )
 
-    expected_update_df_rows = []
-    expected_update_df_rows.append(
+    # Data generated with generate_oralytics_simulator_data.py,
+    # using above info
+    raw_expected_study_df = pd.read_csv(
+        "tests/unit_tests/user_states_with_rewards.csv",
+        index_col=False,
+        header=0,
+    )
+
+    regression_features = generate_features_for_update(policy_idx, study_df)
+
+    expected_update_df_rows = [
         [0]
         + np.concatenate([algorithm.PRIOR_MU, algorithm.PRIOR_SIGMA.flatten()]).tolist()
-    )
+    ]
+
+    for policy_idx in range(1, 9):
+        posterior_mean, posterior_var = perform_bayesian_linear_regression(
+            prior_mean=algorithm.PRIOR_MU,
+            prior_variance=algorithm.PRIOR_SIGMA,
+            features=regression_features,
+            target=raw_expected_study_df["reward"],
+            noise_variance=algorithm.SIGMA_N_2,
+        )
+        expected_update_df_rows.append(
+            [policy_idx]
+            + np.concatenate([posterior_mean, posterior_var.flatten()]).tolist()
+        )
+
     columns = (
         ["update_idx"]
         + [f"posterior_mu.{i}" for i in range(algorithm.feature_dim)]
@@ -355,3 +364,23 @@ def test_run_incremental_recruitment_exp():
 
     pd.testing.assert_frame_equal(update_df, expected_update_df)
     pd.testing.assert_frame_equal(data_df, pd.DataFrame())
+    pd.testing.assert_frame_equal(study_df, pd.DataFrame())
+    np.testing.assert_allclose(alg_update_function_args, {})
+    np.testing.assert_allclose(action_prob_function_args, {})
+
+
+def generate_features_for_update(raw_expected_study_df, policy_idx, study_df):
+    """
+    Generates the features for the update based on the policy index and study DataFrame.
+
+    Args:
+        raw_expected_study_df (pd.DataFrame): The raw expected study DataFrame.
+        policy_idx (int): The policy index.
+        study_df (pd.DataFrame): The study DataFrame.
+
+    Returns:
+        np.ndarray: The generated features for the update.
+    """
+    base_features = raw_expected_study_df[
+        raw_expected_study_df["calendar_decision_time"] < 70 + (policy_idx - 1) * 14
+    ][:, :-1][()].to_numpy()

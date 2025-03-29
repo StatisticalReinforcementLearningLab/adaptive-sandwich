@@ -29,7 +29,7 @@ def invert_matrix_and_check_conditioning(
     matrix, try_tikhonov_if_poorly_conditioned=False, condition_num_threshold=10**3
 ):
     condition_number = np.linalg.cond(matrix)
-    inverse = np.linalg.inv(matrix)
+    inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
     if condition_number > condition_num_threshold:
         warnings.warn(
             f"You are inverting a matrix with a large condition number: {condition_number}"

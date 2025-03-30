@@ -5,6 +5,7 @@ import pandas as pd
 
 import rl_algorithm
 import rl_experiments
+import sim_env_v3
 import smoothing_function
 from tests.unit_tests.test_utils import perform_bayesian_linear_regression
 
@@ -258,7 +259,6 @@ def test_run_incremental_recruitment_exp():
     )
     template_users_list = ["user1", "user2"] * 5
     users_per_recruitment = 2
-    sim_env = mock.MagicMock()
     per_user_weeks_in_study = 4
     num_users_before_update = 6
     num_decision_times_per_user_per_day = 2
@@ -272,6 +272,13 @@ def test_run_incremental_recruitment_exp():
 
     # First update should happen after week 4 and then weekly afterward,
     # for a total of 8 updates since we don't update after the last week.
+
+    np.random.seed(0)
+    users_list = np.random.choice(
+        sim_env_v3.SIM_ENV_USERS,
+        size=10,
+    )
+    sim_env = sim_env_v3.SimulationEnvironmentV3(users_list, "NON_STAT", "LOW_R")
 
     (
         data_df,

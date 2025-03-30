@@ -68,9 +68,16 @@ def perform_bayesian_linear_regression(
     Perform Bayesian linear regression using a conjugate prior.
 
     Args:
-        prior_mean (np.ndarray): The mean of the prior distribution.
-        prior_variance (np.ndarray): The variance of the prior distribution.
-        data (np.ndarray): The observed data.
+        prior_mean (np.ndarray):
+            The mean of the prior distribution.
+        prior_variance (np.ndarray):
+            The variance of the prior distribution.
+        features (np.ndarray):
+            The observed data (2D array)
+        target (np.ndarray):
+            The target variable.
+        noise_variance (float):
+            The noise variance in the linear model.
 
     Returns:
         np.ndarray: The posterior mean.
@@ -84,10 +91,11 @@ def perform_bayesian_linear_regression(
         np.linalg.inv(prior_variance) + X.T @ X / noise_variance
     )
     posterior_mean = posterior_variance @ (
-        np.linalg.inv(prior_variance) @ prior_mean + X.T @ y / noise_variance
+        np.linalg.inv(prior_variance) @ prior_mean.reshape(-1, 1)
+        + X.T @ y / noise_variance
     )
 
-    return posterior_mean, posterior_variance
+    return posterior_mean.flatten(), posterior_variance
 
 
 if __name__ == "__main__":

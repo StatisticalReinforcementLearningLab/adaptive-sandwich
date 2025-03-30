@@ -1,7 +1,6 @@
-from unittest import mock
-
 import numpy as np
 import pandas as pd
+from jax import numpy as jnp
 
 import rl_algorithm
 import rl_experiments
@@ -257,12 +256,21 @@ def test_run_incremental_recruitment_exp():
             0.515,
         ),
     )
-    template_users_list = ["user1", "user2"] * 5
     users_per_recruitment = 2
     per_user_weeks_in_study = 4
     num_users_before_update = 6
     num_decision_times_per_user_per_day = 2
     weeks_between_recruitments = 2
+    num_users = 10
+
+    np.random.seed(0)
+    template_users_list = np.random.choice(
+        sim_env_v3.SIM_ENV_USERS,
+        size=num_users,
+    )
+    sim_env = sim_env_v3.SimulationEnvironmentV3(
+        template_users_list, "NON_STAT", "LOW_R"
+    )
 
     # Week  0  1  2  3  4  5  6  7  8  9  10 11
     # Users 1  1  1  1  3  3  5  5  7  7  9  9
@@ -271,14 +279,8 @@ def test_run_incremental_recruitment_exp():
     #             4  4  6  6  8  8  10 10
 
     # First update should happen after week 4 and then weekly afterward,
-    # for a total of 8 updates since we don't update after the last week.
-
-    np.random.seed(0)
-    users_list = np.random.choice(
-        sim_env_v3.SIM_ENV_USERS,
-        size=10,
-    )
-    sim_env = sim_env_v3.SimulationEnvironmentV3(users_list, "NON_STAT", "LOW_R")
+    # for a total of 7 updates since we don't update after the last week.
+    # This makes for 8 policies including the initial.
 
     (
         data_df,
@@ -297,12 +299,19 @@ def test_run_incremental_recruitment_exp():
         weeks_between_recruitments,
     )
 
+    # Just collect these for convenience of checking args.
+    posterior_by_update_idx = {}
+
     expected_update_df_rows = [
         [0]
         + np.concatenate([algorithm.PRIOR_MU, algorithm.PRIOR_SIGMA.flatten()]).tolist()
     ]
+    posterior_by_update_idx[0] = (
+        algorithm.PRIOR_MU,
+        algorithm.PRIOR_SIGMA,
+    )
 
-    for policy_idx in range(1, 9):
+    for policy_idx in range(1, 8):
         regression_features, rewards = generate_features_and_reward_for_update(
             data_df, policy_idx
         )
@@ -312,6 +321,10 @@ def test_run_incremental_recruitment_exp():
             features=regression_features,
             target=rewards,
             noise_variance=algorithm.SIGMA_N_2,
+        )
+        posterior_by_update_idx[policy_idx] = (
+            posterior_mean,
+            posterior_var,
         )
         expected_update_df_rows.append(
             [policy_idx]
@@ -330,10 +343,172 @@ def test_run_incremental_recruitment_exp():
     expected_update_df = pd.DataFrame(expected_update_df_rows, columns=columns)
 
     pd.testing.assert_frame_equal(update_df, expected_update_df)
-    pd.testing.assert_frame_equal(data_df, pd.DataFrame())
-    pd.testing.assert_frame_equal(study_df, pd.DataFrame())
-    np.testing.assert_allclose(alg_update_function_args, {})
-    np.testing.assert_allclose(action_prob_function_args, {})
+
+    assert data_df.shape[0] == 12 * 7 * num_decision_times_per_user_per_day * num_users
+    assert study_df.shape[0] == data_df.shape[0]
+
+    for user_idx in data_df["user_idx"].unique():
+        assert len(
+            study_df[
+                (study_df.in_study_indicator == 1) & (study_df.user_idx == user_idx)
+            ]
+            == 7 * num_decision_times_per_user_per_day * per_user_weeks_in_study
+        )
+
+    columns_transformed = [
+        data_df["calendar_decision_t"],
+        data_df["user_idx"],
+        data_df["in_study"].astype(int),
+        data_df["action"].fillna(0),
+        data_df["policy_idx"].fillna(0),
+        data_df["prob"].fillna(0),
+        data_df["reward"].fillna(0),
+        data_df["quality"].fillna(0),
+        data_df["state.tod"].fillna(0),
+        data_df["state.b.bar"].fillna(0),
+        data_df["state.a.bar"].fillna(0),
+        data_df["state.app.engage"].fillna(0),
+        data_df["state.bias"].fillna(0),
+    ]
+    transformed_data_df = (
+        pd.concat(columns_transformed, axis=1)
+        .sort_values(by=["calendar_decision_t", "user_idx"])
+        .reset_index(drop=True)
+    )
+    np.testing.assert_allclose(
+        study_df.to_numpy(),
+        transformed_data_df.to_numpy(),
+    )
+
+    for calendar_decision_t in range(
+        data_df["calendar_decision_t"].min(), data_df["calendar_decision_t"].max() + 1
+    ):
+        temp = data_df[
+            data_df["calendar_decision_t"] == calendar_decision_t
+        ].reset_index(drop=True)
+
+        for user_idx in data_df["user_idx"].unique():
+            record = temp[temp["user_idx"] == user_idx].reset_index(drop=True)
+
+            if record.in_study.item():
+                policy_idx = record["policy_idx"].values[0]
+                state = jnp.array(
+                    record[
+                        [
+                            "state.tod",
+                            "state.b.bar",
+                            "state.a.bar",
+                            "state.app.engage",
+                            "state.bias",
+                        ]
+                    ].values[0],
+                    dtype=np.float32,
+                )
+                assert (
+                    len(action_prob_function_args[calendar_decision_t][user_idx]) == 3
+                )
+                np.testing.assert_array_equal(
+                    action_prob_function_args[calendar_decision_t][user_idx][0],
+                    rl_experiments.form_beta_from_posterior(
+                        *posterior_by_update_idx[policy_idx],
+                    ),
+                )
+                np.testing.assert_array_equal(
+                    action_prob_function_args[calendar_decision_t][user_idx][1],
+                    state,
+                )
+                assert action_prob_function_args[calendar_decision_t][user_idx][2] == 15
+            else:
+                assert action_prob_function_args[calendar_decision_t][user_idx] == ()
+
+    for policy_idx in range(1, 8):
+        beta = rl_experiments.form_beta_from_posterior(
+            *posterior_by_update_idx[policy_idx],
+        )
+
+        num_users_entered_already = data_df[
+            (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
+        ]["user_idx"].nunique()
+
+        for user_idx in data_df["user_idx"].unique():
+            temp = data_df[
+                (data_df["policy_idx"] < policy_idx)
+                & (data_df["user_idx"] == user_idx)
+                & (data_df["in_study"] == 1)
+            ].reset_index(drop=True)
+
+            if temp.shape[0] != 0:
+                temp = temp.sort_values(by="calendar_decision_t")
+
+                states = []
+                actions = []
+                act_probs = []
+                decision_times = []
+                rewards = jnp.array(temp["reward"].values)
+                for j in range(temp.shape[0]):
+                    state = np.array(
+                        temp.loc[j][
+                            [
+                                "state.tod",
+                                "state.b.bar",
+                                "state.a.bar",
+                                "state.app.engage",
+                                "state.bias",
+                            ]
+                        ].values,
+                        dtype=np.float32,
+                    )
+                    action = temp.loc[j]["action"]
+                    act_prob = temp.loc[j]["prob"]
+                    decision_time = temp.loc[j]["calendar_decision_t"]
+
+                    states.append(state)
+                    actions.append(action)
+                    act_probs.append(act_prob)
+                    decision_times.append(decision_time)
+
+                states = jnp.array(states)
+                actions = jnp.array(actions).reshape(-1, 1)
+                act_probs = jnp.array(act_probs).reshape(-1, 1)
+                decision_times = jnp.array(decision_times).reshape(-1, 1)
+
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][0],
+                    beta,
+                )
+                assert (
+                    alg_update_function_args[policy_idx][user_idx][1]
+                    == num_users_entered_already
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][2],
+                    states,
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][3],
+                    actions,
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][4],
+                    act_probs,
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][5],
+                    decision_times,
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][6],
+                    rewards,
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][7],
+                    algorithm.PRIOR_MU,
+                )
+                np.testing.assert_array_equal(
+                    alg_update_function_args[policy_idx][user_idx][8],
+                    np.linalg.inv(algorithm.PRIOR_SIGMA),
+                )
+                assert alg_update_function_args[policy_idx][user_idx][9] == 3396.449
 
 
 def generate_features_and_reward_for_update(

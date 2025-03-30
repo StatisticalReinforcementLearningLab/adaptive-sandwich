@@ -582,12 +582,9 @@ def create_study_df(data_df: pd.DataFrame) -> pd.DataFrame:
         for user in data_df["user_idx"].unique():
             record = temp[temp["user_idx"] == user].reset_index(drop=True)
 
-            # Check if the user is in the study
             if record.in_study.item():
-                # Fetch the policy number and associated beta
                 policy = record["policy_idx"].values[0]
 
-                # Fetch the state
                 state = jnp.array(
                     record[
                         [

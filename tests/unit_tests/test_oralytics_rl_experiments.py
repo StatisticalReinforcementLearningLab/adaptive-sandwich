@@ -1,4 +1,3 @@
-from itertools import cycle
 from unittest import mock
 
 import numpy as np
@@ -232,6 +231,20 @@ def test_create_base_data_df_2():
 
 
 def test_run_incremental_recruitment_exp():
+    """
+    Test the function that contains essentially all important logic for oralytics
+    simulator.
+
+    Finding the right level of granularity for the test is a bit difficult, with
+    so much going on.  I've chosen to largely assume the data_df is correct
+    and check that the updates happened properly and analysis function arguments were collected
+    correctly conditional on that.
+
+    This enables a larger, more realistic test scenario and avoids having to mock out all the
+    and state and reward generation functions.
+
+    We may test the formation of data_df in small, separate test.
+    """
 
     L_min, L_max = [0.2, 0.8]
     algorithm = rl_algorithm.BlrACV3(
@@ -260,52 +273,6 @@ def test_run_incremental_recruitment_exp():
     # First update should happen after week 4 and then weekly afterward,
     # for a total of 8 updates since we don't update after the last week.
 
-    def generate_current_state_side_effect(
-        user_idx, user_decision_time, weeks_in_study
-    ):
-        """
-        # Non-stationary state space
-        # 0 - time of day
-        # 1 - b_bar (normalized)
-        # 2 - a_bar (normalized)
-        # 3 - app engagement
-        # 4 - weekday vs. weekend
-        # 5 - bias
-        # 6 - day in study (normalized)
-        """
-        return np.array(
-            [
-                user_decision_time % 2,
-                user_idx / 10.0,
-                1 - user_idx / 10.0,
-                (user_decision_time + 1) % 2,
-                user_decision_time % 14 >= 10,
-                1,
-                -1 + 2 * user_decision_time / (weeks_in_study * 7 * 2),
-            ]
-        )
-
-    def get_user_last_open_app_dt_side_effect(user_idx):
-        """
-        This isn't realistic but I don't really care what the states end up being.
-        """
-        return 0
-
-    def generate_rewards_side_effect(user_idx, env_state, action):
-        # Define a list of rewards to iterate through
-        rewards_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        # Use a cycle iterator to loop through the rewards list
-        rewards_cycle = cycle(rewards_list)
-        # Calculate the reward as a function of inputs and the next value in the cycle.
-        # Not using action for simplicity
-        return next(rewards_cycle) + user_idx + 2 * env_state[1]
-
-    sim_env.generate_current_state.side_effect = generate_current_state_side_effect
-    sim_env.get_user_last_open_app_dt.side_effect = (
-        get_user_last_open_app_dt_side_effect
-    )
-    sim_env.generate_rewards.side_effect = generate_rewards_side_effect
-
     (
         data_df,
         update_df,
@@ -323,27 +290,20 @@ def test_run_incremental_recruitment_exp():
         weeks_between_recruitments,
     )
 
-    # Data generated with generate_oralytics_simulator_data.py,
-    # using above info
-    raw_expected_study_df = pd.read_csv(
-        "tests/unit_tests/user_states_with_rewards.csv",
-        index_col=False,
-        header=0,
-    )
-
-    regression_features = generate_features_for_update(policy_idx, study_df)
-
     expected_update_df_rows = [
         [0]
         + np.concatenate([algorithm.PRIOR_MU, algorithm.PRIOR_SIGMA.flatten()]).tolist()
     ]
 
     for policy_idx in range(1, 9):
+        regression_features, rewards = generate_features_and_reward_for_update(
+            data_df, policy_idx
+        )
         posterior_mean, posterior_var = perform_bayesian_linear_regression(
             prior_mean=algorithm.PRIOR_MU,
             prior_variance=algorithm.PRIOR_SIGMA,
             features=regression_features,
-            target=raw_expected_study_df["reward"],
+            target=rewards,
             noise_variance=algorithm.SIGMA_N_2,
         )
         expected_update_df_rows.append(
@@ -369,18 +329,63 @@ def test_run_incremental_recruitment_exp():
     np.testing.assert_allclose(action_prob_function_args, {})
 
 
-def generate_features_for_update(raw_expected_study_df, policy_idx, study_df):
+def generate_features_and_reward_for_update(
+    data_df: pd.DataFrame, policy_idx: int
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Generates the features for the update based on the policy index and study DataFrame.
+    Generates the features for an update based on the resulting policy index and the study data.
 
     Args:
-        raw_expected_study_df (pd.DataFrame): The raw expected study DataFrame.
-        policy_idx (int): The policy index.
-        study_df (pd.DataFrame): The study DataFrame.
+        data_df (pd.DataFrame): The data_df for the whole study.
+        policy_idx (int): The policy index resulting from the update under consideration.
 
     Returns:
-        np.ndarray: The generated features for the update.
+        tuple[np.ndarray, np.ndarray]: The generated features and rewards going into this update.
     """
-    base_features = raw_expected_study_df[
-        raw_expected_study_df["calendar_decision_time"] < 70 + (policy_idx - 1) * 14
-    ][:, :-1][()].to_numpy()
+
+    feature_cols = [
+        "state.tod",
+        "state.b.bar",
+        "state.a.bar",
+        "state.app.engage",
+        "state.bias",
+    ]
+
+    base_features = data_df[
+        (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
+    ][feature_cols].to_numpy()
+
+    actions = (
+        data_df[(data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)][
+            "action"
+        ]
+        .to_numpy()
+        .reshape(-1, 1)
+    )
+
+    action_probs = (
+        data_df[(data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)][
+            "prob"
+        ]
+        .to_numpy()
+        .reshape(-1, 1)
+    )
+
+    rewards = (
+        data_df[(data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)][
+            "reward"
+        ]
+        .to_numpy()
+        .reshape(-1, 1)
+    )
+
+    return (
+        np.hstack(
+            [
+                base_features,
+                action_probs * base_features,
+                (actions - action_probs) * base_features,
+            ]
+        ),
+        rewards,
+    )

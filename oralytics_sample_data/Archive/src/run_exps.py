@@ -484,21 +484,6 @@ def collect_action_prob_function_args(
     return df2, act_prob_dict
 
 
-def process_results(data_df, update_df, exp_path, seed, feature_dim):
-    _, loss_dict = collect_alg_update_function_args(data_df, update_df, feature_dim)
-    _, act_prob_dict = collect_action_prob_function_args(
-        data_df, update_df, loss_dict, feature_dim
-    )
-    study_df = create_study_df(data_df)
-
-    with open(exp_path + f"/{seed}_loss_fn_data.pkl", "wb") as f:
-        pkl.dump(loss_dict, f)
-    with open(exp_path + f"/{seed}_action_data.pkl", "wb") as f:
-        pkl.dump(act_prob_dict, f)
-    with open(exp_path + f"/{seed}_study_data.pkl", "wb") as f:
-        pkl.dump(study_df, f)
-
-
 @click.command()
 @click.option("--seed", default=0, help="Random seed for the experiment.")
 @click.option(

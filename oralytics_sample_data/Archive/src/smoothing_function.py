@@ -1,11 +1,10 @@
 import numpy as np
 from scipy.special import expit
 
-"""### Smoothing Functions
----
-"""
+
 ### traditional Thompson Sampling ###
-BASIC_THOMPSON_SAMPLING_FUNC = lambda x: x > 0
+def BASIC_THOMPSON_SAMPLING_FUNC(x):
+    return x > 0
 
 
 ### generalized logistic function ###
@@ -18,6 +17,7 @@ C_logistic = 3
 # and the asymptote towards the lower clipping more steep
 K_logistic = 1
 
+
 # l_min, l_max are lower and upper asymptotes
 # uses scipy.special.expit for numerical stability
 def stable_generalized_logistic(x, L_min, L_max, B_logistic):
@@ -27,6 +27,7 @@ def stable_generalized_logistic(x, L_min, L_max, B_logistic):
 
     return L_min + num * stable_exp_k
 
-def genearlized_logistic_func_wrapper(l_min, l_max, B):
+
+def generalized_logistic_func_wrapper(l_min, l_max, B):
 
     return lambda x: stable_generalized_logistic(x, l_min, l_max, B)

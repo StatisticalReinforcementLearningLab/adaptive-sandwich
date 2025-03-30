@@ -5023,24 +5023,34 @@ def allocation_function(mean: float, var: float) -> float:
     samples = mean + (randomvars * std)
     prob = jnp.mean(logistic_function(samples))
 
+    # the above is replacing the following non-JAX-differentiable code:
     # prob = stats.norm.expect(func=logistic_function, loc=mean, scale=np.sqrt(var))
 
     return prob
 
 
 def oralytics_act_prob_function(
-    beta: jnp.ndarray,
-    advantage: jnp.ndarray,
+    beta: jnp.ndarray, advantage: jnp.ndarray, total_feature_dim: int
 ) -> float:
+    """
+    This function calculates the probability of taking action 1 given a user's "advantage" features
+    and the model parameters "beta". This is intended to match up with what occurs in Oralytics,
+    substituting in a sample mean for an expectation calculated by numerical integration.
+
+    NOTE: If you change the number of features in the simulator, the value of "dim" here will need
+    to be updated to match the new number of features.
+    """
 
     n_params = len(advantage)
 
-    dim = 15
-
-    mu = beta[:dim].reshape(-1, 1)
-    utvar_terms = beta[dim:]
-    idx = jnp.triu_indices(dim)
-    utvar_inv = jnp.zeros((dim, dim), dtype=jnp.float32).at[idx].set(utvar_terms)
+    mu = beta[:total_feature_dim].reshape(-1, 1)
+    utvar_terms = beta[total_feature_dim:]
+    idx = jnp.triu_indices(total_feature_dim)
+    utvar_inv = (
+        jnp.zeros((total_feature_dim, total_feature_dim), dtype=jnp.float32)
+        .at[idx]
+        .set(utvar_terms)
+    )
     var_inv = utvar_inv + utvar_inv.T - jnp.diag(jnp.diag(utvar_inv))
     var = jnp.linalg.inv(var_inv)
 

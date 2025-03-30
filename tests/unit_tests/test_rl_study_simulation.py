@@ -28,7 +28,6 @@ class TestRunStudySimulation:
             upper_clip=0.9,
             lower_clip=0.1,
             fixed_action_prob=0.5,
-            min_users=1,
             err_corr="time_corr",
             decisions_between_updates=2,
             save_dir=".",
@@ -53,7 +52,6 @@ class TestRunStudySimulation:
             upper_clip=0.9,
             lower_clip=0.1,
             fixed_action_prob=0.5,
-            min_users=1,
             err_corr="time_corr",
             decisions_between_updates=2,
             save_dir=".",
@@ -1935,6 +1933,7 @@ class TestRunStudySimulation:
         )
 
 
+# TODO: Implement test or handle otherwise
 @pytest.mark.skip(reason="To be implemented")
 def test_load_data_and_simulate_studies():
     raise NotImplementedError()

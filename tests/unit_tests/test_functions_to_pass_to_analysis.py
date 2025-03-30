@@ -1,9 +1,13 @@
-import numpy as np
+import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
+import optax
+import pytest
 
 import functions_to_pass_to_analysis.oralytics_estimate_theta_primary_analysis
 import functions_to_pass_to_analysis.oralytics_primary_analysis_loss
+import functions_to_pass_to_analysis.get_action_1_prob_pure
 
 
 def test_get_action_1_prob_pure_no_clip():
@@ -18,7 +22,7 @@ def test_get_action_1_prob_pure_no_clip():
             upper_clip=0.9,
             treat_states=treat_states,
         ),
-        np.array(0.1693274, dtype=np.float32),
+        np.array(0.16932733, dtype=np.float32),
     )
 
 
@@ -134,3 +138,82 @@ def test_oralytics_estimate_theta_primary_analysis():
 
     # Assert that the coefficients are almost equal to the expected coefficients
     np.testing.assert_almost_equal(coef, expected_coef, decimal=6)
+
+
+@pytest.mark.skip(
+    "The optimization is not converging to the regression answer for some reason, but I'm not "
+    "convinced it's because the loss is wrong..."
+)
+def test_minimizing_oralytics_primary_analysis_loss_same_as_regression():
+    # Example DataFrame
+    tod = jnp.array([1, 37, 5, 7, 46])
+    bbar = jnp.array([2, 4, 60, 8, 10])
+    abar = jnp.array([3, 1, 4, 2, 5])
+    appengage = jnp.array([4, 6, 8, 10, 12])
+    bias = jnp.array([1, 1, 1, 1, 1])
+    act_prob = jnp.array([0.2, 0.4, 0.6, 0.3, 0.5])
+    action = jnp.array([1, 0, 1, 0, 1])
+    oscb = jnp.array([10, 20, 30, 40, 50])
+    in_study_indicator = jnp.array([1, 1, 1, 1, 1])
+
+    data = {
+        "tod": tod,
+        "bbar": bbar,
+        "abar": abar,
+        "appengage": appengage,
+        "bias": bias,
+        "act_prob": act_prob,
+        "action": action,
+        "oscb": oscb,
+        "in_study_indicator": in_study_indicator,
+    }
+    study_df = pd.DataFrame(data)
+
+    regression_coef = functions_to_pass_to_analysis.oralytics_estimate_theta_primary_analysis.oralytics_estimate_theta_primary_analysis(
+        study_df
+    )
+
+    print(
+        f"Regression loss: {functions_to_pass_to_analysis.oralytics_primary_analysis_loss.oralytics_primary_analysis_loss(regression_coef, tod.reshape(-1, 1), bbar.reshape(-1, 1), abar.reshape(-1, 1), appengage.reshape(-1, 1), bias.reshape(-1, 1), action.reshape(-1, 1), oscb.reshape(-1, 1), act_prob.reshape(-1, 1))}"
+    )
+
+    # Create an Adam optimizer and initialize its state
+    optimizer = optax.adam(learning_rate=1e-3)
+    params = jnp.zeros(7)
+    opt_state = optimizer.init(params)
+
+    # Define a single optimization step
+    @jax.jit
+    def update(params, opt_state, *args):
+        loss, grads = jax.value_and_grad(
+            functions_to_pass_to_analysis.oralytics_primary_analysis_loss.oralytics_primary_analysis_loss
+        )(params, *args)
+        updates, opt_state = optimizer.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        return params, opt_state, loss
+
+    # Training loop
+    min_loss = float("inf")
+    best_params = None
+    for epoch in range(30000):
+        params, opt_state, loss = update(
+            params,
+            opt_state,
+            tod.reshape(-1, 1),
+            bbar.reshape(-1, 1),
+            abar.reshape(-1, 1),
+            appengage.reshape(-1, 1),
+            bias.reshape(-1, 1),
+            action.reshape(-1, 1),
+            oscb.reshape(-1, 1),
+            act_prob.reshape(-1, 1),
+        )
+        if loss < min_loss:
+            best_params = params
+            min_loss = loss
+        if epoch % 10000 == 0:
+            print(f"Epoch {epoch}, Loss: {loss}")
+
+    print(f"Min loss found: {min_loss}")
+
+    np.testing.assert_almost_equal(regression_coef, best_params, decimal=6)

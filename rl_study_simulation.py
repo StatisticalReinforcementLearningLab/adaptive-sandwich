@@ -95,7 +95,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             study_df = study_env.update_study_df(study_df, t)
 
         # Note that we DO NOT filter to in_study == 1 here.  The way we calculate the gradients
-        # we need in batches requires same-size state inputs for each user, so we actually
+        # we need in batches benefits from same-size state inputs for each user, so we actually
         # want to pass states for when users are not in the study but zero them out.
         all_prev_data_bool = study_df["calendar_t"] <= t
         all_prev_data = study_df[all_prev_data_bool]
@@ -166,18 +166,11 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         env_params = load_synthetic_env_params(paramf_path)
         if len(env_params.shape) == 2:
             assert env_params.shape[0] >= args.T
-        exp_str = "{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}".format(
-            args.dataset_type,
-            mode,
-            args.RL_alg,
-            args.T,
-            args.n,
-            args.recruit_n,
-            args.decisions_between_updates,
-            args.steepness,
-            args.alg_state_feats,
-            args.err_corr,
-            args.action_centering,
+        exp_str = (
+            f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
+            f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
+            f"steepness={args.steepness}_algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
+            f"actionC={args.action_centering}"
         )
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
@@ -236,7 +229,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         toc2 = time.perf_counter()
         if i > 1:
             logger.info(
-                f"Simulation {i-1} of {args.N} ran in {toc2 - toc1:0.4f} seconds"
+                "Simulation %d of %d ran in %.4f seconds", i - 1, args.N, toc2 - toc1
             )
         toc1 = toc2
 
@@ -316,7 +309,10 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             pickle.dump(beta_df, f)
 
     logger.info(
-        f"Simulation {args.N} of {args.N} ran in {time.perf_counter() - toc2:0.4f} seconds"
+        "Simulation %d of %d ran in %.4f seconds",
+        args.N,
+        args.N,
+        time.perf_counter() - toc2,
     )
     print(f"All simulations ran in {time.perf_counter() - tic:0.4f} seconds")
 
@@ -381,12 +377,6 @@ def main():
         type=float,
         default=0.5,
         help="Used if not using learning alg to select actions",
-    )
-    parser.add_argument(
-        "--min_users",
-        type=int,
-        default=25,
-        help="Min number of users needed to update alg",
     )
     parser.add_argument(
         "--err_corr",

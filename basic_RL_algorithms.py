@@ -198,7 +198,7 @@ class SigmoidLS:
             "ij,ik->jk", design_avail, design_avail
         )
 
-        # NOTE: this gives NANs and breaks action selection when the all
+        # NOTE: this gives NANs and breaks action selection when all
         # users take same action
         inv_XX = jnp.linalg.inv(new_XX)
 

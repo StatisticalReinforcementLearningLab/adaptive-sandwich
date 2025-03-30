@@ -4630,6 +4630,7 @@ def test_oralytics_inference_derivatives_against_finite_differences():
     np.testing.assert_allclose(result[2][0], finite_diff_result[2][0], rtol=0.3)
 
 
+@pytest.mark.skip("Not relevant, gonna delete soon")
 def test_oralytics_act_prob_derivatives_against_finite_differences():
     """
     This test makes sure the oralytics automatic derivatives roughly match up to

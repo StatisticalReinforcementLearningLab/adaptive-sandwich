@@ -9,34 +9,24 @@
            |__/
 ```
 
-Save your standard errors from pooling in RL.
-
-- `After_Study_Analyses.py`: main code for after study analyses
-- `RL_Study_Simulation.py`: main code for running RL algorithm experiements
-- `basic_RL_algorithms.py`: includes code for boltzman sampling algorithm (called SigmoidLS)
-- `debug_helper.py`: code I kept around from when I computed standard errors differently earlier. I keep it around to debug new code to make sure it matches.
-- `helper_functions.py`: various helper functions
-- `least_squares_helper.py`: functions to help with forming least squares estimators and estimating equations
-- `oralytics_env.py`: oralytics environment (not cleaned up; haven't used in a while)
-- `smooth_posterior_sampling.py`: code for smooth posterior sampling algorithm
-- `synthetic_env.py`: synthetic simulation environment
-- `run.sh`: script for running experiments
-
+Save your standard errors from pooling in adaptive experiments.
 
 ## Setup (if not using conda)
 ### Create and activate a virtual environment
 - `python3 -m venv .venv; source /.venv/bin/activate`
+
 ### Adding a package
 - Add to `requirements.txt` with a specific version or no version if you want the latest stable
 - Run `pip freeze > requirements.txt` to lock the versions of your package and all its subpackages
 
 ## Running the code
-- `export PYTHONPATH to the overall location of this repository on your computer
-- `./run.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
+- `export PYTHONPATH to the absolute path of this repository on your computer
+- `./run_local.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
 
 ## Linting/Formatting
 
 ## Testing
+python -m pytest
 python -m pytest tests/unit_tests
 python -m pytest tests/integration_tests
 
@@ -84,5 +74,6 @@ sbatch --array=[0-999] -t 1-00:00 --mem=50G simulation_run_and_analysis_parallel
 
 
 ## TODO
-1. Add precommit hooks (one of which should handle pip freeze)
+1. Add precommit hooks (pip freeze, linting, formatting)
+2. Run tests on PRs
 

@@ -43,31 +43,20 @@ def cli():
     pass
 
 
-# TODO: Take in requirements files for action prob and loss and take derivatives
-# in corresponding sandbox. For now we just assume the dependencies in this package
-# suffice.
-# TODO: Handle raw timestamps instead of calendar time index? For now I'm requiring it.
-# More generally, handle decision times being different across different users? Would like
-# to consolidate.
 # TODO: Check all help strings for accuracy.
-# TODO: Need to support pure exploration phase with more flags than just in study. Maybe in study, receiving updates
 # TODO: Deal with NA, -1, etc policy numbers
-# TODO:Make sure in study is never on for more than one stretch EDIT: unclear if
+# TODO: Make sure in study is never on for more than one stretch EDIT: unclear if
 # this will remain an invariant as we deal with more complicated data missingness
 # TODO: I think I'm agnostic to indexing of calendar times but should check because
 # otherwise need to add a check here to verify required format.
 # TODO: Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
 # Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 # TODO: Make the user give the min and max probabilities, and I'll enforce it?
-# TODO: I assume someone is in the study at each decision time. Check for this or
-# see if it shouldn't always be true. EDIT: Is this true that I assume this?
-# TODO: I also assume someone has some data to contribute at each update time. Check
-# for this or see if shouldn't always be true. EDIT: Is it true that I assume this?
 @cli.command()
 @click.option(
     "--study_df_pickle",
     type=click.File("rb"),
-    help="Pickled pandas dataframe in correct format (see contract/readme)",
+    help="Pickled pandas dataframe in correct format (see contract/readme).",
     required=True,
 )
 @click.option(
@@ -79,19 +68,19 @@ def cli():
 @click.option(
     "--action_prob_func_args_pickle",
     type=click.File("rb"),
-    help="Pickled dictionary that contains the action probability function arguments for all decision times for all users",
+    help="Pickled dictionary that contains the action probability function arguments for all decision times for all users.",
     required=True,
 )
 @click.option(
     "--action_prob_func_args_beta_index",
     type=int,
     required=True,
-    help="Index of the algorithm parameter vector beta in the tuple of action probability func args",
+    help="Index of the algorithm parameter vector beta in the tuple of action probability func args.",
 )
 @click.option(
     "--alg_update_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the per-user update function used to determine the algorithm parameters at each update and relevant imports.  The filename without its extension will be assumed to match the function name.",
+    help="File that contains the per-user update function used to determine the algorithm parameters at each update and relevant imports. May be a loss or estimating function, specified in a separate argument.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -103,26 +92,26 @@ def cli():
 @click.option(
     "--alg_update_func_args_pickle",
     type=click.File("rb"),
-    help="Pickled dictionary that contains the algorithm update function arguments for all update times for all users",
+    help="Pickled dictionary that contains the algorithm update function arguments for all update times for all users.",
     required=True,
 )
 @click.option(
     "--alg_update_func_args_beta_index",
     type=int,
     required=True,
-    help="Index of the algorithm parameter vector beta in the tuple of algorithm update func args",
+    help="Index of the algorithm parameter vector beta in the tuple of algorithm update func args.",
 )
 @click.option(
     "--alg_update_func_args_action_prob_index",
     type=int,
     default=-1000,
-    help="Index of the action probability in the tuple of algorithm update func args, if applicable",
+    help="Index of the action probability in the tuple of algorithm update func args, if applicable.",
 )
 @click.option(
     "--alg_update_func_args_action_prob_times_index",
     type=int,
     default=-1000,
-    help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of algorithm update func args, if applicable",
+    help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of algorithm update func args, if applicable.",
 )
 @click.option(
     "--inference_func_filename",
@@ -140,7 +129,7 @@ def cli():
     "--inference_func_args_theta_index",
     type=int,
     required=True,
-    help="Index of the algorithm parameter vector beta in the tuple of inference loss/estimating func args",
+    help="Index of the algorithm parameter vector beta in the tuple of inference loss/estimating func args.",
 )
 @click.option(
     "--theta_calculation_func_filename",
@@ -152,19 +141,19 @@ def cli():
     "--in_study_col_name",
     type=str,
     required=True,
-    help="Name of the binary column in the study dataframe that indicates whether a user is in the study",
+    help="Name of the binary column in the study dataframe that indicates whether a user is in the study.",
 )
 @click.option(
     "--action_col_name",
     type=str,
     required=True,
-    help="Name of the binary column in the study dataframe that indicates which action was taken",
+    help="Name of the binary column in the study dataframe that indicates which action was taken.",
 )
 @click.option(
     "--policy_num_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that indicates the policy number in use",
+    help="Name of the column in the study dataframe that indicates the policy number in use.",
 )
 @click.option(
     "--calendar_t_col_name",
@@ -176,25 +165,25 @@ def cli():
     "--user_id_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that indicates user id",
+    help="Name of the column in the study dataframe that indicates user id.",
 )
 @click.option(
     "--action_prob_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that gives action probabilities",
+    help="Name of the column in the study dataframe that gives action one probabilities.",
 )
 @click.option(
     "--suppress_interactive_data_checks",
     type=bool,
     default=False,
-    help="Flag to suppress any data checks that require user input. This is suitable for tests.",
+    help="Flag to suppress any data checks that require user input. This is suitable for tests and large simulations",
 )
 @click.option(
     "--suppress_all_data_checks",
     type=bool,
     default=False,
-    help="Flag to suppress all data checks. This is suitable for large simulations.",
+    help="Flag to suppress all data checks. Not usually recommended, as suppressing only interactive checks suffices to keep tests/simulations running and is safer.",
 )
 @click.option(
     "--small_sample_correction",
@@ -232,7 +221,7 @@ def analyze_dataset(
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
     small_sample_correction: str,
-):
+) -> None:
     """
     Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
 
@@ -294,10 +283,6 @@ def analyze_dataset(
     )
 
     study_df = pickle.load(study_df_pickle)
-    # TODO: Should I sort? Check how slow it is, for one.
-    # study_df = pickle.load(study_df_pickle).sort_values(
-    #     by=[user_id_col_name, calendar_t_col_name]
-    # )
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     alg_update_func_args = pickle.load(alg_update_func_args_pickle)
 
@@ -324,7 +309,7 @@ def analyze_dataset(
             small_sample_correction,
         )
 
-    # Begin collecting data structures that will be used to compute the joint bread matrix.
+    ### Begin collecting data structures that will be used to compute the joint bread matrix.
 
     beta_index_by_policy_num, initial_policy_num = (
         construct_beta_index_by_policy_num_map(
@@ -362,6 +347,7 @@ def analyze_dataset(
         in_study_col_name,
     )
 
+    # Create the function that creates a weighted estimating function stack for a single user.
     single_user_weighted_estimating_function_stacker = (
         construct_single_user_weighted_estimating_function_stacker(
             action_prob_func_filename,
@@ -386,6 +372,9 @@ def analyze_dataset(
         )
     )
 
+    # Use the per-user stacking function to derive classical and joint adaptive meat and inverse
+    # bread matrices.  This is facilitated because the *value* of the weighted and unweighted stacks
+    # are the same, as the weights evaluate to 1 pre-differentiation.
     logger.info("Constructing joint adaptive bread inverse matrix.")
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     # TODO: roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
@@ -639,7 +628,6 @@ def process_inference_func_args(
     )
 
 
-# TODO: Docstring
 def get_radon_nikodym_weight(
     beta_target: jnp.ndarray[jnp.float32],
     action_prob_func: callable,
@@ -1300,8 +1288,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
-    # Interestingly, jax.jacobian does not seem to work here... just hangs in
-    # the oralytics case, while it works fine in the simpler synthetic case.
+    # jax.jacobian MAY perform worse here--seemed to hang indefinitely while jacrev is merely very
+    # slow.
     joint_adaptive_bread_inverse_pieces, (
         avg_estimating_function_stack,
         joint_adaptive_meat,
@@ -1319,9 +1307,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         user_ids,
     )
 
-    # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary values.
-    # The bread will always be block lower triangular.  If this is not the case there
-    # is an error (but it is almost certainly the package's fault, not the user's).
+    # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
+    # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
         jnp.hstack(joint_adaptive_bread_inverse_pieces),
         joint_adaptive_meat,
@@ -1352,7 +1339,17 @@ def estimate_theta(study_df, theta_calculation_func_filename):
     type=int,
     help="The index of the parameter to check confidence interval coverage for across runs.  If not provided, coverage will not be checked.",
 )
-def collect_existing_analyses(input_glob, index_to_check_ci_coverage):
+def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) -> None:
+    """
+    Collects existing analyses from the specified input glob and computes the mean parameter estimate,
+    empirical variance, and adaptive/classical sandwich variance estimates.
+    Optionally checks confidence interval coverage for a specified parameter index.
+
+    Args:
+        input_glob (str): The glob pattern to search for analysis files.
+        index_to_check_ci_coverage (int, optional): The index of the parameter to check confidence
+            interval coverage for. If not provided, coverage will not be checked.
+    """
 
     raw_theta_estimates = []
     raw_adaptive_sandwich_var_estimates = []

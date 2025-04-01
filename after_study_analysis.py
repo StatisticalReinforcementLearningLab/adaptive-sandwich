@@ -347,35 +347,12 @@ def analyze_dataset(
         in_study_col_name,
     )
 
-    # Create the function that creates a weighted estimating function stack for a single user.
-    single_user_weighted_estimating_function_stacker = (
-        construct_single_user_weighted_estimating_function_stacker(
-            action_prob_func_filename,
-            action_prob_func_args_beta_index,
-            alg_update_func_filename,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
-            action_prob_func_args,
-            alg_update_func_args,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-        )
+    # Use a per-user weighted estimating function stacking functino to derive classical and joint
+    # adaptive meat and inverse bread matrices.  This is facilitated because the *value* of the
+    # weighted and unweighted stacks are the same, as the weights evaluate to 1 pre-differentiation.
+    logger.info(
+        "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
     )
-
-    # Use the per-user stacking function to derive classical and joint adaptive meat and inverse
-    # bread matrices.  This is facilitated because the *value* of the weighted and unweighted stacks
-    # are the same, as the weights evaluate to 1 pre-differentiation.
-    logger.info("Constructing joint adaptive bread inverse matrix.")
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     # TODO: roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
     (
@@ -385,10 +362,28 @@ def analyze_dataset(
         classical_meat_matrix,
         avg_estimating_function_stack,
     ) = construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
-        single_user_weighted_estimating_function_stacker,
         theta_est,
         all_post_update_betas,
         user_ids,
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        alg_update_func_args,
+        action_by_decision_time_by_user_id,
     )
 
     beta_dim = len(all_post_update_betas[0])
@@ -704,132 +699,15 @@ def get_min_time_by_policy_num(
     return min_time_by_policy_num, first_time_after_first_update
 
 
-def construct_single_user_weighted_estimating_function_stacker(
-    action_prob_func_filename: str,
-    action_prob_func_args_beta_index: int,
-    alg_update_func_filename: str,
-    alg_update_func_type: str,
-    alg_update_func_args_beta_index: int,
-    alg_update_func_args_action_prob_index: int,
-    alg_update_func_args_action_prob_times_index: int,
-    inference_func_filename: str,
-    inference_func_type: str,
-    inference_func_args_theta_index: int,
-    inference_func_args_action_prob_index: int,
-    beta_index_by_policy_num: dict[int | float, int],
-    initial_policy_num: int | float,
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
-    policy_num_by_decision_time_by_user_id: dict[
-        collections.abc.Hashable, dict[int, int | float]
-    ],
-    action_prob_func_args_by_user_id_by_decision_time: dict[
-        collections.abc.Hashable, dict[int, tuple[Any, ...]]
-    ],
-    update_func_args_by_by_user_id_by_policy_num: dict[
-        collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
-    ],
-    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
-    inference_action_prob_decision_times_by_user_id: dict[
-        collections.abc.Hashable, list[int]
-    ],
-) -> callable:
-    """
-    Returns a function that computes a weighted estimating function stack for a single user. This
-    includes a vertical stack of weighted estimating functions for each update and then one at the
-    bottom for inference.
-
-    Arguments that are not user-specific are provided at this level, whereas user-specific args are
-    provided when the returned function is called.
-
-    Args:
-        action_prob_func_filename (str):
-            The filename of the action probability function to be loaded.
-
-        action_prob_func_args_beta_index (int):
-            The index of the beta argument in the action probability function's arguments.
-
-        alg_update_func_filename (str):
-            The filename of the algorithm update function to be loaded.
-
-        alg_update_func_type (str):
-            The type of the algorithm update function. FunctionTypes.LOSS or
-            FunctionTypes.ESTIMATING.
-
-        alg_update_func_args_beta_index (int):
-            The index of the beta argument in the algorithm update function's arguments.
-
-        alg_update_func_args_action_prob_index (int):
-            The index of the action probabilities argument in the algorithm update function's
-            arguments.
-
-        alg_update_func_args_action_prob_times_index (int):
-            The index of the argument holding the decision times the action probabilities correspond
-            to in the algorithm update function's arguments.
-
-        inference_func_filename (str):
-            The filename of the inference loss or estimating function to be loaded.
-
-        inference_func_type (str):
-            The type of the inference function. FunctionTypes.LOSS or FunctionTypes.ESTIMATING.
-
-        inference_func_args_theta_index (int):
-            The index of the theta parameter in the inference loss or estimating function arguments.
-            This parameter must be present, so this should always be nonnegative.
-
-        inference_func_args_action_prob_index (int):
-            The index of the action probabilities argument in the inference loss or estimating
-            function's arguments. -1 if not present.
-
-        beta_index_by_policy_num (dict[int | float, int]):
-            A dictionary mapping policy numbers to the index of the corresponding beta in
-            all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-
-        initial_policy_num (int | float): The policy number of the initial policy before any
-            updates.
-
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping decision times to actions taken.
-
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A dictionary mapping decision times to the policy number in use.
-            This may be user-specific. Should be sorted by decision time.
-
-        action_prob_func_args_by_user_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for action probability function.
-            This is for all decision times for all users (ars are an empty tuple if they are not in
-            the study). Should be sorted by decision time.
-
-        update_func_args_by_by_user_id_by_policy_num (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from policy numbers to tuples containing the arguments for the algorithm
-            loss or estimating functions when producing this policy.  This is for all non-initial,
-            non-fallback policies. Should be sorted by policy number.
-
-        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A tuple containing the arguments for the inference loss or estimating function for this
-            user.
-
-        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times to which action probabilities correspond if
-            provided. Typically just in-study times if action probabilites are used in the inference
-            loss or estimating function.
-
-    Returns:
-        callable: A function that computes a weighted estimating function stack for a single user
-            (and some auxiliary values described in its docstring).
-    """
-
-    return single_user_weighted_algorithm_estimating_function_stacker
-
-
 # TODO : remove user id from dicts to prepare for vmap?
 def single_user_weighted_algorithm_estimating_function_stacker(
-    theta: jnp.ndarray[jnp.float32],
-    all_post_update_betas: list[jnp.ndarray[jnp.float32]],
+    beta_dim: int,
     user_id: collections.abc.Hashable,
     action_prob_func: callable,
     algorithm_estimating_func: callable,
     inference_estimating_func: callable,
     action_prob_func_args_beta_index: int,
+    inference_func_args_theta_index: int,
     action_prob_func_args_by_user_id_by_decision_time: dict[
         int, dict[collections.abc.Hashable, tuple[Any, ...]]
     ],
@@ -859,10 +737,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     arguments.
 
     Args:
-        theta (jnp.ndarray):
-            The estimate of the parameter vector.
-
-        all_post_update_betas (list[jnp.ndarray]):
+        beta_dim (list[jnp.ndarray]):
             A list of 1D JAX NumPy arrays corresponding to the betas produced by all updates.
 
         user_id (collections.abc.Hashable):
@@ -973,7 +848,9 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                                 action_prob_func,
                                 action_prob_func_args_beta_index,
                                 action_by_decision_time_by_user_id[user_id][t],
-                                *threaded_single_user_action_prob_func_args_by_decision_time[
+                                *threaded_action_prob_func_args_by_decision_time_by_user_id[
+                                    user_id
+                                ][
                                     t
                                 ],
                             )
@@ -1003,9 +880,11 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                 # Note that after they exit, they still contribute all their data to later
                 # updates.
                 if update_args
-                else jnp.zeros(len(all_post_update_betas[0]))
+                else jnp.zeros(beta_dim)
             )
-            for policy_num, update_args in threaded_single_user_update_func_args_by_policy_num.items()
+            for policy_num, update_args in threaded_update_func_args_by_policy_num_by_user_id[
+                user_id
+            ].items()
         ]
     )
     # 7. Form the weighted inference estimating equation.
@@ -1024,7 +903,9 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                     action_prob_func,
                     action_prob_func_args_beta_index,
                     action_by_decision_time_by_user_id[user_id][t],
-                    *threaded_single_user_action_prob_func_args_by_decision_time[t],
+                    *threaded_action_prob_func_args_by_decision_time_by_user_id[
+                        user_id
+                    ][t],
                 )
                 # Go from the first time for the user that is after the first
                 # update to their last active time
@@ -1034,7 +915,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                 )
             ]
         )
-    ) * inference_estimating_func(*threaded_single_user_inference_func_args)
+    ) * inference_estimating_func(*threaded_inference_func_args_by_user_id[user_id])
 
     # 8. Concatenate the two components to form the weighted estimating function stack for this
     # user.
@@ -1056,26 +937,65 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         jnp.outer(weighted_stack, weighted_stack),
         jnp.outer(inference_component, inference_component),
         jax.jacrev(inference_estimating_func, argnums=inference_func_args_theta_index)(
-            *threaded_single_user_inference_func_args
+            *threaded_inference_func_args_by_user_id[user_id]
         ),
     )
 
 
 def thread_action_prob_func_args(
-    action_prob_func_args_by_user_id_by_decision_time,
-    policy_num_by_decision_time_by_user_id,
-    initial_policy_num,
-    all_post_update_betas,
-    beta_index_by_policy_num,
-    action_prob_func_args_beta_index,
-):
-    threaded_action_prob_func_args_by_decision_time_by_user_id = {}
+    action_prob_func_args_by_user_id_by_decision_time: dict[
+        int, dict[collections.abc.Hashable, tuple[Any, ...]]
+    ],
+    policy_num_by_decision_time_by_user_id: dict[
+        collections.abc.Hashable, dict[int, int | float]
+    ],
+    initial_policy_num: int | float,
+    all_post_update_betas: list[jnp.ndarray],
+    beta_index_by_policy_num: dict[int | float, int],
+    action_prob_func_args_beta_index: int,
+) -> dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]:
+    """
+    Threads the shared betas into the action probability function arguments for each user and
+    decision time to enable correct differentiation.
+
+    Args:
+        action_prob_func_args_by_user_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
+            A map from decision times to maps of user ids to tuples of arguments for action
+            probability function. This is for all decision times for all users (args are an empty
+            tuple if they are not in the study). Should be sorted by decision time.
+
+        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A dictionary mapping decision times to the policy number in use. This may be user-specific.
+            Should be sorted by decision time.
+
+        initial_policy_num (int | float): The policy number of the initial policy before any
+            updates.
+
+        all_post_update_betas (list[jnp.ndarray]):
+            A list of beta values to be introduced into arguments to
+            facilitate differentiation.  They will be the same value as what they replace, but this
+            introduces direct dependence on the parameter we will differentiate with respect to.
+
+        beta_index_by_policy_num (dict[int | float, int]):
+            A dictionary mapping policy numbers to the index of the corresponding beta in
+            all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
+
+        action_prob_func_args_beta_index (int):
+            The index in the action probability function arguments tuple
+            where the beta value should be inserted.
+    Returns:
+        dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]:
+            A map from user ids to maps of decision times to action probability function
+            arguments tuples with the shared betas threaded in. Note the key order switch.
+    """
+    threaded_action_prob_func_args_by_decision_time_by_user_id = (
+        collections.defaultdict(dict)
+    )
     for (
         decision_time,
         action_prob_func_args_by_user_id,
     ) in action_prob_func_args_by_user_id_by_decision_time.items():
         for user_id, args in action_prob_func_args_by_user_id.items():
-            threaded_action_prob_func_args_by_decision_time_by_user_id[user_id] = {}
             if not args:
                 threaded_action_prob_func_args_by_decision_time_by_user_id[user_id][
                     decision_time
@@ -1109,135 +1029,199 @@ def thread_action_prob_func_args(
 
 
 def thread_update_func_args(
-    update_func_args_by_by_user_id_by_policy_num,
-    all_post_update_betas,
-    beta_index_by_policy_num,
-    alg_update_func_args_beta_index,
-    alg_update_func_args_action_prob_index,
-    alg_update_func_args_action_prob_times_index,
-    threaded_action_prob_func_args_by_decision_time_by_user_id,
-    action_prob_func,
-):
+    update_func_args_by_by_user_id_by_policy_num: dict[
+        int | float, dict[collections.abc.Hashable, tuple[Any, ...]]
+    ],
+    all_post_update_betas: list[jnp.ndarray],
+    beta_index_by_policy_num: dict[int | float, int],
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_action_prob_index: int,
+    alg_update_func_args_action_prob_times_index: int,
+    threaded_action_prob_func_args_by_decision_time_by_user_id: dict[
+        collections.abc.Hashable, dict[int, tuple[Any, ...]]
+    ],
+    action_prob_func: callable,
+) -> dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]:
     """
-    Updates the function arguments for a specific user and policy number in a threaded environment.
+    Threads the shared betas into the algorithm update function arguments for each user and
+    policy update to enable correct differentiation.  This is done by replacing the betas in the
+    update function arguments with the shared betas, and if necessary replacing action probabilities
+    with reconstructed action probabilities computed using the shared betas.
 
     Args:
-        update_func_args_by_by_user_id_by_policy_num (dict): A dictionary where keys are policy
+        update_func_args_by_by_user_id_by_policy_num (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
+            A dictionary where keys are policy
             numbers and values are dictionaries mapping user IDs to their respective update function
             arguments.
 
-        user_id (int): The ID of the user for whom the update function arguments are being
-            processed.
-
-        all_post_update_betas (list): A list of beta values to be introduced into arguments to
+        all_post_update_betas (list[jnp.ndarray]):
+            A list of beta values to be introduced into arguments to
             facilitate differentiation.  They will be the same value as what they replace, but this
             introduces direct dependence on the parameter we will differentiate with respect to.
 
-        beta_index_by_policy_num (dict): A dictionary mapping policy numbers to their respective
+        beta_index_by_policy_num (dict[int | float, int]):
+            A dictionary mapping policy numbers to their respective
             beta indices in all_post_update_betas.
 
-        alg_update_func_args_beta_index (int): The index in the update function arguments tuple
+        alg_update_func_args_beta_index (int):
+            The index in the update function arguments tuple
             where the beta value should be inserted.
 
-        alg_update_func_args_action_prob_index (int): The index in the update function arguments
+        alg_update_func_args_action_prob_index (int):
+            The index in the update function arguments
             tuple where new beta-threaded action probabilities should be inserted, if applicable.
             -1 otherwise.
 
-        alg_update_func_args_action_prob_times_index (int): If action probabilities are supplied
+        alg_update_func_args_action_prob_times_index (int):
+            If action probabilities are supplied
             to the update function, this is the index in the arguments where an array of times for
             which the given action probabilities apply is provided.
 
-        threaded_single_user_action_prob_func_args_by_decision_time (dict): A dictionary mapping
-            decision times to the function arguments required to compute action probabilities for
-            this user, and with the shared betas thread in.
+        threaded_action_prob_func_args_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to the function arguments required to compute action
+            probabilities for this user, and with the shared betas thread in.
 
-        action_prob_func (callable): A function that computes action probabilities given the
-            appropriate arguments.
+        action_prob_func (callable):
+            A function that computes an action 1 probability given the appropriate arguments.
 
     Returns:
-        dict: A dictionary where keys are policy numbers and values are the updated function
-            arguments tuples for the specified user.
+        dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]:
+            A map from user ids to maps of policy numbers to update function
+            arguments tuples for the specified user with the shared betas threaded in. Note the key
+            order switch relative to the supplied args!
     """
-    threaded_single_user_update_func_args_by_policy_num = {}
+    threaded_update_func_args_by_policy_num_by_user_id = collections.defaultdict(dict)
     for (
         policy_num,
         update_func_args_by_user_id,
     ) in update_func_args_by_by_user_id_by_policy_num.items():
-        if not update_func_args_by_user_id[user_id]:
-            threaded_single_user_update_func_args_by_policy_num[policy_num] = ()
-            continue
+        for user_id, args in update_func_args_by_user_id.items():
+            if not args:
+                threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                    policy_num
+                ] = ()
+                continue
 
-        beta_to_introduce = all_post_update_betas[beta_index_by_policy_num[policy_num]]
-        threaded_single_user_update_func_args_by_policy_num[policy_num] = (
-            replace_tuple_index(
-                update_func_args_by_user_id[user_id],
-                alg_update_func_args_beta_index,
-                beta_to_introduce,
-            )
-        )
-
-        if alg_update_func_args_action_prob_index >= 0:
-            action_prob_times = update_func_args_by_user_id[user_id][
-                alg_update_func_args_action_prob_times_index
+            beta_to_introduce = all_post_update_betas[
+                beta_index_by_policy_num[policy_num]
             ]
-            action_probs_to_introduce = jnp.array(
-                [
-                    action_prob_func(
-                        *threaded_single_user_action_prob_func_args_by_decision_time[t]
-                    )
-                    for t in action_prob_times.flatten().tolist()
-                ]
-            ).reshape(
-                update_func_args_by_user_id[user_id][
-                    alg_update_func_args_action_prob_index
-                ].shape
-            )
-            threaded_single_user_update_func_args_by_policy_num[policy_num] = (
+            threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
                 replace_tuple_index(
-                    threaded_single_user_update_func_args_by_policy_num[policy_num],
+                    update_func_args_by_user_id[user_id],
+                    alg_update_func_args_beta_index,
+                    beta_to_introduce,
+                )
+            )
+
+            if alg_update_func_args_action_prob_index >= 0:
+                action_prob_times = update_func_args_by_user_id[user_id][
+                    alg_update_func_args_action_prob_times_index
+                ]
+                action_probs_to_introduce = jnp.array(
+                    [
+                        action_prob_func(
+                            *threaded_action_prob_func_args_by_decision_time_by_user_id[
+                                user_id
+                            ][t]
+                        )
+                        for t in action_prob_times.flatten().tolist()
+                    ]
+                ).reshape(
+                    update_func_args_by_user_id[user_id][
+                        alg_update_func_args_action_prob_index
+                    ].shape
+                )
+                threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                    policy_num
+                ] = replace_tuple_index(
+                    threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                        policy_num
+                    ],
                     alg_update_func_args_action_prob_index,
                     action_probs_to_introduce,
                 )
-            )
-    return threaded_single_user_update_func_args_by_policy_num
+    return threaded_update_func_args_by_policy_num_by_user_id
 
 
 def thread_inference_func_args(
-    inference_func_args_by_user_id,
-    inference_func_args_theta_index,
-    theta,
-    inference_func_args_action_prob_index,
-    threaded_action_prob_func_args_by_decision_time_by_user_id,
-    inference_action_prob_decision_times_by_user_id,
-    action_prob_func,
-):
-    single_user_inference_func_args = inference_func_args_by_user_id[user_id]
+    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_func_args_theta_index: int,
+    theta: jnp.ndarray,
+    inference_func_args_action_prob_index: int,
+    threaded_action_prob_func_args_by_decision_time_by_user_id: dict[
+        collections.abc.Hashable, dict[int, tuple[Any, ...]]
+    ],
+    inference_action_prob_decision_times_by_user_id: dict[
+        collections.abc.Hashable, list[int]
+    ],
+    action_prob_func: callable,
+) -> dict[collections.abc.Hashable, tuple[Any, ...]]:
+    """
+    Threads the shared theta into the inference function arguments for each user to enable correct
+    differentiation.  This is done by replacing the theta in the inference function arguments with
+    theta. If applicable, action probabilities are also replaced with reconstructed action
+    probabilities computed using the shared betas.
 
-    threaded_single_user_inference_func_args = replace_tuple_index(
-        single_user_inference_func_args,
-        inference_func_args_theta_index,
-        theta,
-    )
+    Args:
+        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping user IDs to their respective inference function arguments.
 
-    if inference_func_args_action_prob_index >= 0:
-        action_probs_to_introduce = jnp.array(
-            [
-                action_prob_func(
-                    *threaded_single_user_action_prob_func_args_by_decision_time[t]
-                )
-                for t in inference_action_prob_decision_times_by_user_id[user_id]
-                .flatten()
-                .tolist()
-            ]
-        ).reshape(
-            single_user_inference_func_args[inference_func_args_action_prob_index].shape
+        inference_func_args_theta_index (int):
+            The index in the inference function arguments tuple
+            where the theta value should be inserted.
+
+        theta (jnp.ndarray):
+            The theta value to be threaded into the inference function arguments.
+
+        inference_func_args_action_prob_index (int):
+            The index in the inference function arguments
+            tuple where new beta-threaded action probabilities should be inserted, if applicable.
+            -1 otherwise.
+
+        threaded_action_prob_func_args_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to the function arguments required to compute action
+            probabilities for this user, and with the shared betas thread in.
+
+        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
+            For each user, a list of decision times to which action probabilities correspond if
+            provided. Typically just in-study times if action probabilites are used in the inference
+            loss or estimating function.
+
+        action_prob_func (callable):
+            A function that computes an action 1 probability given the appropriate arguments.
+    Returns:
+        dict[collections.abc.Hashable, tuple[Any, ...]]:
+            A map from user ids to tuples of inference function arguments with the shared theta
+            threaded in.
+    """
+
+    threaded_inference_func_args_by_user_id = {}
+    for user_id, args in inference_func_args_by_user_id.items():
+        threaded_inference_func_args_by_user_id[user_id] = replace_tuple_index(
+            args,
+            inference_func_args_theta_index,
+            theta,
         )
-        threaded_single_user_inference_func_args = replace_tuple_index(
-            threaded_single_user_inference_func_args,
-            inference_func_args_action_prob_index,
-            action_probs_to_introduce,
-        )
-    return threaded_single_user_inference_func_args
+
+        if inference_func_args_action_prob_index >= 0:
+            action_probs_to_introduce = jnp.array(
+                [
+                    action_prob_func(
+                        *threaded_action_prob_func_args_by_decision_time_by_user_id[
+                            user_id
+                        ][t]
+                    )
+                    for t in inference_action_prob_decision_times_by_user_id[user_id]
+                    .flatten()
+                    .tolist()
+                ]
+            ).reshape(args[inference_func_args_action_prob_index].shape)
+            threaded_inference_func_args_by_user_id[user_id] = replace_tuple_index(
+                threaded_inference_func_args_by_user_id[user_id],
+                inference_func_args_action_prob_index,
+                action_probs_to_introduce,
+            )
+    return threaded_inference_func_args_by_user_id
 
 
 # TODO: vmap
@@ -1270,7 +1254,72 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     update_func_args_by_by_user_id_by_policy_num: dict[
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
+    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
 ) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+    """
+    Computes the average of the weighted estimating function stacks for all users, along with
+    auxiliary values used to construct the adaptive and classical sandwich variances.
+
+    Args:
+        all_post_update_betas_and_theta (list[jnp.ndarray]):
+            A list of JAX NumPy arrays representing the betas produced by all updates and the
+            theta value, in that order.
+        user_ids (jnp.ndarray):
+            A 1D JAX NumPy array of user IDs.
+        action_prob_func_filename (str):
+            The name of the file containing the action probability function.
+        action_prob_func_args_beta_index (int):
+            The index of beta in the action probability function arguments tuples.
+        alg_update_func_filename (str):
+            The name of the file containing the algorithm update function.
+        alg_update_func_type (str):
+            The type of the algorithm update function (loss or estimating).
+        alg_update_func_args_beta_index (int):
+            The index of beta in the update function arguments tuples.
+        alg_update_func_args_action_prob_index (int):
+            The index  of action probabilities in the update function arguments tuple, if
+            applicable. -1 otherwise.
+        alg_update_func_args_action_prob_times_index (int):
+            The index in the update function arguments tuple where an array of times for which the
+            given action probabilities apply is provided, if applicable. -1 otherwise.
+        inference_func_filename (str):
+            The name of the file containing the inference function.
+        inference_func_type (str):
+            The type of the inference function (loss or estimating).
+        inference_func_args_theta_index (int):
+            The index of theta in the inference function arguments tuples.
+        inference_func_args_action_prob_index (int):
+            The index of action probabilities in the inference function arguments tuple, if
+            applicable. -1 otherwise.
+        action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of user ids to the function arguments
+            required to compute action probabilities for this user.
+        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of user ids to dictionaries mapping decision times to the policy number in use.
+        initial_policy_num (int | float):
+            The policy number of the initial policy before any updates.
+        beta_index_by_policy_num (dict[int | float, int]):
+            A dictionary mapping policy numbers to the index of the corresponding beta in
+            all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
+        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping user IDs to their respective inference function arguments.
+        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
+            For each user, a list of decision times to which action probabilities correspond if
+            provided. Typically just in-study times if action probabilites are used in the inference
+            loss or estimating function.
+        update_func_args_by_by_user_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
+            A dictionary where keys are policy numbers and values are dictionaries mapping user IDs
+            to their respective update function arguments.
+        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping user IDs to their respective actions taken at each decision time.
+
+    Returns:
+        jnp.ndarray:
+            A 1D JAX NumPy array representing the average weighted estimating function stack.
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+            A tuple containing the average weighted estimating function stack, the adaptive meat
+            matrix, the classical meat matrix, and the inverse classical bread matrix.
+    """
 
     # 1. Collect the necessary function objects
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
@@ -1324,7 +1373,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_prob_func,
     )
 
-    # 4. Thread the central betas into the inference function arguments
+    # 4. Thread the central theta into the inference function arguments
     # and replace any action probabilities with reconstructed ones from the above
     # arguments with the central betas introduced.
     logger.info(
@@ -1341,18 +1390,25 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_prob_func,
     )
 
-    # 5. Now we can compute the average the weighted estimating function stacks for all users.
+    # 5. Now we can compute the average of the weighted estimating function stacks for all users
+    # as well as collect related values used to construct the adaptive and classical
+    # sandwich variances.
     results = [
         single_user_weighted_algorithm_estimating_function_stacker(
-            all_post_update_betas_and_theta[-1],
-            all_post_update_betas_and_theta[:-1],
+            len(all_post_update_betas_and_theta[0]),
             user_id,
             action_prob_func,
             algorithm_estimating_func,
             inference_estimating_func,
+            action_prob_func_args_beta_index,
+            inference_func_args_theta_index,
+            action_prob_func_args_by_user_id_by_decision_time,
             threaded_action_prob_func_args_by_decision_time_by_user_id,
             threaded_update_func_args_by_policy_num_by_user_id,
             threaded_inference_func_args_by_user_id,
+            policy_num_by_decision_time_by_user_id,
+            action_by_decision_time_by_user_id,
+            beta_index_by_policy_num,
         )
         for user_id in user_ids.tolist()
     ]
@@ -1375,15 +1431,116 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
 
 
 def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
-    single_user_weighted_estimating_function_stacker: callable,
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
-):
+    action_prob_func_filename: str,
+    action_prob_func_args_beta_index: int,
+    alg_update_func_filename: str,
+    alg_update_func_type: str,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_action_prob_index: int,
+    alg_update_func_args_action_prob_times_index: int,
+    inference_func_filename: str,
+    inference_func_type: str,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+    action_prob_func_args_by_user_id_by_decision_time: dict[
+        collections.abc.Hashable, dict[int, tuple[Any, ...]]
+    ],
+    policy_num_by_decision_time_by_user_id: dict[
+        collections.abc.Hashable, dict[int, int | float]
+    ],
+    initial_policy_num: int | float,
+    beta_index_by_policy_num: dict[int | float, int],
+    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_user_id: dict[
+        collections.abc.Hashable, list[int]
+    ],
+    update_func_args_by_by_user_id_by_policy_num: dict[
+        collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
+    ],
+    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+) -> tuple[
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
+]:
+    """
+    Constructs the classical and adaptive inverse bread and meat matrices, as well as the average
+    estimating function stack.
+    This is done by computing and differentiating the average weighted estimating function stack
+    with respect to the betas and theta, and then using the resulting Jacobian to compute the inverse bread and meat
+    matrices.
+
+    Args:
+        theta (jnp.ndarray):
+            A 1-D JAX NumPy array representing the parameter estimate for inference.
+        all_post_update_betas (jnp.ndarray):
+            A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
+        user_ids (jnp.ndarray):
+            A 1-D JAX NumPy array holding all user IDs in the study.
+        action_prob_func_filename (str):
+            The name of the file containing the action probability function.
+        action_prob_func_args_beta_index (int):
+            The index of beta in the action probability function arguments tuples.
+        alg_update_func_filename (str):
+            The name of the file containing the algorithm update function.
+        alg_update_func_type (str):
+            The type of the algorithm update function (loss or estimating).
+        alg_update_func_args_beta_index (int):
+            The index of beta in the update function arguments tuples.
+        alg_update_func_args_action_prob_index (int):
+            The index  of action probabilities in the update function arguments tuple, if
+            applicable. -1 otherwise.
+        alg_update_func_args_action_prob_times_index (int):
+            The index in the update function arguments tuple where an array of times for which the
+            given action probabilities apply is provided, if applicable. -1 otherwise.
+        inference_func_filename (str):
+            The name of the file containing the inference function.
+        inference_func_type (str):
+            The type of the inference function (loss or estimating).
+        inference_func_args_theta_index (int):
+            The index of theta in the inference function arguments tuples.
+        inference_func_args_action_prob_index (int):
+            The index of action probabilities in the inference function arguments tuple, if
+            applicable. -1 otherwise.
+        action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of user ids to the function arguments
+            required to compute action probabilities for this user.
+        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of user ids to dictionaries mapping decision times to the policy number in use.
+        initial_policy_num (int | float):
+            The policy number of the initial policy before any updates.
+        beta_index_by_policy_num (dict[int | float, int]):
+            A dictionary mapping policy numbers to the index of the corresponding beta in
+            all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
+        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping user IDs to their respective inference function arguments.
+        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
+            For each user, a list of decision times to which action probabilities correspond if
+            provided. Typically just in-study times if action probabilites are used in the inference
+            loss or estimating function.
+        update_func_args_by_by_user_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
+            A dictionary where keys are policy numbers and values are dictionaries mapping user IDs
+            to their respective update function arguments.
+        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping user IDs to their respective actions taken at each decision time.
+    Returns:
+        tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
+            A tuple containing:
+            - The adaptive inverse bread matrix.
+            - The adaptive meat matrix.
+            - The classical inverse bread matrix.
+            - The classical meat matrix.
+            - The average weighted estimating function stack.
+    """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
-    # jax.jacobian MAY perform worse here--seemed to hang indefinitely while jacrev is merely very
+    # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
     # slow.
     joint_adaptive_bread_inverse_pieces, (
         avg_estimating_function_stack,
@@ -1398,8 +1555,26 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         # differentiate with respect to all betas and thetas at once if they
         # are collected like so.
         list(all_post_update_betas) + [theta],
-        single_user_weighted_estimating_function_stacker,
         user_ids,
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
     )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary

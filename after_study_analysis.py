@@ -708,22 +708,18 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     inference_estimating_func: callable,
     action_prob_func_args_beta_index: int,
     inference_func_args_theta_index: int,
-    action_prob_func_args_by_user_id_by_decision_time: dict[
+    action_prob_func_args_by_decision_time: dict[
         int, dict[collections.abc.Hashable, tuple[Any, ...]]
     ],
-    threaded_action_prob_func_args_by_decision_time_by_user_id: dict[
+    threaded_action_prob_func_args_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
-    threaded_update_func_args_by_policy_num_by_user_id: dict[
+    threaded_update_func_args_by_policy_num: dict[
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
-    threaded_inference_func_args_by_user_id: dict[
-        collections.abc.Hashable, tuple[Any, ...]
-    ],
-    policy_num_by_decision_time_by_user_id: dict[
-        collections.abc.Hashable, dict[int, int | float]
-    ],
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    threaded_inference_func_args: dict[collections.abc.Hashable, tuple[Any, ...]],
+    policy_num_by_decision_time: dict[collections.abc.Hashable, dict[int, int | float]],
+    action_by_decision_time: dict[collections.abc.Hashable, dict[int, int]],
     beta_index_by_policy_num: dict[int | float, int],
 ) -> tuple[
     jnp.ndarray[jnp.float32],
@@ -759,33 +755,33 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         inference_func_args_theta_index (int):
             The index of the theta parameter in the inference loss or estimating function arguments.
 
-        action_prob_func_args_by_user_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to maps of user ids to tuples of arguments for action
-            probability function. This is for all decision times for all users (args are an empty
+        action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
+            A map from decision times to tuples of arguments for this user for the action
+            probability function. This is for all decision times (args are an empty
             tuple if they are not in the study). Should be sorted by decision time. NOTE THAT THESE
             ARGS DO NOT CONTAIN THE SHARED BETAS, making them impervious to the differentiation that
             will occur.
 
-        threaded_action_prob_func_args_by_decision_time_by_user_id (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for action
+        threaded_action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
+            A map from decision times to tuples of arguments for the action
             probability function, with the shared betas threaded in for differentation. Decision
             times should be sorted.
 
-        threaded_update_func_args_by_policy_num_by_user_id (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from user ids to maps from policy numbers to tuples containing the arguments for
-            the estimating functions when producing this policy, with the shared betas threaded in
+        threaded_update_func_args_by_policy_num (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
+            A map from policy numbers to tuples containing the arguments for
+            the corresponding estimating functions for this user, with the shared betas threaded in
             for differentiation.  This is for all non-initial, non-fallback policies. Policy numbers
             should be sorted.
 
-        threaded_inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A map from user ids to tuples containing the arguments for the inference
-            estimating function, with the shared betas threaded in for differentiation.
+        threaded_inference_func_args (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A tuple containing the arguments for the inference
+            estimating function for this user, with the shared betas threaded in for differentiation.
 
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+        policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
             A dictionary mapping decision times to the policy number in use. This may be user-specific.
             Should be sorted by decision time.
 
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
+        action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping decision times to actions taken.
 
         beta_index_by_policy_num (dict[int | float, int]):
@@ -810,18 +806,18 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     # Collect the first time after the first update separately for convenience.
     # These are both used to form the Radon-Nikodym weights for the right times.
     min_time_by_policy_num, first_time_after_first_update = get_min_time_by_policy_num(
-        policy_num_by_decision_time_by_user_id[user_id],
+        policy_num_by_decision_time,
         beta_index_by_policy_num,
     )
 
-    # 5. Get the start and end times for this user.
+    # 2. Get the start and end times for this user.
     user_start_time = math.inf
     user_end_time = -math.inf
-    for decision_time in action_by_decision_time_by_user_id[user_id]:
+    for decision_time in action_by_decision_time:
         user_start_time = min(user_start_time, decision_time)
         user_end_time = max(user_end_time, decision_time)
 
-    # 6. Form a stack of weighted estimating equations, one for each update of the algorithm.
+    # 3. Form a stack of weighted estimating equations, one for each update of the algorithm.
     logger.info(
         "Computing the algorithm component of the weighted estimating function stack for user %s.",
         user_id,
@@ -842,17 +838,13 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                             # respect to all_post_update_betas. The args, on the other hand,
                             # are a function of all_post_update_betas.
                             get_radon_nikodym_weight(
-                                action_prob_func_args_by_user_id_by_decision_time[t][
-                                    user_id
-                                ][action_prob_func_args_beta_index],
+                                action_prob_func_args_by_decision_time[t][
+                                    action_prob_func_args_beta_index
+                                ],
                                 action_prob_func,
                                 action_prob_func_args_beta_index,
-                                action_by_decision_time_by_user_id[user_id][t],
-                                *threaded_action_prob_func_args_by_decision_time_by_user_id[
-                                    user_id
-                                ][
-                                    t
-                                ],
+                                action_by_decision_time[t],
+                                *threaded_action_prob_func_args_by_decision_time[t],
                             )
                             for t in range(
                                 # The earliest time after the first update where the user was in
@@ -882,12 +874,10 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                 if update_args
                 else jnp.zeros(beta_dim)
             )
-            for policy_num, update_args in threaded_update_func_args_by_policy_num_by_user_id[
-                user_id
-            ].items()
+            for policy_num, update_args in threaded_update_func_args_by_policy_num.items()
         ]
     )
-    # 7. Form the weighted inference estimating equation.
+    # 4. Form the weighted inference estimating equation.
     logger.info(
         "Computing the inference component of the weighted estimating function stack for user %s.",
         user_id,
@@ -897,15 +887,13 @@ def single_user_weighted_algorithm_estimating_function_stacker(
             [
                 # Note: as above, the first arg is the original beta, not the shared one.
                 get_radon_nikodym_weight(
-                    action_prob_func_args_by_user_id_by_decision_time[t][user_id][
+                    action_prob_func_args_by_decision_time[t][
                         action_prob_func_args_beta_index
                     ],
                     action_prob_func,
                     action_prob_func_args_beta_index,
-                    action_by_decision_time_by_user_id[user_id][t],
-                    *threaded_action_prob_func_args_by_decision_time_by_user_id[
-                        user_id
-                    ][t],
+                    action_by_decision_time[t],
+                    *threaded_action_prob_func_args_by_decision_time[t],
                 )
                 # Go from the first time for the user that is after the first
                 # update to their last active time
@@ -915,29 +903,28 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                 )
             ]
         )
-    ) * inference_estimating_func(*threaded_inference_func_args_by_user_id[user_id])
+    ) * inference_estimating_func(*threaded_inference_func_args)
 
-    # 8. Concatenate the two components to form the weighted estimating function stack for this
+    # 5. Concatenate the two components to form the weighted estimating function stack for this
     # user.
     weighted_stack = jnp.concatenate([algorithm_component, inference_component])
 
-    # 9. Return the stack and auxiliary outputs described below.
-    # Note the 4 outputs:
-    # 1. The first is simply the weighted estimating function stack for this user. The average
-    # of these is what we differentiate with respect to theta to form the inverse adaptive bread
-    # matrix, and we also compare that average to zero to check the estimating functions'
+    # 6. Return the following outputs:
+    # a. The first is simply the weighted estimating function stack for this user. The average
+    # of these is what we differentiate with respect to theta to form the inverse adaptive joint
+    # bread matrix, and we also compare that average to zero to check the estimating functions'
     # fidelity.
-    # 2. The average outer product of these per-user stacks across users is the meat matrix,
-    # hence the second output.
-    # 3. The third output is averaged across users to obtain the classical meat matrix.
-    # 4. The fourth output is averaged across users to obtatin the inverse classical bread
+    # b. The average outer product of these per-user stacks across users is the adaptive joint meat
+    # matrix, hence the second output.
+    # c. The third output is averaged across users to obtain the classical meat matrix.
+    # d. The fourth output is averaged across users to obtatin the inverse classical bread
     # matrix.
     return (
         weighted_stack,
         jnp.outer(weighted_stack, weighted_stack),
         jnp.outer(inference_component, inference_component),
         jax.jacrev(inference_estimating_func, argnums=inference_func_args_theta_index)(
-            *threaded_inference_func_args_by_user_id[user_id]
+            *threaded_inference_func_args
         ),
     )
 
@@ -953,7 +940,10 @@ def thread_action_prob_func_args(
     all_post_update_betas: list[jnp.ndarray],
     beta_index_by_policy_num: dict[int | float, int],
     action_prob_func_args_beta_index: int,
-) -> dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]:
+) -> tuple[
+    dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]],
+    dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]],
+]:
     """
     Threads the shared betas into the action probability function arguments for each user and
     decision time to enable correct differentiation.
@@ -991,11 +981,18 @@ def thread_action_prob_func_args(
     threaded_action_prob_func_args_by_decision_time_by_user_id = (
         collections.defaultdict(dict)
     )
+    action_prob_func_args_by_decision_time_by_user_id = collections.defaultdict(dict)
     for (
         decision_time,
         action_prob_func_args_by_user_id,
     ) in action_prob_func_args_by_user_id_by_decision_time.items():
         for user_id, args in action_prob_func_args_by_user_id.items():
+            # Always add a contribution to the reversed key order dictionary.
+            action_prob_func_args_by_decision_time_by_user_id[user_id][
+                decision_time
+            ] = args
+
+            # Now proceed with the threading, if necessary.
             if not args:
                 threaded_action_prob_func_args_by_decision_time_by_user_id[user_id][
                     decision_time
@@ -1006,8 +1003,6 @@ def thread_action_prob_func_args(
 
             # The expectation is that fallback policies have empty args, and the only other
             # policy not represented in beta_index_by_policy_num is the initial policy.
-            # Specifically check for this to be a little more robust than simply checking
-            # for the policy number in the dictionary.
             if policy_num == initial_policy_num:
                 threaded_action_prob_func_args_by_decision_time_by_user_id[user_id][
                     decision_time
@@ -1025,7 +1020,10 @@ def thread_action_prob_func_args(
                 beta_to_introduce,
             )
 
-    return threaded_action_prob_func_args_by_decision_time_by_user_id
+    return (
+        threaded_action_prob_func_args_by_decision_time_by_user_id,
+        action_prob_func_args_by_decision_time_by_user_id,
+    )
 
 
 def thread_update_func_args(
@@ -1341,18 +1339,20 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     # 2. Thread in the betas and theta in all_post_update_betas_and_theta into the arguments
     # supplied for the above functions, so that differentiation works correctly.  The existing
     # values should be the same, but not connected to the parameter we are differentiating
-    # with respect to.
+    # with respect to. Note we will also find it useful below to have the action probability args
+    # nested dict structure flipped to be user_id -> decision_time -> args, so we do that here too.
 
     logger.info("Threading in betas to action probability arguments for all users.")
-    threaded_action_prob_func_args_by_decision_time_by_user_id = (
-        thread_action_prob_func_args(
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            all_post_update_betas_and_theta[:-1],
-            beta_index_by_policy_num,
-            action_prob_func_args_beta_index,
-        )
+    (
+        threaded_action_prob_func_args_by_decision_time_by_user_id,
+        action_prob_func_args_by_decision_time_by_user_id,
+    ) = thread_action_prob_func_args(
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        all_post_update_betas_and_theta[:-1],
+        beta_index_by_policy_num,
+        action_prob_func_args_beta_index,
     )
 
     # 3. Thread the central betas into the algorithm update function arguments
@@ -1402,12 +1402,12 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
             inference_estimating_func,
             action_prob_func_args_beta_index,
             inference_func_args_theta_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            threaded_action_prob_func_args_by_decision_time_by_user_id,
-            threaded_update_func_args_by_policy_num_by_user_id,
-            threaded_inference_func_args_by_user_id,
-            policy_num_by_decision_time_by_user_id,
-            action_by_decision_time_by_user_id,
+            action_prob_func_args_by_decision_time_by_user_id[user_id],
+            threaded_action_prob_func_args_by_decision_time_by_user_id[user_id],
+            threaded_update_func_args_by_policy_num_by_user_id[user_id],
+            threaded_inference_func_args_by_user_id[user_id],
+            policy_num_by_decision_time_by_user_id[user_id],
+            action_by_decision_time_by_user_id[user_id],
             beta_index_by_policy_num,
         )
         for user_id in user_ids.tolist()

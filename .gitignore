@@ -10,7 +10,6 @@ adaptive-sandwich.code-workspace
 deploy.sh
 oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
-run_and_analysis_parallel*.sh
 *.pyc
 cluster_simulation_requirements.txt
 

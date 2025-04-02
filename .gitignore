@@ -11,5 +11,4 @@ deploy.sh
 oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
 *.pyc
-cluster_simulation_requirements.txt
 

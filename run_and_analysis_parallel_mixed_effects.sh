@@ -45,17 +45,17 @@ policy_num_col_name="policy_number"
 calendar_t_col_name="calendar_time"
 user_id_col_name="user_id"
 action_prob_col_name="action_probability"
-action_prob_func_filename="functions_to_pass_to_analysis/miwaves_action_selection.py"
+action_prob_func_filename="functions_to_pass_to_analysis/mixed_effects_action_selection.py"
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/miwaves_RL_estimating_function.py"
+alg_update_func_filename="functions_to_pass_to_analysis/mixed_effects_RL_estimating_function.py"
 alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
-inference_func_filename="functions_to_pass_to_analysis/miwaves_primary_analysis_loss.py"
+inference_func_filename="functions_to_pass_to_analysis/mixed_effects_primary_analysis_loss.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
-theta_calculation_func_filename="functions_to_pass_to_analysis/miwaves_estimate_theta_primary_analysis.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/mixed_effects_estimate_theta_primary_analysis.py"
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none"
@@ -137,7 +137,7 @@ mkdir -p "$save_dir"
 # Simulate an miwaves RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
   echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects: Beginning RL study simulation."
-  python miwaves_sample_data/src/run_simulation.py \
+  python mixed_effects_sample_data/src/run_simulation.py \
     --num_users $num_users \
     --num_time_steps $num_time_steps \
     --seed $SLURM_ARRAY_TASK_ID \

@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 
-def miwaves_primary_analysis_loss(
+def mixed_effects_primary_analysis_loss(
     theta_est,
     action,
     outcome,

@@ -3,7 +3,7 @@ import pandas as pd
 
 
 # TODO: reward should be replaced with oscb
-def miwaves_estimate_theta_primary_analysis(study_df):
+def mixed_effects_estimate_theta_primary_analysis(study_df):
     # Note that the intercept is included in the features already (col of 1s)
     linear_model = LinearRegression(fit_intercept=False)
 

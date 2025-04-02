@@ -5031,7 +5031,7 @@ def allocation_function(mean: float, var: float) -> float:
     return prob
 
 
-def miwaves_action_selection(
+def mixed_effects_action_selection(
     beta: jnp.ndarray,
     n_users: int,
     A_beta_gamma: jnp.ndarray,

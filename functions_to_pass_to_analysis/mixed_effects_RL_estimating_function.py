@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 
-def miwaves_RL_estimating_function(
+def mixed_effects_RL_estimating_function(
     beta: jnp.array,
     n_users: int,
     state: jnp.array,

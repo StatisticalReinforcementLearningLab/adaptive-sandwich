@@ -8,6 +8,8 @@ import after_study_analysis
 from constants import FunctionTypes
 from helper_functions import load_function_from_same_named_file, replace_tuple_index
 
+# TODO: Add checking of all aux values.
+
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs():
@@ -186,30 +188,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         inference_action_prob_decision_times_by_user_id,
     ) = setup_data_two_loss_functions_no_action_probs
 
-    stacker = (
-        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
-            action_prob_func_filename,
-            action_prob_func_args_beta_index,
-            alg_update_func_filename,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
-            action_prob_func_args_by_user_id_by_decision_time,
-            update_func_args_by_by_user_id_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-        )
-    )
-
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
     # Note for this test these must match the betas in the action probability
@@ -222,9 +200,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         jnp.array([-5, 2, 5, 4], dtype="float32"),
     ]
 
-    result_1 = stacker(theta, all_post_update_betas, 1)
-    result_2 = stacker(theta, all_post_update_betas, 2)
-
     alg_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_rl.py"
     inference_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_inference_no_action_centering.py"
 
@@ -233,6 +208,35 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     )
     inference_estimating_func = load_function_from_same_named_file(
         inference_estimating_func_filename
+    )
+
+    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
+    user_ids = jnp.array([1, 2])
+
+    result = (
+        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+            all_post_update_betas_and_theta,
+            user_ids,
+            action_prob_func_filename,
+            action_prob_func_args_beta_index,
+            alg_update_func_filename,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            inference_func_filename,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_func_args_by_user_id_by_decision_time,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            inference_func_args_by_user_id,
+            inference_action_prob_decision_times_by_user_id,
+            update_func_args_by_by_user_id_by_policy_num,
+            action_by_decision_time_by_user_id,
+        )
     )
 
     # Note that we don't multiply by the weights! Therefore we test that they
@@ -320,13 +324,35 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
             ),
         ]
     )
-    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1)
-    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
-        result_1[1], np.outer(expected_weighted_stack_1, expected_weighted_stack_1)
+        result[0],
+        jnp.mean(
+            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
+        ),
+        rtol=1e-6,
+    )
+    np.testing.assert_array_equal(
+        result[1][0],
+        result[0],
     )
     np.testing.assert_allclose(
-        result_2[1], np.outer(expected_weighted_stack_2, expected_weighted_stack_2)
+        result[1][1],
+        jnp.mean(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
+        ),
+        rtol=1e-6,
     )
 
 
@@ -484,30 +510,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
         inference_action_prob_decision_times_by_user_id,
     ) = setup_data_two_estimating_functions_no_action_probs
 
-    stacker = (
-        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
-            action_prob_func_filename,
-            action_prob_func_args_beta_index,
-            alg_update_func_filename,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
-            action_prob_func_args_by_user_id_by_decision_time,
-            update_func_args_by_by_user_id_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-        )
-    )
-
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
     # Note for this test these must match the betas in the action probability
@@ -520,9 +522,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
         jnp.array([-5, 2, 5, 4], dtype="float32"),
     ]
 
-    result_1 = stacker(theta, all_post_update_betas, 1)
-    result_2 = stacker(theta, all_post_update_betas, 2)
-
     alg_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_rl.py"
     inference_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/get_least_squares_estimating_function_inference_no_action_centering.py"
 
@@ -531,6 +530,35 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     )
     inference_estimating_func = load_function_from_same_named_file(
         inference_estimating_func_filename
+    )
+
+    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
+    user_ids = jnp.array([1, 2])
+
+    result = (
+        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+            all_post_update_betas_and_theta,
+            user_ids,
+            action_prob_func_filename,
+            action_prob_func_args_beta_index,
+            alg_update_func_filename,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            inference_func_filename,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_func_args_by_user_id_by_decision_time,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            inference_func_args_by_user_id,
+            inference_action_prob_decision_times_by_user_id,
+            update_func_args_by_by_user_id_by_policy_num,
+            action_by_decision_time_by_user_id,
+        )
     )
 
     # Note that we don't multiply by the weights! Therefore we test that they
@@ -618,13 +646,35 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
             ),
         ]
     )
-    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1)
-    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
-        result_1[1], np.outer(expected_weighted_stack_1, expected_weighted_stack_1)
+        result[0],
+        jnp.mean(
+            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
+        ),
+        rtol=1e-6,
+    )
+    np.testing.assert_array_equal(
+        result[1][0],
+        result[0],
     )
     np.testing.assert_allclose(
-        result_2[1], np.outer(expected_weighted_stack_2, expected_weighted_stack_2)
+        result[1][1],
+        jnp.mean(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
+        ),
+        rtol=1e-6,
     )
 
 
@@ -795,8 +845,30 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         inference_action_prob_decision_times_by_user_id,
     ) = setup_data_two_loss_functions_no_action_probs_different_betas
 
-    stacker = (
-        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    all_post_update_betas = [
+        jnp.array([-2, 2, 2, 4], dtype="float32"),
+        jnp.array([-3, 2, 3, 4], dtype="float32"),
+        jnp.array([-4, 2, 4, 4], dtype="float32"),
+        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+    ]
+
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+
+    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
+    user_ids = jnp.array([1, 2])
+
+    result = (
+        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+            all_post_update_betas_and_theta,
+            user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
             alg_update_func_filename,
@@ -808,36 +880,16 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
             action_prob_func_args_by_user_id_by_decision_time,
-            update_func_args_by_by_user_id_by_policy_num,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
             inference_func_args_by_user_id,
             inference_action_prob_decision_times_by_user_id,
+            update_func_args_by_by_user_id_by_policy_num,
+            action_by_decision_time_by_user_id,
         )
     )
-
-    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
-
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
-    ]
-
-    result_1 = stacker(theta, all_post_update_betas, 1)
-    result_2 = stacker(theta, all_post_update_betas, 2)
-
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
     expected_weighted_stack_1 = jnp.concatenate(
         [
@@ -1182,18 +1234,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         ]
     )
 
-    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1, rtol=1e-6)
-    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
-        result_1[1],
-        np.outer(expected_weighted_stack_1, expected_weighted_stack_1),
+        result[0],
+        jnp.mean(
+            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
+        ),
         rtol=1e-6,
     )
+    np.testing.assert_array_equal(
+        result[1][0],
+        result[0],
+    )
     np.testing.assert_allclose(
-        result_2[1],
-        np.outer(
-            expected_weighted_stack_2,
-            expected_weighted_stack_2,
+        result[1][1],
+        jnp.mean(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -1382,8 +1449,30 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
         inference_action_prob_decision_times_by_user_id,
     ) = setup_data_two_loss_functions_no_action_probs_incremental_recruitment
 
-    stacker = (
-        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    all_post_update_betas = [
+        jnp.array([-2, 2, 2, 4], dtype="float32"),
+        jnp.array([-3, 2, 3, 4], dtype="float32"),
+        jnp.array([-4, 2, 4, 4], dtype="float32"),
+        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+    ]
+
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+
+    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
+    user_ids = jnp.array([1, 2])
+
+    result = (
+        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+            all_post_update_betas_and_theta,
+            user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
             alg_update_func_filename,
@@ -1395,36 +1484,16 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
             action_prob_func_args_by_user_id_by_decision_time,
-            update_func_args_by_by_user_id_by_policy_num,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
             inference_func_args_by_user_id,
             inference_action_prob_decision_times_by_user_id,
+            update_func_args_by_by_user_id_by_policy_num,
+            action_by_decision_time_by_user_id,
         )
     )
-
-    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
-
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
-    ]
-
-    result_1 = stacker(theta, all_post_update_betas, 1)
-    result_2 = stacker(theta, all_post_update_betas, 2)
-
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
     expected_weighted_stack_1 = jnp.concatenate(
         [
@@ -1697,16 +1766,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
         ]
     )
 
-    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1)
-    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
-        result_1[1], np.outer(expected_weighted_stack_1, expected_weighted_stack_1)
+        result[0],
+        jnp.mean(
+            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
+        ),
+        rtol=1e-6,
+    )
+    np.testing.assert_array_equal(
+        result[1][0],
+        result[0],
     )
     np.testing.assert_allclose(
-        result_2[1],
-        np.outer(
-            expected_weighted_stack_2,
-            expected_weighted_stack_2,
+        result[1][1],
+        jnp.mean(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -1886,8 +1972,28 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
         inference_action_prob_decision_times_by_user_id,
     ) = setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates
 
-    stacker = (
-        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    all_post_update_betas = [
+        jnp.array([-2, 2, 3, 4], dtype="float32"),
+        jnp.array([-3, 2, 0.3, 4], dtype="float32"),
+    ]
+
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+
+    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
+    user_ids = jnp.array([1, 2])
+
+    result = (
+        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+            all_post_update_betas_and_theta,
+            user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
             alg_update_func_filename,
@@ -1899,34 +2005,16 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
             action_prob_func_args_by_user_id_by_decision_time,
-            update_func_args_by_by_user_id_by_policy_num,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
             inference_func_args_by_user_id,
             inference_action_prob_decision_times_by_user_id,
+            update_func_args_by_by_user_id_by_policy_num,
+            action_by_decision_time_by_user_id,
         )
     )
-
-    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
-
-    all_post_update_betas = [
-        jnp.array([-2, 2, 3, 4], dtype="float32"),
-        jnp.array([-3, 2, 0.3, 4], dtype="float32"),
-    ]
-
-    result_1 = stacker(theta, all_post_update_betas, 1)
-    result_2 = stacker(theta, all_post_update_betas, 2)
-
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
     expected_weighted_stack_1 = jnp.concatenate(
         [
@@ -2113,16 +2201,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
         ]
     )
 
-    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1)
-    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
-        result_1[1], np.outer(expected_weighted_stack_1, expected_weighted_stack_1)
+        result[0],
+        jnp.mean(
+            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
+        ),
+        rtol=1e-6,
+    )
+    np.testing.assert_array_equal(
+        result[1][0],
+        result[0],
     )
     np.testing.assert_allclose(
-        result_2[1],
-        np.outer(
-            expected_weighted_stack_2,
-            expected_weighted_stack_2,
+        result[1][1],
+        jnp.mean(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -2320,8 +2425,30 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
         inference_action_prob_decision_times_by_user_id,
     ) = setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides
 
-    stacker = (
-        after_study_analysis.construct_single_user_weighted_estimating_function_stacker(
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+
+    all_post_update_betas = [
+        jnp.array([-2, 2, 2, 4], dtype="float32"),
+        jnp.array([-3, 2, 3, 4], dtype="float32"),
+        jnp.array([-4, 2, 4, 4], dtype="float32"),
+        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+    ]
+
+    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
+
+    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
+    user_ids = jnp.array([1, 2])
+
+    result = (
+        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+            all_post_update_betas_and_theta,
+            user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
             alg_update_func_filename,
@@ -2333,36 +2460,16 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
-            beta_index_by_policy_num,
-            initial_policy_num,
-            action_by_decision_time_by_user_id,
-            policy_num_by_decision_time_by_user_id,
             action_prob_func_args_by_user_id_by_decision_time,
-            update_func_args_by_by_user_id_by_policy_num,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
             inference_func_args_by_user_id,
             inference_action_prob_decision_times_by_user_id,
+            update_func_args_by_by_user_id_by_policy_num,
+            action_by_decision_time_by_user_id,
         )
     )
-
-    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
-
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
-    ]
-
-    result_1 = stacker(theta, all_post_update_betas, 1)
-    result_2 = stacker(theta, all_post_update_betas, 2)
-
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
     reconstructed_action_probs = {
         1: [
@@ -2812,18 +2919,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
         ]
     )
 
-    np.testing.assert_allclose(result_1[0], expected_weighted_stack_1, rtol=1e-6)
-    np.testing.assert_allclose(result_2[0], expected_weighted_stack_2, rtol=1e-6)
     np.testing.assert_allclose(
-        result_1[1],
-        np.outer(expected_weighted_stack_1, expected_weighted_stack_1),
+        result[0],
+        jnp.mean(
+            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
+        ),
         rtol=1e-6,
     )
+    np.testing.assert_array_equal(
+        result[1][0],
+        result[0],
+    )
     np.testing.assert_allclose(
-        result_2[1],
-        np.outer(
-            expected_weighted_stack_2,
-            expected_weighted_stack_2,
+        result[1][1],
+        jnp.mean(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )

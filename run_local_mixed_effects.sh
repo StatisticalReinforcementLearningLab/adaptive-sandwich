@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -88,8 +88,8 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an miwaves RL study (unless we just want to analyze previous results)
 if [ "$only_analysis" -eq "0" ]; then
-  echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning RL study simulation."
-  python miwaves_sample_data/src/run_simulation.py \
+  echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Beginning RL study simulation."
+  python mixed_effects_sample_data/src/run_simulation.py \
     --num_users $num_users \
     --num_time_steps $num_time_steps \
     --seed $seed \
@@ -99,15 +99,15 @@ if [ "$only_analysis" -eq "0" ]; then
     --gamma_var $gamma_var \
     --sigma_e2 $sigma_e2 \
     --policy_type $policy_type
-  echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished RL study simulation."
+  echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Finished RL study simulation."
 fi
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="miwaves_sample_data/results/num_users${num_users}_num_time_steps${num_time_steps}_seed${seed}_delta_seed0_beta_mean[$(printf '%.1f' $beta_mean)]_beta_var[[$(printf '%.1f' $beta_var)]]_gamma_var[[$(printf '%.1f' $gamma_var)]]_sigma_e2$(printf '%.1f' $sigma_e2)_policy_typemixed_effects"
+output_folder="mixed_effects_sample_data/results/num_users${num_users}_num_time_steps${num_time_steps}_seed${seed}_delta_seed0_beta_mean[$(printf '%.1f' $beta_mean)]_beta_var[[$(printf '%.1f' $beta_var)]]_gamma_var[[$(printf '%.1f' $gamma_var)]]_sigma_e2$(printf '%.1f' $sigma_e2)_policy_typemixed_effects"
 
 # Do after-study analysis on the single algorithm run from above
-echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Beginning after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
   --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
@@ -132,6 +132,6 @@ python after_study_analysis.py analyze-dataset \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction
-echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Ending after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Ending after-study analysis."
 
-echo "$(date +"%Y-%m-%d %T") run_local_miwaves.sh: Finished simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Finished simulation."

@@ -1,5 +1,4 @@
 __pycache__/*
-april12/*
 simulated_data/*
 synthetic_env_params/.DS_Store
 .DS_Store
@@ -10,5 +9,8 @@ synthetic_env_params/.DS_Store
 adaptive-sandwich.code-workspace
 deploy.sh
 oralytics_sample_data/Archive/exps/*
-miwaves_sample_data/results/*
+mixed_effects_sample_data/results/*
+run_and_analysis_parallel*.sh
+*.pyc
+cluster_simulation_requirements.txt
 

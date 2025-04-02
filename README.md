@@ -21,7 +21,7 @@ Save your standard errors from pooling in adaptive experiments.
 
 ## Running the code
 - `export PYTHONPATH to the absolute path of this repository on your computer
-- `./run_local.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
+- `./run_local_synthetic.sh`, which outputs to `simulated_data/` by default. See all the possible flags to be toggled in the script code.
 
 ## Linting/Formatting
 
@@ -30,6 +30,8 @@ python -m pytest
 python -m pytest tests/unit_tests
 python -m pytest tests/integration_tests
 
+
+# Talk about gitignored cluster simulation scripts
 
 
 

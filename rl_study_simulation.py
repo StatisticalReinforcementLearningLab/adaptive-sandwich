@@ -338,8 +338,16 @@ def main():
     parser.add_argument(
         "--synthetic_mode",
         type=str,
-        default=RLStudyArgs.DELAYED_EFFECTS,
-        help="File name of synthetic env params",
+        default=RLStudyArgs.DELAYED_1_DOSAGE,
+        choices=[
+            RLStudyArgs.DELAYED_1_DOSAGE,
+            RLStudyArgs.DELAYED_2_DOSAGE,
+            RLStudyArgs.DELAYED_5_DOSAGE,
+            RLStudyArgs.DELAYED_1_DOSAGE_PAPER,
+            RLStudyArgs.DELAYED_2_DOSAGE_PAPER,
+            RLStudyArgs.DELAYED_5_DOSAGE_PAPER,
+        ],
+        help="File name of synthetic env params. The paper versions do not multiply dosage by the latest action to derive the reward mean.",
     )
     parser.add_argument(
         "--RL_alg",

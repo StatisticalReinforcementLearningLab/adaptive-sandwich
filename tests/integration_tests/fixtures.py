@@ -8,7 +8,7 @@ from tests.integration_tests.utils import get_abs_path
 def run_local_pipeline():
     def _run_local_pipeline(**kwargs):
         # Construct the command with keyword arguments
-        script_path = get_abs_path(__file__, "../../run_local.sh")
+        script_path = get_abs_path(__file__, "../../run_local_synthetic.sh")
         command = sh.Command(script_path)
         args = [f"--{key}={value}" for key, value in kwargs.items()]
         try:

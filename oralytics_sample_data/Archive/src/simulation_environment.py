@@ -90,7 +90,7 @@ def sigmoid(x):
 
 
 def construct_model_and_sample(
-    user,
+    user,  # pylint: disable=unused-argument
     state,
     action,
     bern_params,

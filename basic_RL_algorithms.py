@@ -10,7 +10,9 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 
-from functions_to_pass_to_analysis.get_action_1_prob_pure import get_action_1_prob_pure
+from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
+    synthetic_get_action_1_prob_pure,
+)
 
 from helper_functions import clip
 
@@ -49,7 +51,7 @@ def get_pis_batched(
     batched_treat_states_tensor,
 ):
     return jax.vmap(
-        fun=get_action_1_prob_pure,
+        fun=synthetic_get_action_1_prob_pure,
         in_axes=(None, None, None, None, 0),
         out_axes=0,
     )(

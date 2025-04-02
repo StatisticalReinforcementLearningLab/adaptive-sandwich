@@ -5,9 +5,9 @@ from jax import numpy as jnp
 
 import calculate_derivatives
 from constants import FunctionTypes
-import functions_to_pass_to_analysis.get_action_1_prob_pure
-import functions_to_pass_to_analysis.get_least_squares_loss_inference_action_centering
-import functions_to_pass_to_analysis.get_least_squares_loss_rl
+import functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure
+import functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering
+import functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl
 import functions_to_pass_to_analysis.oralytics_RL_estimating_function
 
 import functions_to_pass_to_analysis.oralytics_act_prob_function
@@ -41,7 +41,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_positive_action_high_clip(
             "action",
             "calendar_t",
             "user_id",
-            functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure,
+            functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure,
             0,
             3,
             {
@@ -106,7 +106,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_postive_action_nonzero_gra
             "action",
             "calendar_t",
             "user_id",
-            functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure,
+            functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure,
             0,
             2,
             {
@@ -168,7 +168,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_zero_action_low_clip():
             "action",
             "calendar_t",
             "user_id",
-            functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure,
+            functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure,
             0,
             3,
             {
@@ -237,7 +237,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_out_of_study_1():
             "action",
             "calendar_t",
             "user_id",
-            functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure,
+            functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure,
             0,
             1,
             {
@@ -290,7 +290,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_out_of_study_2():
             "action",
             "calendar_t",
             "user_id",
-            functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure,
+            functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure,
             0,
             4,
             {
@@ -344,7 +344,7 @@ def test_calculate_rl_update_derivatives_specific_update_no_action_centering():
     """
     np.testing.assert_equal(
         calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+            functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
             "loss",
             0,
             5,
@@ -448,7 +448,7 @@ def test_calculate_rl_update_derivatives_specific_update_no_action_probs_passed_
     """
     np.testing.assert_equal(
         calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+            functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
             "loss",
             0,
             -1,
@@ -618,7 +618,7 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering():
 
     np.testing.assert_equal(
         calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-            functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+            functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
             "loss",
             0,
             5,
@@ -856,7 +856,7 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
     # Pass the data in from the above dataframe by just passing in in-study data,
     # no padding, and get the resulting derivatives.
     non_zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
         "loss",
         0,
         5,
@@ -918,7 +918,7 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
 
     # Pass the data in from the above dataframe by padding out of study values with zeros
     zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
         "loss",
         0,
         5,
@@ -1177,7 +1177,7 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering_increm
     # Pass the data in from the above dataframe by just passing in in-study data,
     # no padding, and get the resulting derivatives.
     non_zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
         "loss",
         0,
         5,
@@ -1239,7 +1239,7 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering_increm
 
     # Pass the data in from the above dataframe by padding out of study values with zeros
     zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
         "loss",
         0,
         5,
@@ -1379,7 +1379,7 @@ def test_calculate_rl_update_derivatives_multiple_size_groups_real_bug_case():
     """
 
     result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
-        functions_to_pass_to_analysis.get_least_squares_loss_rl.get_least_squares_loss_rl,
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl.synthetic_get_least_squares_loss_rl,
         "loss",
         0,
         5,
@@ -3592,7 +3592,7 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
     calculated_result = calculate_derivatives.calculate_inference_loss_derivatives(
         study_df,
         theta,
-        "functions_to_pass_to_analysis/get_least_squares_loss_inference_action_centering.py",
+        "functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_action_centering.py",
         0,
         [1, 2],
         "user_id",

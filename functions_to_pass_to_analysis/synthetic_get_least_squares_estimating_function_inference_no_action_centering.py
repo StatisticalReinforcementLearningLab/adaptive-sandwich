@@ -1,7 +1,7 @@
 from jax import numpy as jnp
 
 
-def get_least_squares_estimating_function_inference_no_action_centering(
+def synthetic_get_least_squares_estimating_function_inference_no_action_centering(
     theta_est,
     intercept,
     past_reward,

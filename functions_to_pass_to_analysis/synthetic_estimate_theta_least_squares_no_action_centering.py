@@ -1,7 +1,7 @@
 from sklearn.linear_model import LinearRegression
 
 
-def estimate_theta_least_squares_no_action_centering(study_df):
+def synthetic_estimate_theta_least_squares_no_action_centering(study_df):
 
     covariate_names = ["intercept", "past_reward"]
     # Note that the intercept is included in the features already (col of 1s)

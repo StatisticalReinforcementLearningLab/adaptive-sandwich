@@ -26,7 +26,6 @@ FILL_IN_COLS = ["policy_idx", "action", "prob", "reward", "quality"] + [
 ]
 
 
-# TODO: Needs unit tests
 def create_base_data_df(
     template_users_list: list[str],
     per_user_weeks_in_study: int,

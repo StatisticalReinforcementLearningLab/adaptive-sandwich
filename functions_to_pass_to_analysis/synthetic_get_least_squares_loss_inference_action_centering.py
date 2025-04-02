@@ -1,7 +1,7 @@
 from jax import numpy as jnp
 
 
-def get_least_squares_loss_inference_action_centering(
+def synthetic_get_least_squares_loss_inference_action_centering(
     theta_est,
     intercept,
     past_reward,

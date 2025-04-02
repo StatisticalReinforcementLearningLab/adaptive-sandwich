@@ -60,9 +60,6 @@ def perform_first_wave_input_checks(
         confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
             alg_update_func_args_action_prob_index
         )
-    require_action_prob_args_in_range_0_1_if_supplied(
-        alg_update_func_args, alg_update_func_args_action_prob_index
-    )
     require_action_prob_times_given_if_index_supplied(
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
@@ -420,13 +417,6 @@ def require_binary_in_study_indicators(study_df, in_study_col_name):
 def require_consecutive_integer_policy_numbers(
     study_df, in_study_col_name, policy_num_col_name
 ):
-
-    # TODO: Maybe any negative number taken to be a fallback policy, everything else
-    # consecutive integers. Consecutive might not be feasible tho given app
-    # opening issue.
-
-    # TODO: This probably isn't going to be a requirement when we move away from
-    # update times... remove if so.
     # TODO: This is a somewhat rough check of this, could also check nondecreasing temporally
 
     logger.info(
@@ -518,13 +508,6 @@ def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
         confirm_input_check_result(
             "\nYou specified that the algorithm update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
         )
-
-
-def require_action_prob_args_in_range_0_1_if_supplied(
-    alg_update_func_args, alg_update_func_args_action_prob_index
-):
-    # TODO: implement
-    pass
 
 
 def require_action_prob_times_given_if_index_supplied(

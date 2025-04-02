@@ -25,7 +25,7 @@ done
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 if [ -z "$input_glob" ]; then
-        die 'Missing input folder arg'
+  die 'Missing input folder arg'
 fi
 
 # Load Python 3.10, among other things
@@ -49,7 +49,12 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requireme
 # Loop through each dataset created in the referenced simulation and do
 # after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
-python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}"
+if [ -z "$index_to_check_ci_coverage" ]; then
+  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}"
+else
+  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}"
+fi
+
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.
 
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Analysis complete.

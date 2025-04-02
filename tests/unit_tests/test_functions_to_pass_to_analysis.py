@@ -7,7 +7,8 @@ import pytest
 
 import functions_to_pass_to_analysis.oralytics_estimate_theta_primary_analysis
 import functions_to_pass_to_analysis.oralytics_primary_analysis_loss
-import functions_to_pass_to_analysis.get_action_1_prob_pure
+import functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure
+import functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_paper_simulation
 
 
 def test_get_action_1_prob_pure_no_clip():
@@ -15,7 +16,7 @@ def test_get_action_1_prob_pure_no_clip():
     beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
 
     np.testing.assert_equal(
-        functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure(
+        functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure(
             beta_est=beta_est,
             lower_clip=0.1,
             steepness=10,
@@ -31,7 +32,7 @@ def test_get_action_1_prob_pure_clip():
     beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
 
     np.testing.assert_equal(
-        functions_to_pass_to_analysis.get_action_1_prob_pure.get_action_1_prob_pure(
+        functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure.synthetic_get_action_1_prob_pure(
             beta_est=beta_est,
             lower_clip=0.1,
             steepness=10,
@@ -217,3 +218,58 @@ def test_minimizing_oralytics_primary_analysis_loss_same_as_regression():
     print(f"Min loss found: {min_loss}")
 
     np.testing.assert_almost_equal(regression_coef, best_params, decimal=6)
+
+
+def test_synthetic_get_least_squares_loss_inference_paper_simulation_zero_loss():
+    theta_est = jnp.array([1.0, 2.0, 3.0])
+    intercept = jnp.array([1.0])
+    past_reward = jnp.array([2.0])
+    action = jnp.array([3.0])
+    reward = jnp.array([14.0])  # 1*1 + 2*2 + 3*3 = 14
+
+    loss = functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_paper_simulation.synthetic_get_least_squares_loss_inference_paper_simulation(
+        theta_est, intercept, past_reward, action, reward
+    )
+    assert jnp.isclose(loss, 0.0), f"Expected loss to be 0.0, got {loss}"
+
+
+def test_synthetic_get_least_squares_loss_inference_paper_simulation_nonzero_loss():
+    theta_est = jnp.array([1.0, 2.0, 3.0])
+    intercept = jnp.array([1.0])
+    past_reward = jnp.array([2.0])
+    action = jnp.array([3.0])
+    reward = jnp.array([15.0])  # Incorrect reward to induce non-zero loss
+
+    loss = functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_paper_simulation.synthetic_get_least_squares_loss_inference_paper_simulation(
+        theta_est, intercept, past_reward, action, reward
+    )
+    assert loss == 1, f"Expected loss to be greater than 0.0, got {loss}"
+
+
+def test_synthetic_get_least_squares_loss_inference_paper_simulation_shape_mismatch():
+    theta_est = jnp.array([1.0, 2.0])  # Incorrect shape
+    intercept = jnp.array([1.0])
+    past_reward = jnp.array([2.0])
+    action = jnp.array([3.0])
+    reward = jnp.array([14.0])
+
+    with pytest.raises(TypeError):
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_paper_simulation.synthetic_get_least_squares_loss_inference_paper_simulation(
+            theta_est, intercept, past_reward, action, reward
+        )
+
+
+def test_synthetic_get_least_squares_loss_inference_paper_simulation_batch_nonzero_loss():
+    theta_est = jnp.array([1.0, 2.0, 3.0])
+    intercept = jnp.array([[1.0], [1.0], [1.0]])
+    past_reward = jnp.array([[2.0], [3.0], [4.0]])
+    action = jnp.array([[3.0], [2.0], [1.0]])
+    reward = jnp.array(
+        [[15.0], [12.0], [10.0]]
+    )  # Incorrect rewards to induce non-zero loss
+
+    loss = functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_paper_simulation.synthetic_get_least_squares_loss_inference_paper_simulation(
+        theta_est, intercept, past_reward, action, reward
+    )
+
+    assert loss == 1 + 1 + 4

@@ -84,7 +84,7 @@ def load_synthetic_env_params(paramf_path="./synthetic_env_params/delayed_effect
     """
 
     # Load Model Parameters ###############################################
-    with open(paramf_path, "r") as f:
+    with open(paramf_path, "r", encoding="utf-8") as f:
         params = f.readlines()
 
     all_env_params = []
@@ -132,7 +132,12 @@ class SyntheticEnv:
         self.reward_noise = noise.flatten()
 
     def update_study_df(self, study_df, t):
-        """Perform a running update of study_df for the given time"""
+        """
+        Perform a running update of study_df for the given time.  This is about
+        setting up the states for the next decision time if the user will be
+        in the study, as the current decision time has already been carried out,
+        with the resulting actions and rewards being collected below.
+        """
 
         # Find users at current time who are in study and will continue on
         cont_user_current_bool = (
@@ -164,6 +169,7 @@ class SyntheticEnv:
             for x in self.gen_feats
             if "reward" not in x and "dosage" not in x and "action" in x
         ]
+        # slice gets rid of intercept
         get_past_actions_names = gen_feats_action_names[1:] + ["action"]
         past_actions = study_df[cont_user_current_bool][
             get_past_actions_names

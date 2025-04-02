@@ -43,7 +43,7 @@ source venv/bin/activate
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Making sure Python requirements are installed.
-pip install -r simulation_requirements.txt
+pip install -r cluster_simulation_requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requirements installed.
 
 # Loop through each dataset created in the referenced simulation and do

@@ -6,6 +6,9 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Parsing options.
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
+input_glob=""
+index_to_check_ci_coverage=""
+
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
 while getopts i:c:-: OPT; do

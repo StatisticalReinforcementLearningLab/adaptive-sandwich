@@ -1530,8 +1530,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
-            - The adaptive inverse bread matrix.
-            - The adaptive meat matrix.
+            - The joint adaptive inverse bread matrix.
+            - The joint adaptive meat matrix.
             - The classical inverse bread matrix.
             - The classical meat matrix.
             - The average weighted estimating function stack.
@@ -1587,8 +1587,19 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     )
 
 
-# TODO: Docstring
-def estimate_theta(study_df, theta_calculation_func_filename):
+def estimate_theta(
+    study_df: pandas.DataFrame, theta_calculation_func_filename: str
+) -> jnp.ndarray[jnp.float32]:
+    """
+    Estimates theta using the provided study DataFrame and the specified theta calculation
+    function.
+    Args:
+        study_df (pandas.DataFrame): The DataFrame containing the study data.
+        theta_calculation_func_filename (str): The filename of the theta calculation function.
+    Returns:
+        jnp.ndarray[jnp.float32]: The estimated theta (1-D).
+    """
+
     logger.info("Forming theta estimate.")
     theta_calculation_func = load_function_from_same_named_file(
         theta_calculation_func_filename

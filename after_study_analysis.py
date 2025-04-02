@@ -699,7 +699,6 @@ def get_min_time_by_policy_num(
     return min_time_by_policy_num, first_time_after_first_update
 
 
-# TODO : remove user id from dicts to prepare for vmap?
 def single_user_weighted_algorithm_estimating_function_stacker(
     beta_dim: int,
     user_id: collections.abc.Hashable,

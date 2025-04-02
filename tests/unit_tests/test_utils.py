@@ -39,7 +39,7 @@ def test_finite_difference_hessian_constant():
     # Define a constant function f(x) = c
     c = 5
 
-    def f(x):
+    def f(x):  # pylint: disable=unused-argument
         return c
 
     x = np.array([1.0, 2.0])

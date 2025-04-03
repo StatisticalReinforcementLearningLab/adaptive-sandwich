@@ -1667,14 +1667,32 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     classical_sandwich_var_estimates = np.array(raw_classical_sandwich_var_estimates)
 
     theta_estimate = np.mean(theta_estimates, axis=0)
-    empirical_var_normalized = empirical_var_normalized = np.atleast_2d(
-        np.cov(theta_estimates.T, ddof=0)
-    )
+    empirical_var_normalized = np.atleast_2d(np.cov(theta_estimates.T, ddof=1))
+
     mean_adaptive_sandwich_var_estimate = np.mean(
         adaptive_sandwich_var_estimates, axis=0
     )
+    adaptive_sandwich_var_estimate_std_deviations = np.sqrt(
+        np.var(adaptive_sandwich_var_estimates, axis=0, ddof=1)
+    )
+    adaptive_sandwich_var_estimate_mins = np.sqrt(
+        np.min(adaptive_sandwich_var_estimates, axis=0)
+    )
+    adaptive_sandwich_var_estimate_maxes = np.sqrt(
+        np.max(adaptive_sandwich_var_estimates, axis=0)
+    )
+
     mean_classical_sandwich_var_estimate = np.mean(
         classical_sandwich_var_estimates, axis=0
+    )
+    classical_sandwich_var_estimate_std_deviations = np.sqrt(
+        np.var(classical_sandwich_var_estimates, axis=0, ddof=1)
+    )
+    classical_sandwich_var_estimate_mins = np.sqrt(
+        np.min(classical_sandwich_var_estimates, axis=0)
+    )
+    classical_sandwich_var_estimate_maxes = np.sqrt(
+        np.max(classical_sandwich_var_estimates, axis=0)
     )
 
     # Calculate standard error (or corresponding variance) of variance estimate for each
@@ -1706,22 +1724,40 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
             theta_component_variance_std_errors[j],
         )
 
-    print(f"\n(Mean) parameter estimate:\n{theta_estimate}")
-    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
+    print(f"\nMean parameter estimate:\n{theta_estimate}")
+    print(f"\nEmpirical variance of parameter estimates:\n{empirical_var_normalized}")
     print(
         f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
     )
     print(
-        f"\n(Mean) adaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
+        f"\nMean adaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
     )
     print(
-        f"\n(Mean) classical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
+        f"\nMean classical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
     )
     print(
         f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
     )
     print(
         f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}\n",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate elementwise standard deviations:\n{adaptive_sandwich_var_estimate_std_deviations}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate elementwise standard deviations:\n{classical_sandwich_var_estimate_std_deviations}",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate elementwise mins:\n{adaptive_sandwich_var_estimate_mins}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate elementwise mins:\n{classical_sandwich_var_estimate_mins}",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate elementwise maxes:\n{adaptive_sandwich_var_estimate_maxes}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate elementwise maxes:\n{classical_sandwich_var_estimate_maxes}",
     )
 
     if theta_estimates[0].size == 1:

@@ -388,9 +388,12 @@ def analyze_dataset(
 
     beta_dim = len(all_post_update_betas[0])
     theta_dim = len(theta_est)
-    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+    if not suppress_all_data_checks:
         input_checks.require_estimating_functions_sum_to_zero(
-            avg_estimating_function_stack, beta_dim, theta_dim
+            avg_estimating_function_stack,
+            beta_dim,
+            theta_dim,
+            suppress_interactive_data_checks,
         )
 
     logger.info("Forming classical sandwich variance estimate...")
@@ -410,9 +413,11 @@ def analyze_dataset(
         joint_adaptive_bread_inverse_matrix
     )
 
-    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+    if not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
-            joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
+            joint_adaptive_bread_matrix,
+            joint_adaptive_bread_inverse_matrix,
+            suppress_interactive_data_checks,
         )
 
     logger.info("Forming joint adaptive sandwich variance estimate...")
@@ -449,7 +454,6 @@ def analyze_dataset(
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
                 "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
-                "joint_bread_matrix": joint_adaptive_bread_matrix,
                 "joint_meat_matrix": joint_adaptive_meat_matrix,
             },
             f,

@@ -449,6 +449,7 @@ def analyze_dataset(
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
                 "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+                "joint_bread_matrix": joint_adaptive_bread_matrix,
                 "joint_meat_matrix": joint_adaptive_meat_matrix,
             },
             f,

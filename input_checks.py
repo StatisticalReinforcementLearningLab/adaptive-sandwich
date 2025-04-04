@@ -250,24 +250,23 @@ def require_action_prob_args_in_alg_update_func_correspond_to_study_df(
     if alg_update_func_args_action_prob_index < 0:
         return
 
-    for policy_num in alg_update_func_args:
-        for user_id in alg_update_func_args[policy_num]:
-            if not alg_update_func_args[policy_num][user_id]:
+    # Precompute a lookup dictionary for faster access
+    study_df_lookup = study_df.set_index([calendar_t_col_name, user_id_col_name])[
+        action_prob_col_name
+    ].to_dict()
+
+    for policy_num, user_args in alg_update_func_args.items():
+        for user_id, args in user_args.items():
+            if not args:
                 continue
-            arg_action_probs = alg_update_func_args[policy_num][user_id][
-                alg_update_func_args_action_prob_index
+            arg_action_probs = args[alg_update_func_args_action_prob_index]
+            action_prob_times = args[alg_update_func_args_action_prob_times_index]
+
+            # Use the precomputed lookup dictionary
+            study_df_action_probs = [
+                study_df_lookup[(decision_time, user_id)]
+                for decision_time in action_prob_times
             ]
-            action_prob_times = alg_update_func_args[policy_num][user_id][
-                alg_update_func_args_action_prob_times_index
-            ]
-            study_df_action_probs = []
-            for decision_time in action_prob_times:
-                study_df_action_probs.append(
-                    study_df[
-                        (study_df[calendar_t_col_name] == decision_time)
-                        & (study_df[user_id_col_name] == user_id)
-                    ][action_prob_col_name].values[0]
-                )
 
             assert np.allclose(
                 arg_action_probs.flatten(),

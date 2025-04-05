@@ -31,8 +31,9 @@ def invert_matrix_and_check_conditioning(
     condition_number = np.linalg.cond(matrix)
     inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
     if condition_number > condition_num_threshold:
-        warnings.warn(
-            f"You are inverting a matrix with a large condition number: {condition_number}"
+        logger.warning(
+            "You are inverting a matrix with a large condition number: %s",
+            condition_number,
         )
         if try_tikhonov_if_poorly_conditioned:
             supposed_identity = inverse * matrix
@@ -173,7 +174,13 @@ def load_function_from_same_named_file(filename):
         ) from e
 
 
-def confirm_input_check_result(message, error=None):
+def confirm_input_check_result(message, suppress_interactive_data_checks, error=None):
+
+    if suppress_interactive_data_checks:
+        logger.info(
+            f"Skipping the following interactive data check, as requested:\n{message}"
+        )
+        return
     answer = None
     while answer != "y":
         # pylint: disable=bad-builtin

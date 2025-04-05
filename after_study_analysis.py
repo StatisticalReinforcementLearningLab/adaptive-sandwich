@@ -388,9 +388,12 @@ def analyze_dataset(
 
     beta_dim = len(all_post_update_betas[0])
     theta_dim = len(theta_est)
-    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+    if not suppress_all_data_checks:
         input_checks.require_estimating_functions_sum_to_zero(
-            avg_estimating_function_stack, beta_dim, theta_dim
+            avg_estimating_function_stack,
+            beta_dim,
+            theta_dim,
+            suppress_interactive_data_checks,
         )
 
     logger.info("Forming classical sandwich variance estimate...")
@@ -410,9 +413,11 @@ def analyze_dataset(
         joint_adaptive_bread_inverse_matrix
     )
 
-    if not suppress_interactive_data_checks and not suppress_all_data_checks:
+    if not suppress_all_data_checks:
         input_checks.require_adaptive_bread_inverse_is_true_inverse(
-            joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
+            joint_adaptive_bread_matrix,
+            joint_adaptive_bread_inverse_matrix,
+            suppress_interactive_data_checks,
         )
 
     logger.info("Forming joint adaptive sandwich variance estimate...")
@@ -821,6 +826,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         "Computing the algorithm component of the weighted estimating function stack for user %s.",
         user_id,
     )
+    # TODO: This loop could be vmapped to be much faster.
     algorithm_component = jnp.concatenate(
         [
             # Here we compute a product of Radon-Nikodym weights
@@ -1667,13 +1673,31 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     classical_sandwich_var_estimates = np.array(raw_classical_sandwich_var_estimates)
 
     theta_estimate = np.mean(theta_estimates, axis=0)
-    empirical_var_normalized = empirical_var_normalized = np.atleast_2d(
-        np.cov(theta_estimates.T, ddof=0)
-    )
+    empirical_var_normalized = np.atleast_2d(np.cov(theta_estimates.T, ddof=1))
+
     mean_adaptive_sandwich_var_estimate = np.mean(
         adaptive_sandwich_var_estimates, axis=0
     )
+    adaptive_sandwich_var_estimate_std_deviations = np.sqrt(
+        np.var(adaptive_sandwich_var_estimates, axis=0, ddof=1)
+    )
+    adaptive_sandwich_var_estimate_mins = np.min(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+    adaptive_sandwich_var_estimate_maxes = np.max(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+
     mean_classical_sandwich_var_estimate = np.mean(
+        classical_sandwich_var_estimates, axis=0
+    )
+    classical_sandwich_var_estimate_std_deviations = np.sqrt(
+        np.var(classical_sandwich_var_estimates, axis=0, ddof=1)
+    )
+    classical_sandwich_var_estimate_mins = np.min(
+        classical_sandwich_var_estimates, axis=0
+    )
+    classical_sandwich_var_estimate_maxes = np.max(
         classical_sandwich_var_estimates, axis=0
     )
 
@@ -1706,22 +1730,40 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
             theta_component_variance_std_errors[j],
         )
 
-    print(f"\n(Mean) parameter estimate:\n{theta_estimate}")
-    print(f"\nEmpirical variance:\n{empirical_var_normalized}")
+    print(f"\nMean parameter estimate:\n{theta_estimate}")
+    print(f"\nEmpirical variance of parameter estimates:\n{empirical_var_normalized}")
     print(
         f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
     )
     print(
-        f"\n(Mean) adaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
+        f"\nMean adaptive sandwich variance estimate:\n{mean_adaptive_sandwich_var_estimate}",
     )
     print(
-        f"\n(Mean) classical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}\n",
+        f"\nMean classical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}",
     )
     print(
         f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
     )
     print(
-        f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}\n",
+        f"\nClassical sandwich variance estimate std errors from empirical:\n{(mean_classical_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate elementwise standard deviations:\n{adaptive_sandwich_var_estimate_std_deviations}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate elementwise standard deviations:\n{classical_sandwich_var_estimate_std_deviations}",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate elementwise mins:\n{adaptive_sandwich_var_estimate_mins}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate elementwise mins:\n{classical_sandwich_var_estimate_mins}",
+    )
+    print(
+        f"\nAdaptive sandwich variance estimate elementwise maxes:\n{adaptive_sandwich_var_estimate_maxes}",
+    )
+    print(
+        f"\nClassical sandwich variance estimate elementwise maxes:\n{classical_sandwich_var_estimate_maxes}\n",
     )
 
     if theta_estimates[0].size == 1:
@@ -1759,7 +1801,7 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
             f"\nAdaptive sandwich 95% CI coverage:\n{adaptive_cover_count / len(theta_estimates)}",
         )
         print(
-            f"\nClassical sandwich 95% CI coverage:\n{classical_cover_count / len(theta_estimates)}",
+            f"\nClassical sandwich 95% CI coverage:\n{classical_cover_count / len(theta_estimates)}\n",
         )
 
 

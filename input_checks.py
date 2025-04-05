@@ -56,10 +56,9 @@ def perform_first_wave_input_checks(
     require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_alg_update_args(
         study_df, in_study_col_name, policy_num_col_name, alg_update_func_args
     )
-    if not suppress_interactive_data_checks:
-        confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
-            alg_update_func_args_action_prob_index
-        )
+    confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
+        alg_update_func_args_action_prob_index, suppress_interactive_data_checks
+    )
     require_action_prob_times_given_if_index_supplied(
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
@@ -94,16 +93,16 @@ def perform_first_wave_input_checks(
     require_action_prob_func_args_given_for_all_decision_times(
         study_df, calendar_t_col_name, action_prob_func_args
     )
-    if not suppress_interactive_data_checks:
-        require_action_probabilities_in_study_df_can_be_reconstructed(
-            study_df,
-            action_prob_col_name,
-            calendar_t_col_name,
-            user_id_col_name,
-            in_study_col_name,
-            action_prob_func_filename,
-            action_prob_func_args,
-        )
+    require_action_probabilities_in_study_df_can_be_reconstructed(
+        study_df,
+        action_prob_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        in_study_col_name,
+        action_prob_func_filename,
+        action_prob_func_args,
+        suppress_interactive_data_checks,
+    )
 
     require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
         study_df,
@@ -120,15 +119,15 @@ def perform_first_wave_input_checks(
     )
 
     ### Validate study_df
-    if not suppress_interactive_data_checks:
-        verify_study_df_summary_satisfactory(
-            study_df,
-            user_id_col_name,
-            policy_num_col_name,
-            calendar_t_col_name,
-            in_study_col_name,
-            action_prob_col_name,
-        )
+    verify_study_df_summary_satisfactory(
+        study_df,
+        user_id_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        in_study_col_name,
+        action_prob_col_name,
+        suppress_interactive_data_checks,
+    )
 
     require_all_users_have_all_times_in_study_df(
         study_df, calendar_t_col_name, user_id_col_name
@@ -177,6 +176,7 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
     in_study_col_name,
     action_prob_func_filename,
     action_prob_func_args,
+    suppress_interactive_data_checks,
 ):
     logger.info("Reconstructing action probabilities from function and arguments.")
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
@@ -197,6 +197,7 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
     except AssertionError as e:
         confirm_input_check_result(
             f"\nThe action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable. If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
             e,
         )
 
@@ -250,24 +251,25 @@ def require_action_prob_args_in_alg_update_func_correspond_to_study_df(
     if alg_update_func_args_action_prob_index < 0:
         return
 
-    for policy_num in alg_update_func_args:
-        for user_id in alg_update_func_args[policy_num]:
-            if not alg_update_func_args[policy_num][user_id]:
+    # Precompute a lookup dictionary for faster access
+    study_df_lookup = study_df.set_index([calendar_t_col_name, user_id_col_name])[
+        action_prob_col_name
+    ].to_dict()
+
+    for policy_num, user_args in alg_update_func_args.items():
+        for user_id, args in user_args.items():
+            if not args:
                 continue
-            arg_action_probs = alg_update_func_args[policy_num][user_id][
-                alg_update_func_args_action_prob_index
-            ]
-            action_prob_times = alg_update_func_args[policy_num][user_id][
+            arg_action_probs = args[alg_update_func_args_action_prob_index]
+            action_prob_times = args[
                 alg_update_func_args_action_prob_times_index
+            ].flatten()
+
+            # Use the precomputed lookup dictionary
+            study_df_action_probs = [
+                study_df_lookup[(decision_time.item(), user_id)]
+                for decision_time in action_prob_times
             ]
-            study_df_action_probs = []
-            for decision_time in action_prob_times:
-                study_df_action_probs.append(
-                    study_df[
-                        (study_df[calendar_t_col_name] == decision_time)
-                        & (study_df[user_id_col_name] == user_id)
-                    ][action_prob_col_name].values[0]
-                )
 
             assert np.allclose(
                 arg_action_probs.flatten(),
@@ -500,13 +502,15 @@ def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_
 
 def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
     alg_update_func_args_action_prob_index,
+    suppress_interactive_data_checks,
 ):
     logger.info(
         "Confirming that action probabilities are not in algorithm update function args IF their index is not specified"
     )
     if alg_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
-            "\nYou specified that the algorithm update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n"
+            "\nYou specified that the algorithm update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
         )
 
 
@@ -575,6 +579,7 @@ def verify_study_df_summary_satisfactory(
     calendar_t_col_name,
     in_study_col_name,
     action_prob_col_name,
+    suppress_interactive_data_checks,
 ):
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
@@ -610,7 +615,8 @@ def verify_study_df_summary_satisfactory(
         f" for which multiple non-fallback policies were used"
         f"\n* Minimum action probability {min_action_prob}"
         f"\n* Maximum action probability {max_action_prob}"
-        f" \n\nDoes this meet expectations? (y/n)\n"
+        f" \n\nDoes this meet expectations? (y/n)\n",
+        suppress_interactive_data_checks,
     )
 
 
@@ -685,7 +691,10 @@ def require_valid_action_prob_times_given_if_index_supplied(
 
 
 def require_estimating_functions_sum_to_zero(
-    mean_estimating_function_stack: jnp.ndarray, beta_dim: int, theta_dim: int
+    mean_estimating_function_stack: jnp.ndarray,
+    beta_dim: int,
+    theta_dim: int,
+    suppress_interactive_data_checks: bool,
 ):
     """
     This is a test that the correct loss/estimating functions have
@@ -735,6 +744,7 @@ def require_estimating_functions_sum_to_zero(
         )
         confirm_input_check_result(
             f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result, taking into account the above breakdown by update number and inference. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
             e,
         )
 
@@ -750,7 +760,9 @@ def require_custom_small_sample_correction_function_provided_if_selected(
 
 
 def require_adaptive_bread_inverse_is_true_inverse(
-    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_matrix
+    joint_adaptive_bread_matrix,
+    joint_adaptive_bread_inverse_matrix,
+    suppress_interactive_data_checks,
 ):
     """
     Check that the product of the joint adaptive bread matrix and its inverse is
@@ -767,5 +779,6 @@ def require_adaptive_bread_inverse_is_true_inverse(
     except AssertionError as e:
         confirm_input_check_result(
             f"\nJoint adaptive bread is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
             e,
         )

@@ -28,29 +28,29 @@ min_users=1
 #synthetic_mode='delayed_01_5_dosage'
 #synthetic_mode='test_1_1_T2'
 #synthetic_mode='delayed_effects_large'
-eta=0
-#RL_alg="sigmoid_LS"
-RL_alg="posterior_sampling"
+eta=0 # Nowell: I think this is ignored
+# RL_alg="posterior_sampling"
 #RL_alg="fixed_randomization"
 #err_corr='independent'
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
-inference_mode="model"
+inference_mode="model" # This makes the inference model have three features: intercept, past_reward, and action
 #inference_mode="value"
-action_centering=1
+action_centering=1 # Nowell: This doesn't do anything if sigmoid LS used
 
-recruit_n=100
-n=100
-#synthetic_mode='delayed_1_dosage'
-#steepness=5
+recruit_n=50
+n=50
+# recruit_n=100
+# n=100
+# recruit_n=500
+# n=500
 
-#n = 1000, 100, 500
-#steepness = 1 2 0.5
+
 
 save_dir=/n/murphy_lab/lab/kellywzhang/inference_after_pooling/results/may3
 
 #for steepness in 1 2 0.5 5
-for steepness in 1 0.5 5
+for steepness in 0.5 1 5
 do
 
     for synthetic_mode in 'delayed_1_dosage' 'delayed_5_dosage' #'delayed_2_dosage'

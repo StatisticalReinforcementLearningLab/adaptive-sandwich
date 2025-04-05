@@ -8,6 +8,7 @@ synthetic_env_params/.DS_Store
 *.lprof
 *.swp
 .venv
+.kelly_venv
 .vscode
 adaptive-sandwich.code-workspace
 deploy.sh

@@ -11,3 +11,8 @@
 - `synthetic_env.py`: synthetic simulation environment
 - `run.sh`: script for running experiments
 
+One way to setup (tested on Python 3.9.6):
+python -m venv .kelly_venv
+source .kelly_venv/bin/activate
+pip install -r requirements.txt
+

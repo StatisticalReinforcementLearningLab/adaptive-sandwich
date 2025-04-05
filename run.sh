@@ -4,7 +4,7 @@
 # Sample size=100,500,1000
 
 T=25
-decisions_between_updates=2
+decisions_between_updates=1
 recruit_n=25; recruit_t=2
 recruit_n=50; recruit_t=1
 N=5
@@ -18,8 +18,8 @@ synthetic_mode='delayed_1_dosage'
 steepness=1
 eta=0
 RL_alg="sigmoid_LS"
-RL_alg="posterior_sampling"
-#RL_alg="fixed_randomization" 
+# RL_alg="posterior_sampling"
+#RL_alg="fixed_randomization"
 #err_corr='independent'
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"

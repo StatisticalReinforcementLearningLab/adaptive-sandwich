@@ -826,6 +826,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         "Computing the algorithm component of the weighted estimating function stack for user %s.",
         user_id,
     )
+    # TODO: This loop could be vmapped to be much faster.
     algorithm_component = jnp.concatenate(
         [
             # Here we compute a product of Radon-Nikodym weights

@@ -10,7 +10,7 @@
 set -eu
 
 module load Mambaforge/22.11.1-fasrc01
-cd /n/murphy_lab/lab/nclosser/kelly_paper_reproduction/code
+cd /n/murphy_lab/lab/nclosser/kelly_paper_reproduction
 
 # Load Python 3.10, among other things
 module load Mambaforge/22.11.1-fasrc01
@@ -23,7 +23,8 @@ fi
 source venv/bin/activate
 
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
-pip install -r cluster_simulation_requirements.txt
+cd code
+pip install -r requirements.txt
 
 T=50
 N=2000

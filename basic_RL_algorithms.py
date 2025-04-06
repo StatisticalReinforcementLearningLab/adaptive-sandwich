@@ -194,7 +194,7 @@ class SigmoidLS:
         treat_est = beta_est[self.treat_bool]
         lin_est = np.matmul(prob_input_dict['treat_states'], treat_est.T)
         
-        raw_probs = scipy.special.expit(lin_est)
+        raw_probs = scipy.special.expit(self.steepness * lin_est)
         probs = clip(self.args, raw_probs)
         
         return probs.squeeze()

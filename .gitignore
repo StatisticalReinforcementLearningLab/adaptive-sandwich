@@ -1,6 +1,5 @@
 __pycache__/*
 april12/*
-synthetic_env_params/*.txt
 __pycache__/*
 simulated_data/*
 synthetic_env_params/.DS_Store
@@ -12,6 +11,7 @@ synthetic_env_params/.DS_Store
 .vscode
 adaptive-sandwich.code-workspace
 deploy.sh
+deploy_paper_code.sh
 oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
 *.pyc

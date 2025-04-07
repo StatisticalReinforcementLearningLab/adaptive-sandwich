@@ -322,14 +322,11 @@ class SigmoidLS:
         user_ids = data_dict['user_id']
         all_user_id = data_dict['all_user_id']
       
-        try:
-            est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids, 
-                                          beta_est, avail_vec, all_user_id,
-                                          correction = correction,
-                                          reconstruct_check = check,
-                                          light=light)
-        except:
-            import ipdb; ipdb.set_trace()
+        est_eqn_dict = get_est_eqn_LS(outcome_vec, design, user_ids, 
+                                        beta_est, avail_vec, all_user_id,
+                                        correction = correction,
+                                        reconstruct_check = check,
+                                        light=light)
 
         if return_ave_only:
             return np.sum(est_eqn_dict['est_eqns'], axis=0) / len(all_user_id)

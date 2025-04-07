@@ -354,7 +354,6 @@ def analyze_dataset(
         "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
     )
     user_ids = jnp.array(study_df[user_id_col_name].unique())
-    # TODO: roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
     (
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,

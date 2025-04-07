@@ -38,6 +38,7 @@ min_users=1
 # RL_alg="posterior_sampling"
 #RL_alg="fixed_randomization"
 #err_corr='independent'
+RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 inference_mode="model" # Nowell: This makes the inference model have three features: intercept, past_reward, and action

@@ -44,7 +44,7 @@ alg_state_feats="intercept,past_reward"
 inference_mode="model" # Nowell: This makes the inference model have three features: intercept, past_reward, and action
 #inference_mode="value"
 
-action_centering=1 # Nowell: This doesn't do anything if sigmoid LS used
+action_centering=0 # Nowell: This doesn't do anything if sigmoid LS used
 eta=0 # Nowell: This is ignored
 
 

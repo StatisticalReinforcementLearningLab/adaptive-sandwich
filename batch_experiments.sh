@@ -49,6 +49,7 @@ eta=0 # Nowell: This is ignored
 
 
 save_dir=/n/murphy_lab/lab/nclosser/kelly_paper_reproduction/results/$SLURM_JOB_ID
+mkdir -p $save_dir
 for n in 50 100 500
 do
     for steepness in 0.5 1 5

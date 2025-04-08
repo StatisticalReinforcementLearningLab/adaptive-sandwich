@@ -450,7 +450,7 @@ def get_stacked_estimating_function(
             info_dict=info_dict,
             correction=alg_correction,
             check=check,
-            light=True,
+            light=False,
         )
 
         # Check estimating equation sums to zero

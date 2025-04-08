@@ -485,13 +485,7 @@ def get_stacked_estimating_function(
 
             # Check that reproduced the action selection probabilities correctly
             if check:
-                try:
-                    assert np.all(np.around(user_pi_weights, 5) == 1)
-                except:
-                    print("Reproducing action selection probabilities check failed")
-                    import ipdb
-
-                    ipdb.set_trace()
+                assert np.all(np.around(user_pi_weights, 5) == 1)
 
     # Estimating Equation for theta ######################
     theta_est_eqn = form_LS_est_eqn(

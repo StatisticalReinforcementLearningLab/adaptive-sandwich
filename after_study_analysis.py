@@ -18,6 +18,7 @@ import pandas
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
+from vmap_helpers import stack_batched_arg_lists_into_tensors
 
 
 from helper_functions import (
@@ -825,50 +826,95 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         "Computing the algorithm component of the weighted estimating function stack for user %s.",
         user_id,
     )
-    # TODO: This loop could be vmapped to be much faster.
+
+    # TODO: move out of there. But set up args for vmap below
+    all_original_action_prob_func_args = action_prob_func_args_by_decision_time.values()
+    breakpoint()
+    all_original_betas_list_by_decision_time_index = jnp.array(
+        [
+            action_prob_func_args[action_prob_func_args_beta_index]
+            for action_prob_func_args in all_original_action_prob_func_args
+        ]
+    )
+    actions_list_by_decision_time_index = jnp.array(
+        list(action_by_decision_time.values())
+    )
+
+    # Sort the threaded args by decision time to be cautious. We check if the
+    # user id is present in the user args dict because we may call this on a
+    # subset of the user arg dict when we are batching arguments by shape
+    sorted_threaded_action_prob_args_by_decision_time = {
+        decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
+        for decision_time in range(user_start_time, user_end_time + 1)
+        if decision_time in threaded_action_prob_func_args_by_decision_time
+    }
+
+    num_args = None
+    for args in sorted_threaded_action_prob_args_by_decision_time.values():
+        if args:
+            num_args = len(args)
+            break
+
+    # NOTE: Cannot do [[]] * num_args here! Then all lists point
+    # same object...
+    batched_arg_lists = [[] for _ in range(num_args)]
+    for (
+        decision_time,
+        args,
+    ) in sorted_threaded_action_prob_args_by_decision_time.items():
+        if not args:
+            continue
+        for idx, arg in enumerate(args):
+            batched_arg_lists[idx].append(arg)
+
+    batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
+        batched_arg_lists
+    )
+
+    # Note that we do NOT use the shared betas in the first arg to the weight function,
+    # since we don't want differentiation to happen with respect to them.
+    # Just grab the original beta from the update function arguments. This is the same
+    # value, but impervious to differentiation with respect to all_post_update_betas. The
+    # args, on the other hand, are a function of all_post_update_betas.
+    all_weights = jax.vmap(
+        fun=get_radon_nikodym_weight,
+        in_axes=[0, None, None, 0] + batch_axes,
+        out_axes=0,
+    )(
+        all_original_betas_list_by_decision_time_index,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        actions_list_by_decision_time_index,
+        *batched_arg_tensors,
+    )
+
+    # TODO: May need to use dynamic slicing when this whole function is vmapped
     algorithm_component = jnp.concatenate(
         [
             # Here we compute a product of Radon-Nikodym weights
             # for all decision times after the first update and before the update
             # update under consideration took effect, for which the user was in the study.
+            # Note the - user_start_time to shift the calendar time to an index of times
+            # for the user, allowing correct indexing into the weights.
             (
                 jnp.prod(
-                    jnp.array(
-                        [
-                            # Note that we do NOT use the shared betas in the first arg, for
-                            # which we don't want differentiation to happen with respect to.
-                            # Just grab the original beta from the update function arguments.
-                            # This is the same value, but impervious to differentiation with
-                            # respect to all_post_update_betas. The args, on the other hand,
-                            # are a function of all_post_update_betas.
-                            get_radon_nikodym_weight(
-                                action_prob_func_args_by_decision_time[t][
-                                    action_prob_func_args_beta_index
-                                ],
-                                action_prob_func,
-                                action_prob_func_args_beta_index,
-                                action_by_decision_time[t],
-                                *threaded_action_prob_func_args_by_decision_time[t],
-                            )
-                            for t in range(
-                                # The earliest time after the first update where the user was in
-                                #  the study
-                                max(
-                                    first_time_after_first_update,
-                                    user_start_time,
-                                ),
-                                # The latest time the user was in the study before the time the
-                                # update under consideration first applied. Note the + 1 because
-                                # range does not include the right endpoint.
-                                # TODO: Is there any reason for the policy to not be in min time
-                                # by policy num? I can't think of one currently.
-                                min(
-                                    min_time_by_policy_num.get(policy_num, math.inf),
-                                    user_end_time + 1,
-                                ),
-                            )
-                        ]
-                    )
+                    all_weights[
+                        # The earliest time after the first update where the user was in
+                        # the study
+                        max(
+                            first_time_after_first_update,
+                            user_start_time,
+                        )
+                        - user_start_time :
+                        # One more than the latest time the user was in the study before the time
+                        # the update under consideration first applied. Note the + 1 because range
+                        # does not include the right endpoint.
+                        min(
+                            min_time_by_policy_num.get(policy_num, math.inf),
+                            user_end_time + 1,
+                        )
+                        - user_start_time,
+                    ]
                 )  # Now use the above to weight the alg estimating function for this update
                 * algorithm_estimating_func(*update_args)
                 # If there are no arguments for the update function, the user is not yet in the
@@ -887,26 +933,12 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         user_id,
     )
     inference_component = jnp.prod(
-        jnp.array(
-            [
-                # Note: as above, the first arg is the original beta, not the shared one.
-                get_radon_nikodym_weight(
-                    action_prob_func_args_by_decision_time[t][
-                        action_prob_func_args_beta_index
-                    ],
-                    action_prob_func,
-                    action_prob_func_args_beta_index,
-                    action_by_decision_time[t],
-                    *threaded_action_prob_func_args_by_decision_time[t],
-                )
-                # Go from the first time for the user that is after the first
-                # update to their last active time
-                for t in range(
-                    max(first_time_after_first_update, user_start_time),
-                    user_end_time + 1,
-                )
-            ]
-        )
+        all_weights[
+            max(first_time_after_first_update, user_start_time)
+            - user_start_time : user_end_time
+            + 1
+            - user_start_time,
+        ]
     ) * inference_estimating_func(*threaded_inference_func_args)
 
     # 5. Concatenate the two components to form the weighted estimating function stack for this

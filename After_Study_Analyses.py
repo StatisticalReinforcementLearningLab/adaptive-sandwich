@@ -455,17 +455,11 @@ def get_stacked_estimating_function(
 
         # Check estimating equation sums to zero
         if check:
-            try:
-                tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(
-                    all_user_id
-                )
-                # assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.001 )
-                assert np.all(np.absolute(tmp_ave_est_eqn) < 0.001)
-            except:
-                print("Estimating equation sum to zero check failed")
-                import ipdb
-
-                ipdb.set_trace()
+            tmp_ave_est_eqn = np.sum(est_eqns_dict["est_eqns"], axis=0) / len(
+                all_user_id
+            )
+            # assert np.all( np.absolute( tmp_ave_est_eqn ) < 0.001 )
+            assert np.all(np.absolute(tmp_ave_est_eqn) < 0.001)
 
         # Multiply by weights
         prev_weights_prod = np.expand_dims(np.prod(all_weights, axis=0), 1)
@@ -571,7 +565,7 @@ def get_adaptive_sandwich_new(
         return_full=True,
         alg_correction=alg_correction,
         theta_correction=theta_correction,
-        check=True,
+        check=not alg_correction,
     )
 
     cat_est_eqn = np.hstack(stacked_est_dict["all_est_eqn"])

@@ -904,8 +904,6 @@ def single_user_weighted_algorithm_estimating_function_stacker(
             # Here we compute a product of Radon-Nikodym weights
             # for all decision times after the first update and before the update
             # update under consideration took effect, for which the user was in the study.
-            # Note the - user_start_time to shift the calendar time to an index of times
-            # for the user, allowing correct indexing into the weights.
             (
                 jnp.prod(
                     all_weights[

@@ -828,15 +828,16 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     )
 
     # TODO: move out of there. But set up args for vmap below
-    all_original_action_prob_func_args = action_prob_func_args_by_decision_time.values()
-    breakpoint()
-    all_original_betas_list_by_decision_time_index = jnp.array(
+    in_study_action_prob_func_args = [
+        args for args in action_prob_func_args_by_decision_time.values() if args
+    ]
+    in_study_betas_list_by_decision_time_index = jnp.array(
         [
             action_prob_func_args[action_prob_func_args_beta_index]
-            for action_prob_func_args in all_original_action_prob_func_args
+            for action_prob_func_args in in_study_action_prob_func_args
         ]
     )
-    actions_list_by_decision_time_index = jnp.array(
+    in_study_actions_list_by_decision_time_index = jnp.array(
         list(action_by_decision_time.values())
     )
 
@@ -876,17 +877,26 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     # Just grab the original beta from the update function arguments. This is the same
     # value, but impervious to differentiation with respect to all_post_update_betas. The
     # args, on the other hand, are a function of all_post_update_betas.
-    all_weights = jax.vmap(
+    in_study_weights = jax.vmap(
         fun=get_radon_nikodym_weight,
         in_axes=[0, None, None, 0] + batch_axes,
         out_axes=0,
     )(
-        all_original_betas_list_by_decision_time_index,
+        in_study_betas_list_by_decision_time_index,
         action_prob_func,
         action_prob_func_args_beta_index,
-        actions_list_by_decision_time_index,
+        in_study_actions_list_by_decision_time_index,
         *batched_arg_tensors,
     )
+
+    in_batch_index = 0
+    all_weights_raw = []
+    for (
+        decision_time,
+        args,
+    ) in sorted_threaded_action_prob_args_by_decision_time.items():
+        all_weights_raw.append(in_study_weights[in_batch_index] if args else 1.0)
+    all_weights = jnp.array(all_weights_raw)
 
     # TODO: May need to use dynamic slicing when this whole function is vmapped
     algorithm_component = jnp.concatenate(
@@ -904,16 +914,14 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                         max(
                             first_time_after_first_update,
                             user_start_time,
-                        )
-                        - user_start_time :
+                        ) :
                         # One more than the latest time the user was in the study before the time
                         # the update under consideration first applied. Note the + 1 because range
                         # does not include the right endpoint.
                         min(
                             min_time_by_policy_num.get(policy_num, math.inf),
                             user_end_time + 1,
-                        )
-                        - user_start_time,
+                        ),
                     ]
                 )  # Now use the above to weight the alg estimating function for this update
                 * algorithm_estimating_func(*update_args)
@@ -924,6 +932,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                 if update_args
                 else jnp.zeros(beta_dim)
             )
+            # vmapping over this would be tricky due to different shapes across updates
             for policy_num, update_args in threaded_update_func_args_by_policy_num.items()
         ]
     )
@@ -934,10 +943,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     )
     inference_component = jnp.prod(
         all_weights[
-            max(first_time_after_first_update, user_start_time)
-            - user_start_time : user_end_time
-            + 1
-            - user_start_time,
+            max(first_time_after_first_update, user_start_time) : user_end_time + 1,
         ]
     ) * inference_estimating_func(*threaded_inference_func_args)
 

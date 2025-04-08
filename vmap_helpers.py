@@ -9,11 +9,11 @@ import numpy as np
 # TODO: This is complicated enough to deserve its own unit tests
 def stack_batched_arg_lists_into_tensors(batched_arg_lists):
     """
-    Stack a simple Python list of lists of function arguments (across all users for a specific arg position)
-    into a list of jnp arrays that can be supplied to vmap as batch arguments. vmap requires all elements of
-    such a batched array to be the same shape, as do the stacking functions we use here.  Thus we require
-    this be called on batches of users with the same data shape. We also supply the axes one must
-    iterate over to get each users's args in a batch.
+    Stack a simple Python list of lists of function arguments into a list of jnp arrays that can be
+    supplied to vmap as batch arguments. vmap requires all elements of such a batched array to be
+    the same shape, as do the stacking functions we use here.  Thus we require this be called on
+    batches with the same data shape. We also supply the axes one must iterate over to get
+    each users's args in a batch.
     """
 
     batched_arg_tensors = []

@@ -3,7 +3,7 @@
 #SBATCH -N 1                                                                             # Ensure that all cores are on one machine
 #SBATCH -t 0-10:00                                                                       # Runtime in D-HH:MM, minimum of 10 minutes
 #SBATCH -p serial_requeue                                                                # Partition to submit to
-#SBATCH --mem=20G                                                                       # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH --mem=20G                                                                        # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -o /n/netscratch/murphy_lab/Lab/nclosser/kelly_paper_reproduction_output/%j.out  # File to which STDOUT will be written, %j inserts jobid
 #SBATCH -e /n/netscratch/murphy_lab/Lab/nclosser/kelly_paper_reproduction_output/%j.out  # File to which STDERR will be written, %j inserts jobid
 

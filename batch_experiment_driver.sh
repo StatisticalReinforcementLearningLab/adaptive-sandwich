@@ -47,6 +47,9 @@ inference_mode="model" # Nowell: This makes the inference model have three featu
 action_centering=0 # Nowell: This doesn't do anything if sigmoid LS used
 eta=0 # Nowell: This is ignored
 
+save_dir=/n/murphy_lab/lab/nclosser/kelly_paper_reproduction/results/$SLURM_JOB_ID
+mkdir -p $save_dir
+
 n=$1
 steepness=$2
 synthetic_mode=$3

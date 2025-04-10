@@ -2387,9 +2387,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     Test that the constructed function correctly computes a weighted estimating
     function stack for each of 2 users.
 
-    This test handles the simplest case: no incremental recruitment, no use of
-    action probabilities in the loss/estimating functions for algorithm updates
-    or inference, and only 1 decision time between updates.
+    This test adds the wrinkle of action probabilities being used in both the
+    algorithm and inference estimating functions.
 
     **This test intentionally breaks the assumption that the betas in the action
     probability function args match those in all_post_update_betas, which

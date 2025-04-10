@@ -858,7 +858,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
 
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
-    batched_arg_lists = [[] for _ in range(num_args)]
+    batched_threaded_arg_lists = [[] for _ in range(num_args)]
     for (
         decision_time,
         args,
@@ -866,10 +866,10 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         if not args:
             continue
         for idx, arg in enumerate(args):
-            batched_arg_lists[idx].append(arg)
+            batched_threaded_arg_lists[idx].append(arg)
 
-    batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
-        batched_arg_lists
+    batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
+        batched_threaded_arg_lists
     )
 
     # Note that we do NOT use the shared betas in the first arg to the weight function,
@@ -886,7 +886,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         action_prob_func,
         action_prob_func_args_beta_index,
         in_study_actions_list_by_decision_time_index,
-        *batched_arg_tensors,
+        *batched_threaded_arg_tensors,
     )
 
     in_batch_index = 0

@@ -1,4 +1,4 @@
-# Dosage used directly as in paper description
+# Dosage used directly as in paper's simulation *description*
 sbatch batch_experiment_driver.sh 50 0.5 'delayed_1_dosage_paper'
 sbatch batch_experiment_driver.sh 100 0.5 'delayed_1_dosage_paper'
 sbatch -t 0-45:00 batch_experiment_driver.sh 500 0.5 'delayed_1_dosage_paper'
@@ -18,7 +18,7 @@ sbatch batch_experiment_driver.sh 50 5 'delayed_5_dosage_paper'
 sbatch batch_experiment_driver.sh 100 5 'delayed_5_dosage_paper'
 sbatch -t 0-45:00 batch_experiment_driver.sh 500 5 'delayed_5_dosage_paper'
 
-# Dosage multiplied by action
+# Dosage multiplied by action: this is what I believe was used in the paper's *results table*
 sbatch batch_experiment_driver.sh 50 0.5 'delayed_1_action_dosage'
 sbatch batch_experiment_driver.sh 100 0.5 'delayed_1_action_dosage'
 sbatch -t 0-45:00 batch_experiment_driver.sh 500 0.5 'delayed_1_action_dosage'
@@ -38,7 +38,7 @@ sbatch batch_experiment_driver.sh 50 5 'delayed_5_action_dosage'
 sbatch batch_experiment_driver.sh 100 5 'delayed_5_action_dosage'
 sbatch -t 0-45:00 batch_experiment_driver.sh 500 5 'delayed_5_action_dosage'
 
-# Dosage multiplied by action, negative kappa1 experiments susan wanted to see
+# Dosage multiplied by action: negative kappa1 experiments susan wanted to see
 sbatch batch_experiment_driver.sh 50 0.5 'delayed_neg_1_action_dosage'
 sbatch batch_experiment_driver.sh 100 0.5 'delayed_neg_1_action_dosage'
 sbatch batch_experiment_driver.sh 50 1 'delayed_neg_1_action_dosage'

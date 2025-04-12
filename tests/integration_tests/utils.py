@@ -63,27 +63,22 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             rtol=1e-6,
         )
 
-        # Given the new derivative calculation method (JIRA ADS-60), the debug pieces have changed.
-        # Just update and save the expected pieces mid-test if need be. Could be deleted later.
-        new_expected_keys = [
+        # Too hard to go back in time and add expected values for all the keys here,
+        # but we can at least check they're present in the observed dict now,
+        # and then still compare the most important ones to observed.
+        expected_debug_keys = [
             "theta_est",
             "adaptive_sandwich_var_estimate",
             "classical_sandwich_var_estimate",
             "joint_bread_inverse_matrix",
+            "joint_bread_matrix",
             "joint_meat_matrix",
+            "classical_bread_inverse_matrix",
+            "classical_bread_matrix",
+            "classical_meat_matrix",
+            "all_estimating_function_stacks",
         ]
-        if list(expected_debug_pieces_dict.keys()) != new_expected_keys:
-            expected_debug_pieces_dict = {
-                k: v
-                for k, v in expected_debug_pieces_dict.items()
-                if k in new_expected_keys
-            }
-            with open(
-                get_abs_path(test_file_path, "expected_debug_pieces.pkl"),
-                "wb",
-            ) as expected_debug_pieces_file:
-                pickle.dump(expected_debug_pieces_dict, expected_debug_pieces_file)
-        assert observed_debug_pieces_dict.keys() == expected_debug_pieces_dict.keys()
+        assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys
 
         ### Check joint meat and bread inverse, uniting RL and inference
         np.testing.assert_allclose(

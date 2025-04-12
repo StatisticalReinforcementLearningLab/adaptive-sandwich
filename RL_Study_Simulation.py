@@ -223,7 +223,11 @@ def run_study_simulation(study_env, study_RLalg):
                 study_RLalg.update_alg(new_update_data, update_last_t = t)
 
                 ### Just for collecting args needed for Nowell's package.
-                study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
+                # Note that I do not want update args if the update was never
+                # used, as is the case if we update at time T here.
+                if t < study_env.calendar_T:
+                    curr_beta_est = study_RLalg.get_current_beta_estimate()
+                    study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
 
     if args.RL_alg == 'posterior_sampling':
         fill_columns = ['policy_last_t', 'policy_num']

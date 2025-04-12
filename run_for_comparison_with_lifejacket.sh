@@ -15,8 +15,8 @@ synthetic_mode='delayed_5_action_dosage'
 # synthetic_mode='delayed_5_dosage_paper'
 
 # steepness=0.5
-# steepness=1
-steepness=5
+# steepness=1.0
+steepness=5.0
 
 recruit_n=$n
 T=2

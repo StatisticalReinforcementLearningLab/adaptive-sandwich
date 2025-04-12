@@ -687,7 +687,7 @@ for i in range(1, args.N + 1):
 
     # Load Data #########################################
     folder_path = os.path.join(all_folder_path, "exp={}".format(i))
-    analyses_out_path = "{}/analysis.pkl".format(folder_path)
+    analyses_out_path = "{}/kelly_analysis.pkl".format(folder_path)
 
     if args.redo_analyses:
         pass

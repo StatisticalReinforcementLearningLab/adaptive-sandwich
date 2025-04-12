@@ -6,9 +6,9 @@ n=50
 #n=100
 #n=500
 
-#synthetic_mode='delayed_1_dosage'
+#synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
-#synthetic_mode='delayed_5_dosage'
+#synthetic_mode='delayed_5_action_dosage'
 synthetic_mode='delayed_5_dosage_paper'
 
 # steepness=0.5

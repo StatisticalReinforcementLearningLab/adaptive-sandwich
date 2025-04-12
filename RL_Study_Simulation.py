@@ -65,9 +65,9 @@ tmp_args = parser.parse_known_args()[0]
 if tmp_args.dataset_type == 'heartsteps':
     raise ValueError("Not implemented")
 elif tmp_args.dataset_type == 'synthetic':
-    arg_dict = { "T" : 2, 'recruit_n': tmp_args.n, 'recruit_t': 1, 
+    arg_dict = { "T" : 2, 'recruit_n': tmp_args.n, 'recruit_t': 1,
                 "allocation_sigma": 1, "noise_var": 1}
-   
+
     # Algorithm state features
     alg_state_feats = tmp_args.alg_state_feats.split(",")
     alg_treat_feats = tmp_args.alg_state_feats.split(",")
@@ -79,17 +79,17 @@ elif tmp_args.dataset_type == 'synthetic':
     past_reward_action_cols = ['past_reward'] + \
             ['past_action_{}_reward'.format(i) for i in range(1,past_action_len+1)]
     gen_feats = past_action_cols + past_reward_action_cols + ['dosage']
-   
-    
+
+
 elif tmp_args.dataset_type == 'oralytics':
-    arg_dict = { "T" : 50, 'recruit_n': tmp_args.n, 'recruit_t': 1, 
+    arg_dict = { "T" : 50, 'recruit_n': tmp_args.n, 'recruit_t': 1,
                 "allocation_sigma": 1, "noise_var": 1 }
 
     #allocation_sigma: 163 (truncated brush times); 5.7 (square-root of truncatred brush times)
 
     alg_state_feats = ['intercept', 'time_of_day', 'prior_day_brush']
     alg_treat_feats = ['intercept', 'time_of_day', 'prior_day_brush']
-    
+
 else:
     raise ValueError()
 
@@ -129,16 +129,16 @@ elif args.dataset_type == 'oralytics':
     paramf_path= "./oralytics_env_params/non_stat_zero_infl_pois_model_params.csv"
     param_names, bern_params, poisson_params = load_oralytics_env(paramf_path)
     treat_feats = ['intercept', 'time_of_day', 'weekend', 'day_in_study_norm', 'prior_day_brush']
-    
+
     user_env_data = {
         'bern_params' : bern_params,
         'poisson_params' : poisson_params
     }
-    
+
 else:
     raise ValueError("Invalid Dataset Type")
 
-    
+
 ###############################################################
 # Simulation Functions ########################################
 ###############################################################
@@ -170,16 +170,15 @@ def run_study_simulation(study_env, study_RLalg):
             study_df.loc[ study_df['calendar_t'] == t, 'policy_num'] = 1
 
         curr_timestep_data = study_df[ study_df['calendar_t'] == t ]
-  
-        
+
         # Sample Actions #####################################################
-        action_probs = study_RLalg.get_action_probs(curr_timestep_data, 
+        action_probs = study_RLalg.get_action_probs(curr_timestep_data,
                                         filter_keyval = ('calendar_t', t) )
-        
+
         if args.dataset_type == 'heartsteps':
             action_probs *= curr_timestep_data['availability']
         actions = study_RLalg.rng.binomial(1, action_probs)
-        
+
         # Sample Rewards #####################################################
         if args.dataset_type == 'oralytics':
             rewards, brush_times = study_env.sample_rewards(curr_timestep_data, actions, t)
@@ -195,12 +194,16 @@ def run_study_simulation(study_env, study_RLalg):
             fill_columns = ['reward', 'action', 'action1prob']
             fill_vals = np.vstack( [rewards, actions, action_probs] ).T
             study_df.loc[ study_df['calendar_t'] == t, fill_columns] = fill_vals
-        
+
         if t < study_env.calendar_T:
             # Record data to prepare for state at next decision time
             current_users = study_df[ study_df['calendar_t'] == t ]['user_id']
             study_df = study_env.update_study_df(study_df, t)
-            
+
+        all_prev_data = study_df[study_df["calendar_t"] <= t]
+        curr_beta_est = study_RLalg.get_current_beta_estimate()
+        study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
+
         # Check if need to update algorithm #######################################
         if t % args.decisions_between_updates == 0 and args.RL_alg != 'fixed_randomization':
             # check enough avail data and users; if so, update algorithm
@@ -208,8 +211,7 @@ def run_study_simulation(study_env, study_RLalg):
             new_obs_bool = np.logical_and( study_df['calendar_t'] <= t,
                                     study_df['calendar_t'] > most_recent_policy_t)
             new_update_data = study_df[ new_obs_bool ]
-            all_prev_data = study_df[ study_df['calendar_t'] <= t ]
-            
+
             if args.dataset_type == 'heartsteps':
                 num_avail = np.sum(new_update_data['availability'])
             else:
@@ -219,15 +221,16 @@ def run_study_simulation(study_env, study_RLalg):
             if num_avail > 0 and prev_num_users >= args.min_users:
                 # Update Algorithm ##############################################
                 study_RLalg.update_alg(new_update_data, update_last_t = t)
-            
-        
+
+                ### Just for collecting args needed for Nowell's package.
+                study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
+
     if args.RL_alg == 'posterior_sampling':
         fill_columns = ['policy_last_t', 'policy_num']
         for col in fill_columns:
             study_RLalg.norm_samples_df[col] = study_df[col].to_numpy().copy()
 
     return study_df, study_RLalg
-
 
 
 ###############################################################
@@ -249,7 +252,7 @@ else:
 print("Running simulations...")
 if args.dataset_type == 'oralytics':
     exp_str = '{}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steep={}_actionC={}'.format(
-            args.dataset_type, args.RL_alg, args.T, args.n, 
+            args.dataset_type, args.RL_alg, args.T, args.n,
             args.recruit_n, args.decisions_between_updates, args.steepness, args.action_centering)
 else:
     exp_str = '{}_mode={}_alg={}_T={}_n={}_recruitN={}_decisionsBtwnUpdates={}_steepness={}_algfeats={}_errcorr={}_actionC={}'.format(
@@ -262,13 +265,13 @@ if not os.path.isdir(simulation_data_path):
 all_folder_path = os.path.join(simulation_data_path, exp_str)
 if not os.path.isdir(all_folder_path):
     os.mkdir(all_folder_path)
-    
+
 with open(os.path.join(all_folder_path, "args.json"), "w") as f:
     json.dump(vars(args), f)
-    
+
 policy_grad_norm = []
 for i in range(1,args.N+1):
-    
+
     env_seed = i*5000
     alg_seed = (args.N+i)*5000
 
@@ -276,26 +279,24 @@ for i in range(1,args.N+1):
         toc = time.perf_counter()
         print(f"{i} ran in {toc - tic:0.4f} seconds")
 
-        
     # Initialize study environment ############################################
     if args.dataset_type == "heartsteps":
-        #study_env = HeartstepStudyEnv(args, env_params, gen_feats)
+        # study_env = HeartstepStudyEnv(args, env_params, gen_feats)
         raise ValueError("Not implemented")
     elif args.dataset_type == "synthetic":
-        study_env = SyntheticEnv(args, env_params, env_seed=env_seed, 
+        study_env = SyntheticEnv(args, env_params, env_seed=env_seed,
                 gen_feats=gen_feats, err_corr=args.err_corr)
     elif args.dataset_type == "oralytics":
-        study_env = OralyticsEnv(args, param_names, bern_params, 
+        study_env = OralyticsEnv(args, param_names, bern_params,
                                  poisson_params, env_seed=env_seed)
     else:
         raise ValueError("Invalid Dataset Type")
-        
-        
+
     # Initialize RL algorithm ###################################################
     if args.RL_alg == "fixed_randomization":
         study_RLalg = FixedRandomization(args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed)
     elif args.RL_alg == "sigmoid_LS":
-        study_RLalg = SigmoidLS(args, alg_state_feats, alg_treat_feats, 
+        study_RLalg = SigmoidLS(args, alg_state_feats, alg_treat_feats,
                                 allocation_sigma=args.allocation_sigma, alg_seed=alg_seed,
                                 steepness=args.steepness)
     elif args.RL_alg == "posterior_sampling":
@@ -311,9 +312,9 @@ for i in range(1,args.N+1):
 
         else:
             raise ValueError("Invalid prior type: {}".format(args.prior))
-        study_RLalg = SmoothPosteriorSampling(args, alg_state_feats, 
-                                              alg_treat_feats, 
-                                              alg_seed=alg_seed, 
+        study_RLalg = SmoothPosteriorSampling(args, alg_state_feats,
+                                              alg_treat_feats,
+                                              alg_seed=alg_seed,
                                               allocation_sigma=args.allocation_sigma,
                                               steepness=args.steepness,
                                               prior_mean=prior_mean,
@@ -322,8 +323,7 @@ for i in range(1,args.N+1):
                                               action_centering=args.action_centering)
     else:
         raise ValueError("Invalid RL Algorithm Type")
-        
-        
+
     # Run Study Simulation #######################################################
     study_df, study_RLalg = run_study_simulation(study_env, study_RLalg)
 
@@ -345,21 +345,27 @@ for i in range(1,args.N+1):
     # Save Data #################################################################
     if args.verbose:
         print("Saving data...")
-   
+
     folder_path = os.path.join(all_folder_path, "exp={}".format(i))
     if not os.path.isdir(folder_path):
         os.mkdir(folder_path)
-    
+
     if args.RL_alg != 'fixed_randomization':
-        study_df = study_df.astype({'policy_num': 'int32', 
+        study_df = study_df.astype({'policy_num': 'int32',
                                     "policy_last_t": 'int32', "action": 'int32'})
-    
+
     study_df.to_csv( '{}/data.csv'.format(folder_path), index=False )
     with open('{}/study_df.pkl'.format(folder_path), 'wb') as f:
         pkl.dump(study_df, f)
 
     with open('{}/study_RLalg.pkl'.format(folder_path), 'wb') as f:
         pkl.dump(study_RLalg, f)
+
+    with open(f"{folder_path}/pi_args.pkl", "wb") as f:
+        pkl.dump(study_RLalg.pi_args, f)
+
+    with open(f"{folder_path}/rl_update_args.pkl", "wb") as f:
+        pkl.dump(study_RLalg.rl_update_args, f)
 
     # TODO eventually removeSave Variance Components ##################################################
     if args.RL_alg == 'sigmoid_LS':
@@ -372,4 +378,3 @@ for i in range(1,args.N+1):
 
 toc = time.perf_counter()
 print(f"Final ran in {toc - tic:0.4f} seconds")
-

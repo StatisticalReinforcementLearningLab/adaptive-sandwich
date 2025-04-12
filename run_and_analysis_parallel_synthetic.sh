@@ -20,7 +20,7 @@
 # S BATCH -p gpu_requeue                                                       # Target Partition
 # S BATCH --gres=gpu:1                                                         # Request a GPU
 
-# Stop on nonzero exit codes and use of undefined variables, and print all commands
+# Stop on nonzero exit codes and use of undefined variables
 set -eu
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Parsing options.

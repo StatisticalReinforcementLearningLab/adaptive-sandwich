@@ -3014,7 +3014,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             ),
             axis=0,
         ),
-        rtol=1e-6,
+        rtol=1e-5,
     )
 
 

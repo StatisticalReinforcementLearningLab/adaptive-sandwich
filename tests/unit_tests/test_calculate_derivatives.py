@@ -13,7 +13,7 @@ import functions_to_pass_to_analysis.oralytics_RL_estimating_function
 import functions_to_pass_to_analysis.oralytics_act_prob_function
 import functions_to_pass_to_analysis.oralytics_primary_analysis_estimating_function
 import functions_to_pass_to_analysis.oralytics_primary_analysis_loss
-from tests.unit_tests import utils as test_utils
+from tests import utils as test_utils
 
 
 def test_calculate_pi_and_weight_gradients_specific_t_positive_action_high_clip():

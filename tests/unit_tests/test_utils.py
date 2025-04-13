@@ -1,7 +1,6 @@
 import numpy as np
-import pytest
 
-from tests.unit_tests.utils import finite_difference_hessian
+from tests.utils import finite_difference_hessian
 
 
 def test_finite_difference_hessian_quadratic():
@@ -96,7 +95,3 @@ def perform_bayesian_linear_regression(
     )
 
     return posterior_mean.flatten(), posterior_variance
-
-
-if __name__ == "__main__":
-    pytest.main()

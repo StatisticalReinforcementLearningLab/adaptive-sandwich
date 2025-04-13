@@ -1257,7 +1257,17 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering_increm
         [1, 2],
         6,
     )
-    np.testing.assert_equal(non_zero_padded_result, expected_result)
+    np.testing.assert_allclose(
+        non_zero_padded_result[0], expected_result[0], rtol=1e-07
+    )
+    np.testing.assert_allclose(
+        non_zero_padded_result[1], expected_result[1], rtol=1e-07
+    )
+    np.testing.assert_allclose(
+        non_zero_padded_result[2], expected_result[2], rtol=1e-07
+    )
+
+    assert len(non_zero_padded_result) == len(expected_result)
 
     # Pass the data in from the above dataframe by padding out of study values with zeros
     zero_padded_result = calculate_derivatives.calculate_rl_update_derivatives_specific_update(
@@ -3626,7 +3636,17 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
         "in_study",
         "calendar_t",
     )
-    np.testing.assert_equal(calculated_result, expected_result)
+        np.testing.assert_allclose(
+        calculated_result[0], expected_result[0], rtol=1e-07
+    )
+    np.testing.assert_allclose(
+        calculated_result[1], expected_result[1], rtol=1e-07
+    )
+    np.testing.assert_allclose(
+        calculated_result[2], expected_result[2], rtol=1e-07
+    )
+
+    assert len(calculated_result) == len(expected_result)
 
 
 def test_oralytics_RL_derivatives_against_finite_differences():

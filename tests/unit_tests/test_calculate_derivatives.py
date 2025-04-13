@@ -1052,16 +1052,16 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
     )
 
     np.testing.assert_allclose(
-        non_zero_padded_result[0], expected_result[0], rtol=1e-07
+        zero_padded_result[0], expected_result[0], rtol=1e-07
     )
     np.testing.assert_allclose(
-        non_zero_padded_result[1], expected_result[1], rtol=1e-07
+        zero_padded_result[1], expected_result[1], rtol=1e-07
     )
     np.testing.assert_allclose(
-        non_zero_padded_result[2], expected_result[2], rtol=1e-07
+        zero_padded_result[2], expected_result[2], rtol=1e-07
     )
 
-    assert len(non_zero_padded_result) == len(expected_result)
+    assert len(zero_padded_result) == len(expected_result)
 
     # NOTE: np isn't able to do the following comparison for some reason:
     # np.testing.assert_equal(non_zero_padded_result, zero_padded_result)

@@ -104,8 +104,6 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             atol=1e-8,
         )
 
-import numpy as np
-
 
 def finite_difference_gradient(func, param, h=1e-5):
     """

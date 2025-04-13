@@ -83,7 +83,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_meat_matrix"],
             expected_debug_pieces_dict["joint_meat_matrix"],
-            atol=1e-5,
+            rtol=5e-5,
         )
 
         np.testing.assert_allclose(

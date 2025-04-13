@@ -18,8 +18,6 @@ import pandas
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
-
-
 from helper_functions import (
     conditional_x_or_one_minus_x,
     get_in_study_df_column,

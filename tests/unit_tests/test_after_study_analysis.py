@@ -7,20 +7,30 @@ import pytest
 import after_study_analysis
 from constants import FunctionTypes
 from helper_functions import load_function_from_same_named_file, replace_tuple_index
+from tests.utils import get_abs_path
 
 # TODO: Add checking of all aux values.
 
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs():
-    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+    action_prob_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
+    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
+    alg_update_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
+    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+    inference_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
+    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -140,7 +150,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     setup_data_two_loss_functions_no_action_probs,  # pylint: disable=redefined-outer-name
 ):
     """
-    Test that the constructed function correctly computes a weighted estimating
+    Test that the stacking function correctly computes a weighted estimating
     function stack for each of 2 users, at least in terms of the value. For now
     this test does not test that betas and thetas are threaded in correctly to
     enable differentiation.
@@ -200,8 +210,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         jnp.array([-5, 2, 5, 4], dtype="float32"),
     ]
 
-    alg_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py"
-    inference_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py"
+    alg_estimating_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
+    )
+    inference_estimating_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py",
+    )
 
     alg_estimating_func = load_function_from_same_named_file(
         alg_estimating_func_filename
@@ -358,14 +374,23 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
 
 @pytest.fixture
 def setup_data_two_estimating_functions_no_action_probs():
-    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+    action_prob_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
+    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py"
+    alg_update_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
+    )
     alg_update_func_type = FunctionTypes.ESTIMATING
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py"
+    inference_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py",
+    )
     inference_func_type = FunctionTypes.ESTIMATING
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -522,8 +547,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
         jnp.array([-5, 2, 5, 4], dtype="float32"),
     ]
 
-    alg_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py"
-    inference_estimating_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py"
+    alg_estimating_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
+    )
+    inference_estimating_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py",
+    )
 
     alg_estimating_func = load_function_from_same_named_file(
         alg_estimating_func_filename
@@ -680,14 +711,23 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_different_betas():
-    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+    action_prob_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
+    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
+    alg_update_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
+    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+    inference_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
+    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -804,7 +844,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     setup_data_two_loss_functions_no_action_probs_different_betas,  # pylint: disable=redefined-outer-name
 ):
     """
-    Test that the constructed function correctly computes a weighted estimating
+    Test that the stacking function correctly computes a weighted estimating
     function stack for each of 2 users.
 
     This test handles the simplest case: no incremental recruitment, no use of
@@ -1268,14 +1308,23 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
-    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+    action_prob_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
+    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
+    alg_update_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
+    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+    inference_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
+    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -1410,7 +1459,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
     setup_data_two_loss_functions_no_action_probs_incremental_recruitment,  # pylint: disable=redefined-outer-name
 ):
     """
-    Test that the constructed function correctly computes a weighted estimating
+    Test that the stacking function correctly computes a weighted estimating
     function stack for each of 2 users.
 
     This test adds in incremental recruitment to the simplest case.
@@ -1800,14 +1849,23 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates():
-    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+    action_prob_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
+    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
+    alg_update_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
+    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+    inference_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
+    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1}
@@ -1929,7 +1987,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates,  # pylint: disable=redefined-outer-name
 ):
     """
-    Test that the constructed function correctly computes a weighted estimating
+    Test that the stacking function correctly computes a weighted estimating
     function stack for each of 2 users.
 
     This test adds the wrinkle of 2 decision times between updates to the
@@ -2235,14 +2293,23 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
-    action_prob_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+    action_prob_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
+    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
+    alg_update_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
+    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = 5
     alg_update_func_args_action_prob_times_index = 6
-    inference_func_filename = "/Users/nowellclosser/code/adaptive-sandwich/functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_action_centering.py"
+    inference_func_filename = get_abs_path(
+        __file__,
+        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_action_centering.py",
+    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -2384,7 +2451,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides,  # pylint: disable=redefined-outer-name
 ):
     """
-    Test that the constructed function correctly computes a weighted estimating
+    Test that the stacking function correctly computes a weighted estimating
     function stack for each of 2 users.
 
     This test handles the simplest case: no incremental recruitment, no use of

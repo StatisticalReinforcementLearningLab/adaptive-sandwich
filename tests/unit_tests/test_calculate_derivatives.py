@@ -3636,7 +3636,7 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
         "in_study",
         "calendar_t",
     )
-        np.testing.assert_allclose(
+    np.testing.assert_allclose(
         calculated_result[0], expected_result[0], rtol=1e-07
     )
     np.testing.assert_allclose(

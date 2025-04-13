@@ -18,8 +18,6 @@ import pandas
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
-
-
 from helper_functions import (
     conditional_x_or_one_minus_x,
     get_in_study_df_column,
@@ -361,6 +359,7 @@ def analyze_dataset(
         classical_bread_inverse_matrix,
         classical_meat_matrix,
         avg_estimating_function_stack,
+        all_per_user_estimating_function_stacks,
     ) = construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
         theta_est,
         all_post_update_betas,
@@ -454,7 +453,12 @@ def analyze_dataset(
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
                 "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+                "joint_bread_matrix": joint_adaptive_bread_matrix,
                 "joint_meat_matrix": joint_adaptive_meat_matrix,
+                "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
+                "classical_bread_matrix": classical_bread_matrix,
+                "classical_meat_matrix": classical_meat_matrix,
+                "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
             },
             f,
         )
@@ -1258,7 +1262,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
-) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
     """
     Computes the average of the weighted estimating function stacks for all users, along with
     auxiliary values used to construct the adaptive and classical sandwich variances.
@@ -1319,9 +1323,10 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     Returns:
         jnp.ndarray:
             A 1D JAX NumPy array representing the average weighted estimating function stack.
-        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing the average weighted estimating function stack, the adaptive meat
-            matrix, the classical meat matrix, and the inverse classical bread matrix.
+            matrix, the classical meat matrix, the inverse classical bread matrix, and the raw
+            per-user weighted estimating function stacks.
     """
 
     # 1. Collect the necessary function objects
@@ -1426,12 +1431,13 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second output will be passed along without modification via has_aux=True and then used
     # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices.
+    # bread matrices. The raw per-user stacks are also returned for debugging purposes.
     return jnp.mean(stacks, axis=0), (
         jnp.mean(stacks, axis=0),
         jnp.mean(outer_products, axis=0),
         jnp.mean(inference_only_outer_products, axis=0),
         jnp.mean(inference_hessians, axis=0),
+        stacks
     )
 
 
@@ -1467,6 +1473,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
 ) -> tuple[
+    jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1534,13 +1541,14 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
     Returns:
-        tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
+        tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
             - The joint adaptive inverse bread matrix.
             - The joint adaptive meat matrix.
             - The classical inverse bread matrix.
             - The classical meat matrix.
             - The average weighted estimating function stack.
+            - All per-user weighted estimating function stacks.
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
@@ -1552,6 +1560,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         joint_adaptive_meat,
         classical_meat,
         classical_bread_inverse,
+        all_per_user_estimating_function_stacks
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(
@@ -1590,6 +1599,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         classical_bread_inverse,
         classical_meat,
         avg_estimating_function_stack,
+        all_per_user_estimating_function_stacks,
     )
 
 

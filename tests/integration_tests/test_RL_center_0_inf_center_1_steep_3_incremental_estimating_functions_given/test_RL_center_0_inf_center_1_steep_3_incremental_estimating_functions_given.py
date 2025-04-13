@@ -1,7 +1,7 @@
 from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
     run_local_pipeline,
 )
-from tests.integration_tests.utils import assert_real_run_output_as_expected
+from tests.utils import assert_real_run_output_as_expected
 
 
 def test_RL_center_0_inf_center_1_steep_3_incremental(

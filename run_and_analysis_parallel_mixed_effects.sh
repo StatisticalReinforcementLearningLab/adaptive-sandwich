@@ -110,7 +110,8 @@ shift $((OPTIND-1)) # remove parsed options and args from $@ list
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01
-module load cuda/12.2.0-fasrc01
+# if using GPU, something like the following will be necessary:
+# module load cuda/12.2.0-fasrc01
 
 # Make virtualenv if necessary, and then activate it
 cd ~

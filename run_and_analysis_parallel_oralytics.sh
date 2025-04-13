@@ -115,7 +115,7 @@ source venv/bin/activate
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Making sure Python requirements are installed.
-pip install -r cluster_simulation_requirements.txt
+pip install -r requirements.txt
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: All Python requirements installed.
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"

@@ -338,11 +338,11 @@ def main():
     parser.add_argument(
         "--synthetic_mode",
         type=str,
-        default=RLStudyArgs.DELAYED_1_DOSAGE,
+        default=RLStudyArgs.DELAYED_1_ACTION_DOSAGE,
         choices=[
-            RLStudyArgs.DELAYED_1_DOSAGE,
-            RLStudyArgs.DELAYED_2_DOSAGE,
-            RLStudyArgs.DELAYED_5_DOSAGE,
+            RLStudyArgs.DELAYED_1_ACTION_DOSAGE,
+            RLStudyArgs.DELAYED_2_ACTION_DOSAGE,
+            RLStudyArgs.DELAYED_5_ACTION_DOSAGE,
             RLStudyArgs.DELAYED_1_DOSAGE_PAPER,
             RLStudyArgs.DELAYED_2_DOSAGE_PAPER,
             RLStudyArgs.DELAYED_5_DOSAGE_PAPER,

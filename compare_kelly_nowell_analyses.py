@@ -10,10 +10,9 @@ a branch containing Nowell's code (mostly).
 git checkout pre_nowell_state_mostly_but_with_inputs_collected_for_package
 deactivate; source .kelly_venv/bin/activate
 ./run_for_comparison_with_lifejacket.sh
-<copy the suggested lifejacket command>
 git checkout main
 deactivate; source .venv/bin/activate
-<run the suggested lifejacket command>
+<scroll up and grab and run the suggested lifejacket command>
 ./compare_kelly_nowell_analyses.py --containing_folder <path to the folder containing the two analyses>
 """
 

@@ -513,7 +513,12 @@ def get_stacked_estimating_function(
 
 # @profile
 def get_adaptive_sandwich_new(
-    all_est_eqn_dict, study_RLalg, study_df, alg_correction="", theta_correction=""
+    all_est_eqn_dict,
+    study_RLalg,
+    study_df,
+    alg_correction="",
+    theta_correction="",
+    inflate_stacked_meat=False,
 ):
     """
     Form adaptive sandwich variance estimator
@@ -567,7 +572,8 @@ def get_adaptive_sandwich_new(
     n_unique = cat_est_eqn.shape[0]
 
     stacked_meat = stacked_raw_meat / n_unique
-    stacked_meat = stacked_meat * (n_unique - 1) / (n_unique - theta_dim)
+    if inflate_stacked_meat:
+        stacked_meat = stacked_meat * (n_unique - 1) / (n_unique - theta_dim)
 
     if args.debug:
         print("Adaptive: stacked meat done")
@@ -770,7 +776,7 @@ for i in range(1, args.N + 1):
     # Form Adaptive Sandwich Var ######################################
     num_updates = len(study_RLalg.all_policies) - 1
     adaptive_sandwich_dict = get_adaptive_sandwich_new(
-        est_val_dict, study_RLalg, study_df
+        est_val_dict, study_RLalg, study_df, inflate_stacked_meat=False
     )
 
     # if args.recruit_n != args.n:
@@ -783,6 +789,7 @@ for i in range(1, args.N + 1):
         study_df,
         alg_correction="HC3",
         theta_correction="HC3",
+        inflate_stacked_meat=True,
     )
 
     adaptive_sandwich = adaptive_sandwich_dict["adaptive_sandwich"]

@@ -333,7 +333,7 @@ def form_LS_est_eqn(est_param, study_df, all_user_id, correction="HC3", check=Fa
 ###############################################################
 
 
-def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
+def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator, hc1=True):
     """
     Forms standard sandwich variance estimator for inference (thetahat)
 
@@ -351,7 +351,8 @@ def get_sandwich_var(est_eqns, normalized_hessian, LS_estimator):
     meat = meat / n_unique
 
     # degrees of freedom adjustment
-    meat = meat * (n_unique - 1) / (n_unique - len(LS_estimator))
+    if hc1:
+        meat = meat * (n_unique - 1) / (n_unique - len(LS_estimator))
     est_val_dict["meat"] = meat
 
     inv_hessian = np.linalg.inv(normalized_hessian)
@@ -764,6 +765,7 @@ for i in range(1, args.N + 1):
         est_eqns=est_val_dict["est_eqns"],
         normalized_hessian=est_val_dict["normalized_hessian"],
         LS_estimator=LS_estimator,
+        hc1=False,
     )
     all_sandwich[i - 1] = sandwich_var
 

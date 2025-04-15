@@ -19,7 +19,7 @@ synthetic_mode='delayed_5_action_dosage'
 steepness=5.0
 
 recruit_n=$n
-T=2
+T=50
 decisions_between_updates=1
 min_users=1
 RL_alg="sigmoid_LS"

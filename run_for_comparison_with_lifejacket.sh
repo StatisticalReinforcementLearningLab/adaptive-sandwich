@@ -3,7 +3,14 @@ set -eu
 # We run two experiments because there's a bug so that N=1 blows up.
 # But we only need to use one of the results. The suggested analysis using the
 # package below looks at exp=1.
-N=2
+N=1
+
+# This is a problematic case
+env_seed_override=505001
+alg_seed_override=1010000
+
+# env_seed_override=-1
+# alg_seed_override=-1
 
 n=50
 #n=100
@@ -35,7 +42,7 @@ eta=0
 action_centering=0
 
 # Run experiment, saving output suiting for both Kelly's analysis and Nowell's.
-python RL_Study_Simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering
+python RL_Study_Simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --RL_alg $RL_alg --err_corr $err_corr --alg_state_feats $alg_state_feats --action_centering $action_centering --env_seed_override $env_seed_override --alg_seed_override $alg_seed_override
 
 # Run Kelly's analysis.
 python After_Study_Analyses.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --debug $debug --RL_alg $RL_alg --eta $eta --alg_state_feats $alg_state_feats --inference_mode $inference_mode --action_centering $action_centering --redo_analyses $redo_analyses

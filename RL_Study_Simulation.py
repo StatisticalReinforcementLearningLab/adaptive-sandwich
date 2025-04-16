@@ -60,6 +60,16 @@ parser.add_argument('--action_centering', type=int, default=0,
 parser.add_argument('--prior', type=str, default="naive",
                     choices=["naive", "oralytics"],
                     help='Prior for posterior sampling algorithm')
+parser.add_argument(
+    "--env_seed_override",
+    type=int,
+    help="An optional fixed seed for the environment",
+)
+parser.add_argument(
+    "--alg_seed_override",
+    type=int,
+    help="An optional fixed seed for the algorithm",
+)
 tmp_args = parser.parse_known_args()[0]
 
 if tmp_args.dataset_type == 'heartsteps':
@@ -276,8 +286,12 @@ with open(os.path.join(all_folder_path, "args.json"), "w") as f:
 policy_grad_norm = []
 for i in range(1,args.N+1):
 
-    env_seed = i*5000
-    alg_seed = (args.N+i)*5000
+    env_seed = i*5000 if (args.env_seed_override is None or args.env_seed_override < 0) else args.env_seed_override
+    alg_seed = (
+        (args.N + i) * 5000
+        if (args.alg_seed_override is None or args.alg_seed_override < 0)
+        else args.alg_seed_override
+    )
 
     if i == 10 or i % 25 == 0:
         toc = time.perf_counter()

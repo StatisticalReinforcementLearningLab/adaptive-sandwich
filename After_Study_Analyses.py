@@ -970,20 +970,22 @@ def process_var(c_vec, results_dict, n, N, fignum=0):
     # Info on standard error for empirical varaiance:
     # https://en.wikipedia.org/w/index.php?title=Variance&oldid=735567901
     # Distribution_of_the_sample_variance
+    std_error = std_error_normalized = 0
     est_var = round(np.var(est_eqns * np.sqrt(args.n)), 4)
-    N_tmp = len(est_eqns)
-    fourth_m = stats.moment(est_eqns * np.sqrt(args.n), moment=4)
-    second_m = np.var(est_eqns * np.sqrt(args.n))
-    pre_std_error = (fourth_m - (N_tmp - 3) / (N_tmp - 1) * np.square(second_m)) / N_tmp
-    std_error = round(np.sqrt(pre_std_error), 5)
-
     est_var_normalized = round(np.var(est_eqns), 4)
-    fourth_m_normalized = stats.moment(est_eqns, moment=4)
-    second_m_normalized = np.var(est_eqns)
-    pre_std_error_normalized = (
-        fourth_m - (N_tmp - 3) / (N_tmp - 1) * np.square(second_m)
-    ) / N_tmp
-    std_error_normalized = round(np.sqrt(pre_std_error_normalized), 5)
+    if args.N > 1:
+        N_tmp = len(est_eqns)
+        fourth_m = stats.moment(est_eqns * np.sqrt(args.n), moment=4)
+        second_m = np.var(est_eqns * np.sqrt(args.n))
+        pre_std_error = (fourth_m - (N_tmp - 3) / (N_tmp - 1) * np.square(second_m)) / N_tmp
+        std_error = round(np.sqrt(pre_std_error), 5)
+
+        fourth_m_normalized = stats.moment(est_eqns, moment=4)
+        second_m_normalized = np.var(est_eqns)
+        pre_std_error_normalized = (
+            fourth_m - (N_tmp - 3) / (N_tmp - 1) * np.square(second_m)
+        ) / N_tmp
+        std_error_normalized = round(np.sqrt(pre_std_error_normalized), 5)
 
     results_dict["Empirical"][c_vec2string(c_vec)] = {
         "var_est": (est_var, std_error),
@@ -1093,11 +1095,11 @@ if args.RL_alg != "fixed_randomization":
 
 
 # Evaluate Confidence Regions ###################
-
 for fignum, c_vec in enumerate(c_vec_list):
     process_var(c_vec, results_dict, args.n, args.N, fignum=fignum)
 
-process_var_hotelling(results_dict, args.n, dval)
+if args.N > 1:
+    process_var_hotelling(results_dict, args.n, dval)
 
 
 ###############################################################
@@ -1144,15 +1146,16 @@ def writeout(outf, results_dict, c_vec_list, printlines=False):
 
         f.write("========================================")
 
-        # Hotellings-t statistics
-        f.write("\nHotelling's t-statistic (95% CI)\n")
-        for key in results_dict.keys():
-            # if key == "Empirical":
-            #    continue
-            coveragestr = str(results_dict[key]["hotelling"]["coverage"])
-            f.write(str(key) + "\t" + coveragestr + "\n")
+        if args.N > 1:
+            # Hotellings-t statistics
+            f.write("\nHotelling's t-statistic (95% CI)\n")
+            for key in results_dict.keys():
+                # if key == "Empirical":
+                #    continue
+                coveragestr = str(results_dict[key]["hotelling"]["coverage"])
+                f.write(str(key) + "\t" + coveragestr + "\n")
 
-        f.write("========================================")
+            f.write("========================================")
 
     if printlines:
         with open(outf, "r") as f:
@@ -1195,28 +1198,29 @@ def write_latex(latex_path, results_dict, c_vec_list):
                 f.write(result_str)
             f.write("\n")
 
-        for stat in ["hotelling"]:
-            f.write(stat2name[stat] + "\n")
-            all_result_str = []
+        if args.N > 1:
+            for stat in ["hotelling"]:
+                f.write(stat2name[stat] + "\n")
+                all_result_str = []
 
-            result_str = "T={}, n={}, dataset={}, mode={}".format(
-                args.T, args.n, args.dataset_type, mode
-            )
-            name_str = ""
-            for key in results_dict.keys():
-                if key == "Empirical":
-                    continue
-                name_str = name_str + " & " + key
-                coveragestr = str(results_dict[key][stat]["coverage"])
-                result_str = result_str + " & " + coveragestr
-            name_str = name_str + " \\\\ \hline\n"
-            result_str = result_str + " \\\\ \hline\n"
-            all_result_str.append(result_str)
+                result_str = "T={}, n={}, dataset={}, mode={}".format(
+                    args.T, args.n, args.dataset_type, mode
+                )
+                name_str = ""
+                for key in results_dict.keys():
+                    if key == "Empirical":
+                        continue
+                    name_str = name_str + " & " + key
+                    coveragestr = str(results_dict[key][stat]["coverage"])
+                    result_str = result_str + " & " + coveragestr
+                name_str = name_str + " \\\\ \hline\n"
+                result_str = result_str + " \\\\ \hline\n"
+                all_result_str.append(result_str)
 
-            f.write(name_str)
-            for result_str in all_result_str:
-                f.write(result_str)
-            f.write("\n")
+                f.write(name_str)
+                for result_str in all_result_str:
+                    f.write(result_str)
+                f.write("\n")
 
 
 # Writing Out Results ##########################################

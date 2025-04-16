@@ -1262,7 +1262,9 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
-) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+) -> tuple[
+    jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+]:
     """
     Computes the average of the weighted estimating function stacks for all users, along with
     auxiliary values used to construct the adaptive and classical sandwich variances.
@@ -1437,7 +1439,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         jnp.mean(outer_products, axis=0),
         jnp.mean(inference_only_outer_products, axis=0),
         jnp.mean(inference_hessians, axis=0),
-        stacks
+        stacks,
     )
 
 
@@ -1560,7 +1562,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         joint_adaptive_meat,
         classical_meat,
         classical_bread_inverse,
-        all_per_user_estimating_function_stacks
+        all_per_user_estimating_function_stacks,
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(

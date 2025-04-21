@@ -7,6 +7,7 @@ import os
 import logging
 import glob
 import math
+import sys
 from typing import Any
 
 import click
@@ -15,7 +16,7 @@ import numpy as np
 from jax import numpy as jnp
 import scipy
 import pandas
-import matplotlib.pyplot as plt
+import plotext as plt
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
@@ -1649,6 +1650,7 @@ def collect_existing_analyses(
 
     Args:
         input_glob (str): The glob pattern to search for analysis files.
+        num_users (int): The number of users in the study.
         index_to_check_ci_coverage (int, optional): The index of the parameter to check confidence
             interval coverage for. If not provided, coverage will not be checked.
     """
@@ -1844,25 +1846,34 @@ def collect_existing_analyses(
             f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% standard normal CI coverage:\n{np.mean(classical_z_covers)}\n",
         )
         print(
-            f"\nAdaptive sandwich {NOMINAL_COVERAGE * 100}% t({num_users}) CI coverage:\n{np.mean(adaptive_t_covers)}\n",
+            f"\nAdaptive sandwich {NOMINAL_COVERAGE * 100}% t({num_users - 1}) CI coverage:\n{np.mean(adaptive_t_covers)}\n",
         )
         print(
-            f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% t({num_users}) CI coverage:\n{np.mean(classical_t_covers)}\n",
+            f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% t({num_users - 1}) CI coverage:\n{np.mean(classical_t_covers)}\n",
         )
 
         print("\nNow examining stability.\n")
 
-        plt.figure(figsize=(10, 6))
-        plt.plot(
-            theta_estimates[:, index_to_check_ci_coverage],
-            marker="o",
-            linestyle="-",
-            color="b",
-        )
-        plt.title(f"Theta Estimates for Index {index_to_check_ci_coverage}")
+        # Make sure previous output is flushed and not cleared
+        sys.stdout.flush()
+        plt.clear_terminal(False)
+
+        # Plot the theta estimates to visually check for blowup
+        plt.title(f"Index {index_to_check_ci_coverage} of Theta Estimates")
         plt.xlabel("Simulation Index")
         plt.ylabel("Theta Estimate")
+        plt.scatter(
+            theta_estimates[:, index_to_check_ci_coverage],
+            color="blue",
+        )
         plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(theta_estimates[:, index_to_check_ci_coverage]),
+                max(1, len(theta_estimates[:, index_to_check_ci_coverage]) // 10),
+            )
+        )
         plt.show()
 
 

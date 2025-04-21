@@ -1822,14 +1822,14 @@ def collect_existing_analyses(
         adaptive_z_covers = (
             diffs < scipy.stats.norm.ppf(upper_percentile) * adaptive_standard_errors
         )
+        classical_z_covers = (
+            diffs < scipy.stats.norm.ppf(upper_percentile) * classical_standard_errors
+        )
+
         adaptive_t_covers = (
             diffs
             < scipy.stats.t.ppf(upper_percentile, num_users - 1)
             * adaptive_standard_errors
-        )
-
-        classical_z_covers = (
-            diffs < scipy.stats.norm.ppf(upper_percentile) * classical_standard_errors
         )
         classical_t_covers = (
             diffs
@@ -1849,6 +1849,8 @@ def collect_existing_analyses(
         print(
             f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% t({num_users}) CI coverage:\n{np.mean(classical_t_covers)}\n",
         )
+
+        print("\nNow examining stability.\n")
 
         plt.figure(figsize=(10, 6))
         plt.plot(

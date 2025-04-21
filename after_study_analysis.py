@@ -15,6 +15,7 @@ import numpy as np
 from jax import numpy as jnp
 import scipy
 import pandas
+import matplotlib.pyplot as plt
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
@@ -1632,12 +1633,15 @@ def estimate_theta(
     help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
     required=True,
 )
+@click.option("--num_users", type=int, required=True)
 @click.option(
     "--index_to_check_ci_coverage",
     type=int,
     help="The index of the parameter to check confidence interval coverage for across runs.  If not provided, coverage will not be checked.",
 )
-def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) -> None:
+def collect_existing_analyses(
+    input_glob: str, num_users: int, index_to_check_ci_coverage: int
+) -> None:
     """
     Collects existing analyses from the specified input glob and computes the mean parameter estimate,
     empirical variance, and adaptive/classical sandwich variance estimates.
@@ -1684,10 +1688,13 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     adaptive_sandwich_var_estimates = np.array(raw_adaptive_sandwich_var_estimates)
     classical_sandwich_var_estimates = np.array(raw_classical_sandwich_var_estimates)
 
-    theta_estimate = np.mean(theta_estimates, axis=0)
+    mean_theta_estimate = np.mean(theta_estimates, axis=0)
     empirical_var_normalized = np.atleast_2d(np.cov(theta_estimates.T, ddof=1))
 
     mean_adaptive_sandwich_var_estimate = np.mean(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+    median_adaptive_sandwich_var_estimate = np.median(
         adaptive_sandwich_var_estimates, axis=0
     )
     adaptive_sandwich_var_estimate_std_deviations = np.sqrt(
@@ -1701,6 +1708,9 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     )
 
     mean_classical_sandwich_var_estimate = np.mean(
+        classical_sandwich_var_estimates, axis=0
+    )
+    median_classical_sandwich_var_estimate = np.median(
         classical_sandwich_var_estimates, axis=0
     )
     classical_sandwich_var_estimate_std_deviations = np.sqrt(
@@ -1719,19 +1729,19 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     # Population standard error formula: https://en.wikipedia.org/wiki/Variance
     # Unbiased estimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
     theta_component_variance_std_errors = []
-    for i in range(len(theta_estimate)):
+    for i in range(len(mean_theta_estimate)):
         component_estimates = [estimate[i] for estimate in theta_estimates]
         second_central_moment = scipy.stats.moment(component_estimates, moment=4)
         fourth_central_moment = scipy.stats.moment(component_estimates, moment=4)
-        n = len(theta_estimates)
+        N = len(theta_estimates)
         theta_component_variance_std_errors.append(
             np.sqrt(
-                n
+                N
                 * (
-                    ((n) ** 2 - 3) * (second_central_moment) ** 2
-                    + ((n - 1) ** 2) * fourth_central_moment
+                    ((N) ** 2 - 3) * (second_central_moment) ** 2
+                    + ((N - 1) ** 2) * fourth_central_moment
                 )
-                / ((n - 3) * (n - 2) * ((n - 1) ** 2))
+                / ((N - 3) * (N - 2) * ((N - 1) ** 2))
             )
         )
 
@@ -1742,7 +1752,7 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
             theta_component_variance_std_errors[j],
         )
 
-    print(f"\nMean parameter estimate:\n{theta_estimate}")
+    print(f"\nMean parameter estimate:\n{mean_theta_estimate}")
     print(f"\nEmpirical variance of parameter estimates:\n{empirical_var_normalized}")
     print(
         f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
@@ -1752,6 +1762,12 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     )
     print(
         f"\nMean classical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}",
+    )
+    print(
+        f"\nMedian adaptive sandwich variance estimate:\n{median_adaptive_sandwich_var_estimate}",
+    )
+    print(
+        f"\nMedian classical sandwich variance estimate:\n{median_classical_sandwich_var_estimate}",
     )
     print(
         f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
@@ -1783,38 +1799,69 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     if index_to_check_ci_coverage is not None:
         adaptive_cover_count = 0
         classical_cover_count = 0
-        scalar_mean_theta = theta_estimate[index_to_check_ci_coverage]
-        for single_theta_est in theta_estimates:
-            scalar_single_theta = single_theta_est[index_to_check_ci_coverage]
-            adaptive_se = math.sqrt(
-                mean_adaptive_sandwich_var_estimate[index_to_check_ci_coverage][
-                    index_to_check_ci_coverage
-                ]
-            )
-            classical_se = math.sqrt(
-                mean_classical_sandwich_var_estimate[index_to_check_ci_coverage][
-                    index_to_check_ci_coverage
-                ]
-            )
-            if (
-                scalar_mean_theta - 1.96 * adaptive_se
-                <= scalar_single_theta
-                <= scalar_mean_theta + 1.96 * adaptive_se
-            ):
-                adaptive_cover_count += 1
-            if (
-                scalar_mean_theta - 1.96 * classical_se
-                <= scalar_single_theta
-                <= scalar_mean_theta + 1.96 * classical_se
-            ):
-                classical_cover_count += 1
+
+        # We take this to be the "true" value
+        scalar_mean_theta = mean_theta_estimate[index_to_check_ci_coverage]
+        diffs = np.abs(
+            theta_estimates[:, index_to_check_ci_coverage] - scalar_mean_theta
+        )
+
+        adaptive_standard_errors = np.sqrt(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+        classical_standard_errors = np.sqrt(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+        NOMINAL_COVERAGE = 0.95
+        upper_percentile = 1 - (1 - NOMINAL_COVERAGE) / 2
+
+        adaptive_z_covers = (
+            diffs < scipy.stats.norm.ppf(upper_percentile) * adaptive_standard_errors
+        )
+        adaptive_t_covers = (
+            diffs
+            < scipy.stats.t.ppf(upper_percentile, num_users - 1)
+            * adaptive_standard_errors
+        )
+
+        classical_z_covers = (
+            diffs < scipy.stats.norm.ppf(upper_percentile) * classical_standard_errors
+        )
+        classical_t_covers = (
+            diffs
+            < scipy.stats.t.ppf(upper_percentile, num_users - 1)
+            * classical_standard_errors
+        )
 
         print(
-            f"\nAdaptive sandwich 95% CI coverage:\n{adaptive_cover_count / len(theta_estimates)}",
+            f"\nAdaptive sandwich {NOMINAL_COVERAGE * 100}% standard normal CI coverage:\n{np.mean(adaptive_z_covers)}\n",
         )
         print(
-            f"\nClassical sandwich 95% CI coverage:\n{classical_cover_count / len(theta_estimates)}\n",
+            f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% standard normal CI coverage:\n{np.mean(classical_z_covers)}\n",
         )
+        print(
+            f"\nAdaptive sandwich {NOMINAL_COVERAGE * 100}% t({num_users}) CI coverage:\n{np.mean(adaptive_t_covers)}\n",
+        )
+        print(
+            f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% t({num_users}) CI coverage:\n{np.mean(classical_t_covers)}\n",
+        )
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(
+            theta_estimates[:, index_to_check_ci_coverage],
+            marker="o",
+            linestyle="-",
+            color="b",
+        )
+        plt.title(f"Theta Estimates for Index {index_to_check_ci_coverage}")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Theta Estimate")
+        plt.grid(True)
+        plt.show()
 
 
 if __name__ == "__main__":

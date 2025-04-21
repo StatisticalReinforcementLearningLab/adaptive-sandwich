@@ -186,4 +186,4 @@ python after_study_analysis.py analyze-dataset \
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --index_to_check_ci_coverage=1"
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --num_users=$num_users --index_to_check_ci_coverage=1"

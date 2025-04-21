@@ -1910,6 +1910,39 @@ def collect_existing_analyses(
         )
         plt.show()
 
+        # Plot the classical sandwich variance estimates to look for blowup
+        plt.clear_figure()
+        plt.title(f"Index {index_to_check_ci_coverage} of Classical Variance Estimates")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Classical Variance Estimate")
+        plt.scatter(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="green",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(
+                    classical_sandwich_var_estimates[
+                        :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                    ]
+                ),
+                max(
+                    1,
+                    len(
+                        classical_sandwich_var_estimates[
+                            :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                        ]
+                    )
+                    // 10,
+                ),
+            )
+        )
+        plt.show()
+
 
 if __name__ == "__main__":
     cli()

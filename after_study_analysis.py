@@ -1858,7 +1858,8 @@ def collect_existing_analyses(
         sys.stdout.flush()
         plt.clear_terminal(False)
 
-        # Plot the theta estimates to visually check for blowup
+        # Plot the theta estimates to see variation
+        plt.clear_figure()
         plt.title(f"Index {index_to_check_ci_coverage} of Theta Estimates")
         plt.xlabel("Simulation Index")
         plt.ylabel("Theta Estimate")
@@ -1872,6 +1873,39 @@ def collect_existing_analyses(
                 0,
                 len(theta_estimates[:, index_to_check_ci_coverage]),
                 max(1, len(theta_estimates[:, index_to_check_ci_coverage]) // 10),
+            )
+        )
+        plt.show()
+
+        # Plot the adaptive sandwich variance estimates to look for blowup
+        plt.clear_figure()
+        plt.title(f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Adaptive Variance Estimate")
+        plt.scatter(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="green",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(
+                    adaptive_sandwich_var_estimates[
+                        :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                    ]
+                ),
+                max(
+                    1,
+                    len(
+                        adaptive_sandwich_var_estimates[
+                            :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                        ]
+                    )
+                    // 10,
+                ),
             )
         )
         plt.show()

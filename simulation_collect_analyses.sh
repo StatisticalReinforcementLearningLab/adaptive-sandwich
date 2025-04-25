@@ -12,7 +12,7 @@ index_to_check_ci_coverage=""
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:n:c:-: OPT; do
+while getopts i:n:c:s:a:p:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -23,6 +23,9 @@ while getopts i:n:c:-: OPT; do
     i  | input_glob )                   needs_arg; input_glob="$OPTARG" ;;
     n  | num_users )                    needs_arg; num_users="$OPTARG" ;;
     c  | index_to_check_ci_coverage )   needs_arg; index_to_check_ci_coverage="$OPTARG" ;;
+    s  | in_study_col_name )            needs_arg; in_study_col_name="$OPTARG" ;;
+    a  | action_col_name )              needs_arg; action_col_name="$OPTARG" ;;
+    p  | action_prob_col_name )         needs_arg; action_prob_col_name="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -57,7 +60,7 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-exist
 if [ -z "$index_to_check_ci_coverage" ]; then
   python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}"
 else
-  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}"
+  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
 fi
 
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.

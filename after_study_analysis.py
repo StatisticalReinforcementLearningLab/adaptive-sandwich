@@ -22,10 +22,12 @@ from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
 from helper_functions import (
     conditional_x_or_one_minus_x,
+    get_action_prob_variance,
     get_in_study_df_column,
     invert_matrix_and_check_conditioning,
     load_function_from_same_named_file,
     replace_tuple_index,
+    get_action_1_fraction,
 )
 
 logger = logging.getLogger(__name__)
@@ -400,7 +402,7 @@ def analyze_dataset(
     logger.info("Forming classical sandwich variance estimate...")
     classical_bread_matrix = invert_matrix_and_check_conditioning(
         classical_bread_inverse_matrix
-    )
+    )[0]
     classical_sandwich_var_estimate = (
         classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
     ) / len(user_ids)
@@ -410,8 +412,8 @@ def analyze_dataset(
     # TODO: decide whether to in fact scrap the structure-based inversion
     # TODO: Could inspect condition number of each of the diagonal matrices
     logger.info("Inverting joint bread inverse matrix...")
-    joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
-        joint_adaptive_bread_inverse_matrix
+    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
+        invert_matrix_and_check_conditioning(joint_adaptive_bread_inverse_matrix)
     )
 
     if not suppress_all_data_checks:
@@ -461,6 +463,7 @@ def analyze_dataset(
                 "classical_bread_matrix": classical_bread_matrix,
                 "classical_meat_matrix": classical_meat_matrix,
                 "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
+                "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
             },
             f,
         )
@@ -1640,8 +1643,28 @@ def estimate_theta(
     type=int,
     help="The index of the parameter to check confidence interval coverage for across runs.  If not provided, coverage will not be checked.",
 )
+@click.option(
+    "--in_study_col_name",
+    type=str,
+    help="Name of the binary column in the study dataframe that indicates whether a user is in the study.",
+)
+@click.option(
+    "--action_col_name",
+    type=str,
+    help="Name of the column in the study dataframe that indicates the action taken by the user.",
+)
+@click.option(
+    "--action_prob_col_name",
+    type=str,
+    help="Name of the column in the study dataframe that indicates the probability of taking action 1.",
+)
 def collect_existing_analyses(
-    input_glob: str, num_users: int, index_to_check_ci_coverage: int
+    input_glob: str,
+    num_users: int,
+    index_to_check_ci_coverage: int,
+    in_study_col_name: str,
+    action_col_name: str,
+    action_prob_col_name: str,
 ) -> None:
     """
     Collects existing analyses from the specified input glob and computes the mean parameter estimate,
@@ -1653,11 +1676,19 @@ def collect_existing_analyses(
         num_users (int): The number of users in the study.
         index_to_check_ci_coverage (int, optional): The index of the parameter to check confidence
             interval coverage for. If not provided, coverage will not be checked.
+        in_study_col_name (str, optional): The name of the column indicating whether a user is in
+            the study.
+        action_col_name (str, optional): The name of the column indicating the action taken by the
+            user.
+        action_prob_col_name (str, optional): The name of the column indicating the probability of
+            taking action 1.
     """
 
     raw_theta_estimates = []
     raw_adaptive_sandwich_var_estimates = []
     raw_classical_sandwich_var_estimates = []
+    all_debug_pieces = []
+    study_dfs = []
     filenames = glob.glob(input_glob)
 
     logger.info("Found %d files under the glob %s", len(filenames), input_glob)
@@ -1685,6 +1716,10 @@ def collect_existing_analyses(
             raw_theta_estimates.append(theta_est)
             raw_adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
+        with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
+            all_debug_pieces.append(pickle.load(f))
+        with open(filename.replace("analysis.pkl", "study_df.pkl"), "rb") as f:
+            study_dfs.append(pandas.read_pickle(f))
 
     theta_estimates = np.array(raw_theta_estimates)
     adaptive_sandwich_var_estimates = np.array(raw_adaptive_sandwich_var_estimates)
@@ -1799,9 +1834,6 @@ def collect_existing_analyses(
     if theta_estimates[0].size == 1:
         index_to_check_ci_coverage = 0
     if index_to_check_ci_coverage is not None:
-        adaptive_cover_count = 0
-        classical_cover_count = 0
-
         # We take this to be the "true" value
         scalar_mean_theta = mean_theta_estimate[index_to_check_ci_coverage]
         diffs = np.abs(
@@ -1853,6 +1885,28 @@ def collect_existing_analyses(
         )
 
         print("\nNow examining stability.\n")
+
+        condition_numbers = None
+        if "joint_adaptive_bread_inverse_condition_number" in all_debug_pieces[0]:
+            condition_numbers = [
+                debug_pieces["joint_adaptive_bread_inverse_condition_number"]
+                for debug_pieces in all_debug_pieces
+            ]
+        if "joint_adaptive_bread_inverse" in all_debug_pieces[0]:
+            condition_numbers = [
+                np.linalg.cond(debug_pieces["joint_adaptive_bread_inverse"])
+                for debug_pieces in all_debug_pieces
+            ]
+
+        action_1_fractions = [
+            get_action_1_fraction(study_df, in_study_col_name, action_col_name)
+            for study_df in study_dfs
+        ]
+
+        action_prob_variances = [
+            get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name)
+            for study_df in study_dfs
+        ]
 
         # Make sure previous output is flushed and not cleared
         sys.stdout.flush()
@@ -1941,6 +1995,127 @@ def collect_existing_analyses(
                 ),
             )
         )
+        plt.show()
+
+        # Plot the classical sandwich variance estimates for the top 5% experiments ranked by adaptive variance estimate size
+        num_top_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
+        top_indices = np.argsort(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )[-num_top_experiments:]
+
+        top_classical_var_estimates = classical_sandwich_var_estimates[
+            top_indices, index_to_check_ci_coverage, index_to_check_ci_coverage
+        ]
+
+        plt.clear_figure()
+        plt.title(
+            f"Classical Estimates vs. Median for Highest {num_top_experiments} *Adaptive* Estimates at Index {index_to_check_ci_coverage}"
+        )
+        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.ylabel("Classical Variance Estimate")
+        plt.scatter(
+            top_classical_var_estimates,
+            color="orange",
+        )
+        plt.horizontal_line(
+            median_classical_sandwich_var_estimate[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
+        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        plt.show()
+
+        if condition_numbers:
+            # Plot all condition numbers
+            plt.clear_figure()
+            plt.title("Condition Numbers for All Simulations")
+            plt.xlabel("Simulation Index")
+            plt.ylabel("Condition Number")
+            plt.scatter(condition_numbers, color="purple")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(condition_numbers),
+                    max(1, len(condition_numbers) // 10),
+                )
+            )
+            plt.show()
+
+            # Plot condition numbers for the top 5% of adaptive variance estimates
+            top_condition_numbers = [condition_numbers[i] for i in top_indices]
+            plt.clear_figure()
+            plt.title(
+                f"Condition Numbers for Top {num_top_experiments} Adaptive Variance Estimates"
+            )
+            plt.xlabel("Experiment Rank (by Adaptive Variance)")
+            plt.ylabel("Condition Number")
+            plt.scatter(top_condition_numbers, color="purple")
+            plt.xticks(
+                range(1, num_top_experiments + 1, max(1, num_top_experiments // 10))
+            )
+            plt.grid(True)
+            plt.show()
+
+        # Plot all action_1_fractions
+        plt.clear_figure()
+        plt.title("Action 1 Fractions for All Simulations")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Action 1 Fraction")
+        plt.scatter(action_1_fractions, color="red")
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(action_1_fractions),
+                max(1, len(action_1_fractions) // 10),
+            )
+        )
+        plt.show()
+
+        # Plot action_1_fractions for the top 5% of adaptive variance estimates
+        top_action_1_fractions = [action_1_fractions[i] for i in top_indices]
+        plt.clear_figure()
+        plt.title(
+            f"Action 1 Fractions for Top {num_top_experiments} Adaptive Variance Estimates"
+        )
+        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.ylabel("Action 1 Fraction")
+        plt.scatter(top_action_1_fractions, color="red")
+        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        plt.grid(True)
+        plt.show()
+
+        # Plot all action probability variances
+        plt.clear_figure()
+        plt.title("Action Probability Variances for All Simulations")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Action Probability Variance")
+        plt.scatter(action_prob_variances, color="blue")
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(action_prob_variances),
+                max(1, len(action_prob_variances) // 10),
+            )
+        )
+        plt.show()
+
+        # Plot action probability variances for the top 5% of adaptive variance estimates
+        top_action_prob_variances = [action_prob_variances[i] for i in top_indices]
+        plt.clear_figure()
+        plt.title(
+            f"Action Probability Variances for Top {num_top_experiments} Adaptive Variance Estimates"
+        )
+        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.ylabel("Action Probability Variance")
+        plt.scatter(top_action_prob_variances, color="blue")
+        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        plt.grid(True)
         plt.show()
 
 

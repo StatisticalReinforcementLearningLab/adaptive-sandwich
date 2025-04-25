@@ -1819,23 +1819,23 @@ def collect_existing_analyses(
             ]
         )
         NOMINAL_COVERAGE = 0.95
-        upper_percentile = 1 - (1 - NOMINAL_COVERAGE) / 2
+        UPPER_PERCENTILE = 1 - (1 - NOMINAL_COVERAGE) / 2
 
         adaptive_z_covers = (
-            diffs < scipy.stats.norm.ppf(upper_percentile) * adaptive_standard_errors
+            diffs < scipy.stats.norm.ppf(UPPER_PERCENTILE) * adaptive_standard_errors
         )
         classical_z_covers = (
-            diffs < scipy.stats.norm.ppf(upper_percentile) * classical_standard_errors
+            diffs < scipy.stats.norm.ppf(UPPER_PERCENTILE) * classical_standard_errors
         )
 
         adaptive_t_covers = (
             diffs
-            < scipy.stats.t.ppf(upper_percentile, num_users - 1)
+            < scipy.stats.t.ppf(UPPER_PERCENTILE, num_users - 1)
             * adaptive_standard_errors
         )
         classical_t_covers = (
             diffs
-            < scipy.stats.t.ppf(upper_percentile, num_users - 1)
+            < scipy.stats.t.ppf(UPPER_PERCENTILE, num_users - 1)
             * classical_standard_errors
         )
 

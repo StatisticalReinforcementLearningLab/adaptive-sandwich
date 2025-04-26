@@ -198,4 +198,4 @@ python after_study_analysis.py analyze-dataset \
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl --num_users=$n [--index_to_check_ci_coverage=<>]  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"

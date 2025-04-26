@@ -32,6 +32,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # that.
 T=10
 decisions_between_updates=1
+min_update_time=20
 recruit_t=1
 n=100
 recruit_n=$n
@@ -69,7 +70,7 @@ small_sample_correction="none"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -88,6 +89,7 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-:
     a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
     s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
+    Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -161,7 +163,8 @@ python rl_study_simulation.py \
   --alg_state_feats=$alg_state_feats \
   --action_centering=$action_centering_RL \
   --save_dir=$save_dir \
-  --dynamic_seeds=$dynamic_seeds
+  --dynamic_seeds=$dynamic_seeds \
+  --min_update_time=$min_update_time
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script

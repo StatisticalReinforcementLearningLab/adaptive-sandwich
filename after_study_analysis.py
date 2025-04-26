@@ -1887,12 +1887,12 @@ def collect_existing_analyses(
         print("\nNow examining stability.\n")
 
         condition_numbers = None
-        if "joint_adaptive_bread_inverse_condition_number" in all_debug_pieces[0]:
+        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
             condition_numbers = [
                 debug_pieces["joint_adaptive_bread_inverse_condition_number"]
                 for debug_pieces in all_debug_pieces
             ]
-        if "joint_adaptive_bread_inverse" in all_debug_pieces[0]:
+        if "joint_bread_inverse_matrix" in all_debug_pieces[0]:
             condition_numbers = [
                 np.linalg.cond(debug_pieces["joint_adaptive_bread_inverse"])
                 for debug_pieces in all_debug_pieces

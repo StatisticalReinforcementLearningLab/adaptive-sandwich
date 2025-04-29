@@ -94,7 +94,7 @@ output_folder="oralytics_sample_data/Archive/exps/write/NON_STAT_LOW_R_None_0.51
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/study_data.pkl" \
+  --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/action_data.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \

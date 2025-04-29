@@ -548,7 +548,7 @@ def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_updat
     # Write the pickled results to file.
     pd.to_pickle(data_df, exp_path + f"/data_df.pkl")
     pd.to_pickle(update_df, exp_path + f"/update_df.pkl")
-    pd.to_pickle(study_df, exp_path + f"/study_data.pkl")
+    pd.to_pickle(study_df, exp_path + f"/study_df.pkl")
     with open(exp_path + f"/loss_fn_data.pkl", "wb") as f:
         pkl.dump(alg_update_function_args, f)
     with open(exp_path + f"/action_data.pkl", "wb") as f:

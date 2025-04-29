@@ -1658,6 +1658,12 @@ def estimate_theta(
     type=str,
     help="Name of the column in the study dataframe that indicates the probability of taking action 1.",
 )
+@click.option(
+    "--study_df_filename",
+    type=str,
+    help="The filename of the pickled study DataFrame.  This is not the full path."
+    required=True
+)
 def collect_existing_analyses(
     input_glob: str,
     num_users: int,
@@ -1665,6 +1671,7 @@ def collect_existing_analyses(
     in_study_col_name: str,
     action_col_name: str,
     action_prob_col_name: str,
+    study_df_filename: str,
 ) -> None:
     """
     Collects existing analyses from the specified input glob and computes the mean parameter estimate,
@@ -1718,7 +1725,7 @@ def collect_existing_analyses(
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
         with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
             all_debug_pieces.append(pickle.load(f))
-        with open(filename.replace("analysis.pkl", "study_df.pkl"), "rb") as f:
+        with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
             study_dfs.append(pandas.read_pickle(f))
 
     theta_estimates = np.array(raw_theta_estimates)

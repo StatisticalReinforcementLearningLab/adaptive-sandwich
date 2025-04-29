@@ -32,7 +32,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # that.
 T=50
 decisions_between_updates=1
-min_update_time=20
+min_update_time=0
 recruit_t=1
 n=100
 recruit_n=$n

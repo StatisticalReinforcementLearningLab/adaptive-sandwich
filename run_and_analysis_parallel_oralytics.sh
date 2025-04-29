@@ -144,13 +144,13 @@ output_folder_glob="${save_dir_prefix}/NON_STAT_LOW_R_None_0.515_14_full_pooling
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_study_data.pkl" \
+  --study_df_pickle="${output_folder}/study_data.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_action_data.pkl" \
+  --action_prob_func_args_pickle="${output_folder}/action_data.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --alg_update_func_filename=$alg_update_func_filename \
   --alg_update_func_type=$alg_update_func_type \
-  --alg_update_func_args_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_loss_fn_data.pkl" \
+  --alg_update_func_args_pickle="${output_folder}/loss_fn_data.pkl" \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \

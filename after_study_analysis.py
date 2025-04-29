@@ -1661,8 +1661,8 @@ def estimate_theta(
 @click.option(
     "--study_df_filename",
     type=str,
-    help="The filename of the pickled study DataFrame.  This is not the full path."
-    required=True
+    help="The filename of the pickled study DataFrame.  This is not the full path.",
+    required=True,
 )
 def collect_existing_analyses(
     input_glob: str,
@@ -1689,6 +1689,7 @@ def collect_existing_analyses(
             user.
         action_prob_col_name (str, optional): The name of the column indicating the probability of
             taking action 1.
+        study_df_filename (str): The filename of the pickled study DataFrame. Not the full path.
     """
 
     raw_theta_estimates = []
@@ -1725,8 +1726,8 @@ def collect_existing_analyses(
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
         with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
             all_debug_pieces.append(pickle.load(f))
-        with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
-            study_dfs.append(pandas.read_pickle(f))
+        # with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
+        #     study_dfs.append(pandas.read_pickle(f))
 
     theta_estimates = np.array(raw_theta_estimates)
     adaptive_sandwich_var_estimates = np.array(raw_adaptive_sandwich_var_estimates)
@@ -1905,15 +1906,15 @@ def collect_existing_analyses(
                 for debug_pieces in all_debug_pieces
             ]
 
-        action_1_fractions = [
-            get_action_1_fraction(study_df, in_study_col_name, action_col_name)
-            for study_df in study_dfs
-        ]
+        # action_1_fractions = [
+        #     get_action_1_fraction(study_df, in_study_col_name, action_col_name)
+        #     for study_df in study_dfs
+        # ]
 
-        action_prob_variances = [
-            get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name)
-            for study_df in study_dfs
-        ]
+        # action_prob_variances = [
+        #     get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name)
+        #     for study_df in study_dfs
+        # ]
 
         # Make sure previous output is flushed and not cleared
         sys.stdout.flush()
@@ -2067,63 +2068,63 @@ def collect_existing_analyses(
             plt.grid(True)
             plt.show()
 
-        # Plot all action_1_fractions
-        plt.clear_figure()
-        plt.title("Action 1 Fractions for All Simulations")
-        plt.xlabel("Simulation Index")
-        plt.ylabel("Action 1 Fraction")
-        plt.scatter(action_1_fractions, color="red")
-        plt.grid(True)
-        plt.xticks(
-            range(
-                0,
-                len(action_1_fractions),
-                max(1, len(action_1_fractions) // 10),
-            )
-        )
-        plt.show()
+        # # Plot all action_1_fractions
+        # plt.clear_figure()
+        # plt.title("Action 1 Fractions for All Simulations")
+        # plt.xlabel("Simulation Index")
+        # plt.ylabel("Action 1 Fraction")
+        # plt.scatter(action_1_fractions, color="red")
+        # plt.grid(True)
+        # plt.xticks(
+        #     range(
+        #         0,
+        #         len(action_1_fractions),
+        #         max(1, len(action_1_fractions) // 10),
+        #     )
+        # )
+        # plt.show()
 
-        # Plot action_1_fractions for the top 5% of adaptive variance estimates
-        top_action_1_fractions = [action_1_fractions[i] for i in top_indices]
-        plt.clear_figure()
-        plt.title(
-            f"Action 1 Fractions for Top {num_top_experiments} Adaptive Variance Estimates"
-        )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
-        plt.ylabel("Action 1 Fraction")
-        plt.scatter(top_action_1_fractions, color="red")
-        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
-        plt.grid(True)
-        plt.show()
+        # # Plot action_1_fractions for the top 5% of adaptive variance estimates
+        # top_action_1_fractions = [action_1_fractions[i] for i in top_indices]
+        # plt.clear_figure()
+        # plt.title(
+        #     f"Action 1 Fractions for Top {num_top_experiments} Adaptive Variance Estimates"
+        # )
+        # plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        # plt.ylabel("Action 1 Fraction")
+        # plt.scatter(top_action_1_fractions, color="red")
+        # plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        # plt.grid(True)
+        # plt.show()
 
-        # Plot all action probability variances
-        plt.clear_figure()
-        plt.title("Action Probability Variances for All Simulations")
-        plt.xlabel("Simulation Index")
-        plt.ylabel("Action Probability Variance")
-        plt.scatter(action_prob_variances, color="blue")
-        plt.grid(True)
-        plt.xticks(
-            range(
-                0,
-                len(action_prob_variances),
-                max(1, len(action_prob_variances) // 10),
-            )
-        )
-        plt.show()
+        # # Plot all action probability variances
+        # plt.clear_figure()
+        # plt.title("Action Probability Variances for All Simulations")
+        # plt.xlabel("Simulation Index")
+        # plt.ylabel("Action Probability Variance")
+        # plt.scatter(action_prob_variances, color="blue")
+        # plt.grid(True)
+        # plt.xticks(
+        #     range(
+        #         0,
+        #         len(action_prob_variances),
+        #         max(1, len(action_prob_variances) // 10),
+        #     )
+        # )
+        # plt.show()
 
-        # Plot action probability variances for the top 5% of adaptive variance estimates
-        top_action_prob_variances = [action_prob_variances[i] for i in top_indices]
-        plt.clear_figure()
-        plt.title(
-            f"Action Probability Variances for Top {num_top_experiments} Adaptive Variance Estimates"
-        )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
-        plt.ylabel("Action Probability Variance")
-        plt.scatter(top_action_prob_variances, color="blue")
-        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
-        plt.grid(True)
-        plt.show()
+        # # Plot action probability variances for the top 5% of adaptive variance estimates
+        # top_action_prob_variances = [action_prob_variances[i] for i in top_indices]
+        # plt.clear_figure()
+        # plt.title(
+        #     f"Action Probability Variances for Top {num_top_experiments} Adaptive Variance Estimates"
+        # )
+        # plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        # plt.ylabel("Action Probability Variance")
+        # plt.scatter(top_action_prob_variances, color="blue")
+        # plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        # plt.grid(True)
+        # plt.show()
 
 
 if __name__ == "__main__":

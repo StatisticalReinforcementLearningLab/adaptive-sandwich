@@ -61,6 +61,7 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requireme
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
 if [ -z "$index_to_check_ci_coverage" ]; then
   python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}"
+else
   python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
 fi
 

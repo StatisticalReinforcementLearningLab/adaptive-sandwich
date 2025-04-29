@@ -1900,7 +1900,7 @@ def collect_existing_analyses(
                 debug_pieces["joint_bread_inverse_condition_number"]
                 for debug_pieces in all_debug_pieces
             ]
-        if "joint_bread_inverse_matrix" in all_debug_pieces[0]:
+        else:
             condition_numbers = [
                 np.linalg.cond(debug_pieces["joint_bread_inverse_matrix"])
                 for debug_pieces in all_debug_pieces
@@ -1941,7 +1941,9 @@ def collect_existing_analyses(
 
         # Plot the adaptive sandwich variance estimates to look for blowup
         plt.clear_figure()
-        plt.title(f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates")
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical"
+        )
         plt.xlabel("Simulation Index")
         plt.ylabel("Adaptive Variance Estimate")
         plt.scatter(
@@ -1970,11 +1972,19 @@ def collect_existing_analyses(
                 ),
             )
         )
+        plt.horizontal_line(
+            empirical_var_normalized[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
         plt.show()
 
         # Plot the classical sandwich variance estimates to look for blowup
         plt.clear_figure()
-        plt.title(f"Index {index_to_check_ci_coverage} of Classical Variance Estimates")
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Classical Variance Estimates vs Empirical"
+        )
         plt.xlabel("Simulation Index")
         plt.ylabel("Classical Variance Estimate")
         plt.scatter(
@@ -2003,6 +2013,12 @@ def collect_existing_analyses(
                 ),
             )
         )
+        plt.horizontal_line(
+            empirical_var_normalized[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
         plt.show()
 
         # Plot the classical sandwich variance estimates for the top 5% experiments ranked by adaptive variance estimate size
@@ -2011,7 +2027,7 @@ def collect_existing_analyses(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ]
-        )[-num_top_experiments:]
+        )[-num_top_experiments::-1]
 
         top_classical_var_estimates = classical_sandwich_var_estimates[
             top_indices, index_to_check_ci_coverage, index_to_check_ci_coverage

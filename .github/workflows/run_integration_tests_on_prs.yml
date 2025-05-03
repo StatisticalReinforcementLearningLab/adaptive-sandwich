@@ -35,10 +35,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run integration tests
-        continue-on-error: true
+        # continue-on-error: true
         run: |
           python -m pytest tests/integration_tests
 
-      - name: Check simulated_data directory contents
-        run: |
-          ls -Rla /home/runner/work/adaptive-sandwich/adaptive-sandwich/simulated_data || echo "Directory does not exist or is empty"
+      # - name: Check simulated_data directory contents
+      #   run: |
+      #     ls -Rla /home/runner/work/adaptive-sandwich/adaptive-sandwich/simulated_data || echo "Directory does not exist or is empty"

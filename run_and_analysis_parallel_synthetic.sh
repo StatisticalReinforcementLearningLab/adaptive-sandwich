@@ -112,9 +112,19 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
-    * )                                         die "Illegal option --$OPT" ;; # bad long option
+    * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
 done
+
+# Check for invalid options that do not start with a dash. This
+# prevents accidentally missing dashes and thinking you passed an
+# arg that you didn't.
+for arg in "$@"; do
+  if [[ "$arg" != -* ]]; then
+    die "Invalid argument: $arg. Options must start with a dash (- or --)."
+  fi
+done
+
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Load Python 3.10, among other things

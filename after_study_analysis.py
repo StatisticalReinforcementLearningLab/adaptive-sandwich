@@ -1902,156 +1902,6 @@ def collect_existing_analyses(
         sys.stdout.flush()
         plt.clear_terminal(False)
 
-        condition_numbers = None
-        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
-            condition_numbers = [
-                debug_pieces["joint_bread_inverse_condition_number"]
-                for debug_pieces in all_debug_pieces
-            ]
-        else:
-            condition_numbers = [
-                np.linalg.cond(debug_pieces["joint_bread_inverse_matrix"])
-                for debug_pieces in all_debug_pieces
-            ]
-
-        # Examine conditioning of first block of joint bread inverse if the data is available
-        if "joint_bread_inverse_first_block_eigvals" in all_debug_pieces[0]:
-            joint_bread_inverse_first_block_eigenvalues = [
-                debug_pieces["joint_bread_inverse_first_block_eigvals"]
-                for debug_pieces in all_debug_pieces
-            ]
-
-            min_eigenvalues_first_block = np.array(
-                [
-                    np.min(eigenvalues)
-                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
-                ]
-            )
-            max_eigenvalues_first_block = np.array(
-                [
-                    np.max(eigenvalues)
-                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
-                ]
-            )
-
-            # Plot minimum eigenvalues for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Simulation Index")
-            plt.ylabel("Minimum Eigenvalue")
-            plt.scatter(min_eigenvalues_first_block, color="green")
-            plt.grid(True)
-            plt.xticks(
-                range(
-                    0,
-                    len(min_eigenvalues_first_block),
-                    max(1, len(min_eigenvalues_first_block) // 10),
-                )
-            )
-            plt.show()
-
-            # Plot histogram of minimum eigenvalues for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Histogram of Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Minimum Eigenvalue")
-            plt.ylabel("Frequency")
-            plt.hist(min_eigenvalues_first_block, bins=20, color="green")
-            plt.grid(True)
-            plt.show()
-
-            # Plot histogram of maximum eigenvalues for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Histogram of Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Maximum Eigenvalue")
-            plt.ylabel("Frequency")
-            plt.hist(max_eigenvalues_first_block, bins=20, color="orange")
-            plt.grid(True)
-            plt.show()
-
-            # Plot histogram of condition numbers for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Histogram of Condition Numbers of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Condition Number")
-            plt.ylabel("Frequency")
-            plt.hist(
-                max_eigenvalues_first_block / min_eigenvalues_first_block,
-                bins=20,
-                color="purple",
-            )
-            plt.grid(True)
-            plt.show()
-
-            # Plot maximum eigenvalues for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Simulation Index")
-            plt.ylabel("Maximum Eigenvalue")
-            plt.scatter(max_eigenvalues_first_block, color="orange")
-            plt.grid(True)
-            plt.xticks(
-                range(
-                    0,
-                    len(max_eigenvalues_first_block),
-                    max(1, len(max_eigenvalues_first_block) // 10),
-                )
-            )
-            plt.show()
-
-            # Plot condition numbers for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Simulation Index")
-            plt.ylabel("Condition Number of Joint Bread Inverse First Diag Block")
-            plt.scatter(
-                max_eigenvalues_first_block / min_eigenvalues_first_block,
-                color="orange",
-            )
-            plt.grid(True)
-            plt.xticks(
-                range(
-                    0,
-                    len(max_eigenvalues_first_block),
-                    max(1, len(max_eigenvalues_first_block) // 10),
-                )
-            )
-            plt.show()
-
-        # Examine normality of first beta if available
-        if "all_post_update_betas" in all_debug_pieces[0]:
-            for coordinate in min(
-                5, all_debug_pieces[0]["all_post_update_betas"].shape[1]
-            ):
-                plt.clear_figure()
-                plt.title(f"Histogram of First Update Beta Coordinate {coordinate}")
-                plt.xlabel("First Update Beta Coordinate")
-                plt.ylabel("Frequency")
-                plt.hist(
-                    [
-                        debug_pieces["all_post_update_betas"][:, coordinate]
-                        for debug_pieces in all_debug_pieces
-                    ],
-                    bins=20,
-                    color="blue",
-                )
-                plt.grid(True)
-                plt.show()
-            joint_bread_inverse_first_block_eigenvalues = [
-                debug_pieces["joint_bread_inverse_first_block_eigvals"]
-                for debug_pieces in all_debug_pieces
-            ]
-
         action_1_fractions = [
             get_action_1_fraction(study_df, in_study_col_name, action_col_name)
             for study_df in study_dfs
@@ -2165,7 +2015,7 @@ def collect_existing_analyses(
 
         # Plot the classical sandwich variance estimates for the top 5% experiments ranked by adaptive variance estimate size
         num_top_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
-        sorted_experiment_indices_adaptive_est_descending = np.argsort(
+        sorted_experiment_indices_by_adaptive_est = np.argsort(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ]
@@ -2173,7 +2023,7 @@ def collect_existing_analyses(
 
         classical_var_estimates_sorted_by_adaptive_descending = (
             classical_sandwich_var_estimates[
-                sorted_experiment_indices_adaptive_est_descending,
+                sorted_experiment_indices_by_adaptive_est,
                 index_to_check_ci_coverage,
                 index_to_check_ci_coverage,
             ]
@@ -2181,9 +2031,9 @@ def collect_existing_analyses(
 
         plt.clear_figure()
         plt.title(
-            f"Classical Estimates Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage} (vs. Median) "
+            f"Classical Estimates Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage} (vs. Classical Median) "
         )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Classical Variance Estimate")
         plt.scatter(
             classical_var_estimates_sorted_by_adaptive_descending,
@@ -2198,33 +2048,19 @@ def collect_existing_analyses(
         plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
         plt.show()
 
-        if condition_numbers:
-            # Plot all condition numbers
-            plt.clear_figure()
-            plt.title("Condition Numbers for All Simulations")
-            plt.xlabel("Simulation Index")
-            plt.ylabel("Condition Number")
-            plt.scatter(condition_numbers, color="purple")
-            plt.grid(True)
-            plt.xticks(
-                range(
-                    0,
-                    len(condition_numbers),
-                    max(1, len(condition_numbers) // 10),
-                )
-            )
-            plt.show()
-
-            # Plot condition numbers for the top 5% of adaptive variance estimates
+        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
+            condition_numbers = [
+                debug_pieces["joint_bread_inverse_condition_number"]
+                for debug_pieces in all_debug_pieces
+            ]
             sorted_condition_numbers = [
-                condition_numbers[i]
-                for i in sorted_experiment_indices_adaptive_est_descending
+                condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
             ]
             plt.clear_figure()
             plt.title(
-                f"Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
             )
-            plt.xlabel("Experiment Rank (by Adaptive Variance)")
+            plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
             plt.scatter(sorted_condition_numbers, color="purple")
             plt.xticks(
@@ -2236,6 +2072,154 @@ def collect_existing_analyses(
             )
             plt.grid(True)
             plt.show()
+
+        # Examine conditioning of first block of joint bread inverse if the data is available
+        if "joint_bread_inverse_first_block_eigvals" in all_debug_pieces[0]:
+            joint_bread_inverse_first_block_eigenvalues = [
+                debug_pieces["joint_bread_inverse_first_block_eigvals"]
+                for debug_pieces in all_debug_pieces
+            ]
+
+            min_eigenvalues_first_block = np.array(
+                [
+                    np.min(eigenvalues)
+                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
+                ]
+            )
+            max_eigenvalues_first_block = np.array(
+                [
+                    np.max(eigenvalues)
+                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
+                ]
+            )
+
+            # Plot histogram of minimum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Minimum Eigenvalue")
+            plt.ylabel("Frequency")
+            plt.hist(min_eigenvalues_first_block, bins=20, color="green")
+            plt.grid(True)
+            plt.show()
+
+            # Plot histogram of maximum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Maximum Eigenvalue")
+            plt.ylabel("Frequency")
+            plt.hist(max_eigenvalues_first_block, bins=20, color="orange")
+            plt.grid(True)
+            plt.show()
+
+            # Plot histogram of condition numbers for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Condition Numbers of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Condition Number")
+            plt.ylabel("Frequency")
+            plt.hist(
+                max_eigenvalues_first_block / min_eigenvalues_first_block,
+                bins=20,
+                color="purple",
+            )
+            plt.grid(True)
+            plt.show()
+
+            sorted_min_eigenvalues_first_block = np.array(
+                [
+                    min_eigenvalues_first_block[i]
+                    for i in sorted_experiment_indices_by_adaptive_est
+                ]
+            )
+            # Plot minimum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Min Eigenvalue")
+            plt.scatter(sorted_min_eigenvalues_first_block, color="orange")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(min_eigenvalues_first_block),
+                    max(1, len(min_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+            sorted_max_eigenvalues_first_block = np.array(
+                [
+                    max_eigenvalues_first_block[i]
+                    for i in sorted_experiment_indices_by_adaptive_est
+                ]
+            )
+            # Plot maximum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Max Eigenvalue")
+            plt.scatter(sorted_max_eigenvalues_first_block, color="orange")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(max_eigenvalues_first_block),
+                    max(1, len(max_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+            # Plot condition numbers for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Condition Number of Joint Bread Inverse First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Condition Number")
+            plt.scatter(
+                sorted_max_eigenvalues_first_block / sorted_min_eigenvalues_first_block,
+                color="orange",
+            )
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(max_eigenvalues_first_block),
+                    max(1, len(max_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+        # Examine normality of first beta if available
+        if "all_post_update_betas" in all_debug_pieces[0]:
+            for coordinate in range(
+                min(5, all_debug_pieces[0]["all_post_update_betas"].shape[1])
+            ):
+                plt.clear_figure()
+                plt.title(f"Histogram of First Update Beta Coordinate {coordinate}")
+                plt.xlabel("First Update Beta Coordinate")
+                plt.ylabel("Frequency")
+                plt.hist(
+                    np.array(
+                        [
+                            debug_pieces["all_post_update_betas"][0, coordinate]
+                            for debug_pieces in all_debug_pieces
+                        ]
+                    ),
+                    bins=20,
+                    color="blue",
+                )
+                plt.grid(True)
+                plt.show()
 
         # Plot all action_1_fractions
         plt.clear_figure()
@@ -2255,14 +2239,13 @@ def collect_existing_analyses(
 
         # Plot action_1_fractions for the top 5% of adaptive variance estimates
         sorted_action_1_fractions = [
-            action_1_fractions[i]
-            for i in sorted_experiment_indices_adaptive_est_descending
+            action_1_fractions[i] for i in sorted_experiment_indices_by_adaptive_est
         ]
         plt.clear_figure()
         plt.title(
             f"Action 1 Fractions Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
         )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Action 1 Fraction")
         plt.scatter(sorted_action_1_fractions, color="red")
         plt.xticks(
@@ -2277,14 +2260,13 @@ def collect_existing_analyses(
 
         # Plot action probability variances sorted by size of the adaptive variance
         sorted_action_prob_variances = [
-            action_prob_variances[i]
-            for i in sorted_experiment_indices_adaptive_est_descending
+            action_prob_variances[i] for i in sorted_experiment_indices_by_adaptive_est
         ]
         plt.clear_figure()
         plt.title(
             f"Action Probability Variances Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
         )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Action Probability Variance")
         plt.scatter(sorted_action_prob_variances, color="blue")
         plt.xticks(

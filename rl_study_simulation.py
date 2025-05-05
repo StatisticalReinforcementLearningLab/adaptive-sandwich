@@ -115,6 +115,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             t < study_env.calendar_T
             and t % args.decisions_between_updates == 0
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
+            and t >= args.min_update_time
         ):
             last_policy_num = len(study_RLalg.all_policies) - 1
 
@@ -415,6 +416,12 @@ def main():
         type=int,
         default=0,
         help="Whether RL algorithm uses action centering (if applicable)",
+    )
+    parser.add_argument(
+        "--min_update_time",
+        type=int,
+        default=0,
+        help="The algorithm will not update before this decision time",
     )
     parser.add_argument(
         "--prior",

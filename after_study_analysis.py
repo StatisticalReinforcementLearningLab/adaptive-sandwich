@@ -464,6 +464,10 @@ def analyze_dataset(
                 "classical_meat_matrix": classical_meat_matrix,
                 "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
                 "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
+                "joint_bread_inverse_first_block_eigvals": jnp.linalg.eigvals(
+                    joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
+                ),
+                "all_post_update_betas": all_post_update_betas,
             },
             f,
         )
@@ -1658,6 +1662,12 @@ def estimate_theta(
     type=str,
     help="Name of the column in the study dataframe that indicates the probability of taking action 1.",
 )
+@click.option(
+    "--study_df_filename",
+    type=str,
+    help="The filename of the pickled study DataFrame.  This is not the full path.",
+    required=True,
+)
 def collect_existing_analyses(
     input_glob: str,
     num_users: int,
@@ -1665,6 +1675,7 @@ def collect_existing_analyses(
     in_study_col_name: str,
     action_col_name: str,
     action_prob_col_name: str,
+    study_df_filename: str,
 ) -> None:
     """
     Collects existing analyses from the specified input glob and computes the mean parameter estimate,
@@ -1682,6 +1693,7 @@ def collect_existing_analyses(
             user.
         action_prob_col_name (str, optional): The name of the column indicating the probability of
             taking action 1.
+        study_df_filename (str): The filename of the pickled study DataFrame. Not the full path.
     """
 
     raw_theta_estimates = []
@@ -1718,7 +1730,7 @@ def collect_existing_analyses(
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
         with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
             all_debug_pieces.append(pickle.load(f))
-        with open(filename.replace("analysis.pkl", "study_df.pkl"), "rb") as f:
+        with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
             study_dfs.append(pandas.read_pickle(f))
 
     theta_estimates = np.array(raw_theta_estimates)
@@ -1886,17 +1898,9 @@ def collect_existing_analyses(
 
         print("\nNow examining stability.\n")
 
-        condition_numbers = None
-        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
-            condition_numbers = [
-                debug_pieces["joint_bread_inverse_condition_number"]
-                for debug_pieces in all_debug_pieces
-            ]
-        if "joint_bread_inverse_matrix" in all_debug_pieces[0]:
-            condition_numbers = [
-                np.linalg.cond(debug_pieces["joint_bread_inverse_matrix"])
-                for debug_pieces in all_debug_pieces
-            ]
+        # Make sure previous output is flushed and not cleared
+        sys.stdout.flush()
+        plt.clear_terminal(False)
 
         action_1_fractions = [
             get_action_1_fraction(study_df, in_study_col_name, action_col_name)
@@ -1907,10 +1911,6 @@ def collect_existing_analyses(
             get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name)
             for study_df in study_dfs
         ]
-
-        # Make sure previous output is flushed and not cleared
-        sys.stdout.flush()
-        plt.clear_terminal(False)
 
         # Plot the theta estimates to see variation
         plt.clear_figure()
@@ -1933,7 +1933,9 @@ def collect_existing_analyses(
 
         # Plot the adaptive sandwich variance estimates to look for blowup
         plt.clear_figure()
-        plt.title(f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates")
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical"
+        )
         plt.xlabel("Simulation Index")
         plt.ylabel("Adaptive Variance Estimate")
         plt.scatter(
@@ -1962,11 +1964,19 @@ def collect_existing_analyses(
                 ),
             )
         )
+        plt.horizontal_line(
+            empirical_var_normalized[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
         plt.show()
 
         # Plot the classical sandwich variance estimates to look for blowup
         plt.clear_figure()
-        plt.title(f"Index {index_to_check_ci_coverage} of Classical Variance Estimates")
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Classical Variance Estimates vs Empirical"
+        )
         plt.xlabel("Simulation Index")
         plt.ylabel("Classical Variance Estimate")
         plt.scatter(
@@ -1995,28 +2005,38 @@ def collect_existing_analyses(
                 ),
             )
         )
+        plt.horizontal_line(
+            empirical_var_normalized[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
         plt.show()
 
         # Plot the classical sandwich variance estimates for the top 5% experiments ranked by adaptive variance estimate size
         num_top_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
-        top_indices = np.argsort(
+        sorted_experiment_indices_by_adaptive_est = np.argsort(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ]
-        )[-num_top_experiments:]
+        )
 
-        top_classical_var_estimates = classical_sandwich_var_estimates[
-            top_indices, index_to_check_ci_coverage, index_to_check_ci_coverage
-        ]
+        classical_var_estimates_sorted_by_adaptive_descending = (
+            classical_sandwich_var_estimates[
+                sorted_experiment_indices_by_adaptive_est,
+                index_to_check_ci_coverage,
+                index_to_check_ci_coverage,
+            ]
+        )
 
         plt.clear_figure()
         plt.title(
-            f"Classical Estimates vs. Median for Highest {num_top_experiments} *Adaptive* Estimates at Index {index_to_check_ci_coverage}"
+            f"Classical Estimates Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage} (vs. Classical Median) "
         )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Classical Variance Estimate")
         plt.scatter(
-            top_classical_var_estimates,
+            classical_var_estimates_sorted_by_adaptive_descending,
             color="orange",
         )
         plt.horizontal_line(
@@ -2028,14 +2048,21 @@ def collect_existing_analyses(
         plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
         plt.show()
 
-        if condition_numbers:
-            # Plot all condition numbers
+        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
+            condition_numbers = [
+                debug_pieces["joint_bread_inverse_condition_number"]
+                for debug_pieces in all_debug_pieces
+            ]
+            sorted_condition_numbers = [
+                condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
+            ]
             plt.clear_figure()
-            plt.title("Condition Numbers for All Simulations")
-            plt.xlabel("Simulation Index")
+            plt.title(
+                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
-            plt.scatter(condition_numbers, color="purple")
-            plt.grid(True)
+            plt.scatter(sorted_condition_numbers, color="purple")
             plt.xticks(
                 range(
                     0,
@@ -2043,22 +2070,156 @@ def collect_existing_analyses(
                     max(1, len(condition_numbers) // 10),
                 )
             )
+            plt.grid(True)
             plt.show()
 
-            # Plot condition numbers for the top 5% of adaptive variance estimates
-            top_condition_numbers = [condition_numbers[i] for i in top_indices]
+        # Examine conditioning of first block of joint bread inverse if the data is available
+        if "joint_bread_inverse_first_block_eigvals" in all_debug_pieces[0]:
+            joint_bread_inverse_first_block_eigenvalues = [
+                debug_pieces["joint_bread_inverse_first_block_eigvals"]
+                for debug_pieces in all_debug_pieces
+            ]
+
+            min_eigenvalues_first_block = np.array(
+                [
+                    np.min(eigenvalues)
+                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
+                ]
+            )
+            max_eigenvalues_first_block = np.array(
+                [
+                    np.max(eigenvalues)
+                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
+                ]
+            )
+
+            # Plot histogram of minimum eigenvalues for first diagonal block of joint bread inverse
             plt.clear_figure()
             plt.title(
-                f"Condition Numbers for Top {num_top_experiments} Adaptive Variance Estimates"
+                "Histogram of Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
             )
-            plt.xlabel("Experiment Rank (by Adaptive Variance)")
-            plt.ylabel("Condition Number")
-            plt.scatter(top_condition_numbers, color="purple")
-            plt.xticks(
-                range(1, num_top_experiments + 1, max(1, num_top_experiments // 10))
+            plt.xlabel("Minimum Eigenvalue")
+            plt.ylabel("Frequency")
+            plt.hist(min_eigenvalues_first_block, bins=20, color="green")
+            plt.grid(True)
+            plt.show()
+
+            # Plot histogram of maximum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Maximum Eigenvalue")
+            plt.ylabel("Frequency")
+            plt.hist(max_eigenvalues_first_block, bins=20, color="orange")
+            plt.grid(True)
+            plt.show()
+
+            # Plot histogram of condition numbers for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Condition Numbers of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Condition Number")
+            plt.ylabel("Frequency")
+            plt.hist(
+                max_eigenvalues_first_block / min_eigenvalues_first_block,
+                bins=20,
+                color="purple",
             )
             plt.grid(True)
             plt.show()
+
+            sorted_min_eigenvalues_first_block = np.array(
+                [
+                    min_eigenvalues_first_block[i]
+                    for i in sorted_experiment_indices_by_adaptive_est
+                ]
+            )
+            # Plot minimum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Min Eigenvalue")
+            plt.scatter(sorted_min_eigenvalues_first_block, color="orange")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(min_eigenvalues_first_block),
+                    max(1, len(min_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+            sorted_max_eigenvalues_first_block = np.array(
+                [
+                    max_eigenvalues_first_block[i]
+                    for i in sorted_experiment_indices_by_adaptive_est
+                ]
+            )
+            # Plot maximum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Max Eigenvalue")
+            plt.scatter(sorted_max_eigenvalues_first_block, color="orange")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(max_eigenvalues_first_block),
+                    max(1, len(max_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+            # Plot condition numbers for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Condition Number of Joint Bread Inverse First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Condition Number")
+            plt.scatter(
+                sorted_max_eigenvalues_first_block / sorted_min_eigenvalues_first_block,
+                color="orange",
+            )
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(max_eigenvalues_first_block),
+                    max(1, len(max_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+        # Examine normality of first beta if available
+        if "all_post_update_betas" in all_debug_pieces[0]:
+            for coordinate in range(
+                min(5, all_debug_pieces[0]["all_post_update_betas"].shape[1])
+            ):
+                plt.clear_figure()
+                plt.title(f"Histogram of First Update Beta Coordinate {coordinate}")
+                plt.xlabel("First Update Beta Coordinate")
+                plt.ylabel("Frequency")
+                plt.hist(
+                    np.array(
+                        [
+                            debug_pieces["all_post_update_betas"][0, coordinate]
+                            for debug_pieces in all_debug_pieces
+                        ]
+                    ),
+                    bins=20,
+                    color="blue",
+                )
+                plt.grid(True)
+                plt.show()
 
         # Plot all action_1_fractions
         plt.clear_figure()
@@ -2077,25 +2238,37 @@ def collect_existing_analyses(
         plt.show()
 
         # Plot action_1_fractions for the top 5% of adaptive variance estimates
-        top_action_1_fractions = [action_1_fractions[i] for i in top_indices]
+        sorted_action_1_fractions = [
+            action_1_fractions[i] for i in sorted_experiment_indices_by_adaptive_est
+        ]
         plt.clear_figure()
         plt.title(
-            f"Action 1 Fractions for Top {num_top_experiments} Adaptive Variance Estimates"
+            f"Action 1 Fractions Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
         )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Action 1 Fraction")
-        plt.scatter(top_action_1_fractions, color="red")
-        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        plt.scatter(sorted_action_1_fractions, color="red")
+        plt.xticks(
+            range(
+                0,
+                len(action_1_fractions),
+                max(1, len(action_1_fractions) // 10),
+            )
+        )
         plt.grid(True)
         plt.show()
 
-        # Plot all action probability variances
+        # Plot action probability variances sorted by size of the adaptive variance
+        sorted_action_prob_variances = [
+            action_prob_variances[i] for i in sorted_experiment_indices_by_adaptive_est
+        ]
         plt.clear_figure()
-        plt.title("Action Probability Variances for All Simulations")
-        plt.xlabel("Simulation Index")
+        plt.title(
+            f"Action Probability Variances Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+        )
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Action Probability Variance")
-        plt.scatter(action_prob_variances, color="blue")
-        plt.grid(True)
+        plt.scatter(sorted_action_prob_variances, color="blue")
         plt.xticks(
             range(
                 0,
@@ -2103,18 +2276,6 @@ def collect_existing_analyses(
                 max(1, len(action_prob_variances) // 10),
             )
         )
-        plt.show()
-
-        # Plot action probability variances for the top 5% of adaptive variance estimates
-        top_action_prob_variances = [action_prob_variances[i] for i in top_indices]
-        plt.clear_figure()
-        plt.title(
-            f"Action Probability Variances for Top {num_top_experiments} Adaptive Variance Estimates"
-        )
-        plt.xlabel("Experiment Rank (by Adaptive Variance)")
-        plt.ylabel("Action Probability Variance")
-        plt.scatter(top_action_prob_variances, color="blue")
-        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
         plt.grid(True)
         plt.show()
 

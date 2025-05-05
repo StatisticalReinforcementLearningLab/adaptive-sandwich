@@ -74,6 +74,16 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:-: OPT; do
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
 done
+
+# Check for invalid options that do not start with a dash. This
+# prevents accidentally missing dashes and thinking you passed an
+# arg that you didn't.
+for arg in "$@"; do
+  if [[ "$arg" != -* ]]; then
+    die "Invalid argument: $arg. Options must start with a dash (- or --)."
+  fi
+done
+
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an oralytics RL study (unless we just want to analyze previous results)
@@ -94,13 +104,13 @@ output_folder="oralytics_sample_data/Archive/exps/write/NON_STAT_LOW_R_None_0.51
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/${seed}_study_data.pkl" \
+  --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/${seed}_action_data.pkl" \
+  --action_prob_func_args_pickle="${output_folder}/action_data.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --alg_update_func_filename=$alg_update_func_filename \
   --alg_update_func_type=$alg_update_func_type \
-  --alg_update_func_args_pickle="${output_folder}/${seed}_loss_fn_data.pkl" \
+  --alg_update_func_args_pickle="${output_folder}/loss_fn_data.pkl" \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \

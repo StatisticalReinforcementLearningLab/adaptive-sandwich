@@ -10,6 +10,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # Arguments that affect RL study simulation side
 T=10
 decisions_between_updates=1
+min_update_time=1
 recruit_t=1
 n=100
 recruit_n=$n
@@ -47,7 +48,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -66,6 +67,7 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:
     a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
     s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
+    Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -94,6 +96,16 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
 done
+
+# Check for invalid options that do not start with a dash. This
+# prevents accidentally missing dashes and thinking you passed an
+# arg that you didn't.
+for arg in "$@"; do
+  if [[ "$arg" != -* ]]; then
+    die "Invalid argument: $arg. Options must start with a dash (- or --)."
+  fi
+done
+
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
@@ -113,7 +125,8 @@ python rl_study_simulation.py \
   --action_centering=$action_centering_RL \
   --dynamic_seeds=$dynamic_seeds \
   --env_seed_override=$env_seed_override \
-  --alg_seed_override=$alg_seed_override
+  --alg_seed_override=$alg_seed_override \
+  --min_update_time=$min_update_time
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

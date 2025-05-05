@@ -39,6 +39,7 @@ class TestRunStudySimulation:
             recruit_t=1,
             allocation_sigma=1,
             noise_var=1,
+            min_update_time=0,
         )
 
         self.args_no_incremental_1 = argparse.Namespace(
@@ -63,6 +64,7 @@ class TestRunStudySimulation:
             recruit_t=1,
             allocation_sigma=1,
             noise_var=1,
+            min_update_time=0,
         )
 
         self.state_feats = [

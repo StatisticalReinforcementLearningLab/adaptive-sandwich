@@ -9,6 +9,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 input_glob=""
 num_users=""
 index_to_check_ci_coverage=""
+study_df_filename="study_df.pkl"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -26,10 +27,21 @@ while getopts i:n:c:s:a:p:-: OPT; do
     s  | in_study_col_name )            needs_arg; in_study_col_name="$OPTARG" ;;
     a  | action_col_name )              needs_arg; action_col_name="$OPTARG" ;;
     p  | action_prob_col_name )         needs_arg; action_prob_col_name="$OPTARG" ;;
+    f  | study_df_filename )            needs_arg; study_df_filename="$OPTARG" ;;
     \? )                                exit 2 ;;  # bad short option (error reported via getopts)
     * )                                 die "Illegal option --$OPT" ;; # bad long option
   esac
 done
+
+# Check for invalid options that do not start with a dash. This
+# prevents accidentally missing dashes and thinking you passed an
+# arg that you didn't.
+for arg in "$@"; do
+  if [[ "$arg" != -* ]]; then
+    die "Invalid argument: $arg. Options must start with a dash (- or --)."
+  fi
+done
+
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 if [ -z "$input_glob" ]; then
@@ -58,9 +70,9 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requireme
 # after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
 if [ -z "$index_to_check_ci_coverage" ]; then
-  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}"
+  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}"
 else
-  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
+  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
 fi
 
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.

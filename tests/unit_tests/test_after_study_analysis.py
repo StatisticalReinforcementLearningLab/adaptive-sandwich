@@ -171,7 +171,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     multiplied by the right estimating functions and also that the shared betas
     are appropriately subbed in to (only) the numerators of the weights.
 
-    This test does compare that given loss functions on both sides, they are
+    This test does check that given loss functions on both sides, they are
     differentiated properly, as I actually load the corresponding estimating
     functions directly below and work with them instead of differentiating the
     losses in the test to form expected values.

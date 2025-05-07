@@ -842,7 +842,6 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         user_id,
     )
 
-    # TODO: move out of there. But set up args for vmap below
     in_study_action_prob_func_args = [
         args for args in action_prob_func_args_by_decision_time.values() if args
     ]
@@ -904,13 +903,17 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         *batched_threaded_arg_tensors,
     )
 
-    in_batch_index = 0
+    in_study_index = 0
+    decision_time_to_all_weights_index_offset = min(
+        sorted_threaded_action_prob_args_by_decision_time
+    )
     all_weights_raw = []
     for (
         decision_time,
         args,
     ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        all_weights_raw.append(in_study_weights[in_batch_index] if args else 1.0)
+        all_weights_raw.append(in_study_weights[in_study_index] if args else 1.0)
+        in_study_index += 1
     all_weights = jnp.array(all_weights_raw)
 
     # TODO: May need to use dynamic slicing when this whole function is vmapped
@@ -927,14 +930,16 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                         max(
                             first_time_after_first_update,
                             user_start_time,
-                        ) :
+                        )
+                        - decision_time_to_all_weights_index_offset :
                         # One more than the latest time the user was in the study before the time
                         # the update under consideration first applied. Note the + 1 because range
                         # does not include the right endpoint.
                         min(
                             min_time_by_policy_num.get(policy_num, math.inf),
                             user_end_time + 1,
-                        ),
+                        )
+                        - decision_time_to_all_weights_index_offset,
                     ]
                 )  # Now use the above to weight the alg estimating function for this update
                 * algorithm_estimating_func(*update_args)
@@ -956,7 +961,10 @@ def single_user_weighted_algorithm_estimating_function_stacker(
     )
     inference_component = jnp.prod(
         all_weights[
-            max(first_time_after_first_update, user_start_time) : user_end_time + 1,
+            max(first_time_after_first_update, user_start_time)
+            - decision_time_to_all_weights_index_offset : user_end_time
+            + 1
+            - decision_time_to_all_weights_index_offset,
         ]
     ) * inference_estimating_func(*threaded_inference_func_args)
 

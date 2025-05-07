@@ -107,6 +107,7 @@ for arg in "$@"; do
 done
 
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01

@@ -132,10 +132,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             logger.info("Updating algorithm parameters for time %s.", t)
             logger.info("Collecting RL loss args for time %s.", t)
             study_RLalg.update_alg(new_update_data)
-            logger.info(
-                "Calculating loss gradients per user and average hessian for time %s.",
-                t,
-            )
 
             curr_beta_est = study_RLalg.get_current_beta_estimate()
 

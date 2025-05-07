@@ -13,9 +13,9 @@ class RLStudyArgs:
     EASY = "easy"
 
     # Synthetic mode
-    DELAYED_1_DOSAGE = "delayed_1_dosage"
-    DELAYED_2_DOSAGE = "delayed_2_dosage"
-    DELAYED_5_DOSAGE = "delayed_5_dosage"
+    DELAYED_1_ACTION_DOSAGE = "delayed_1_action_dosage"
+    DELAYED_2_ACTION_DOSAGE = "delayed_2_action_dosage"
+    DELAYED_5_ACTION_DOSAGE = "delayed_5_action_dosage"
     DELAYED_1_DOSAGE_PAPER = "delayed_1_dosage_paper"
     DELAYED_2_DOSAGE_PAPER = "delayed_2_dosage_paper"
     DELAYED_5_DOSAGE_PAPER = "delayed_5_dosage_paper"

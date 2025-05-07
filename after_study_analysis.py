@@ -7,6 +7,7 @@ import os
 import logging
 import glob
 import math
+import sys
 from typing import Any
 
 import click
@@ -15,6 +16,7 @@ import numpy as np
 from jax import numpy as jnp
 import scipy
 import pandas
+import plotext as plt
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
@@ -23,10 +25,12 @@ from vmap_helpers import stack_batched_arg_lists_into_tensors
 
 from helper_functions import (
     conditional_x_or_one_minus_x,
+    get_action_prob_variance,
     get_in_study_df_column,
     invert_matrix_and_check_conditioning,
     load_function_from_same_named_file,
     replace_tuple_index,
+    get_action_1_fraction,
 )
 
 logger = logging.getLogger(__name__)
@@ -361,6 +365,7 @@ def analyze_dataset(
         classical_bread_inverse_matrix,
         classical_meat_matrix,
         avg_estimating_function_stack,
+        all_per_user_estimating_function_stacks,
     ) = construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
         theta_est,
         all_post_update_betas,
@@ -399,7 +404,7 @@ def analyze_dataset(
     logger.info("Forming classical sandwich variance estimate...")
     classical_bread_matrix = invert_matrix_and_check_conditioning(
         classical_bread_inverse_matrix
-    )
+    )[0]
     classical_sandwich_var_estimate = (
         classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
     ) / len(user_ids)
@@ -409,8 +414,8 @@ def analyze_dataset(
     # TODO: decide whether to in fact scrap the structure-based inversion
     # TODO: Could inspect condition number of each of the diagonal matrices
     logger.info("Inverting joint bread inverse matrix...")
-    joint_adaptive_bread_matrix = invert_matrix_and_check_conditioning(
-        joint_adaptive_bread_inverse_matrix
+    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
+        invert_matrix_and_check_conditioning(joint_adaptive_bread_inverse_matrix)
     )
 
     if not suppress_all_data_checks:
@@ -454,7 +459,17 @@ def analyze_dataset(
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
                 "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+                "joint_bread_matrix": joint_adaptive_bread_matrix,
                 "joint_meat_matrix": joint_adaptive_meat_matrix,
+                "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
+                "classical_bread_matrix": classical_bread_matrix,
+                "classical_meat_matrix": classical_meat_matrix,
+                "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
+                "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
+                "joint_bread_inverse_first_block_eigvals": jnp.linalg.eigvals(
+                    joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
+                ),
+                "all_post_update_betas": all_post_update_betas,
             },
             f,
         )
@@ -1293,7 +1308,9 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
-) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+) -> tuple[
+    jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
+]:
     """
     Computes the average of the weighted estimating function stacks for all users, along with
     auxiliary values used to construct the adaptive and classical sandwich variances.
@@ -1354,9 +1371,10 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     Returns:
         jnp.ndarray:
             A 1D JAX NumPy array representing the average weighted estimating function stack.
-        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing the average weighted estimating function stack, the adaptive meat
-            matrix, the classical meat matrix, and the inverse classical bread matrix.
+            matrix, the classical meat matrix, the inverse classical bread matrix, and the raw
+            per-user weighted estimating function stacks.
     """
 
     # 1. Collect the necessary function objects
@@ -1461,12 +1479,13 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second output will be passed along without modification via has_aux=True and then used
     # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices.
+    # bread matrices. The raw per-user stacks are also returned for debugging purposes.
     return jnp.mean(stacks, axis=0), (
         jnp.mean(stacks, axis=0),
         jnp.mean(outer_products, axis=0),
         jnp.mean(inference_only_outer_products, axis=0),
         jnp.mean(inference_hessians, axis=0),
+        stacks,
     )
 
 
@@ -1502,6 +1521,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
 ) -> tuple[
+    jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1569,13 +1589,14 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
     Returns:
-        tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
+        tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
             - The joint adaptive inverse bread matrix.
             - The joint adaptive meat matrix.
             - The classical inverse bread matrix.
             - The classical meat matrix.
             - The average weighted estimating function stack.
+            - All per-user weighted estimating function stacks.
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
@@ -1587,6 +1608,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         joint_adaptive_meat,
         classical_meat,
         classical_bread_inverse,
+        all_per_user_estimating_function_stacks,
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(
@@ -1625,6 +1647,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         classical_bread_inverse,
         classical_meat,
         avg_estimating_function_stack,
+        all_per_user_estimating_function_stacks,
     )
 
 
@@ -1655,12 +1678,42 @@ def estimate_theta(
     help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
     required=True,
 )
+@click.option("--num_users", type=int, required=True)
 @click.option(
     "--index_to_check_ci_coverage",
     type=int,
     help="The index of the parameter to check confidence interval coverage for across runs.  If not provided, coverage will not be checked.",
 )
-def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) -> None:
+@click.option(
+    "--in_study_col_name",
+    type=str,
+    help="Name of the binary column in the study dataframe that indicates whether a user is in the study.",
+)
+@click.option(
+    "--action_col_name",
+    type=str,
+    help="Name of the column in the study dataframe that indicates the action taken by the user.",
+)
+@click.option(
+    "--action_prob_col_name",
+    type=str,
+    help="Name of the column in the study dataframe that indicates the probability of taking action 1.",
+)
+@click.option(
+    "--study_df_filename",
+    type=str,
+    help="The filename of the pickled study DataFrame.  This is not the full path.",
+    required=True,
+)
+def collect_existing_analyses(
+    input_glob: str,
+    num_users: int,
+    index_to_check_ci_coverage: int,
+    in_study_col_name: str,
+    action_col_name: str,
+    action_prob_col_name: str,
+    study_df_filename: str,
+) -> None:
     """
     Collects existing analyses from the specified input glob and computes the mean parameter estimate,
     empirical variance, and adaptive/classical sandwich variance estimates.
@@ -1668,13 +1721,23 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
 
     Args:
         input_glob (str): The glob pattern to search for analysis files.
+        num_users (int): The number of users in the study.
         index_to_check_ci_coverage (int, optional): The index of the parameter to check confidence
             interval coverage for. If not provided, coverage will not be checked.
+        in_study_col_name (str, optional): The name of the column indicating whether a user is in
+            the study.
+        action_col_name (str, optional): The name of the column indicating the action taken by the
+            user.
+        action_prob_col_name (str, optional): The name of the column indicating the probability of
+            taking action 1.
+        study_df_filename (str): The filename of the pickled study DataFrame. Not the full path.
     """
 
     raw_theta_estimates = []
     raw_adaptive_sandwich_var_estimates = []
     raw_classical_sandwich_var_estimates = []
+    all_debug_pieces = []
+    study_dfs = []
     filenames = glob.glob(input_glob)
 
     logger.info("Found %d files under the glob %s", len(filenames), input_glob)
@@ -1702,15 +1765,22 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
             raw_theta_estimates.append(theta_est)
             raw_adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
+        with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
+            all_debug_pieces.append(pickle.load(f))
+        with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
+            study_dfs.append(pandas.read_pickle(f))
 
     theta_estimates = np.array(raw_theta_estimates)
     adaptive_sandwich_var_estimates = np.array(raw_adaptive_sandwich_var_estimates)
     classical_sandwich_var_estimates = np.array(raw_classical_sandwich_var_estimates)
 
-    theta_estimate = np.mean(theta_estimates, axis=0)
+    mean_theta_estimate = np.mean(theta_estimates, axis=0)
     empirical_var_normalized = np.atleast_2d(np.cov(theta_estimates.T, ddof=1))
 
     mean_adaptive_sandwich_var_estimate = np.mean(
+        adaptive_sandwich_var_estimates, axis=0
+    )
+    median_adaptive_sandwich_var_estimate = np.median(
         adaptive_sandwich_var_estimates, axis=0
     )
     adaptive_sandwich_var_estimate_std_deviations = np.sqrt(
@@ -1724,6 +1794,9 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     )
 
     mean_classical_sandwich_var_estimate = np.mean(
+        classical_sandwich_var_estimates, axis=0
+    )
+    median_classical_sandwich_var_estimate = np.median(
         classical_sandwich_var_estimates, axis=0
     )
     classical_sandwich_var_estimate_std_deviations = np.sqrt(
@@ -1742,19 +1815,19 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     # Population standard error formula: https://en.wikipedia.org/wiki/Variance
     # Unbiased estimator: https://stats.stackexchange.com/questions/307537/unbiased-estimator-of-the-variance-of-the-sample-variance
     theta_component_variance_std_errors = []
-    for i in range(len(theta_estimate)):
+    for i in range(len(mean_theta_estimate)):
         component_estimates = [estimate[i] for estimate in theta_estimates]
         second_central_moment = scipy.stats.moment(component_estimates, moment=4)
         fourth_central_moment = scipy.stats.moment(component_estimates, moment=4)
-        n = len(theta_estimates)
+        N = len(theta_estimates)
         theta_component_variance_std_errors.append(
             np.sqrt(
-                n
+                N
                 * (
-                    ((n) ** 2 - 3) * (second_central_moment) ** 2
-                    + ((n - 1) ** 2) * fourth_central_moment
+                    ((N) ** 2 - 3) * (second_central_moment) ** 2
+                    + ((N - 1) ** 2) * fourth_central_moment
                 )
-                / ((n - 3) * (n - 2) * ((n - 1) ** 2))
+                / ((N - 3) * (N - 2) * ((N - 1) ** 2))
             )
         )
 
@@ -1765,7 +1838,7 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
             theta_component_variance_std_errors[j],
         )
 
-    print(f"\nMean parameter estimate:\n{theta_estimate}")
+    print(f"\nMean parameter estimate:\n{mean_theta_estimate}")
     print(f"\nEmpirical variance of parameter estimates:\n{empirical_var_normalized}")
     print(
         f"\nEmpirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):\n{approximate_standard_errors}"
@@ -1775,6 +1848,12 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     )
     print(
         f"\nMean classical sandwich variance estimate:\n{mean_classical_sandwich_var_estimate}",
+    )
+    print(
+        f"\nMedian adaptive sandwich variance estimate:\n{median_adaptive_sandwich_var_estimate}",
+    )
+    print(
+        f"\nMedian classical sandwich variance estimate:\n{median_classical_sandwich_var_estimate}",
     )
     print(
         f"\nAdaptive sandwich variance estimate std errors from empirical:\n{(mean_adaptive_sandwich_var_estimate - empirical_var_normalized) / approximate_standard_errors}",
@@ -1804,40 +1883,438 @@ def collect_existing_analyses(input_glob: str, index_to_check_ci_coverage: int) 
     if theta_estimates[0].size == 1:
         index_to_check_ci_coverage = 0
     if index_to_check_ci_coverage is not None:
-        adaptive_cover_count = 0
-        classical_cover_count = 0
-        scalar_mean_theta = theta_estimate[index_to_check_ci_coverage]
-        for single_theta_est in theta_estimates:
-            scalar_single_theta = single_theta_est[index_to_check_ci_coverage]
-            adaptive_se = math.sqrt(
-                mean_adaptive_sandwich_var_estimate[index_to_check_ci_coverage][
-                    index_to_check_ci_coverage
-                ]
-            )
-            classical_se = math.sqrt(
-                mean_classical_sandwich_var_estimate[index_to_check_ci_coverage][
-                    index_to_check_ci_coverage
-                ]
-            )
-            if (
-                scalar_mean_theta - 1.96 * adaptive_se
-                <= scalar_single_theta
-                <= scalar_mean_theta + 1.96 * adaptive_se
-            ):
-                adaptive_cover_count += 1
-            if (
-                scalar_mean_theta - 1.96 * classical_se
-                <= scalar_single_theta
-                <= scalar_mean_theta + 1.96 * classical_se
-            ):
-                classical_cover_count += 1
+        # We take this to be the "true" value
+        scalar_mean_theta = mean_theta_estimate[index_to_check_ci_coverage]
+        diffs = np.abs(
+            theta_estimates[:, index_to_check_ci_coverage] - scalar_mean_theta
+        )
+
+        adaptive_standard_errors = np.sqrt(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+        classical_standard_errors = np.sqrt(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+        NOMINAL_COVERAGE = 0.95
+        UPPER_PERCENTILE = 1 - (1 - NOMINAL_COVERAGE) / 2
+
+        adaptive_z_covers = (
+            diffs < scipy.stats.norm.ppf(UPPER_PERCENTILE) * adaptive_standard_errors
+        )
+        classical_z_covers = (
+            diffs < scipy.stats.norm.ppf(UPPER_PERCENTILE) * classical_standard_errors
+        )
+
+        adaptive_t_covers = (
+            diffs
+            < scipy.stats.t.ppf(UPPER_PERCENTILE, num_users - 1)
+            * adaptive_standard_errors
+        )
+        classical_t_covers = (
+            diffs
+            < scipy.stats.t.ppf(UPPER_PERCENTILE, num_users - 1)
+            * classical_standard_errors
+        )
 
         print(
-            f"\nAdaptive sandwich 95% CI coverage:\n{adaptive_cover_count / len(theta_estimates)}",
+            f"\nAdaptive sandwich {NOMINAL_COVERAGE * 100}% standard normal CI coverage:\n{np.mean(adaptive_z_covers)}\n",
         )
         print(
-            f"\nClassical sandwich 95% CI coverage:\n{classical_cover_count / len(theta_estimates)}\n",
+            f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% standard normal CI coverage:\n{np.mean(classical_z_covers)}\n",
         )
+        print(
+            f"\nAdaptive sandwich {NOMINAL_COVERAGE * 100}% t({num_users - 1}) CI coverage:\n{np.mean(adaptive_t_covers)}\n",
+        )
+        print(
+            f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% t({num_users - 1}) CI coverage:\n{np.mean(classical_t_covers)}\n",
+        )
+
+        print("\nNow examining stability.\n")
+
+        # Make sure previous output is flushed and not cleared
+        sys.stdout.flush()
+        plt.clear_terminal(False)
+
+        action_1_fractions = [
+            get_action_1_fraction(study_df, in_study_col_name, action_col_name)
+            for study_df in study_dfs
+        ]
+
+        action_prob_variances = [
+            get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name)
+            for study_df in study_dfs
+        ]
+
+        # Plot the theta estimates to see variation
+        plt.clear_figure()
+        plt.title(f"Index {index_to_check_ci_coverage} of Theta Estimates")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Theta Estimate")
+        plt.scatter(
+            theta_estimates[:, index_to_check_ci_coverage],
+            color="blue",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(theta_estimates[:, index_to_check_ci_coverage]),
+                max(1, len(theta_estimates[:, index_to_check_ci_coverage]) // 10),
+            )
+        )
+        plt.show()
+
+        # Plot the adaptive sandwich variance estimates to look for blowup
+        plt.clear_figure()
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical"
+        )
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Adaptive Variance Estimate")
+        plt.scatter(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="green",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(
+                    adaptive_sandwich_var_estimates[
+                        :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                    ]
+                ),
+                max(
+                    1,
+                    len(
+                        adaptive_sandwich_var_estimates[
+                            :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                        ]
+                    )
+                    // 10,
+                ),
+            )
+        )
+        plt.horizontal_line(
+            empirical_var_normalized[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
+        plt.show()
+
+        # Plot the classical sandwich variance estimates to look for blowup
+        plt.clear_figure()
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Classical Variance Estimates vs Empirical"
+        )
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Classical Variance Estimate")
+        plt.scatter(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="green",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(
+                    classical_sandwich_var_estimates[
+                        :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                    ]
+                ),
+                max(
+                    1,
+                    len(
+                        classical_sandwich_var_estimates[
+                            :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                        ]
+                    )
+                    // 10,
+                ),
+            )
+        )
+        plt.horizontal_line(
+            empirical_var_normalized[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
+        plt.show()
+
+        # Plot the classical sandwich variance estimates for the top 5% experiments ranked by adaptive variance estimate size
+        num_top_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
+        sorted_experiment_indices_by_adaptive_est = np.argsort(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+
+        classical_var_estimates_sorted_by_adaptive_descending = (
+            classical_sandwich_var_estimates[
+                sorted_experiment_indices_by_adaptive_est,
+                index_to_check_ci_coverage,
+                index_to_check_ci_coverage,
+            ]
+        )
+
+        plt.clear_figure()
+        plt.title(
+            f"Classical Estimates Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage} (vs. Classical Median) "
+        )
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
+        plt.ylabel("Classical Variance Estimate")
+        plt.scatter(
+            classical_var_estimates_sorted_by_adaptive_descending,
+            color="orange",
+        )
+        plt.horizontal_line(
+            median_classical_sandwich_var_estimate[
+                index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            color="blue",
+        )
+        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        plt.show()
+
+        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
+            condition_numbers = [
+                debug_pieces["joint_bread_inverse_condition_number"]
+                for debug_pieces in all_debug_pieces
+            ]
+            sorted_condition_numbers = [
+                condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
+            ]
+            plt.clear_figure()
+            plt.title(
+                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
+            plt.ylabel("Condition Number")
+            plt.scatter(sorted_condition_numbers, color="purple")
+            plt.xticks(
+                range(
+                    0,
+                    len(condition_numbers),
+                    max(1, len(condition_numbers) // 10),
+                )
+            )
+            plt.grid(True)
+            plt.show()
+
+        # Examine conditioning of first block of joint bread inverse if the data is available
+        if "joint_bread_inverse_first_block_eigvals" in all_debug_pieces[0]:
+            joint_bread_inverse_first_block_eigenvalues = [
+                debug_pieces["joint_bread_inverse_first_block_eigvals"]
+                for debug_pieces in all_debug_pieces
+            ]
+
+            min_eigenvalues_first_block = np.array(
+                [
+                    np.min(eigenvalues)
+                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
+                ]
+            )
+            max_eigenvalues_first_block = np.array(
+                [
+                    np.max(eigenvalues)
+                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
+                ]
+            )
+
+            # Plot histogram of minimum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Minimum Eigenvalue")
+            plt.ylabel("Frequency")
+            plt.hist(min_eigenvalues_first_block, bins=20, color="green")
+            plt.grid(True)
+            plt.show()
+
+            # Plot histogram of maximum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Maximum Eigenvalue")
+            plt.ylabel("Frequency")
+            plt.hist(max_eigenvalues_first_block, bins=20, color="orange")
+            plt.grid(True)
+            plt.show()
+
+            # Plot histogram of condition numbers for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                "Histogram of Condition Numbers of Joint Bread Inverse Matrix First Diag Block"
+            )
+            plt.xlabel("Condition Number")
+            plt.ylabel("Frequency")
+            plt.hist(
+                max_eigenvalues_first_block / min_eigenvalues_first_block,
+                bins=20,
+                color="purple",
+            )
+            plt.grid(True)
+            plt.show()
+
+            sorted_min_eigenvalues_first_block = np.array(
+                [
+                    min_eigenvalues_first_block[i]
+                    for i in sorted_experiment_indices_by_adaptive_est
+                ]
+            )
+            # Plot minimum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Minimum Eigenvalues of Joint Bread Inverse Matrix First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Min Eigenvalue")
+            plt.scatter(sorted_min_eigenvalues_first_block, color="orange")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(min_eigenvalues_first_block),
+                    max(1, len(min_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+            sorted_max_eigenvalues_first_block = np.array(
+                [
+                    max_eigenvalues_first_block[i]
+                    for i in sorted_experiment_indices_by_adaptive_est
+                ]
+            )
+            # Plot maximum eigenvalues for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Maximum Eigenvalues of Joint Bread Inverse Matrix First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Max Eigenvalue")
+            plt.scatter(sorted_max_eigenvalues_first_block, color="orange")
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(max_eigenvalues_first_block),
+                    max(1, len(max_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+            # Plot condition numbers for first diagonal block of joint bread inverse
+            plt.clear_figure()
+            plt.title(
+                f"Condition Number of Joint Bread Inverse First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+            )
+            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
+            plt.ylabel("Condition Number")
+            plt.scatter(
+                sorted_max_eigenvalues_first_block / sorted_min_eigenvalues_first_block,
+                color="orange",
+            )
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    len(max_eigenvalues_first_block),
+                    max(1, len(max_eigenvalues_first_block) // 10),
+                )
+            )
+            plt.show()
+
+        # Examine normality of first beta if available
+        if "all_post_update_betas" in all_debug_pieces[0]:
+            for coordinate in range(
+                min(5, all_debug_pieces[0]["all_post_update_betas"].shape[1])
+            ):
+                plt.clear_figure()
+                plt.title(f"Histogram of First Update Beta Coordinate {coordinate}")
+                plt.xlabel("First Update Beta Coordinate")
+                plt.ylabel("Frequency")
+                plt.hist(
+                    np.array(
+                        [
+                            debug_pieces["all_post_update_betas"][0, coordinate]
+                            for debug_pieces in all_debug_pieces
+                        ]
+                    ),
+                    bins=20,
+                    color="blue",
+                )
+                plt.grid(True)
+                plt.show()
+
+        # Plot all action_1_fractions
+        plt.clear_figure()
+        plt.title("Action 1 Fractions for All Simulations")
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Action 1 Fraction")
+        plt.scatter(action_1_fractions, color="red")
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(action_1_fractions),
+                max(1, len(action_1_fractions) // 10),
+            )
+        )
+        plt.show()
+
+        # Plot action_1_fractions for the top 5% of adaptive variance estimates
+        sorted_action_1_fractions = [
+            action_1_fractions[i] for i in sorted_experiment_indices_by_adaptive_est
+        ]
+        plt.clear_figure()
+        plt.title(
+            f"Action 1 Fractions Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+        )
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
+        plt.ylabel("Action 1 Fraction")
+        plt.scatter(sorted_action_1_fractions, color="red")
+        plt.xticks(
+            range(
+                0,
+                len(action_1_fractions),
+                max(1, len(action_1_fractions) // 10),
+            )
+        )
+        plt.grid(True)
+        plt.show()
+
+        # Plot action probability variances sorted by size of the adaptive variance
+        sorted_action_prob_variances = [
+            action_prob_variances[i] for i in sorted_experiment_indices_by_adaptive_est
+        ]
+        plt.clear_figure()
+        plt.title(
+            f"Action Probability Variances Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+        )
+        plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
+        plt.ylabel("Action Probability Variance")
+        plt.scatter(sorted_action_prob_variances, color="blue")
+        plt.xticks(
+            range(
+                0,
+                len(action_prob_variances),
+                max(1, len(action_prob_variances) // 10),
+            )
+        )
+        plt.grid(True)
+        plt.show()
 
 
 if __name__ == "__main__":

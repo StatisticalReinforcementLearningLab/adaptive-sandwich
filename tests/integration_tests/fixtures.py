@@ -1,7 +1,7 @@
 import pytest
 import sh
 
-from tests.integration_tests.utils import get_abs_path
+from tests.utils import get_abs_path
 
 
 @pytest.fixture

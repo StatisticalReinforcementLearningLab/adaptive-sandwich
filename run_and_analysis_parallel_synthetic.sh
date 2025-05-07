@@ -20,7 +20,7 @@
 # S BATCH -p gpu_requeue                                                       # Target Partition
 # S BATCH --gres=gpu:1                                                         # Request a GPU
 
-# Stop on nonzero exit codes and use of undefined variables, and print all commands
+# Stop on nonzero exit codes and use of undefined variables
 set -eu
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Parsing options.
@@ -30,12 +30,13 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that affect RL study simulation side and then inference through
 # that.
-T=10
+T=50
 decisions_between_updates=1
+min_update_time=0
 recruit_t=1
 n=100
 recruit_n=$n
-synthetic_mode='delayed_1_dosage'
+synthetic_mode='delayed_1_action_dosage'
 steepness=0.0
 RL_alg="sigmoid_LS"
 err_corr='time_corr'
@@ -69,7 +70,7 @@ small_sample_correction="none"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -88,6 +89,7 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-:
     a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
     s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
+    Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -110,15 +112,26 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-:
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
-    * )                                         die "Illegal option --$OPT" ;; # bad long option
+    * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
 done
+
+# Check for invalid options that do not start with a dash. This
+# prevents accidentally missing dashes and thinking you passed an
+# arg that you didn't.
+for arg in "$@"; do
+  if [[ "$arg" != -* ]]; then
+    die "Invalid argument: $arg. Options must start with a dash (- or --)."
+  fi
+done
+
 shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01
-module load cuda/12.2.0-fasrc01
+# if using GPU, something like the following will be necessary:
+# module load cuda/12.2.0-fasrc01
 
 # Make virtualenv if necessary, and then activate it
 cd ~
@@ -131,7 +144,7 @@ source venv/bin/activate
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Making sure Python requirements are installed.
-pip install -r cluster_simulation_requirements.txt
+pip install -r requirements.txt
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: All Python requirements installed.
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
@@ -160,7 +173,8 @@ python rl_study_simulation.py \
   --alg_state_feats=$alg_state_feats \
   --action_centering=$action_centering_RL \
   --save_dir=$save_dir \
-  --dynamic_seeds=$dynamic_seeds
+  --dynamic_seeds=$dynamic_seeds \
+  --min_update_time=$min_update_time
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
@@ -197,4 +211,4 @@ python after_study_analysis.py analyze-dataset \
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl"
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl --num_users=$n [--index_to_check_ci_coverage=<>]  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"

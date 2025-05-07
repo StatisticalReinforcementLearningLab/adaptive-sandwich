@@ -20,6 +20,7 @@
 # S BATCH -p gpu_requeue                                                       # Target Partition
 # S BATCH --gres=gpu:1                                                         # Request a GPU
 
+# Stop on nonzero exit codes and use of undefined variables
 set -eu
 
 echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics: Beginning simulation."
@@ -95,12 +96,22 @@ while getopts s:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:-: OPT; do
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
 done
-shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
+# Check for invalid options that do not start with a dash. This
+# prevents accidentally missing dashes and thinking you passed an
+# arg that you didn't.
+for arg in "$@"; do
+  if [[ "$arg" != -* ]]; then
+    die "Invalid argument: $arg. Options must start with a dash (- or --)."
+  fi
+done
+
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01
-module load cuda/12.2.0-fasrc01
+# if using GPU, something like the following will be necessary:
+# module load cuda/12.2.0-fasrc01
 
 # Make virtualenv if necessary, and then activate it
 cd ~
@@ -113,7 +124,7 @@ source venv/bin/activate
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Making sure Python requirements are installed.
-pip install -r cluster_simulation_requirements.txt
+pip install -r requirements.txt
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: All Python requirements installed.
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
@@ -142,13 +153,13 @@ output_folder_glob="${save_dir_prefix}/NON_STAT_LOW_R_None_0.515_14_full_pooling
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics: Beginning after-study analysis."
 python after_study_analysis.py analyze-dataset \
-  --study_df_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_study_data.pkl" \
+  --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_action_data.pkl" \
+  --action_prob_func_args_pickle="${output_folder}/action_data.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
   --alg_update_func_filename=$alg_update_func_filename \
   --alg_update_func_type=$alg_update_func_type \
-  --alg_update_func_args_pickle="${output_folder}/${SLURM_ARRAY_TASK_ID}_loss_fn_data.pkl" \
+  --alg_update_func_args_pickle="${output_folder}/loss_fn_data.pkl" \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
@@ -168,4 +179,4 @@ python after_study_analysis.py analyze-dataset \
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --index_to_check_ci_coverage=6"
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --num_users=$num_users --index_to_check_ci_coverage=6  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"

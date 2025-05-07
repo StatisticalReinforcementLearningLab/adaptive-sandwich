@@ -68,7 +68,7 @@ def invert_matrix_and_check_conditioning(
                         "Tikhonov regularization with lambda = %s did not improve the inverse.",
                         lambd,
                     )
-    return inverse
+    return inverse, condition_number
 
 
 def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
@@ -100,7 +100,7 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
                 beta_dim * i : beta_dim * (i + 1),
             ],
             try_tikhonov_if_poorly_conditioned=True,
-        )
+        )[0]
         for j in range(0, num_beta_block_rows):
             if i > j:
                 beta_block_row.append(
@@ -132,7 +132,7 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
             -theta_dim:,
             -theta_dim:,
         ]
-    )
+    )[0]
     for k in range(0, num_beta_block_rows):
         theta_block_row.append(
             -theta_diag_inverse
@@ -205,3 +205,24 @@ def get_in_study_df_column(study_df, col_name, in_study_col_name):
 
 def replace_tuple_index(tupl, index, value):
     return tupl[:index] + (value,) + tupl[index + 1 :]
+
+
+def get_action_1_fraction(study_df, in_study_col_name, action_col_name):
+    """
+    Get the fraction of action 1 in the study_df.
+    """
+    action_1_count = np.sum(
+        (study_df[in_study_col_name] == 1) & (study_df[action_col_name] == 1)
+    )
+    total_count = len(study_df)
+    if total_count == 0:
+        return 0.0
+    return action_1_count / total_count
+
+
+def get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name):
+    """
+    Get the variance of the action probabilities in the study_df.
+    """
+    action_probs = study_df.loc[study_df[in_study_col_name] == 1, action_prob_col_name]
+    return np.var(action_probs)

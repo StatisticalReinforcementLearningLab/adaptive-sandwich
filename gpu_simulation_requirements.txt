@@ -16,7 +16,10 @@ iniconfig==2.0.0
 ipdb==0.13.13
 ipython==8.14.0
 isort==5.12.0
-jax[cuda12_pip]==0.4.21 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# This version doesn't match the one in the local requirements, but unfortunately both are chosen
+# because they actually run in their respective environments.
+--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+jax[cuda12_pip]==0.4.21
 jedi==0.18.2
 Jinja2==3.1.2
 joblib==1.3.2

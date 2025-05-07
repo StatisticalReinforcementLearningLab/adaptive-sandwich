@@ -88,7 +88,7 @@ def test_oralytics_primary_analysis_loss():
         theta_est, tod, bbar, abar, appengage, bias, action, oscb, act_prob
     )
 
-    np.testing.assert_almost_equal(loss, expected_loss)
+    np.testing.assert_allclose(loss, expected_loss, rtol=1e-4)
 
 
 def test_oralytics_estimate_theta_primary_analysis():

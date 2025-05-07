@@ -437,6 +437,11 @@ def analyze_dataset(
         -theta_dim:, -theta_dim:
     ]
 
+    # Ensure diagonal entries of the adaptive sandwich variance estimate are non-negative
+    adaptive_sandwich_var_estimate[
+        np.diag_indices_from(adaptive_sandwich_var_estimate)
+    ] = np.maximum(np.diag(adaptive_sandwich_var_estimate), 0)
+
     logger.info("Writing results to file...")
     # Write analysis results to same directory that input files are in
     folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
@@ -2013,8 +2018,9 @@ def collect_existing_analyses(
         )
         plt.show()
 
-        # Plot the classical sandwich variance estimates for the top 5% experiments ranked by adaptive variance estimate size
-        num_top_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
+        # Plot the classical sandwich variance estimates sorted by adaptive sandwich variance
+        # estimates for the coefficient of interest
+        num_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
         sorted_experiment_indices_by_adaptive_est = np.argsort(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
@@ -2045,7 +2051,7 @@ def collect_existing_analyses(
             ],
             color="blue",
         )
-        plt.xticks(range(1, num_top_experiments + 1, max(1, num_top_experiments // 10)))
+        plt.xticks(range(1, num_experiments + 1, max(1, num_experiments // 10)))
         plt.show()
 
         if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
@@ -2123,7 +2129,7 @@ def collect_existing_analyses(
             plt.xlabel("Condition Number")
             plt.ylabel("Frequency")
             plt.hist(
-                max_eigenvalues_first_block / min_eigenvalues_first_block,
+                np.abs(max_eigenvalues_first_block / min_eigenvalues_first_block),
                 bins=20,
                 color="purple",
             )
@@ -2186,7 +2192,10 @@ def collect_existing_analyses(
             plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
             plt.scatter(
-                sorted_max_eigenvalues_first_block / sorted_min_eigenvalues_first_block,
+                np.abs(
+                    sorted_max_eigenvalues_first_block
+                    / sorted_min_eigenvalues_first_block
+                ),
                 color="orange",
             )
             plt.grid(True)

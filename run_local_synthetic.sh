@@ -10,7 +10,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # Arguments that affect RL study simulation side
 T=10
 decisions_between_updates=1
-min_update_time=1
+min_update_time=0
 recruit_t=1
 n=100
 recruit_n=$n

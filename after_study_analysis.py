@@ -2121,21 +2121,6 @@ def collect_existing_analyses(
             plt.grid(True)
             plt.show()
 
-            # Plot histogram of condition numbers for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                "Histogram of Condition Numbers of Joint Bread Inverse Matrix First Diag Block"
-            )
-            plt.xlabel("Condition Number")
-            plt.ylabel("Frequency")
-            plt.hist(
-                np.abs(max_eigenvalues_first_block / min_eigenvalues_first_block),
-                bins=20,
-                color="purple",
-            )
-            plt.grid(True)
-            plt.show()
-
             sorted_min_eigenvalues_first_block = np.array(
                 [
                     min_eigenvalues_first_block[i]
@@ -2174,30 +2159,6 @@ def collect_existing_analyses(
             plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
             plt.ylabel("Max Eigenvalue")
             plt.scatter(sorted_max_eigenvalues_first_block, color="orange")
-            plt.grid(True)
-            plt.xticks(
-                range(
-                    0,
-                    len(max_eigenvalues_first_block),
-                    max(1, len(max_eigenvalues_first_block) // 10),
-                )
-            )
-            plt.show()
-
-            # Plot condition numbers for first diagonal block of joint bread inverse
-            plt.clear_figure()
-            plt.title(
-                f"Condition Number of Joint Bread Inverse First Diag Block Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
-            )
-            plt.xlabel("Simulation Index (sorted by Adaptive Variance)")
-            plt.ylabel("Condition Number")
-            plt.scatter(
-                np.abs(
-                    sorted_max_eigenvalues_first_block
-                    / sorted_min_eigenvalues_first_block
-                ),
-                color="orange",
-            )
             plt.grid(True)
             plt.xticks(
                 range(

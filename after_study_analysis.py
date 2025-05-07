@@ -438,9 +438,9 @@ def analyze_dataset(
     ]
 
     # Ensure diagonal entries of the adaptive sandwich variance estimate are non-negative
-    adaptive_sandwich_var_estimate[
-        np.diag_indices_from(adaptive_sandwich_var_estimate)
-    ] = np.maximum(np.diag(adaptive_sandwich_var_estimate), 0)
+    adaptive_sandwich_var_estimate = adaptive_sandwich_var_estimate.at[
+        jnp.diag_indices_from(adaptive_sandwich_var_estimate)
+    ].set(jnp.maximum(jnp.diag(adaptive_sandwich_var_estimate), 0))
 
     logger.info("Writing results to file...")
     # Write analysis results to same directory that input files are in

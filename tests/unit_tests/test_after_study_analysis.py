@@ -171,7 +171,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     multiplied by the right estimating functions and also that the shared betas
     are appropriately subbed in to (only) the numerators of the weights.
 
-    This test does compare that given loss functions on both sides, they are
+    This test does check that given loss functions on both sides, they are
     differentiated properly, as I actually load the corresponding estimating
     functions directly below and work with them instead of differentiating the
     losses in the test to form expected values.
@@ -2454,9 +2454,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     Test that the stacking function correctly computes a weighted estimating
     function stack for each of 2 users.
 
-    This test handles the simplest case: no incremental recruitment, no use of
-    action probabilities in the loss/estimating functions for algorithm updates
-    or inference, and only 1 decision time between updates.
+    This test adds the wrinkle of action probabilities being used in both the
+    algorithm and inference estimating functions.
 
     **This test intentionally breaks the assumption that the betas in the action
     probability function args match those in all_post_update_betas, which

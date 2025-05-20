@@ -97,16 +97,14 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:
   esac
 done
 
-# Check for invalid options that do not start with a dash. This
-# prevents accidentally missing dashes and thinking you passed an
-# arg that you didn't.
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
+# Check for invalid options that do not start with a dash after parsing options.
 for arg in "$@"; do
   if [[ "$arg" != -* ]]; then
     die "Invalid argument: $arg. Options must start with a dash (- or --)."
   fi
 done
-
-shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Beginning RL study simulation."

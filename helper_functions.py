@@ -1,5 +1,4 @@
 import os
-import warnings
 import importlib.util
 import importlib.machinery
 import logging
@@ -178,7 +177,7 @@ def confirm_input_check_result(message, suppress_interactive_data_checks, error=
 
     if suppress_interactive_data_checks:
         logger.info(
-            f"Skipping the following interactive data check, as requested:\n{message}"
+            "Skipping the following interactive data check, as requested:\n%s", message
         )
         return
     answer = None

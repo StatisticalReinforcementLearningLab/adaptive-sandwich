@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import jax.scipy.special as special
 
@@ -5029,6 +5030,11 @@ def allocation_function(mean: float, var: float) -> float:
     return prob
 
 
+# NOTE: If you change the number of features in the simulator, the value of "dim" here will need
+# to be updated to match the new number of features.
+TOTAL_FEATURE_DIM = 15
+
+
 def oralytics_act_prob_function(
     beta: jnp.ndarray, advantage: jnp.ndarray, total_feature_dim: int
 ) -> float:
@@ -5036,18 +5042,19 @@ def oralytics_act_prob_function(
     This function calculates the probability of taking action 1 given a user's "advantage" features
     and the model parameters "beta". This is intended to match up with what occurs in Oralytics,
     substituting in a sample mean for an expectation calculated by numerical integration.
-
-    NOTE: If you change the number of features in the simulator, the value of "dim" here will need
-    to be updated to match the new number of features.
     """
 
     n_params = len(advantage)
 
-    mu = beta[:total_feature_dim].reshape(-1, 1)
-    utvar_terms = beta[total_feature_dim:]
-    idx = jnp.triu_indices(total_feature_dim)
+    # We don't actually use the total_feature_dim argument so that this function can be
+    # JIT-compiled, but still could use it to check whether TOTAL_FEATURE_DIM is correct.
+    # TODO: Figure out a way to actually check that they are equal...
+
+    mu = beta[:TOTAL_FEATURE_DIM].reshape(-1, 1)
+    utvar_terms = beta[TOTAL_FEATURE_DIM:]
+    idx = jnp.triu_indices(TOTAL_FEATURE_DIM)
     utvar_inv = (
-        jnp.zeros((total_feature_dim, total_feature_dim), dtype=jnp.float32)
+        jnp.zeros((TOTAL_FEATURE_DIM, TOTAL_FEATURE_DIM), dtype=jnp.float32)
         .at[idx]
         .set(utvar_terms)
     )

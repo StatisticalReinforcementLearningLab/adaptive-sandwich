@@ -106,6 +106,8 @@ while getopts m:T:s:S:G:t:g:e:O:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:J:H:Q:q:z:-: OPT
   esac
 done
 
+shift $((OPTIND-1)) # remove parsed options and args from $@ list
+
 # Check for invalid options that do not start with a dash. This
 # prevents accidentally missing dashes and thinking you passed an
 # arg that you didn't.
@@ -114,8 +116,6 @@ for arg in "$@"; do
     die "Invalid argument: $arg. Options must start with a dash (- or --)."
   fi
 done
-
-shift $((OPTIND-1)) # remove parsed options and args from $@ list
 
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: Loading mamba and CUDA modules.

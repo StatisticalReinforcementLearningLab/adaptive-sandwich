@@ -20,6 +20,9 @@ import plotext as plt
 
 from constants import FunctionTypes, SmallSampleCorrections
 import input_checks
+from vmap_helpers import stack_batched_arg_lists_into_tensors
+
+
 from helper_functions import (
     conditional_x_or_one_minus_x,
     get_action_prob_variance,
@@ -356,7 +359,6 @@ def analyze_dataset(
         "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
     )
     user_ids = jnp.array(study_df[user_id_col_name].unique())
-    # TODO: roadmap: vmap the derivatives of the above vectors over users (if I can, shapes may differ...) and then average
     (
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
@@ -800,11 +802,13 @@ def single_user_weighted_algorithm_estimating_function_stacker(
             estimating function for this user, with the shared betas threaded in for differentiation.
 
         policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A dictionary mapping decision times to the policy number in use. This may be user-specific.
-            Should be sorted by decision time.
+            A dictionary mapping decision times to the policy number in use. This may be
+            user-specific. Should be sorted by decision time. Only applies to in-study decision
+            times!
 
         action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping decision times to actions taken.
+            A dictionary mapping decision times to actions taken. Only applies to in-study decision
+            times!
 
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
@@ -844,7 +848,82 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         "Computing the algorithm component of the weighted estimating function stack for user %s.",
         user_id,
     )
-    # TODO: This loop could be vmapped to be much faster.
+
+    in_study_action_prob_func_args = [
+        args for args in action_prob_func_args_by_decision_time.values() if args
+    ]
+    in_study_betas_list_by_decision_time_index = jnp.array(
+        [
+            action_prob_func_args[action_prob_func_args_beta_index]
+            for action_prob_func_args in in_study_action_prob_func_args
+        ]
+    )
+    in_study_actions_list_by_decision_time_index = jnp.array(
+        list(action_by_decision_time.values())
+    )
+
+    # Sort the threaded args by decision time to be cautious. We check if the
+    # user id is present in the user args dict because we may call this on a
+    # subset of the user arg dict when we are batching arguments by shape
+    sorted_threaded_action_prob_args_by_decision_time = {
+        decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
+        for decision_time in range(user_start_time, user_end_time + 1)
+        if decision_time in threaded_action_prob_func_args_by_decision_time
+    }
+
+    num_args = None
+    for args in sorted_threaded_action_prob_args_by_decision_time.values():
+        if args:
+            num_args = len(args)
+            break
+
+    # NOTE: Cannot do [[]] * num_args here! Then all lists point
+    # same object...
+    batched_threaded_arg_lists = [[] for _ in range(num_args)]
+    for (
+        decision_time,
+        args,
+    ) in sorted_threaded_action_prob_args_by_decision_time.items():
+        if not args:
+            continue
+        for idx, arg in enumerate(args):
+            batched_threaded_arg_lists[idx].append(arg)
+
+    batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
+        batched_threaded_arg_lists
+    )
+
+    # Note that we do NOT use the shared betas in the first arg to the weight function,
+    # since we don't want differentiation to happen with respect to them.
+    # Just grab the original beta from the update function arguments. This is the same
+    # value, but impervious to differentiation with respect to all_post_update_betas. The
+    # args, on the other hand, are a function of all_post_update_betas.
+    in_study_weights = jax.vmap(
+        fun=get_radon_nikodym_weight,
+        in_axes=[0, None, None, 0] + batch_axes,
+        out_axes=0,
+    )(
+        in_study_betas_list_by_decision_time_index,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        in_study_actions_list_by_decision_time_index,
+        *batched_threaded_arg_tensors,
+    )
+
+    in_study_index = 0
+    decision_time_to_all_weights_index_offset = min(
+        sorted_threaded_action_prob_args_by_decision_time
+    )
+    all_weights_raw = []
+    for (
+        decision_time,
+        args,
+    ) in sorted_threaded_action_prob_args_by_decision_time.items():
+        all_weights_raw.append(in_study_weights[in_study_index] if args else 1.0)
+        in_study_index += 1
+    all_weights = jnp.array(all_weights_raw)
+
+    # TODO: May need to use dynamic slicing when this whole function is vmapped
     algorithm_component = jnp.concatenate(
         [
             # Here we compute a product of Radon-Nikodym weights
@@ -852,42 +931,23 @@ def single_user_weighted_algorithm_estimating_function_stacker(
             # update under consideration took effect, for which the user was in the study.
             (
                 jnp.prod(
-                    jnp.array(
-                        [
-                            # Note that we do NOT use the shared betas in the first arg, for
-                            # which we don't want differentiation to happen with respect to.
-                            # Just grab the original beta from the update function arguments.
-                            # This is the same value, but impervious to differentiation with
-                            # respect to all_post_update_betas. The args, on the other hand,
-                            # are a function of all_post_update_betas.
-                            get_radon_nikodym_weight(
-                                action_prob_func_args_by_decision_time[t][
-                                    action_prob_func_args_beta_index
-                                ],
-                                action_prob_func,
-                                action_prob_func_args_beta_index,
-                                action_by_decision_time[t],
-                                *threaded_action_prob_func_args_by_decision_time[t],
-                            )
-                            for t in range(
-                                # The earliest time after the first update where the user was in
-                                #  the study
-                                max(
-                                    first_time_after_first_update,
-                                    user_start_time,
-                                ),
-                                # The latest time the user was in the study before the time the
-                                # update under consideration first applied. Note the + 1 because
-                                # range does not include the right endpoint.
-                                # TODO: Is there any reason for the policy to not be in min time
-                                # by policy num? I can't think of one currently.
-                                min(
-                                    min_time_by_policy_num.get(policy_num, math.inf),
-                                    user_end_time + 1,
-                                ),
-                            )
-                        ]
-                    )
+                    all_weights[
+                        # The earliest time after the first update where the user was in
+                        # the study
+                        max(
+                            first_time_after_first_update,
+                            user_start_time,
+                        )
+                        - decision_time_to_all_weights_index_offset :
+                        # One more than the latest time the user was in the study before the time
+                        # the update under consideration first applied. Note the + 1 because range
+                        # does not include the right endpoint.
+                        min(
+                            min_time_by_policy_num.get(policy_num, math.inf),
+                            user_end_time + 1,
+                        )
+                        - decision_time_to_all_weights_index_offset,
+                    ]
                 )  # Now use the above to weight the alg estimating function for this update
                 * algorithm_estimating_func(*update_args)
                 # If there are no arguments for the update function, the user is not yet in the
@@ -897,6 +957,7 @@ def single_user_weighted_algorithm_estimating_function_stacker(
                 if update_args
                 else jnp.zeros(beta_dim)
             )
+            # vmapping over this would be tricky due to different shapes across updates
             for policy_num, update_args in threaded_update_func_args_by_policy_num.items()
         ]
     )
@@ -906,26 +967,12 @@ def single_user_weighted_algorithm_estimating_function_stacker(
         user_id,
     )
     inference_component = jnp.prod(
-        jnp.array(
-            [
-                # Note: as above, the first arg is the original beta, not the shared one.
-                get_radon_nikodym_weight(
-                    action_prob_func_args_by_decision_time[t][
-                        action_prob_func_args_beta_index
-                    ],
-                    action_prob_func,
-                    action_prob_func_args_beta_index,
-                    action_by_decision_time[t],
-                    *threaded_action_prob_func_args_by_decision_time[t],
-                )
-                # Go from the first time for the user that is after the first
-                # update to their last active time
-                for t in range(
-                    max(first_time_after_first_update, user_start_time),
-                    user_end_time + 1,
-                )
-            ]
-        )
+        all_weights[
+            max(first_time_after_first_update, user_start_time)
+            - decision_time_to_all_weights_index_offset : user_end_time
+            + 1
+            - decision_time_to_all_weights_index_offset,
+        ]
     ) * inference_estimating_func(*threaded_inference_func_args)
 
     # 5. Concatenate the two components to form the weighted estimating function stack for this
@@ -1319,6 +1366,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
             required to compute action probabilities for this user.
         policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
             A map of user ids to dictionaries mapping decision times to the policy number in use.
+            Only applies to in-study decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
@@ -1335,6 +1383,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
             to their respective update function arguments.
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
+            Only applies to in-study decision times!
 
     Returns:
         jnp.ndarray:
@@ -1540,6 +1589,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
             required to compute action probabilities for this user.
         policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
             A map of user ids to dictionaries mapping decision times to the policy number in use.
+            Only applies to in-study decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
@@ -1556,6 +1606,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
             to their respective update function arguments.
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
+            Only applies to in-study decision times!
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:

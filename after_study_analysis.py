@@ -797,11 +797,13 @@ def single_user_weighted_algorithm_estimating_function_stacker(
             estimating function for this user, with the shared betas threaded in for differentiation.
 
         policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A dictionary mapping decision times to the policy number in use. This may be user-specific.
-            Should be sorted by decision time.
+            A dictionary mapping decision times to the policy number in use. This may be
+            user-specific. Should be sorted by decision time. Only applies to in-study decision
+            times!
 
         action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping decision times to actions taken.
+            A dictionary mapping decision times to actions taken. Only applies to in-study decision
+            times!
 
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
@@ -1359,6 +1361,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
             required to compute action probabilities for this user.
         policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
             A map of user ids to dictionaries mapping decision times to the policy number in use.
+            Only applies to in-study decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
@@ -1375,6 +1378,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
             to their respective update function arguments.
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
+            Only applies to in-study decision times!
 
     Returns:
         jnp.ndarray:
@@ -1580,6 +1584,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
             required to compute action probabilities for this user.
         policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
             A map of user ids to dictionaries mapping decision times to the policy number in use.
+            Only applies to in-study decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
@@ -1596,6 +1601,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
             to their respective update function arguments.
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
+            Only applies to in-study decision times!
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:

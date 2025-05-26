@@ -1,7 +1,11 @@
 import logging
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from sklearn.linear_model import LinearRegression
+
+from helper_functions import load_function_from_same_named_file
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -45,6 +49,26 @@ def oralytics_estimate_theta_primary_analysis(study_df):
         sample_weight=(1 / (trimmed_df["act_prob"] * (1 - trimmed_df["act_prob"]))),
     )
 
-    breakpoint()
+    inference_loss_func_filename = (
+        "functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py"
+    )
+    inference_loss_func = load_function_from_same_named_file(
+        inference_loss_func_filename
+    )
+    inference_estimating_function = jax.grad(inference_loss_func)
+    total_grad = jnp.sum(
+        jax.vmap(inference_estimating_function, in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0))(
+            jnp.array(linear_model.coef_),
+            jnp.array(trimmed_df["tod"]),
+            jnp.array(trimmed_df["bbar"]),
+            jnp.array(trimmed_df["abar"]),
+            jnp.array(trimmed_df["appengage"]),
+            jnp.array(trimmed_df["bias"]),
+            jnp.array(in_study_df["action"]),
+            jnp.array(in_study_df["oscb"]),
+            jnp.array(trimmed_df["act_prob"]),
+        ),
+        axis=0,
+    )
 
     return linear_model.coef_

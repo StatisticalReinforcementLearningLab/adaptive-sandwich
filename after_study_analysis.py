@@ -1715,45 +1715,44 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     )
     # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
     # slow.
-    with jax.profiler.trace("/tmp/jax_trace"):
-        joint_adaptive_bread_inverse_pieces, (
-            avg_estimating_function_stack,
-            joint_adaptive_meat,
-            classical_meat,
-            classical_bread_inverse,
-            all_per_user_estimating_function_stacks,
-        ) = jax.jacrev(
-            get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
-        )(
-            # While JAX can technically differentiate with respect to a list of JAX arrays,
-            # it is much more efficient to flatten them into a single array. This is done
-            # here to improve performance. We can simply unflatten them inside the function.
-            flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func_filename,
-            action_prob_func_args_beta_index,
-            alg_update_func_filename,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            suppress_all_data_checks,
-            suppress_interactive_data_checks,
-        )
+    joint_adaptive_bread_inverse_pieces, (
+        avg_estimating_function_stack,
+        joint_adaptive_meat,
+        classical_meat,
+        classical_bread_inverse,
+        all_per_user_estimating_function_stacks,
+    ) = jax.jacrev(
+        get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
+    )(
+        # While JAX can technically differentiate with respect to a list of JAX arrays,
+        # it is much more efficient to flatten them into a single array. This is done
+        # here to improve performance. We can simply unflatten them inside the function.
+        flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func_filename,
+        action_prob_func_args_beta_index,
+        alg_update_func_filename,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        inference_func_filename,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        suppress_all_data_checks,
+        suppress_interactive_data_checks,
+    )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.

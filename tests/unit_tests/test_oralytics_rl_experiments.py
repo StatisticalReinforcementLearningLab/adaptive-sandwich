@@ -392,6 +392,10 @@ def test_run_incremental_recruitment_exp():
 
             if record.in_study.item():
                 policy_idx = record["policy_idx"].values[0]
+
+                num_users_entered_before_policy = data_df[
+                    (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
+                ]["user_idx"].nunique()
                 state = jnp.array(
                     record[
                         [
@@ -405,12 +409,13 @@ def test_run_incremental_recruitment_exp():
                     dtype=np.float32,
                 )
                 assert (
-                    len(action_prob_function_args[calendar_decision_t][user_idx]) == 3
+                    len(action_prob_function_args[calendar_decision_t][user_idx]) == 4
                 )
                 np.testing.assert_array_equal(
                     action_prob_function_args[calendar_decision_t][user_idx][0],
                     rl_experiments.form_beta_from_posterior(
                         *posterior_by_update_idx[policy_idx],
+                        num_users_entered_before_policy,
                     ),
                 )
                 np.testing.assert_array_equal(
@@ -418,17 +423,21 @@ def test_run_incremental_recruitment_exp():
                     state,
                 )
                 assert action_prob_function_args[calendar_decision_t][user_idx][2] == 15
+                assert (
+                    action_prob_function_args[calendar_decision_t][user_idx][3]
+                    == num_users_entered_before_policy
+                )
             else:
                 assert action_prob_function_args[calendar_decision_t][user_idx] == ()
 
     for policy_idx in range(1, 8):
-        beta = rl_experiments.form_beta_from_posterior(
-            *posterior_by_update_idx[policy_idx],
-        )
-
         num_users_entered_already = data_df[
             (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
         ]["user_idx"].nunique()
+        beta = rl_experiments.form_beta_from_posterior(
+            *posterior_by_update_idx[policy_idx],
+            num_users_entered_already,
+        )
 
         for user_idx in data_df["user_idx"].unique():
             temp = data_df[

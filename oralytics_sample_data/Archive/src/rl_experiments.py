@@ -212,7 +212,9 @@ def get_previous_day_qualities_and_actions(user_decision_time, Qs, As):
 
 
 def form_beta_from_posterior(
-    posterior_mean: np.ndarray, posterior_var: np.ndarray
+    posterior_mean: np.ndarray,
+    posterior_var: np.ndarray,
+    num_users_entered_before_update: int,
 ) -> jnp.ndarray:
     """
     Form the beta vector from the posterior mean and variance.
@@ -231,7 +233,12 @@ def form_beta_from_posterior(
     """
     sigma_inv = np.linalg.inv(posterior_var)
     ut_sigma_inv = sigma_inv[np.triu_indices_from(sigma_inv)]
-    return jnp.concatenate([posterior_mean, ut_sigma_inv.flatten()])
+    return jnp.concatenate(
+        [
+            posterior_mean,
+            ut_sigma_inv.flatten() / max(1, num_users_entered_before_update),
+        ]
+    )
 
 
 def execute_decision_time(
@@ -323,10 +330,19 @@ def execute_decision_time(
     action, action_prob = algorithm.action_selection(
         advantage_state=alg_state, baseline_state=alg_state
     )
+
+    num_users_entered_before_policy = data_df[
+        (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
+    ]["user_idx"].nunique()
     action_prob_function_args[calendar_decision_time][user_idx] = (
-        form_beta_from_posterior(algorithm.posterior_mean, algorithm.posterior_var),
+        form_beta_from_posterior(
+            algorithm.posterior_mean,
+            algorithm.posterior_var,
+            num_users_entered_before_policy,
+        ),
         jnp.array(alg_state),
         algorithm.feature_dim,
+        num_users_entered_before_policy,
     )
 
     quality = sim_env.generate_rewards(user_idx, env_state, action)
@@ -709,11 +725,12 @@ def update_alg_update_function_args(
     prior_mu = algorithm.PRIOR_MU
     prior_sigma_inv = np.linalg.inv(algorithm.PRIOR_SIGMA)
 
-    beta = form_beta_from_posterior(algorithm.posterior_mean, algorithm.posterior_var)
-
     num_users_entered_already = data_df[
         (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
     ]["user_idx"].nunique()
+    beta = form_beta_from_posterior(
+        algorithm.posterior_mean, algorithm.posterior_var, num_users_entered_already
+    )
     alg_update_function_args[policy_idx] = {}
     for user_idx in data_df["user_idx"].unique():
         # Create the data dataframe

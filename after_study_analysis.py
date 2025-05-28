@@ -389,6 +389,8 @@ def analyze_dataset(
         inference_action_prob_decision_times_by_user_id,
         alg_update_func_args,
         action_by_decision_time_by_user_id,
+        suppress_all_data_checks,
+        suppress_interactive_data_checks,
     )
 
     beta_dim = len(all_post_update_betas[0])
@@ -724,7 +726,7 @@ def get_min_time_by_policy_num(
     return min_time_by_policy_num, first_time_after_first_update
 
 
-def single_user_weighted_algorithm_estimating_function_stacker(
+def single_user_weighted_estimating_function_stacker(
     beta_dim: int,
     user_id: collections.abc.Hashable,
     action_prob_func: callable,
@@ -1323,6 +1325,8 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    suppress_all_data_checks: bool,
+    suppress_interactive_data_checks: bool,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
@@ -1384,6 +1388,11 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
+        suppress_all_data_checks (bool):
+            If True, suppresses carrying out any data checks at all.
+        suppress_interactive_data_checks (bool):
+            If True, suppresses interactive data checks that would otherwise be performed to ensure
+            the correctness of the threaded arguments.
 
     Returns:
         jnp.ndarray:
@@ -1448,6 +1457,17 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_prob_func,
     )
 
+    # If action probabilites are used in the algorithm estimating function, make
+    # sure that substituting in the reconstructed action probabilities is approximately
+    # equivalent to using the original action probabilities.
+    if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
+        input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
+            algorithm_estimating_func,
+            update_func_args_by_by_user_id_by_policy_num,
+            threaded_update_func_args_by_policy_num_by_user_id,
+            suppress_interactive_data_checks,
+        )
+
     # 4. Thread the central theta into the inference function arguments
     # and replace any action probabilities with reconstructed ones from the above
     # arguments with the central betas introduced.
@@ -1465,11 +1485,22 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_prob_func,
     )
 
+    # If action probabilites are used in the inference estimating function, make
+    # sure that substituting in the reconstructed action probabilities is approximately
+    # equivalent to using the original action probabilities.
+    if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
+        input_checks.require_threaded_inference_estimating_function_args_equivalent(
+            inference_estimating_func,
+            inference_func_args_by_user_id,
+            threaded_inference_func_args_by_user_id,
+            suppress_interactive_data_checks,
+        )
+
     # 5. Now we can compute the average of the weighted estimating function stacks for all users
     # as well as collect related values used to construct the adaptive and classical
     # sandwich variances.
     results = [
-        single_user_weighted_algorithm_estimating_function_stacker(
+        single_user_weighted_estimating_function_stacker(
             len(all_post_update_betas_and_theta[0]),
             user_id,
             action_prob_func,
@@ -1537,6 +1568,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    suppress_all_data_checks: bool,
+    suppress_interactive_data_checks: bool,
 ) -> tuple[
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1607,6 +1640,11 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
+        suppress_all_data_checks (bool):
+            If True, suppresses carrying out any data checks at all.
+        suppress_interactive_data_checks (bool):
+            If True, suppresses interactive data checks that would otherwise be performed to ensure
+            the correctness of the threaded arguments.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -1656,6 +1694,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         inference_action_prob_decision_times_by_user_id,
         update_func_args_by_by_user_id_by_policy_num,
         action_by_decision_time_by_user_id,
+        suppress_all_data_checks,
+        suppress_interactive_data_checks,
     )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary

@@ -46,9 +46,8 @@ def oralytics_RL_estimating_function(
 
     vector_2 = prior_sigma_inv @ (prior_mu - mu).flatten() / n_users
 
-    matrix_3 = (
-        jnp.triu(stacked_phis.T @ stacked_phis) / init_noise_var
-        + (jnp.triu(prior_sigma_inv) - jnp.triu(V)) / n_users
+    matrix_3 = jnp.triu(stacked_phis.T @ stacked_phis) / init_noise_var + (
+        jnp.triu(prior_sigma_inv) / n_users - jnp.triu(V)
     )
     triu_indices = jnp.triu_indices_from(matrix_3)
     vector_3 = matrix_3[triu_indices].flatten()

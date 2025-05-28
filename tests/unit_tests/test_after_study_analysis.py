@@ -252,6 +252,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
             inference_action_prob_decision_times_by_user_id,
             update_func_args_by_by_user_id_by_policy_num,
             action_by_decision_time_by_user_id,
+            True,
+            True,
         )
     )
 
@@ -589,6 +591,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
             inference_action_prob_decision_times_by_user_id,
             update_func_args_by_by_user_id_by_policy_num,
             action_by_decision_time_by_user_id,
+            True,
+            True,
         )
     )
 
@@ -928,6 +932,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
             inference_action_prob_decision_times_by_user_id,
             update_func_args_by_by_user_id_by_policy_num,
             action_by_decision_time_by_user_id,
+            True,
+            True,
         )
     )
 
@@ -1541,6 +1547,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             inference_action_prob_decision_times_by_user_id,
             update_func_args_by_by_user_id_by_policy_num,
             action_by_decision_time_by_user_id,
+            True,
+            True,
         )
     )
 
@@ -2071,6 +2079,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
             inference_action_prob_decision_times_by_user_id,
             update_func_args_by_by_user_id_by_policy_num,
             action_by_decision_time_by_user_id,
+            True,
+            True,
         )
     )
 
@@ -2534,6 +2544,8 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             inference_action_prob_decision_times_by_user_id,
             update_func_args_by_by_user_id_by_policy_num,
             action_by_decision_time_by_user_id,
+            True,
+            True,
         )
     )
 

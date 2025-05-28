@@ -49,24 +49,43 @@ EXP_SETTINGS = {
 
 
 def get_algorithm(
-    alg_type, smoothing_func, num_decision_times_between_updates, cost_params, noise_var
+    alg_type,
+    smoothing_func,
+    num_decision_times_between_updates,
+    cost_params,
+    noise_var,
+    use_monte_carlo_expectation,
 ):
     algorithm = None
     if alg_type == "BLR_AC":
         algorithm = rl_algorithm.BlrActionCentering(
-            cost_params, num_decision_times_between_updates, smoothing_func, noise_var
+            cost_params,
+            num_decision_times_between_updates,
+            smoothing_func,
+            noise_var,
+            use_monte_carlo_expectation,
         )
     elif alg_type == "BLR_NO_AC":
         algorithm = rl_algorithm.BlrNoActionCentering(
-            cost_params, num_decision_times_between_updates, smoothing_func, noise_var
+            cost_params,
+            num_decision_times_between_updates,
+            smoothing_func,
+            noise_var,
+            use_monte_carlo_expectation,
         )
     elif alg_type == "BLR_AC_V2":
         algorithm = rl_algorithm.BlrACV2(
-            cost_params, num_decision_times_between_updates, smoothing_func
+            cost_params,
+            num_decision_times_between_updates,
+            smoothing_func,
+            use_monte_carlo_expectation,
         )
     elif alg_type == "BLR_AC_V3":
         algorithm = rl_algorithm.BlrACV3(
-            cost_params, num_decision_times_between_updates, smoothing_func
+            cost_params,
+            num_decision_times_between_updates,
+            smoothing_func,
+            use_monte_carlo_expectation,
         )
     else:
         raise ValueError(f"Algorithm type {alg_type} not recognized.")
@@ -112,6 +131,7 @@ def run(
     num_users: int,
     users_per_recruitment: int,
     num_users_before_update: int,
+    use_monte_carlo_expectation: bool,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -137,6 +157,7 @@ def run(
         EXP_SETTINGS["num_decision_times_between_updates"],
         EXP_SETTINGS["cost_params"],
         EXP_SETTINGS["noise_var"],
+        use_monte_carlo_expectation,
     )
 
     # Sample the users and set up the data-generating environment.
@@ -177,313 +198,6 @@ def run(
     )
 
 
-def collect_alg_update_function_args(data_df, update_df, feature_dim):
-    df = pd.DataFrame(
-        columns=[
-            "update_idx",
-            "user_idx",
-            "betas",
-            "n_users",
-            "states",
-            "actions",
-            "act_probs",
-            "decision_times",
-            "rewards",
-            "prior_mu",
-            "prior_sigma_inv",
-            "init_noise_var",
-        ]
-    )
-    update_func_args_dict = {}
-
-    prior_mu = None
-    prior_sigma_inv = None
-
-    for update_idx in range(update_df["update_idx"].max() + 1):
-        utime_dict = {}
-
-        temp = update_df[update_df["update_idx"] == update_idx]
-
-        mu = []
-        for j in range(feature_dim):
-            mu.append(temp[f"posterior_mu.{j}"].values[0])
-
-        sigma = []
-
-        for j in range(feature_dim):
-            t = []
-            for k in range(feature_dim):
-                t.append(temp[f"posterior_var.{j}.{k}"].values[0])
-            sigma.append(t)
-
-        mu = jnp.array(mu)
-        sigma = jnp.array(sigma)
-        sigma_inv = jnp.linalg.inv(sigma)
-        utsigma_inv = sigma_inv[jnp.triu_indices(sigma_inv.shape[0])]
-        Vt = utsigma_inv.flatten()
-
-        if update_idx == 0:
-            prior_mu = mu
-            prior_sigma_inv = jnp.linalg.inv(sigma)
-            continue
-            # flatten and combine both mu and sigma into betas
-        betas = jnp.concatenate([mu, Vt])
-
-        num_users_entered_already = data_df[
-            (data_df["policy_idx"] < update_idx) & (data_df["in_study"] == 1)
-        ]["user_idx"].nunique()
-        for user in data_df["user_idx"].unique():
-            # Create the data dataframe
-            temp = data_df[
-                (data_df["policy_idx"] < update_idx)
-                & (data_df["user_idx"] == user)
-                & (data_df["in_study"] == 1)
-            ].reset_index(drop=True)
-
-            # Check if the user has any data
-            if temp.shape[0] != 0:
-                # Sort by calendar_decision_t
-                temp = temp.sort_values(by="calendar_decision_t")
-
-                # Phi = []
-                states = []
-                actions = []
-                act_probs = []
-                decision_times = []
-                rewards = jnp.array(temp["reward"].values)
-                for j in range(temp.shape[0]):
-                    state = np.array(
-                        temp.loc[j][
-                            [
-                                "state.tod",
-                                "state.b.bar",
-                                "state.a.bar",
-                                "state.app.engage",
-                                "state.bias",
-                            ]
-                        ].values,
-                        dtype=np.float32,
-                    )
-                    action = temp.loc[j]["action"]
-                    act_prob = temp.loc[j]["prob"]
-                    decision_time = temp.loc[j]["calendar_decision_t"]
-
-                    states.append(state)
-                    actions.append(action)
-                    act_probs.append(act_prob)
-                    decision_times.append(decision_time)
-
-                states = jnp.array(states)
-                actions = jnp.array(actions).reshape(-1, 1)
-                act_probs = jnp.array(act_probs).reshape(-1, 1)
-                decision_times = jnp.array(decision_times).reshape(-1, 1)
-
-                df = pd.concat(
-                    [
-                        df,
-                        pd.DataFrame(
-                            [
-                                [
-                                    update_idx,
-                                    user,
-                                    betas,
-                                    num_users_entered_already,
-                                    states,
-                                    actions,
-                                    act_probs,
-                                    decision_times,
-                                    rewards,
-                                    prior_mu,
-                                    prior_sigma_inv,
-                                    3396.449,
-                                ]
-                            ],
-                            columns=[
-                                "update_idx",
-                                "user_idx",
-                                "betas",
-                                "n_users",
-                                "states",
-                                "actions",
-                                "act_probs",
-                                "decision_times",
-                                "rewards",
-                                "prior_mu",
-                                "prior_sigma_inv",
-                                "init_noise_var",
-                            ],
-                        ),
-                    ]
-                )
-                utime_dict[user] = (
-                    betas,
-                    num_users_entered_already,
-                    states,
-                    actions,
-                    act_probs,
-                    decision_times,
-                    rewards,
-                    prior_mu,
-                    prior_sigma_inv,
-                    3396.449,
-                )
-
-            # Otherwise add a row with no data
-            else:
-                df = pd.concat(
-                    [
-                        df,
-                        pd.DataFrame(
-                            [
-                                [
-                                    update_idx,
-                                    user,
-                                    betas,
-                                    num_users_entered_already,
-                                    [],
-                                    [],
-                                    [],
-                                    [],
-                                    [],
-                                    prior_mu,
-                                    prior_sigma_inv,
-                                    3396.449,
-                                ]
-                            ],
-                            columns=[
-                                "update_idx",
-                                "user_idx",
-                                "betas",
-                                "n_users",
-                                "states",
-                                "actions",
-                                "act_probs",
-                                "decision_times",
-                                "rewards",
-                                "prior_mu",
-                                "prior_sigma_inv",
-                                "init_noise_var",
-                            ],
-                        ),
-                    ]
-                )
-                utime_dict[user] = ()
-
-        update_func_args_dict[update_idx] = utime_dict
-
-    df.reset_index(drop=True, inplace=True)
-
-    return df, update_func_args_dict
-
-
-def collect_action_prob_function_args(
-    data_df, update_df, update_func_args_dict, feature_dim
-):
-    # Now create the dataframe for the action selection function
-    df2 = pd.DataFrame(columns=["calendar_decision_t", "user_idx", "beta", "advantage"])
-
-    act_prob_dict = {}
-
-    for calendar_decision_t in range(
-        data_df["calendar_decision_t"].min(), data_df["calendar_decision_t"].max() + 1
-    ):
-        temp = data_df[
-            data_df["calendar_decision_t"] == calendar_decision_t
-        ].reset_index(drop=True)
-
-        utime_dict = {}
-
-        for user in data_df["user_idx"].unique():
-            record = temp[temp["user_idx"] == user].reset_index(drop=True)
-
-            # Check if the user was in the study
-            if record.in_study.item():
-                # Fetch the policy number and associated beta
-                policy = record["policy_idx"].values[0]
-                if policy == 0:
-                    # Construct beta from update dataframe, where first "update" is the prior
-                    update_0 = update_df[update_df["update_idx"] == 0].reset_index(
-                        drop=True
-                    )
-                    mu = [
-                        update_0[f"posterior_mu.{j}".format(j)].values[0]
-                        for j in range(feature_dim)
-                    ]
-                    sigma = [
-                        [
-                            update_0[f"posterior_var.{j}.{k}"].values[0]
-                            for k in range(feature_dim)
-                        ]
-                        for j in range(feature_dim)
-                    ]
-                    sigma_inv = jnp.linalg.inv(jnp.array(sigma))
-                    utsigma_inv = np.array(sigma_inv)[
-                        np.triu_indices(sigma_inv.shape[0])
-                    ]
-                    beta = jnp.concatenate(
-                        [jnp.array(mu), jnp.array(utsigma_inv).flatten()]
-                    )
-                else:
-                    # Get beta from update_func_args_dict first user first record
-                    t1 = list(update_func_args_dict[policy].keys())[0]
-                    beta = update_func_args_dict[policy][t1][0]
-
-                # Fetch the state
-                state = jnp.array(
-                    record[
-                        [
-                            "state.tod",
-                            "state.b.bar",
-                            "state.a.bar",
-                            "state.app.engage",
-                            "state.bias",
-                        ]
-                    ].values[0],
-                    dtype=np.float32,
-                )
-
-                df2 = pd.concat(
-                    [
-                        df2,
-                        pd.DataFrame(
-                            [[calendar_decision_t, user, beta, state, feature_dim]],
-                            columns=[
-                                "calendar_decision_t",
-                                "user_idx",
-                                "beta",
-                                "advantage",
-                                "feature_dim",
-                            ],
-                        ),
-                    ]
-                )
-                utime_dict[user] = (beta, state, feature_dim)
-            # User is not in study, so produce an appropriate empty arg tuple.
-            else:
-                df2 = pd.concat(
-                    [
-                        df2,
-                        pd.DataFrame(
-                            [[calendar_decision_t, user, [], [], feature_dim]],
-                            columns=[
-                                "calendar_decision_t",
-                                "user_idx",
-                                "beta",
-                                "advantage",
-                                "feature_dim",
-                            ],
-                        ),
-                    ]
-                )
-                utime_dict[user] = ()
-
-        act_prob_dict[calendar_decision_t] = utime_dict
-
-    df2.reset_index(drop=True, inplace=True)
-
-    return df2, act_prob_dict
-
-
 @click.command()
 @click.option("--seed", default=0, help="Random seed for the experiment.")
 @click.option(
@@ -506,7 +220,20 @@ def collect_action_prob_function_args(
     default=15,
     help="The number of users required before the first update.",
 )
-def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_update):
+@click.option(
+    "--use_numerical_expectation",
+    is_flag=True,
+    default=False,
+    help="Use numerical integration instead of Monte Carlo expectation for action probabilities.",
+)
+def main(
+    seed,
+    exp_dir,
+    num_users,
+    users_per_recruitment,
+    num_users_before_update,
+    use_numerical_expectation,
+):
     """
     Run the main experiment with the given parameters.
 
@@ -521,6 +248,8 @@ def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_updat
             The number of users recruited per recruitment.
         num_users_before_update (int):
             The number of users required before the first update.
+        use_numerical_expectation (bool):
+            Whether to use numerical integration for action probabilities instead of Monte Carlo expectation.
 
     Returns:
     None
@@ -543,7 +272,14 @@ def main(seed, exp_dir, num_users, users_per_recruitment, num_users_before_updat
         study_df,
         alg_update_function_args,
         action_prob_function_args,
-    ) = run(exp_path, seed, num_users, users_per_recruitment, num_users_before_update)
+    ) = run(
+        exp_path,
+        seed,
+        num_users,
+        users_per_recruitment,
+        num_users_before_update,
+        not use_numerical_expectation,
+    )
 
     # Write the pickled results to file.
     pd.to_pickle(data_df, exp_path + f"/data_df.pkl")

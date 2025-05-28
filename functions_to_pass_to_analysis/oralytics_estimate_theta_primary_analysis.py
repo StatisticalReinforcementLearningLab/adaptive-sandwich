@@ -1,7 +1,11 @@
 import logging
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from sklearn.linear_model import LinearRegression
+
+from helper_functions import load_function_from_same_named_file
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -44,7 +48,5 @@ def oralytics_estimate_theta_primary_analysis(study_df):
         in_study_df["oscb"],
         sample_weight=(1 / (trimmed_df["act_prob"] * (1 - trimmed_df["act_prob"]))),
     )
-
-    breakpoint()
 
     return linear_model.coef_

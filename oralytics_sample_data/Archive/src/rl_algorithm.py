@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
+import jax
 import numpy as np
 from scipy import stats
 
 import reward_definition
+
+RANDOM_VARS = jax.random.normal(jax.random.PRNGKey(0), (10000,))
 
 
 class RLAlgorithm:
@@ -141,7 +144,11 @@ def update_posterior_w(Phi, R, sigma_n_squared, prior_mu, prior_sigma):
 
 
 def bayes_lr_action_selector(
-    beta_post_mean, beta_post_var, advantage_state, smoothing_func
+    beta_post_mean,
+    beta_post_var,
+    advantage_state,
+    smoothing_func,
+    monte_carlo_approx=True,
 ):
     """
     Selects an action according to smoothed Thompson sampling. We calculate the posterior
@@ -166,13 +173,24 @@ def bayes_lr_action_selector(
     """
     mu = advantage_state @ beta_post_mean
     std = np.sqrt(advantage_state @ beta_post_var @ advantage_state.T)
-    posterior_prob = stats.norm.expect(func=smoothing_func, loc=mu, scale=std)
+    if monte_carlo_approx:
+        # Use Monte Carlo sampling to estimate the posterior probability
+        samples = mu + std * RANDOM_VARS
+        posterior_prob = np.mean(smoothing_func(samples))
+    else:
+        posterior_prob = stats.norm.expect(func=smoothing_func, loc=mu, scale=std)
 
     return stats.bernoulli.rvs(posterior_prob), posterior_prob
 
 
 class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
-    def __init__(self, cost_params, update_cadence, smoothing_func):
+    def __init__(
+        self,
+        cost_params,
+        update_cadence,
+        smoothing_func,
+        use_monte_carlo_expectation=True,
+    ):
         super().__init__(cost_params, update_cadence, smoothing_func)
 
         # need to be set by children classes
@@ -188,6 +206,10 @@ class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
         # parameter used to control study-level period of pure exploration
         self.use_prior = True
 
+        # Override if scipy.stats.norm.expect is required rather than a Monte Carlo approximation
+        # when forming action probabilities.
+        self.use_monte_carlo_expectation = use_monte_carlo_expectation
+
     def action_selection(self, advantage_state, baseline_state):
         if self.use_prior:
             return bayes_lr_action_selector(
@@ -199,6 +221,7 @@ class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
                 ],
                 advantage_state,
                 self.smoothing_func,
+                self.use_monte_carlo_expectation,
             )
             # pylint: enable=invalid-name, too-many-arguments
 
@@ -211,6 +234,7 @@ class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
             self.posterior_var[-self.D_ADVANTAGE :, -self.D_ADVANTAGE :],
             advantage_state,
             self.smoothing_func,
+            self.use_monte_carlo_expectation,
         )
 
     def is_pure_exploration_period(self):
@@ -231,8 +255,17 @@ class BayesianLinearRegression(RLAlgorithm):  # pylint: disable=abstract-method
 
 
 class BlrActionCentering(BayesianLinearRegression):
-    def __init__(self, cost_params, update_cadence, smoothing_func, noise_var):
-        super().__init__(cost_params, update_cadence, smoothing_func)
+    def __init__(
+        self,
+        cost_params,
+        update_cadence,
+        smoothing_func,
+        noise_var,
+        use_monte_carlo_expectation=True,
+    ):
+        super().__init__(
+            cost_params, update_cadence, smoothing_func, use_monte_carlo_expectation
+        )
 
         # THESE VALUES WERE SET WITH ROBAS 2 DATA
         # size of mu vector = D_baseline + D_advantage + D_advantage
@@ -272,8 +305,20 @@ class BlrActionCentering(BayesianLinearRegression):
 # algorithm candidates that run in the V2 environment
 # uses a prior built on Oralytics pilot data
 class BlrACV2(BlrActionCentering):
-    def __init__(self, cost_params, update_cadence, smoothing_func):
-        super().__init__(cost_params, update_cadence, smoothing_func, None)
+    def __init__(
+        self,
+        cost_params,
+        update_cadence,
+        smoothing_func,
+        use_monte_carlo_expectation=True,
+    ):
+        super().__init__(
+            cost_params,
+            update_cadence,
+            smoothing_func,
+            None,
+            use_monte_carlo_expectation,
+        )
 
         # THESE VALUES WERE SET WITH ORALYTICS PILOT DATA
         # size of mu vector = D_baseline=5 + D_advantage=5 + D_advantage=5
@@ -298,8 +343,20 @@ class BlrACV2(BlrActionCentering):
 # algorithm candidates that run in the V3 environment
 # uses a prior built on ROBAS 2 data; this was the prior used in the Oralytics pilot data
 class BlrACV3(BlrActionCentering):
-    def __init__(self, cost_params, update_cadence, smoothing_func):
-        super().__init__(cost_params, update_cadence, smoothing_func, None)
+    def __init__(
+        self,
+        cost_params,
+        update_cadence,
+        smoothing_func,
+        use_monte_carlo_expectation=True,
+    ):
+        super().__init__(
+            cost_params,
+            update_cadence,
+            smoothing_func,
+            None,
+            use_monte_carlo_expectation,
+        )
 
         # THESE VALUES WERE SET WITH ROBAS 2 DATA
         # size of mu vector = D_baseline=5 + D_advantage=5 + D_advantage=5
@@ -340,8 +397,17 @@ class BlrACV3(BlrActionCentering):
 
 
 class BlrNoActionCentering(BayesianLinearRegression):
-    def __init__(self, cost_params, update_cadence, smoothing_func, noise_var):
-        super().__init__(cost_params, update_cadence, smoothing_func)
+    def __init__(
+        self,
+        cost_params,
+        update_cadence,
+        smoothing_func,
+        noise_var,
+        use_monte_carlo_expectation=True,
+    ):
+        super().__init__(
+            cost_params, update_cadence, smoothing_func, use_monte_carlo_expectation
+        )
 
         # THESE VALUES WERE SET WITH ROBAS 2 DATA
         # size of mu vector = D_baseline + D_advantage

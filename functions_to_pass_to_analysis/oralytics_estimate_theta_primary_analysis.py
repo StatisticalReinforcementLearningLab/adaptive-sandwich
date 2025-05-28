@@ -45,6 +45,4 @@ def oralytics_estimate_theta_primary_analysis(study_df):
         sample_weight=(1 / (trimmed_df["act_prob"] * (1 - trimmed_df["act_prob"]))),
     )
 
-    breakpoint()
-
     return linear_model.coef_

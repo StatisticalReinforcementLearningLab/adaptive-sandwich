@@ -29,7 +29,6 @@ die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that only affect simulation side.
-seed=0
 num_users=70
 users_per_recruitment=5
 num_users_before_update=15
@@ -59,7 +58,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts s:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:-: OPT; do
+while getopts o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -67,7 +66,6 @@ while getopts s:o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:-: OPT; do
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
-    s  | seed )                                         needs_arg; seed="$OPTARG" ;;
     o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;

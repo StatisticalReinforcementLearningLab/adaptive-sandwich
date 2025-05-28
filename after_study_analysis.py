@@ -389,6 +389,8 @@ def analyze_dataset(
         inference_action_prob_decision_times_by_user_id,
         alg_update_func_args,
         action_by_decision_time_by_user_id,
+        suppress_all_data_checks,
+        suppress_interactive_data_checks,
     )
 
     beta_dim = len(all_post_update_betas[0])
@@ -724,7 +726,7 @@ def get_min_time_by_policy_num(
     return min_time_by_policy_num, first_time_after_first_update
 
 
-def single_user_weighted_algorithm_estimating_function_stacker(
+def single_user_weighted_estimating_function_stacker(
     beta_dim: int,
     user_id: collections.abc.Hashable,
     action_prob_func: callable,
@@ -1007,7 +1009,7 @@ def thread_action_prob_func_args(
         collections.abc.Hashable, dict[int, int | float]
     ],
     initial_policy_num: int | float,
-    all_post_update_betas: list[jnp.ndarray],
+    all_post_update_betas: jnp.ndarray,
     beta_index_by_policy_num: dict[int | float, int],
     action_prob_func_args_beta_index: int,
 ) -> tuple[
@@ -1031,8 +1033,8 @@ def thread_action_prob_func_args(
         initial_policy_num (int | float): The policy number of the initial policy before any
             updates.
 
-        all_post_update_betas (list[jnp.ndarray]):
-            A list of beta values to be introduced into arguments to
+        all_post_update_betas (jnp.ndarray):
+            A 2D array of beta values to be introduced into arguments to
             facilitate differentiation.  They will be the same value as what they replace, but this
             introduces direct dependence on the parameter we will differentiate with respect to.
 
@@ -1100,7 +1102,7 @@ def thread_update_func_args(
     update_func_args_by_by_user_id_by_policy_num: dict[
         int | float, dict[collections.abc.Hashable, tuple[Any, ...]]
     ],
-    all_post_update_betas: list[jnp.ndarray],
+    all_post_update_betas: jnp.ndarray,
     beta_index_by_policy_num: dict[int | float, int],
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
@@ -1122,8 +1124,8 @@ def thread_update_func_args(
             numbers and values are dictionaries mapping user IDs to their respective update function
             arguments.
 
-        all_post_update_betas (list[jnp.ndarray]):
-            A list of beta values to be introduced into arguments to
+        all_post_update_betas (jnp.ndarray):
+            A 2D array of beta values to be introduced into arguments to
             facilitate differentiation.  They will be the same value as what they replace, but this
             introduces direct dependence on the parameter we will differentiate with respect to.
 
@@ -1170,6 +1172,12 @@ def thread_update_func_args(
                 ] = ()
                 continue
 
+            logger.debug(
+                "Threading in shared betas to update function arguments for user %s and policy number %s.",
+                user_id,
+                policy_num,
+            )
+
             beta_to_introduce = all_post_update_betas[
                 beta_index_by_policy_num[policy_num]
             ]
@@ -1182,23 +1190,43 @@ def thread_update_func_args(
             )
 
             if alg_update_func_args_action_prob_index >= 0:
+                logger.debug(
+                    "Action probabilities are used in the algorithm update function. Reconstructing them using the shared betas."
+                )
                 action_prob_times = update_func_args_by_user_id[user_id][
                     alg_update_func_args_action_prob_times_index
                 ]
-                action_probs_to_introduce = jnp.array(
-                    [
-                        action_prob_func(
-                            *threaded_action_prob_func_args_by_decision_time_by_user_id[
-                                user_id
-                            ][t]
-                        )
-                        for t in action_prob_times.flatten().tolist()
+                # Vectorized computation of action_probs_to_introduce using jax.vmap
+                flattened_times = action_prob_times.flatten()
+                args_list = [
+                    threaded_action_prob_func_args_by_decision_time_by_user_id[user_id][
+                        int(t)
                     ]
-                ).reshape(
-                    update_func_args_by_user_id[user_id][
-                        alg_update_func_args_action_prob_index
-                    ].shape
-                )
+                    for t in flattened_times.tolist()
+                ]
+                if len(args_list) == 0:
+                    action_probs_to_introduce = jnp.array([]).reshape(
+                        update_func_args_by_user_id[user_id][
+                            alg_update_func_args_action_prob_index
+                        ].shape
+                    )
+                else:
+                    batched_args = list(zip(*args_list))
+                    # Ensure each argument is at least 2D for batching, to avoid shape issues with scalars
+                    batched_tensors = []
+                    for arg_group in batched_args:
+                        arr = jnp.array(arg_group)
+                        if arr.ndim == 1:
+                            arr = arr[:, None]
+                        batched_tensors.append(arr)
+                    vmapped_func = jax.vmap(
+                        action_prob_func, in_axes=tuple(0 for _ in batched_tensors)
+                    )
+                    action_probs_to_introduce = vmapped_func(*batched_tensors).reshape(
+                        update_func_args_by_user_id[user_id][
+                            alg_update_func_args_action_prob_index
+                        ].shape
+                    )
                 threaded_update_func_args_by_policy_num_by_user_id[user_id][
                     policy_num
                 ] = replace_tuple_index(
@@ -1272,18 +1300,34 @@ def thread_inference_func_args(
         )
 
         if inference_func_args_action_prob_index >= 0:
-            action_probs_to_introduce = jnp.array(
-                [
-                    action_prob_func(
-                        *threaded_action_prob_func_args_by_decision_time_by_user_id[
-                            user_id
-                        ][t]
-                    )
-                    for t in inference_action_prob_decision_times_by_user_id[user_id]
-                    .flatten()
-                    .tolist()
+            # Use a vmap-like pattern to compute action probabilities in batch.
+            action_prob_times_flattened = (
+                inference_action_prob_decision_times_by_user_id[user_id].flatten()
+            )
+            args_list = [
+                threaded_action_prob_func_args_by_decision_time_by_user_id[user_id][
+                    int(t)
                 ]
-            ).reshape(args[inference_func_args_action_prob_index].shape)
+                for t in action_prob_times_flattened.tolist()
+            ]
+            if len(args_list) == 0:
+                action_probs_to_introduce = jnp.array([]).reshape(
+                    args[inference_func_args_action_prob_index].shape
+                )
+            else:
+                batched_args = list(zip(*args_list))
+                batched_tensors = []
+                for arg_group in batched_args:
+                    arr = jnp.array(arg_group)
+                    if arr.ndim == 1:
+                        arr = arr[:, None]
+                    batched_tensors.append(arr)
+                vmapped_func = jax.vmap(
+                    action_prob_func, in_axes=tuple(0 for _ in batched_tensors)
+                )
+                action_probs_to_introduce = vmapped_func(*batched_tensors).reshape(
+                    args[inference_func_args_action_prob_index].shape
+                )
             threaded_inference_func_args_by_user_id[user_id] = replace_tuple_index(
                 threaded_inference_func_args_by_user_id[user_id],
                 inference_func_args_action_prob_index,
@@ -1294,7 +1338,9 @@ def thread_inference_func_args(
 
 # TODO: vmap
 def get_avg_weighted_estimating_function_stack_and_aux_values(
-    all_post_update_betas_and_theta: list[jnp.ndarray],
+    flattened_betas_and_theta: jnp.ndarray,
+    beta_dim: int,
+    theta_dim: int,
     user_ids: jnp.ndarray,
     action_prob_func_filename: str,
     action_prob_func_args_beta_index: int,
@@ -1323,6 +1369,8 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    suppress_all_data_checks: bool,
+    suppress_interactive_data_checks: bool,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
@@ -1331,9 +1379,14 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     auxiliary values used to construct the adaptive and classical sandwich variances.
 
     Args:
-        all_post_update_betas_and_theta (list[jnp.ndarray]):
+        flattened_betas_and_theta (jnp.ndarray):
             A list of JAX NumPy arrays representing the betas produced by all updates and the
-            theta value, in that order.
+            theta value, in that order. Important that this is a 1D array for efficiency reasons.
+            We simply extract the betas and theta from this array below.
+        beta_dim (int):
+            The dimension of each of the beta parameters.
+        theta_dim (int):
+            The dimension of the theta parameter.
         user_ids (jnp.ndarray):
             A 1D JAX NumPy array of user IDs.
         action_prob_func_filename (str):
@@ -1384,6 +1437,11 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
+        suppress_all_data_checks (bool):
+            If True, suppresses carrying out any data checks at all.
+        suppress_interactive_data_checks (bool):
+            If True, suppresses interactive data checks that would otherwise be performed to ensure
+            the correctness of the threaded arguments.
 
     Returns:
         jnp.ndarray:
@@ -1411,6 +1469,12 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         else inference_func
     )
 
+    betas, theta = unflatten_params(
+        flattened_betas_and_theta,
+        beta_dim,
+        theta_dim,
+    )
+
     # 2. Thread in the betas and theta in all_post_update_betas_and_theta into the arguments
     # supplied for the above functions, so that differentiation works correctly.  The existing
     # values should be the same, but not connected to the parameter we are differentiating
@@ -1425,7 +1489,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         action_prob_func_args_by_user_id_by_decision_time,
         policy_num_by_decision_time_by_user_id,
         initial_policy_num,
-        all_post_update_betas_and_theta[:-1],
+        betas,
         beta_index_by_policy_num,
         action_prob_func_args_beta_index,
     )
@@ -1439,7 +1503,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     )
     threaded_update_func_args_by_policy_num_by_user_id = thread_update_func_args(
         update_func_args_by_by_user_id_by_policy_num,
-        all_post_update_betas_and_theta[:-1],
+        betas,
         beta_index_by_policy_num,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
@@ -1447,6 +1511,17 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         threaded_action_prob_func_args_by_decision_time_by_user_id,
         action_prob_func,
     )
+
+    # If action probabilites are used in the algorithm estimating function, make
+    # sure that substituting in the reconstructed action probabilities is approximately
+    # equivalent to using the original action probabilities.
+    if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
+        input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
+            algorithm_estimating_func,
+            update_func_args_by_by_user_id_by_policy_num,
+            threaded_update_func_args_by_policy_num_by_user_id,
+            suppress_interactive_data_checks,
+        )
 
     # 4. Thread the central theta into the inference function arguments
     # and replace any action probabilities with reconstructed ones from the above
@@ -1458,19 +1533,30 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     threaded_inference_func_args_by_user_id = thread_inference_func_args(
         inference_func_args_by_user_id,
         inference_func_args_theta_index,
-        all_post_update_betas_and_theta[-1],
+        theta,
         inference_func_args_action_prob_index,
         threaded_action_prob_func_args_by_decision_time_by_user_id,
         inference_action_prob_decision_times_by_user_id,
         action_prob_func,
     )
 
+    # If action probabilites are used in the inference estimating function, make
+    # sure that substituting in the reconstructed action probabilities is approximately
+    # equivalent to using the original action probabilities.
+    if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
+        input_checks.require_threaded_inference_estimating_function_args_equivalent(
+            inference_estimating_func,
+            inference_func_args_by_user_id,
+            threaded_inference_func_args_by_user_id,
+            suppress_interactive_data_checks,
+        )
+
     # 5. Now we can compute the average of the weighted estimating function stacks for all users
     # as well as collect related values used to construct the adaptive and classical
     # sandwich variances.
     results = [
-        single_user_weighted_algorithm_estimating_function_stacker(
-            len(all_post_update_betas_and_theta[0]),
+        single_user_weighted_estimating_function_stacker(
+            beta_dim,
             user_id,
             action_prob_func,
             algorithm_estimating_func,
@@ -1537,6 +1623,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    suppress_all_data_checks: bool,
+    suppress_interactive_data_checks: bool,
 ) -> tuple[
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1607,6 +1695,11 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping user IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
+        suppress_all_data_checks (bool):
+            If True, suppresses carrying out any data checks at all.
+        suppress_interactive_data_checks (bool):
+            If True, suppresses interactive data checks that would otherwise be performed to ensure
+            the correctness of the threaded arguments.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -1631,11 +1724,12 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(
-        # Note how this is a list of jnp arrays; it cannot easily be a jnp array itself
-        # because theta and the betas need not be the same size.  But JAX can still
-        # differentiate with respect to all betas and thetas at once if they
-        # are collected like so.
-        list(all_post_update_betas) + [theta],
+        # While JAX can technically differentiate with respect to a list of JAX arrays,
+        # it is much more efficient to flatten them into a single array. This is done
+        # here to improve performance. We can simply unflatten them inside the function.
+        flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
         user_ids,
         action_prob_func_filename,
         action_prob_func_args_beta_index,
@@ -1656,18 +1750,37 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         inference_action_prob_decision_times_by_user_id,
         update_func_args_by_by_user_id_by_policy_num,
         action_by_decision_time_by_user_id,
+        suppress_all_data_checks,
+        suppress_interactive_data_checks,
     )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        jnp.hstack(joint_adaptive_bread_inverse_pieces),
+        joint_adaptive_bread_inverse_pieces,
         joint_adaptive_meat,
         classical_bread_inverse,
         classical_meat,
         avg_estimating_function_stack,
         all_per_user_estimating_function_stacks,
     )
+
+
+def flatten_params(betas: jnp.ndarray, theta: jnp.ndarray) -> jnp.ndarray:
+    return jnp.concatenate(list(betas) + [theta])
+
+
+def unflatten_params(
+    flat: jnp.ndarray, beta_dim: int, theta_dim: int
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    theta = flat[-theta_dim:]
+    betas = jnp.array(
+        [
+            flat[i * beta_dim : (i + 1) * beta_dim]
+            for i in range((len(flat) - theta_dim) // beta_dim)
+        ]
+    )
+    return betas, theta
 
 
 def estimate_theta(

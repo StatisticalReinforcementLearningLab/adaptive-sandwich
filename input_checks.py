@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 import numpy as np
+import jax
 from jax import numpy as jnp
 import pandas as pd
 
@@ -779,6 +780,82 @@ def require_adaptive_bread_inverse_is_true_inverse(
     except AssertionError as e:
         confirm_input_check_result(
             f"\nJoint adaptive bread is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
+            e,
+        )
+
+
+def require_threaded_algorithm_estimating_function_args_equivalent(
+    algorithm_estimating_func,
+    update_func_args_by_by_user_id_by_policy_num,
+    threaded_update_func_args_by_policy_num_by_user_id,
+    suppress_interactive_data_checks,
+):
+    """
+    Check that the algorithm estimating function returns the same values
+    when called with the original arguments and when called with the
+    reconstructed action probabilities substituted in.
+    """
+    try:
+        for (
+            policy_num,
+            update_func_args_by_user_id,
+        ) in update_func_args_by_by_user_id_by_policy_num.items():
+            for (
+                user_id,
+                unthreaded_args,
+            ) in update_func_args_by_user_id.items():
+                if not unthreaded_args:
+                    continue
+                np.testing.assert_allclose(
+                    algorithm_estimating_func(*unthreaded_args),
+                    # Need to stop gradient here because we can't convert a traced value to np array
+                    jax.lax.stop_gradient(
+                        algorithm_estimating_func(
+                            *threaded_update_func_args_by_policy_num_by_user_id[
+                                user_id
+                            ][policy_num]
+                        )
+                    ),
+                    atol=1e-7,
+                    rtol=1e-3,
+                )
+    except AssertionError as e:
+        confirm_input_check_result(
+            f"\nAt least one algorithm estimating function value is not approximately equal with the original arguments and with reconstructed action probabilities substituted in. The following occurred for user {user_id} and policy {policy_num}:\n{str(e)}\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
+            e,
+        )
+
+
+def require_threaded_inference_estimating_function_args_equivalent(
+    inference_estimating_func,
+    inference_func_args_by_user_id,
+    threaded_inference_func_args_by_user_id,
+    suppress_interactive_data_checks,
+):
+    """
+    Check that the inference estimating function returns the same values
+    when called with the original arguments and when called with the
+    reconstructed action probabilities substituted in.
+    """
+    try:
+        for user_id, unthreaded_args in inference_func_args_by_user_id.items():
+            if not unthreaded_args:
+                continue
+            np.testing.assert_allclose(
+                inference_estimating_func(*unthreaded_args),
+                # Need to stop gradient here because we can't convert a traced value to np array
+                jax.lax.stop_gradient(
+                    inference_estimating_func(
+                        *threaded_inference_func_args_by_user_id[user_id]
+                    )
+                ),
+                rtol=1e-2,
+            )
+    except AssertionError as e:
+        confirm_input_check_result(
+            f"\nAt least one inference estimating function value is not approximately equal with the original arguments and with reconstructed action probabilities substituted in. The following occurred for user {user_id}:\n{str(e)}\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
             e,
         )

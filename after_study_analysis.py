@@ -1757,7 +1757,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        jnp.hstack(joint_adaptive_bread_inverse_pieces),
+        joint_adaptive_bread_inverse_pieces,
         joint_adaptive_meat,
         classical_bread_inverse,
         classical_meat,

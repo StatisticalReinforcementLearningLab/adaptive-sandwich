@@ -203,12 +203,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     # Note for this test these must match the betas in the action probability
     # function args, so that all weights end up being 1, as we do not multiply
     # by them below.
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 5, 4], dtype="float32"),
-    ]
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 5, 4], dtype="float32"),
+        ]
+    )
 
     alg_estimating_func_filename = get_abs_path(
         __file__,
@@ -226,12 +228,13 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         inference_estimating_func_filename
     )
 
-    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
     user_ids = jnp.array([1, 2])
 
     result = (
         after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
-            all_post_update_betas_and_theta,
+            after_study_analysis.flatten_params(all_post_update_betas, theta),
+            all_post_update_betas.shape[1],
+            theta.shape[0],
             user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
@@ -542,12 +545,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     # Note for this test these must match the betas in the action probability
     # function args, so that all weights end up being 1, as we do not multiply
     # by them below.
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 5, 4], dtype="float32"),
-    ]
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 5, 4], dtype="float32"),
+        ]
+    )
 
     alg_estimating_func_filename = get_abs_path(
         __file__,
@@ -565,12 +570,13 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
         inference_estimating_func_filename
     )
 
-    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
     user_ids = jnp.array([1, 2])
 
     result = (
         after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
-            all_post_update_betas_and_theta,
+            after_study_analysis.flatten_params(all_post_update_betas, theta),
+            all_post_update_betas.shape[1],
+            theta.shape[0],
             user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
@@ -891,12 +897,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
-    ]
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+        ]
+    )
 
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
@@ -906,12 +914,13 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
     inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
-    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
     user_ids = jnp.array([1, 2])
 
     result = (
         after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
-            all_post_update_betas_and_theta,
+            after_study_analysis.flatten_params(all_post_update_betas, theta),
+            all_post_update_betas.shape[1],
+            theta.shape[0],
             user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
@@ -1506,12 +1515,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
 
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
-    ]
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+        ]
+    )
 
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
@@ -1521,12 +1532,13 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
     alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
     inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
-    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
     user_ids = jnp.array([1, 2])
 
     result = (
         after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
-            all_post_update_betas_and_theta,
+            after_study_analysis.flatten_params(all_post_update_betas, theta),
+            all_post_update_betas.shape[1],
+            theta.shape[0],
             user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
@@ -2040,10 +2052,12 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
 
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
-    all_post_update_betas = [
-        jnp.array([-2, 2, 3, 4], dtype="float32"),
-        jnp.array([-3, 2, 0.3, 4], dtype="float32"),
-    ]
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 3, 4], dtype="float32"),
+            jnp.array([-3, 2, 0.3, 4], dtype="float32"),
+        ]
+    )
 
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
@@ -2053,12 +2067,13 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
     inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
-    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
     user_ids = jnp.array([1, 2])
 
     result = (
         after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
-            all_post_update_betas_and_theta,
+            after_study_analysis.flatten_params(all_post_update_betas, theta),
+            all_post_update_betas.shape[1],
+            theta.shape[0],
             user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,
@@ -2503,12 +2518,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
 
     theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
 
-    all_post_update_betas = [
-        jnp.array([-2, 2, 2, 4], dtype="float32"),
-        jnp.array([-3, 2, 3, 4], dtype="float32"),
-        jnp.array([-4, 2, 4, 4], dtype="float32"),
-        jnp.array([-5, 2, 0.5, 4], dtype="float32"),
-    ]
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+        ]
+    )
 
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
@@ -2518,12 +2535,13 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
     inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
 
-    all_post_update_betas_and_theta = list(all_post_update_betas) + [theta]
     user_ids = jnp.array([1, 2])
 
     result = (
         after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
-            all_post_update_betas_and_theta,
+            after_study_analysis.flatten_params(all_post_update_betas, theta),
+            all_post_update_betas.shape[1],
+            theta.shape[0],
             user_ids,
             action_prob_func_filename,
             action_prob_func_args_beta_index,

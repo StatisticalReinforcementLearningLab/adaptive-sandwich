@@ -1,11 +1,7 @@
 import logging
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 from sklearn.linear_model import LinearRegression
-
-from helper_functions import load_function_from_same_named_file
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

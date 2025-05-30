@@ -580,7 +580,7 @@ def process_inference_func_args(
     in_study_col_name: str,
 ) -> tuple[dict[collections.abc.Hashable, tuple[Any, ...]], int]:
     """
-    Collects the inference function arguments for each user.
+    Collects the inference function arguments for each user from the study DataFrame.
 
     Note that theta and action probabilities, if present, will be replaced later
     so that the function can be differentiated with respect to shared versions
@@ -1441,7 +1441,8 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
             If True, suppresses carrying out any data checks at all.
         suppress_interactive_data_checks (bool):
             If True, suppresses interactive data checks that would otherwise be performed to ensure
-            the correctness of the threaded arguments.
+            the correctness of the threaded arguments. The checks are still performed, but
+            any interactive prompts are suppressed.
 
     Returns:
         jnp.ndarray:
@@ -1699,7 +1700,8 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
             If True, suppresses carrying out any data checks at all.
         suppress_interactive_data_checks (bool):
             If True, suppresses interactive data checks that would otherwise be performed to ensure
-            the correctness of the threaded arguments.
+            the correctness of the threaded arguments. The checks are still performed, but
+            any interactive prompts are suppressed.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -1868,13 +1870,19 @@ def collect_existing_analyses(
     raw_theta_estimates = []
     raw_adaptive_sandwich_var_estimates = []
     raw_classical_sandwich_var_estimates = []
-    all_debug_pieces = []
-    study_dfs = []
     filenames = glob.glob(input_glob)
 
     logger.info("Found %d files under the glob %s", len(filenames), input_glob)
     if len(filenames) == 0:
         raise RuntimeError("Aborting because no files found. Please check path.")
+
+    # Summary metrics to reduce memory footprint
+    condition_numbers = []
+    action_1_fractions = []
+    action_prob_variances = []
+    min_eigvals_first_block = []
+    max_eigvals_first_block = []
+    first_beta_coords = []
 
     for i, filename in enumerate(filenames):
         if i and len(filenames) >= 10 and i % (len(filenames) // 10) == 0:
@@ -1897,10 +1905,36 @@ def collect_existing_analyses(
             raw_theta_estimates.append(theta_est)
             raw_adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
+        # Load and extract summary from debug pieces, then discard full object
         with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
-            all_debug_pieces.append(pickle.load(f))
+            debug_pieces = pickle.load(f)
+            if "joint_bread_inverse_condition_number" in debug_pieces:
+                condition_numbers.append(
+                    debug_pieces["joint_bread_inverse_condition_number"]
+                )
+            if "joint_bread_inverse_first_block_eigvals" in debug_pieces:
+                eigs = debug_pieces["joint_bread_inverse_first_block_eigvals"]
+                min_eigvals_first_block.append(np.min(eigs))
+                max_eigvals_first_block.append(np.max(eigs))
+            if "all_post_update_betas" in debug_pieces:
+                first_beta = debug_pieces["all_post_update_betas"][0]
+                first_beta_coords.append(first_beta)
+            # Discard debug_pieces to free memory
+            del debug_pieces
+
+        # Load and extract summary from study dataframe, then discard full object
         with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
-            study_dfs.append(pandas.read_pickle(f))
+            study_df = pandas.read_pickle(f)
+            action_1_fractions.append(
+                get_action_1_fraction(study_df, in_study_col_name, action_col_name)
+            )
+            action_prob_variances.append(
+                get_action_prob_variance(
+                    study_df, in_study_col_name, action_prob_col_name
+                )
+            )
+            # Discard study_df to free memory
+            del study_df
 
     theta_estimates = np.array(raw_theta_estimates)
     adaptive_sandwich_var_estimates = np.array(raw_adaptive_sandwich_var_estimates)
@@ -2071,16 +2105,6 @@ def collect_existing_analyses(
         sys.stdout.flush()
         plt.clear_terminal(False)
 
-        action_1_fractions = [
-            get_action_1_fraction(study_df, in_study_col_name, action_col_name)
-            for study_df in study_dfs
-        ]
-
-        action_prob_variances = [
-            get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name)
-            for study_df in study_dfs
-        ]
-
         # Plot the theta estimates to see variation
         plt.clear_figure()
         plt.title(f"Index {index_to_check_ci_coverage} of Theta Estimates")
@@ -2218,11 +2242,7 @@ def collect_existing_analyses(
         plt.xticks(range(1, num_experiments + 1, max(1, num_experiments // 10)))
         plt.show()
 
-        if "joint_bread_inverse_condition_number" in all_debug_pieces[0]:
-            condition_numbers = [
-                debug_pieces["joint_bread_inverse_condition_number"]
-                for debug_pieces in all_debug_pieces
-            ]
+        if len(condition_numbers) > 0:
             sorted_condition_numbers = [
                 condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
             ]
@@ -2244,24 +2264,9 @@ def collect_existing_analyses(
             plt.show()
 
         # Examine conditioning of first block of joint bread inverse if the data is available
-        if "joint_bread_inverse_first_block_eigvals" in all_debug_pieces[0]:
-            joint_bread_inverse_first_block_eigenvalues = [
-                debug_pieces["joint_bread_inverse_first_block_eigvals"]
-                for debug_pieces in all_debug_pieces
-            ]
-
-            min_eigenvalues_first_block = np.array(
-                [
-                    np.min(eigenvalues)
-                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
-                ]
-            )
-            max_eigenvalues_first_block = np.array(
-                [
-                    np.max(eigenvalues)
-                    for eigenvalues in joint_bread_inverse_first_block_eigenvalues
-                ]
-            )
+        if len(min_eigvals_first_block) > 0 and len(max_eigvals_first_block) > 0:
+            min_eigenvalues_first_block = np.array(min_eigvals_first_block)
+            max_eigenvalues_first_block = np.array(max_eigvals_first_block)
 
             # Plot histogram of minimum eigenvalues for first diagonal block of joint bread inverse
             plt.clear_figure()
@@ -2334,21 +2339,15 @@ def collect_existing_analyses(
             plt.show()
 
         # Examine normality of first beta if available
-        if "all_post_update_betas" in all_debug_pieces[0]:
-            for coordinate in range(
-                min(5, all_debug_pieces[0]["all_post_update_betas"].shape[1])
-            ):
+        if len(first_beta_coords) > 0:
+            first_beta_coords_arr = np.array(first_beta_coords)
+            for coordinate in range(min(5, first_beta_coords_arr.shape[1])):
                 plt.clear_figure()
                 plt.title(f"Histogram of First Update Beta Coordinate {coordinate}")
                 plt.xlabel("First Update Beta Coordinate")
                 plt.ylabel("Frequency")
                 plt.hist(
-                    np.array(
-                        [
-                            debug_pieces["all_post_update_betas"][0, coordinate]
-                            for debug_pieces in all_debug_pieces
-                        ]
-                    ),
+                    first_beta_coords_arr[:, coordinate],
                     bins=20,
                     color="blue",
                 )

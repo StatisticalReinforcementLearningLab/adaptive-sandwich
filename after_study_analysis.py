@@ -950,7 +950,7 @@ def single_user_weighted_estimating_function_stacker(
                         )
                         - decision_time_to_all_weights_index_offset,
                     ]
-                    # if the user exited the study before there were any updates,
+                    # If the user exited the study before there were any updates,
                     # this variable will be None and the above code to grab a weight would
                     # throw an error. Just use 1 to include the unweighted estimating function
                     # if they have data to contribute to the update.
@@ -981,6 +981,10 @@ def single_user_weighted_estimating_function_stacker(
             + 1
             - decision_time_to_all_weights_index_offset,
         ]
+        # If the user exited the study before there were any updates,
+        # this variable will be None and the above code to grab a weight would
+        # throw an error. Just use 1 to include the unweighted estimating function
+        # if they have data to contribute to the update.
         if first_time_after_first_update is not None
         else 1
     ) * inference_estimating_func(*threaded_inference_func_args)

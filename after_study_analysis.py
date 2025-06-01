@@ -950,6 +950,12 @@ def single_user_weighted_estimating_function_stacker(
                         )
                         - decision_time_to_all_weights_index_offset,
                     ]
+                    # If the user exited the study before there were any updates,
+                    # this variable will be None and the above code to grab a weight would
+                    # throw an error. Just use 1 to include the unweighted estimating function
+                    # if they have data to contribute to the update.
+                    if first_time_after_first_update is not None
+                    else 1
                 )  # Now use the above to weight the alg estimating function for this update
                 * algorithm_estimating_func(*update_args)
                 # If there are no arguments for the update function, the user is not yet in the
@@ -975,6 +981,12 @@ def single_user_weighted_estimating_function_stacker(
             + 1
             - decision_time_to_all_weights_index_offset,
         ]
+        # If the user exited the study before there were any updates,
+        # this variable will be None and the above code to grab a weight would
+        # throw an error. Just use 1 to include the unweighted estimating function
+        # if they have data to contribute here (pretty sure everyone should?)
+        if first_time_after_first_update is not None
+        else 1
     ) * inference_estimating_func(*threaded_inference_func_args)
 
     # 5. Concatenate the two components to form the weighted estimating function stack for this

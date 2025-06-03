@@ -26,7 +26,9 @@ def find_sim_root(starting_dir):
         current = parent
 
 
-def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_dir):
+def assert_real_synthetic_run_output_as_expected(
+    test_file_path, relative_path_to_output_dir
+):
     # 1) Locate the real “simulated_data” folder by climbing up from the test’s directory
     test_dir = os.path.dirname(test_file_path)
     sim_root = find_sim_root(test_dir)

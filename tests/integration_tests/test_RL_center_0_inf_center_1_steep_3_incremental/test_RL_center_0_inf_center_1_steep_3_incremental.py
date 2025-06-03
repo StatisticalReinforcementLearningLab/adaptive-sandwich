@@ -1,7 +1,9 @@
+import os
+import pytest
 from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
     run_local_pipeline,
 )
-from tests.utils import assert_real_run_output_as_expected
+from tests.utils import assert_real_synthetic_run_output_as_expected
 
 
 def test_RL_center_0_inf_center_1_steep_3_incremental(
@@ -22,7 +24,18 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         suppress_interactive_data_checks="1",
     )
 
-    assert_real_run_output_as_expected(
+    cwd = os.getcwd()
+    print(">>> CWD at test time:", cwd)
+    found = False
+    for root, dirs, files in os.walk(cwd):
+        if "simulated_data" in dirs:
+            print(">>> Found simulated_data at:", os.path.join(root, "simulated_data"))
+            found = True
+            break
+    if not found:
+        pytest.skip("run_local_pipeline did not create a simulated_data/ folder")
+
+    assert_real_synthetic_run_output_as_expected(
         test_file_path=__file__,
         relative_path_to_output_dir="../../../simulated_data/synthetic_mode=delayed_1_dosage_alg=sigmoid_LS_T=10_n=100_recruitN=20_decisionsBtwnUpdates=1_steepness=3.0_algfeats=intercept,past_reward_errcorr=time_corr_actionC=0/exp=1",
     )

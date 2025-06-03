@@ -64,7 +64,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         )
 
         # Too hard to go back in time and add expected values for all the keys here,
-        # but we can at least check they're present in the observed dict now,
+        # but we can at least che keys are present in the observed dict now,
         # and then still compare the most important ones to observed.
         expected_debug_keys = [
             "theta_est",
@@ -77,7 +77,11 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "classical_bread_matrix",
             "classical_meat_matrix",
             "all_estimating_function_stacks",
+            "joint_bread_inverse_condition_number",
+            "joint_bread_inverse_first_block_eigvals",
+            "all_post_update_betas",
         ]
+
         assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys
 
         ### Check joint meat and bread inverse, uniting RL and inference

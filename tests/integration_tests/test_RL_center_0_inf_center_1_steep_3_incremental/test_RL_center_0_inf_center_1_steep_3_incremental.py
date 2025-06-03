@@ -24,26 +24,27 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         suppress_interactive_data_checks="1",
     )
 
+    # Find where “simulated_data” actually landed
     cwd = os.getcwd()
-    print(">>> CWD at test time:", cwd)
-    found = False
-    for root, dirs, files in os.walk(cwd):
+    sim_path = None
+    for root, dirs, _ in os.walk(cwd):
         if "simulated_data" in dirs:
             sim_path = os.path.join(root, "simulated_data")
-            print(">>> Found simulated_data at:", sim_path)
-            print(">>> Listing everything inside simulated_data recursively:\n")
-            for root, dirs, files in os.walk(sim_path):
-                # Compute a relative path to make the printout shorter
-                rel = os.path.relpath(root, sim_path)
-                prefix = "" if rel == "." else rel + os.sep
-                for d in dirs:
-                    print(f"{prefix}{d}/")
-                for f in files:
-                    print(f"{prefix}{f}")
-                    found = True
-                    break
-    if not found:
+            break
+
+    if sim_path is None:
         pytest.skip("run_local_pipeline did not create a simulated_data/ folder")
+
+    print(f">>> Found simulated_data at: {sim_path!r}")
+    print(">>> Listing everything inside simulated_data recursively:\n")
+    for root, dirs, files in os.walk(sim_path):
+        # Compute a relative path to make the printout shorter
+        rel = os.path.relpath(root, sim_path)
+        prefix = "" if rel == "." else rel + os.sep
+        for d in dirs:
+            print(f"{prefix}{d}/")
+        for f in files:
+            print(f"{prefix}{f}")
 
     assert_real_run_output_as_expected(
         test_file_path=__file__,

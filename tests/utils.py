@@ -4,67 +4,70 @@ import pickle
 import numpy as np
 import pandas as pd
 
+
 def get_abs_path(code_path, relative_path):
     return os.path.abspath(os.path.join(os.path.dirname(code_path), relative_path))
 
 
-def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_dir):
-    # Load the observed and expected pickle files
-    with open(
-        get_abs_path(
-            test_file_path,
-            f"{relative_path_to_output_dir}/study_df.pkl",
-        ),
-        "rb",
-    ) as observed_study_df_pickle, open(
-        get_abs_path(
-            test_file_path,
-            f"{relative_path_to_output_dir}/analysis.pkl",
-        ),
-        "rb",
-    ) as observed_analysis_pickle, open(
-        get_abs_path(
-            test_file_path,
-            f"{relative_path_to_output_dir}/debug_pieces.pkl",
-        ),
-        "rb",
-    ) as observed_debug_pieces_pickle, open(
-        get_abs_path(test_file_path, "expected_study_df.pkl"),
-        "rb",
-    ) as expected_study_df_pickle, open(
-        get_abs_path(test_file_path, "expected_analysis.pkl"),
-        "rb",
-    ) as expected_analysis_pickle, open(
-        get_abs_path(test_file_path, "expected_debug_pieces.pkl"),
-        "rb",
-    ) as expected_debug_pieces_pickle:
-        observed_study_df = pickle.load(observed_study_df_pickle)
-        observed_analysis_dict = pickle.load(observed_analysis_pickle)
-        observed_debug_pieces_dict = pickle.load(observed_debug_pieces_pickle)
+def find_sim_root(starting_dir):
+    """
+    Walk upward from starting_dir until we see a “simulated_data” subfolder.
+    Return the absolute path to that simulated_data folder (not just its parent).
+    Raise if never found.
+    """
+    current = os.path.abspath(starting_dir)
+    while True:
+        candidate = os.path.join(current, "simulated_data")
+        if os.path.isdir(candidate):
+            return candidate
+        parent = os.path.dirname(current)
+        if parent == current:
+            raise FileNotFoundError("Could not locate simulated_data directory")
+        current = parent
 
-        # The expected df is generated from a time when these were set as Int64.
-        # I don't remember why we had to change to float64; I believe it was
-        # necessary on the analysis side.
-        expected_study_df = pickle.load(expected_study_df_pickle).astype(
+
+def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_dir):
+    # 1) Locate the real “simulated_data” folder by climbing up from the test’s directory
+    test_dir = os.path.dirname(test_file_path)
+    sim_root = find_sim_root(test_dir)
+    #    Now sim_root == "/…/adaptive-sandwich/simulated_data"
+    #
+    # 2) The caller passed something like
+    #    "simulated_data/synthetic_mode=delayed_1_dosage…"
+    #    so strip off the leading "simulated_data/" before joining:
+    suffix = relative_path_to_output_dir.split("simulated_data/")[-1]
+    observed_dir = os.path.join(sim_root, suffix)
+
+    with open(os.path.join(observed_dir, "study_df.pkl"), "rb") as obs_study, open(
+        os.path.join(observed_dir, "analysis.pkl"), "rb"
+    ) as obs_analysis, open(
+        os.path.join(observed_dir, "debug_pieces.pkl"), "rb"
+    ) as obs_debug, open(
+        get_abs_path(test_file_path, "expected_study_df.pkl"), "rb"
+    ) as exp_study, open(
+        get_abs_path(test_file_path, "expected_analysis.pkl"), "rb"
+    ) as exp_analysis, open(
+        get_abs_path(test_file_path, "expected_debug_pieces.pkl"), "rb"
+    ) as exp_debug:
+
+        observed_study_df = pickle.load(obs_study)
+        observed_analysis_dict = pickle.load(obs_analysis)
+        observed_debug_pieces_dict = pickle.load(obs_debug)
+
+        expected_study_df = pickle.load(exp_study).astype(
             {"policy_num": "float64", "action": "float64"}
         )
-        expected_analysis_dict = pickle.load(expected_analysis_pickle)
-        expected_debug_pieces_dict = pickle.load(expected_debug_pieces_pickle)
+        expected_analysis_dict = pickle.load(exp_analysis)
+        expected_debug_pieces_dict = pickle.load(exp_debug)
 
-        ### Check base study dataframes equal. This is important so that
-        # we are even in the game, trying to produce the right inference results.
         pd.testing.assert_frame_equal(observed_study_df, expected_study_df)
 
-        # Check that we have the same theta estimate in both cases.
         np.testing.assert_allclose(
             observed_analysis_dict["theta_est"],
             expected_analysis_dict["theta_est"],
             rtol=1e-6,
         )
 
-        # Too hard to go back in time and add expected values for all the keys here,
-        # but we can at least check they're present in the observed dict now,
-        # and then still compare the most important ones to observed.
         expected_debug_keys = [
             "theta_est",
             "adaptive_sandwich_var_estimate",
@@ -79,20 +82,17 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         ]
         assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys
 
-        ### Check joint meat and bread inverse, uniting RL and inference
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_meat_matrix"],
             expected_debug_pieces_dict["joint_meat_matrix"],
             rtol=6e-4,
         )
-
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_bread_inverse_matrix"],
             expected_debug_pieces_dict["joint_bread_inverse_matrix"],
             atol=1e-5,
         )
 
-        ### Check final results
         np.testing.assert_allclose(
             observed_analysis_dict["adaptive_sandwich_var_estimate"],
             expected_analysis_dict["adaptive_sandwich_var_estimate"],

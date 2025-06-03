@@ -730,7 +730,7 @@ def require_estimating_functions_sum_to_zero(
         logger.info(
             "Estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
         )
-        # If this is not true there is an interal problem in the package.
+        # If this is not true there is an internal problem in the package.
         assert (mean_estimating_function_stack.size - theta_dim) % beta_dim == 0
         num_updates = (mean_estimating_function_stack.size - theta_dim) // beta_dim
         for i in range(num_updates):

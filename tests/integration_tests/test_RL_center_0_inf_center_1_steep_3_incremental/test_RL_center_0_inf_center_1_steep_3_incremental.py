@@ -29,7 +29,9 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
     found = False
     for root, dirs, files in os.walk(cwd):
         if "simulated_data" in dirs:
-            print(">>> Found simulated_data at:", os.path.join(root, "simulated_data"))
+            sim_path = os.path.join(root, "simulated_data")
+            print(">>> Found simulated_data at:", sim_path)
+            print(">>> Contents of simulated_data:", os.listdir(sim_path))
             found = True
             break
     if not found:

@@ -64,7 +64,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         )
 
         # Too hard to go back in time and add expected values for all the keys here,
-        # but we can at least che keys are present in the observed dict now,
+        # but we can at least check the keys are present in the observed dict now,
         # and then still compare the most important ones to observed.
         expected_debug_keys = [
             "theta_est",

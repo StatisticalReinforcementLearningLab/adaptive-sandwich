@@ -31,9 +31,17 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         if "simulated_data" in dirs:
             sim_path = os.path.join(root, "simulated_data")
             print(">>> Found simulated_data at:", sim_path)
-            print(">>> Contents of simulated_data:", os.listdir(sim_path))
-            found = True
-            break
+            print(">>> Listing everything inside simulated_data recursively:\n")
+            for root, dirs, files in os.walk(sim_path):
+                # Compute a relative path to make the printout shorter
+                rel = os.path.relpath(root, sim_path)
+                prefix = "" if rel == "." else rel + os.sep
+                for d in dirs:
+                    print(f"{prefix}{d}/")
+                for f in files:
+                    print(f"{prefix}{f}")
+                    found = True
+                    break
     if not found:
         pytest.skip("run_local_pipeline did not create a simulated_data/ folder")
 

@@ -1,3 +1,5 @@
+import os
+import pytest
 from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
     run_local_pipeline,
 )
@@ -24,5 +26,5 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
 
     assert_real_run_output_as_expected(
         test_file_path=__file__,
-        relative_path_to_output_dir="../../../simulated_data/synthetic_mode=delayed_1_dosage_alg=sigmoid_LS_T=10_n=100_recruitN=20_decisionsBtwnUpdates=1_steepness=3.0_algfeats=intercept,past_reward_errcorr=time_corr_actionC=0/exp=1",
+        relative_path_to_output_dir="../../../simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sigmoid_LS_T=10_n=100_recruitN=20_decisionsBtwnUpdates=1_steepness=3.0_algfeats=intercept,past_reward_errcorr=time_corr_actionC=0/exp=1",
     )

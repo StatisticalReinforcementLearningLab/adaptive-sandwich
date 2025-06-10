@@ -969,6 +969,13 @@ def single_user_weighted_estimating_function_stacker(
             for policy_num, update_args in threaded_update_func_args_by_policy_num.items()
         ]
     )
+
+    if algorithm_component.size % beta_dim != 0:
+        raise ValueError(
+            "The algorithm component of the weighted estimating function stack does not have a "
+            "size that is a multiple of the beta dimension. This likely means that the "
+            "algorithm estimating function is not returning a vector of the correct size."
+        )
     # 4. Form the weighted inference estimating equation.
     logger.info(
         "Computing the inference component of the weighted estimating function stack for user %s.",

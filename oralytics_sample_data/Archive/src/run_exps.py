@@ -131,6 +131,7 @@ def run(
     num_users: int,
     users_per_recruitment: int,
     num_users_before_update: int,
+    ignore_variance_for_rl_parameter_definition: bool,
     use_monte_carlo_expectation: bool,
 ) -> tuple[
     pd.DataFrame,
@@ -187,6 +188,7 @@ def run(
         num_users_before_update,
         EXP_SETTINGS["num_decision_times_per_day_per_user"],
         EXP_SETTINGS["weeks_between_recruitments"],
+        ignore_variance_for_rl_parameter_definition,
     )
 
     return (
@@ -221,6 +223,12 @@ def run(
     help="The number of users required before the first update.",
 )
 @click.option(
+    "--ignore_variance_for_rl_parameter_definition",
+    default=0,
+    type=click.Choice(["0", "1"]),
+    help="If set, we will package arguments for analysis as if the RL parameters are simply the elements of the posterior mean, and the elements of the posterior variance are covariates.",
+)
+@click.option(
     "--use_numerical_expectation",
     is_flag=True,
     default=False,
@@ -232,6 +240,7 @@ def main(
     num_users,
     users_per_recruitment,
     num_users_before_update,
+    ignore_variance_for_rl_parameter_definition,
     use_numerical_expectation,
 ):
     """
@@ -248,12 +257,20 @@ def main(
             The number of users recruited per recruitment.
         num_users_before_update (int):
             The number of users required before the first update.
+        ignore_variance_for_rl_parameter_definition (bool):
+            If set, the RL parameters are treated as the posterior mean, and the posterior variance is treated as covariates.
         use_numerical_expectation (bool):
             Whether to use numerical integration for action probabilities instead of Monte Carlo expectation.
 
     Returns:
     None
     """
+
+    # Really want this to be a boolean, but it's easiest to pass as a 0 or
+    # 1 instead of a flag from the driver shell script.
+    ignore_variance_for_rl_parameter_definition = int(
+        ignore_variance_for_rl_parameter_definition
+    )
 
     # Make exp_name from experiment settings
     exp_name = "_".join([str(EXP_SETTINGS[key]) for key in OUTPUT_PATH_NAMES])
@@ -278,6 +295,7 @@ def main(
         num_users,
         users_per_recruitment,
         num_users_before_update,
+        ignore_variance_for_rl_parameter_definition,
         not use_numerical_expectation,
     )
 

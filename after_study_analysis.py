@@ -2236,7 +2236,8 @@ def collect_existing_analyses(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="green",
+            bins=50,
+            color="red",
         )
         plt.grid(True)
         plt.show()
@@ -2252,7 +2253,8 @@ def collect_existing_analyses(
             classical_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="green",
+            bins=50,
+            color="red",
         )
         plt.grid(True)
         plt.show()

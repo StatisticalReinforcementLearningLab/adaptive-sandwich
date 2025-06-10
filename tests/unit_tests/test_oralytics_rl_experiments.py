@@ -262,6 +262,7 @@ def test_run_incremental_recruitment_exp():
     num_decision_times_per_user_per_day = 2
     weeks_between_recruitments = 2
     num_users = 10
+    ignore_variance_for_rl_parameter_definition = False
 
     np.random.seed(0)
     template_users_list = np.random.choice(
@@ -297,6 +298,7 @@ def test_run_incremental_recruitment_exp():
         num_users_before_update,
         num_decision_times_per_user_per_day,
         weeks_between_recruitments,
+        ignore_variance_for_rl_parameter_definition,
     )
 
     # Just collect these for convenience of checking args.

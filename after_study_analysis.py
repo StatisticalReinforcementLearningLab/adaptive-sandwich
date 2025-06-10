@@ -2225,6 +2225,40 @@ def collect_existing_analyses(
         )
         plt.show()
 
+        # Plot histogram of adaptive sandwich variance estimates
+        plt.clear_figure()
+        plt.title(
+            "Histogram of Adaptive Sandwich Variance Estimates for Coefficient of Interest"
+        )
+        plt.xlabel("Adaptive Estimate")
+        plt.ylabel("Frequency")
+        plt.hist(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            bins=20,
+            color="green",
+        )
+        plt.grid(True)
+        plt.show()
+
+        # Plot histogram of adaptive sandwich variance estimates
+        plt.clear_figure()
+        plt.title(
+            "Histogram of Classical Sandwich Variance Estimates for Coefficient of Interest"
+        )
+        plt.xlabel("Classical Estimate")
+        plt.ylabel("Frequency")
+        plt.hist(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            bins=20,
+            color="green",
+        )
+        plt.grid(True)
+        plt.show()
+
         # Plot the classical sandwich variance estimates sorted by adaptive sandwich variance
         # estimates for the coefficient of interest
         num_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)

@@ -12,6 +12,7 @@ num_users=70
 users_per_recruitment=5
 num_users_before_update=15
 only_analysis=0
+ignore_variance_for_rl_parameter_definition=0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study_indicator"
@@ -38,7 +39,7 @@ suppress_all_data_checks=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:-: OPT; do
+while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:v:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -70,6 +71,7 @@ while getopts i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:-: OPT; do
     n  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
     r  | users_per_recruitment )                        needs_arg; users_per_recruitment="$OPTARG" ;;
     u  | num_users_before_update )                      needs_arg; num_users_before_update="$OPTARG" ;;
+    v  | ignore_variance_for_rl_parameter_definition )   needs_arg; ignore_variance_for_rl_parameter_definition="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -93,7 +95,8 @@ if [ "$only_analysis" -eq "0" ]; then
     --seed ${seed} \
     --num_users ${num_users} \
     --users_per_recruitment ${users_per_recruitment} \
-    --num_users_before_update ${num_users_before_update}
+    --num_users_before_update ${num_users_before_update} \
+    --ignore_variance_for_rl_parameter_definition $ignore_variance_for_rl_parameter_definition
   echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished RL study simulation."
 fi
 

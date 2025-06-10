@@ -171,6 +171,10 @@ def load_function_from_same_named_file(filename):
         raise ValueError(
             f"Unable to import function from {filename}.  Please verify the file has the same name as the function of interest (ignoring the extension)."
         ) from e
+    except KeyError as e:
+        raise ValueError(
+            f"Unable to import function from {filename}.  Please verify the file has the same name as the function of interest (ignoring the extension)."
+        ) from e
 
 
 def confirm_input_check_result(message, suppress_interactive_data_checks, error=None):

@@ -969,6 +969,13 @@ def single_user_weighted_estimating_function_stacker(
             for policy_num, update_args in threaded_update_func_args_by_policy_num.items()
         ]
     )
+
+    if algorithm_component.size % beta_dim != 0:
+        raise ValueError(
+            "The algorithm component of the weighted estimating function stack does not have a "
+            "size that is a multiple of the beta dimension. This likely means that the "
+            "algorithm estimating function is not returning a vector of the correct size."
+        )
     # 4. Form the weighted inference estimating equation.
     logger.info(
         "Computing the inference component of the weighted estimating function stack for user %s.",
@@ -2216,6 +2223,40 @@ def collect_existing_analyses(
             ],
             color="blue",
         )
+        plt.show()
+
+        # Plot histogram of adaptive sandwich variance estimates
+        plt.clear_figure()
+        plt.title(
+            "Histogram of Adaptive Sandwich Variance Estimates for Coefficient of Interest"
+        )
+        plt.xlabel("Adaptive Estimate")
+        plt.ylabel("Frequency")
+        plt.hist(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            bins=50,
+            color="red",
+        )
+        plt.grid(True)
+        plt.show()
+
+        # Plot histogram of adaptive sandwich variance estimates
+        plt.clear_figure()
+        plt.title(
+            "Histogram of Classical Sandwich Variance Estimates for Coefficient of Interest"
+        )
+        plt.xlabel("Classical Estimate")
+        plt.ylabel("Frequency")
+        plt.hist(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ],
+            bins=50,
+            color="red",
+        )
+        plt.grid(True)
         plt.show()
 
         # Plot the classical sandwich variance estimates sorted by adaptive sandwich variance

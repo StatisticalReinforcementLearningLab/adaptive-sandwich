@@ -251,6 +251,7 @@ def execute_decision_time(
     num_decision_times_per_user_per_day: int,
     per_user_weeks_in_study: int,
     action_prob_function_args: dict,
+    ignore_variance_for_rl_parameter_definition: bool,
 ):
     """
     Execute a decision time for a user, updating the data dataframe with the results.
@@ -334,16 +335,31 @@ def execute_decision_time(
     num_users_entered_before_policy = data_df[
         (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
     ]["user_idx"].nunique()
-    action_prob_function_args[calendar_decision_time][user_idx] = (
-        form_beta_from_posterior(
-            algorithm.posterior_mean,
-            algorithm.posterior_var,
+    if not ignore_variance_for_rl_parameter_definition:
+        # This is the normal, "correct" behavior.  The other option
+        action_prob_function_args[calendar_decision_time][user_idx] = (
+            form_beta_from_posterior(
+                algorithm.posterior_mean,
+                algorithm.posterior_var,
+                num_users_entered_before_policy,
+            ),
+            jnp.array(alg_state),
+            algorithm.feature_dim,
             num_users_entered_before_policy,
-        ),
-        jnp.array(alg_state),
-        algorithm.feature_dim,
-        num_users_entered_before_policy,
-    )
+        )
+    else:
+        sigma_inv = np.linalg.inv(algorithm.posterior_var)
+        ut_sigma_inv = sigma_inv[np.triu_indices_from(sigma_inv)]
+        ut_sigma_inv_flat = ut_sigma_inv.flatten() / max(
+            1, num_users_entered_before_policy
+        )
+        action_prob_function_args[calendar_decision_time][user_idx] = (
+            jnp.array(algorithm.posterior_mean),
+            jnp.array(ut_sigma_inv_flat),
+            jnp.array(alg_state),
+            algorithm.feature_dim,
+            num_users_entered_before_policy,
+        )
 
     quality = sim_env.generate_rewards(user_idx, env_state, action)
     reward = algorithm.reward_def_func(quality, action, b_bar, a_bar)
@@ -379,6 +395,7 @@ def run_incremental_recruitment_exp(
     num_users_before_update: int,
     num_decision_times_per_user_per_day: int,
     weeks_between_recruitments: int,
+    ignore_variance_for_rl_parameter_definition: bool,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -484,6 +501,7 @@ def run_incremental_recruitment_exp(
                     num_decision_times_per_user_per_day,
                     per_user_weeks_in_study,
                     action_prob_function_args,
+                    ignore_variance_for_rl_parameter_definition,
                 )
             else:
                 action_prob_function_args[calendar_t][user_idx] = ()
@@ -523,7 +541,11 @@ def run_incremental_recruitment_exp(
                 [algorithm.posterior_mean, algorithm.posterior_var.flatten()]
             )
             update_alg_update_function_args(
-                alg_update_function_args, policy_idx, data_df, algorithm
+                alg_update_function_args,
+                policy_idx,
+                data_df,
+                algorithm,
+                ignore_variance_for_rl_parameter_definition,
             )
 
     update_data = [
@@ -703,6 +725,7 @@ def update_alg_update_function_args(
     policy_idx: int,
     data_df: pd.DataFrame,
     algorithm: RLAlgorithm,
+    ignore_variance_for_rl_parameter_definition: bool,
 ) -> None:
     """
     Update the algorithm update function arguments dictionary with the arguments for the current
@@ -721,6 +744,9 @@ def update_alg_update_function_args(
     algorithm (RLAlgorithm):
         The algorithm object that contains the posterior mean and variance for the current policy.
 
+    ignore_variance_for_rl_parameter_definition (bool):
+        If True, the variance is ignored when forming the beta vector for the after-study analysis.
+        It is simply passed as a covariate and will not be differentiated with respect to.
     """
     prior_mu = algorithm.PRIOR_MU
     prior_sigma_inv = np.linalg.inv(algorithm.PRIOR_SIGMA)
@@ -777,18 +803,41 @@ def update_alg_update_function_args(
             act_probs = jnp.array(act_probs).reshape(-1, 1)
             decision_times = jnp.array(decision_times).reshape(-1, 1)
 
-            alg_update_function_args[policy_idx][user_idx] = (
-                beta,
-                num_users_entered_already,
-                states,
-                actions,
-                act_probs,
-                decision_times,
-                rewards,
-                prior_mu,
-                prior_sigma_inv,
-                3396.449,
-            )
+            if not ignore_variance_for_rl_parameter_definition:
+                # This is the normal, "correct" behavior.  The other option
+                # is to ignore the variance and just use the posterior mean as beta
+                # and pass the variance elements as covariates. This is done below.
+                alg_update_function_args[policy_idx][user_idx] = (
+                    beta,
+                    num_users_entered_already,
+                    states,
+                    actions,
+                    act_probs,
+                    decision_times,
+                    rewards,
+                    prior_mu,
+                    prior_sigma_inv,
+                    3396.449,
+                )
+            else:
+                sigma_inv = np.linalg.inv(algorithm.posterior_var)
+                ut_sigma_inv = sigma_inv[np.triu_indices_from(sigma_inv)]
+                ut_sigma_inv_flat = ut_sigma_inv.flatten() / max(
+                    1, num_users_entered_already
+                )
+                alg_update_function_args[policy_idx][user_idx] = (
+                    jnp.array(algorithm.posterior_mean),
+                    jnp.array(ut_sigma_inv_flat),
+                    num_users_entered_already,
+                    states,
+                    actions,
+                    act_probs,
+                    decision_times,
+                    rewards,
+                    prior_mu,
+                    prior_sigma_inv,
+                    3396.449,
+                )
 
         else:
             alg_update_function_args[policy_idx][user_idx] = ()

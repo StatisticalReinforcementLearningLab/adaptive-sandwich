@@ -91,7 +91,7 @@ while getopts o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:u:v:-: OPT; do
     n  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
     r  | users_per_recruitment )                        needs_arg; users_per_recruitment="$OPTARG" ;;
     u  | num_users_before_update )                      needs_arg; num_users_before_update="$OPTARG" ;;
-    v  | ignore_variance_for_rl_parameter_definition )  needs_arg; ignore_variance_for_rl_paramater_definition="$OPTARG" ;;
+    v  | ignore_variance_for_rl_parameter_definition )  needs_arg; ignore_variance_for_rl_parameter_definition="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac

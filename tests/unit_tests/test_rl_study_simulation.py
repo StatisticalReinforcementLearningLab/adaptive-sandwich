@@ -800,28 +800,28 @@ class TestRunStudySimulation:
                 },
                 3: {
                     1: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.8], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.6], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.3], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -832,28 +832,28 @@ class TestRunStudySimulation:
                 },
                 4: {
                     1: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 1.0], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -866,28 +866,28 @@ class TestRunStudySimulation:
                     1: (),
                     2: (),
                     3: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, -1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.5], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -898,28 +898,28 @@ class TestRunStudySimulation:
                     1: (),
                     2: (),
                     3: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.5], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 1.5], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -932,14 +932,14 @@ class TestRunStudySimulation:
                     3: (),
                     4: (),
                     5: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -952,14 +952,14 @@ class TestRunStudySimulation:
                     3: (),
                     4: (),
                     5: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -974,7 +974,7 @@ class TestRunStudySimulation:
             {
                 2: {
                     1: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.7],
@@ -996,7 +996,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.2],
@@ -1024,7 +1024,7 @@ class TestRunStudySimulation:
                 },
                 3: {
                     1: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         np.array(
                             [
                                 [1, 0.7],
@@ -1050,7 +1050,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         np.array(
                             [
                                 [1, 0.2],
@@ -1076,7 +1076,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         np.array(
                             [
                                 [1, 0.3],
@@ -1098,7 +1098,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         np.array(
                             [
                                 [1, 0.4],
@@ -1135,7 +1135,7 @@ class TestRunStudySimulation:
                 },
                 4: {
                     1: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         np.array(
                             [
                                 [1, 0.7],
@@ -1161,7 +1161,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         np.array(
                             [
                                 [1, 0.2],
@@ -1187,7 +1187,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         np.array(
                             [
                                 [1, 0.3],
@@ -1213,7 +1213,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         np.array(
                             [
                                 [1, 0.4],
@@ -1239,7 +1239,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     5: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         np.array(
                             [
                                 [1, 0.5],
@@ -1261,7 +1261,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         np.array(
                             [
                                 [1, 0.6],
@@ -1558,42 +1558,42 @@ class TestRunStudySimulation:
             {
                 1: {
                     1: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.1], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.2], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.3], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.4], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.5], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -1602,42 +1602,42 @@ class TestRunStudySimulation:
                 },
                 2: {
                     1: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.1], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.9], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -1646,42 +1646,42 @@ class TestRunStudySimulation:
                 },
                 3: {
                     1: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.8], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.6], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, -1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -1690,42 +1690,42 @@ class TestRunStudySimulation:
                 },
                 4: {
                     1: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 1.0], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.5], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 1.5], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
                         np.array([1, 0.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
@@ -1739,7 +1739,7 @@ class TestRunStudySimulation:
             {
                 2: {
                     1: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.1],
@@ -1761,7 +1761,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.2],
@@ -1783,7 +1783,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.3],
@@ -1805,7 +1805,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.4],
@@ -1827,7 +1827,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.5],
@@ -1849,7 +1849,7 @@ class TestRunStudySimulation:
                         0,
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         np.array(
                             [
                                 [1, 0.6],

@@ -11,7 +11,7 @@ import pandas as pd
 import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env_params, SyntheticEnv
-from basic_RL_algorithms import FixedRandomization, SigmoidLS
+from basic_RL_algorithms import FixedRandomization, SigmoidLS, SmoothPosteriorSampling
 from constants import RLStudyArgs
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     max_calendar_t = study_df["calendar_t"].max()
 
     # Loop over all decision times ###############################################
+    logger.info("Maximum decision time: %s.", max_calendar_t)
     for t in range(1, max_calendar_t + 1):
         logger.info("Processing decision time %s.", t)
 
@@ -58,9 +59,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
         # Sample Actions #####################################################
         logger.info("Sampling actions for time %s.", t)
-        action_probs = study_RLalg.get_action_probs(
-            curr_timestep_data, filter_keyval=("calendar_t", t)
-        )
+        action_probs = study_RLalg.get_action_probs(curr_timestep_data)
 
         actions = study_RLalg.rng.binomial(1, action_probs)
 
@@ -106,8 +105,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # structure is the simplest to ask for and so we may as well test the
         # full pipeline doing that.
         logger.info("Collecting pi args for time %s.", t)
-        curr_beta_est = study_RLalg.get_current_beta_estimate()
-        study_RLalg.collect_pi_args(all_prev_data, t, curr_beta_est)
+        study_RLalg.collect_pi_args(all_prev_data, t)
 
         # Check if need to update algorithm #######################################
         # TODO: recruit_t not respected here.  Either remove it or use here.
@@ -119,27 +117,29 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         ):
             last_policy_num = len(study_RLalg.all_policies) - 1
 
-            new_obs_bool = (
-                all_prev_data_bool
-                & (study_df["policy_num"] > last_policy_num)
-                & (study_df["in_study"] == 1)
-            )
-            new_update_data = study_df[new_obs_bool]
-
             # Min users used to be enforced here. It is ignored now.
 
             # Update Algorithm ##############################################
             logger.info("Updating algorithm parameters for time %s.", t)
-            logger.info("Collecting RL loss args for time %s.", t)
-            study_RLalg.update_alg(new_update_data)
+            if study_RLalg.incremental_updates:
+                # If incremental updates, we only need new data to update the algorithm.
+                new_obs_bool = (
+                    all_prev_data_bool
+                    & (study_df["policy_num"] > last_policy_num)
+                    & (study_df["in_study"] == 1)
+                )
+                update_data = study_df[new_obs_bool]
+            else:
+                # Otherwise use all data so far
+                update_data = all_prev_data
 
-            curr_beta_est = study_RLalg.get_current_beta_estimate()
+            study_RLalg.update_alg(update_data)
 
             # NOTE: Very important that this is called AFTER the above update.
             # It is a little confusing that the beta here is the beta that the
             # rest of the data already produced, whereas for the pis the beta
             # is used to produce the probability at that decision time.
-            study_RLalg.collect_rl_update_args(all_prev_data, t, curr_beta_est)
+            study_RLalg.collect_rl_update_args(all_prev_data, t)
     return study_df, study_RLalg
 
 
@@ -163,12 +163,23 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         env_params = load_synthetic_env_params(paramf_path)
         if len(env_params.shape) == 2:
             assert env_params.shape[0] >= args.T
-        exp_str = (
-            f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
-            f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
-            f"steepness={args.steepness}_algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
-            f"actionC={args.action_centering}"
-        )
+
+        if args.RL_alg == RLStudyArgs.SIGMOID_LS:
+            exp_str = (
+                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
+                f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
+                f"steepness={args.steepness}_algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
+                f"actionC={args.action_centering}"
+            )
+        elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
+            exp_str = (
+                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
+                f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
+                f"algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
+                f"actionC={args.action_centering}"
+            )
+        else:
+            raise ValueError("Invalid RL Algorithm Type For Synthetic Dataset")
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
         raise NotImplementedError()
@@ -257,6 +268,24 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 upper_clip=args.upper_clip,
                 action_centering=args.action_centering,
             )
+        elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
+            # TODO: Set these 1. sensibly, definitely 2. dynamically, ideally
+            # prior_mu = np.zeros(len(alg_state_feats + alg_treat_feats))
+            prior_mu = np.array([-0.29625672, 0.36471748, 1.7090082, 0.15021843])
+            prior_var = np.eye(len(alg_state_feats + alg_treat_feats))
+            noise_var = 1
+
+            study_RLalg = SmoothPosteriorSampling(
+                state_feats=alg_state_feats,
+                treat_feats=alg_treat_feats,
+                alg_seed=alg_seed,
+                lower_clip=args.lower_clip,
+                upper_clip=args.upper_clip,
+                action_centering=args.action_centering,
+                prior_mu=prior_mu,
+                prior_sigma=prior_var,
+                noise_var=noise_var,
+            )
         else:
             raise ValueError("Invalid RL Algorithm Type")
 
@@ -286,14 +315,14 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         with open(f"{folder_path}/rl_update_args.pkl", "wb") as f:
             pickle.dump(study_RLalg.rl_update_args, f)
 
-        beta_dim = study_RLalg.all_policies[-1]["beta_est"].shape[1]
+        beta_dim = study_RLalg.get_current_beta_estimate().size
         beta_df = pd.DataFrame(
             data=np.array(
                 [
                     np.concatenate(
                         # Note the plus 1 in policy num. This is just how we do
                         # things when setting up study df.
-                        [np.array([i + 1]), policy["beta_est"].to_numpy().squeeze()]
+                        [np.array([i + 1]), policy["beta_est"]]
                     )
                     for i, policy in enumerate(study_RLalg.all_policies)
                 ]
@@ -352,6 +381,7 @@ def main():
         choices=[
             RLStudyArgs.FIXED_RANDOMIZATION,
             RLStudyArgs.SIGMOID_LS,
+            RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING,
         ],
         help="RL algorithm used to select actions",
     )

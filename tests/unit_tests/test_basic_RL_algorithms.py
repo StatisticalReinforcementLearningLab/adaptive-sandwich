@@ -97,7 +97,7 @@ class TestSigmoidLS_T3_n2:
         beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
 
         np.testing.assert_equal(
-            basic_RL_algorithms.get_pis_batched(
+            basic_RL_algorithms.get_pis_batched_sigmoid(
                 beta_est=beta_est,
                 lower_clip=0.1,
                 steepness=10,

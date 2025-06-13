@@ -41,6 +41,7 @@ def perform_first_wave_input_checks(
     alg_update_func_args_action_prob_index,
     alg_update_func_args_action_prob_times_index,
     theta_est,
+    beta_dim,
     suppress_interactive_data_checks,
     small_sample_correction,
 ):
@@ -127,6 +128,8 @@ def perform_first_wave_input_checks(
         calendar_t_col_name,
         in_study_col_name,
         action_prob_col_name,
+        beta_dim,
+        len(theta_est),
         suppress_interactive_data_checks,
     )
 
@@ -510,7 +513,7 @@ def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
     )
     if alg_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
-            "\nYou specified that the algorithm update function function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
+            "\nYou specified that the algorithm update function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
         )
 
@@ -580,6 +583,8 @@ def verify_study_df_summary_satisfactory(
     calendar_t_col_name,
     in_study_col_name,
     action_prob_col_name,
+    beta_dim,
+    theta_dim,
     suppress_interactive_data_checks,
 ):
 
@@ -601,6 +606,12 @@ def verify_study_df_summary_satisfactory(
     ).sum()
     min_action_prob = in_study_df[action_prob_col_name].min()
     max_action_prob = in_study_df[action_prob_col_name].max()
+    min_non_fallback_policy_num = in_study_df[in_study_df[policy_num_col_name] >= 0][
+        policy_num_col_name
+    ].min()
+    num_data_points_before_first_update = len(
+        in_study_df[in_study_df[policy_num_col_name] == min_non_fallback_policy_num]
+    )
 
     confirm_input_check_result(
         f"\nYou provided a study dataframe reflecting a study with"
@@ -608,6 +619,9 @@ def verify_study_df_summary_satisfactory(
         f"\n* {num_non_initial_or_fallback_policies} policy updates"
         f"\n* {num_decision_times} decision times, for an average of {avg_decisions_per_user}"
         f" decisions per user"
+        f"\n* RL parameters of dimension {beta_dim} per update"
+        f"\n* Inferential target of dimension {theta_dim}"
+        f"\n* {num_data_points_before_first_update} data points before the first update"
         f"\n* {num_decision_times_with_fallback_policies} decision times"
         f" ({num_decision_times_with_fallback_policies * 100 / num_decision_times}%) for which"
         f" fallback policies were used"
@@ -723,7 +737,6 @@ def require_estimating_functions_sum_to_zero(
         np.testing.assert_allclose(
             jnp.zeros(mean_estimating_function_stack.size),
             mean_estimating_function_stack,
-            rtol=1e-5,
             atol=1e-5,
         )
     except AssertionError as e:

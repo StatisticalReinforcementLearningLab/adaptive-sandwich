@@ -293,6 +293,9 @@ def analyze_dataset(
 
     theta_est = jnp.array(estimate_theta(study_df, theta_calculation_func_filename))
 
+    beta_dim = calculate_beta_dim(
+        action_prob_func_args, action_prob_func_args_beta_index
+    )
     if not suppress_all_data_checks:
         input_checks.perform_first_wave_input_checks(
             study_df,
@@ -310,6 +313,7 @@ def analyze_dataset(
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
             theta_est,
+            beta_dim,
             suppress_interactive_data_checks,
             small_sample_correction,
         )
@@ -393,7 +397,6 @@ def analyze_dataset(
         suppress_interactive_data_checks,
     )
 
-    beta_dim = len(all_post_update_betas[0])
     theta_dim = len(theta_est)
     if not suppress_all_data_checks:
         input_checks.require_estimating_functions_sum_to_zero(
@@ -485,6 +488,33 @@ def analyze_dataset(
     print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
     print(
         f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
+    )
+
+
+def calculate_beta_dim(
+    action_prob_func_args: dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]],
+    action_prob_func_args_beta_index: int,
+) -> int:
+    """
+    Calculates the dimension of the beta vector based on the action probability function arguments.
+
+    Args:
+        action_prob_func_args (dict): Dictionary containing the action probability function arguments.
+        action_prob_func_args_beta_index (int): Index of the beta parameter in the action probability function arguments.
+
+    Returns:
+        int: The dimension of the beta vector.
+    """
+    for decision_time in action_prob_func_args:
+        for user_id in action_prob_func_args[decision_time]:
+            if action_prob_func_args[decision_time][user_id]:
+                return len(
+                    action_prob_func_args[decision_time][user_id][
+                        action_prob_func_args_beta_index
+                    ]
+                )
+    raise ValueError(
+        "No valid beta vector found in action probability function arguments. Please check the input data."
     )
 
 

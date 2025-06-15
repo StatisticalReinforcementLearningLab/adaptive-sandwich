@@ -541,8 +541,6 @@ class SmoothPosteriorSampling:
 
         self.all_policies.append(update_dict)
 
-        breakpoint()
-
     def get_all_users(self, study_df, user_id_column="user_id"):
         return study_df[user_id_column].unique()
 

@@ -103,10 +103,7 @@ def assert_dict_with_arrays_equal(d1, d2):
     Recursively compare two dictionaries (or nested structures) that may contain numpy arrays.
     """
 
-    try:
-        assert type(d1) == type(d2), f"Type mismatch: {type(d1)} != {type(d2)}"
-    except AssertionError as e:
-        breakpoint()
+    assert type(d1) == type(d2), f"Type mismatch: {type(d1)} != {type(d2)}"
     if isinstance(d1, dict):
         assert d1.keys() == d2.keys(), f"Dict keys mismatch: {d1.keys()} != {d2.keys()}"
         for k in d1:

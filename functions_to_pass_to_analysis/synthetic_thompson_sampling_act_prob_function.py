@@ -4,8 +4,8 @@ import jax.scipy.special as special
 
 RANDOM_VARS = jax.random.normal(jax.random.PRNGKey(0), (10000,))
 
-C_logistic = 3
-B = 0.515
+C_logistic = 1
+B = 1.5
 
 
 def logistic_function(x: float, L_min: float, L_max: float) -> float:

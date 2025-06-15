@@ -271,7 +271,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
             # TODO: Set these 1. sensibly, definitely 2. dynamically, ideally
             # prior_mu = np.zeros(len(alg_state_feats + alg_treat_feats))
-            prior_mu = np.array([-0.29625672, 0.36471748, 1.7090082, 0.15021843])
+            prior_mu = np.array([-0.37783337, 0.18696958, 2.3131008, 0.32913807])
             prior_var = 1000000 * np.eye(len(alg_state_feats + alg_treat_feats))
             noise_var = 1
 

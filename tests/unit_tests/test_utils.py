@@ -1,4 +1,5 @@
 import numpy as np
+from jax import numpy as jnp
 
 from tests.utils import finite_difference_hessian
 
@@ -95,3 +96,26 @@ def perform_bayesian_linear_regression(
     )
 
     return posterior_mean.flatten(), posterior_variance
+
+
+def assert_dict_with_arrays_equal(d1, d2):
+    """
+    Recursively compare two dictionaries (or nested structures) that may contain numpy arrays.
+    """
+
+    try:
+        assert type(d1) == type(d2), f"Type mismatch: {type(d1)} != {type(d2)}"
+    except AssertionError as e:
+        breakpoint()
+    if isinstance(d1, dict):
+        assert d1.keys() == d2.keys(), f"Dict keys mismatch: {d1.keys()} != {d2.keys()}"
+        for k in d1:
+            assert_dict_with_arrays_equal(d1[k], d2[k])
+    elif isinstance(d1, (list, tuple)):
+        assert len(d1) == len(d2), f"Length mismatch: {len(d1)} != {len(d2)}"
+        for v1, v2 in zip(d1, d2):
+            assert_dict_with_arrays_equal(v1, v2)
+    elif isinstance(d1, (np.ndarray, jnp.ndarray)):
+        np.testing.assert_array_equal(d1, d2)
+    else:
+        assert d1 == d2, f"Value mismatch: {d1} != {d2}"

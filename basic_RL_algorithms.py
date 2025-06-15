@@ -124,7 +124,7 @@ class SigmoidLS:
             {
                 "RX": jnp.zeros(self.beta_dim),
                 "XX": jnp.zeros(self.beta_dim),
-                "beta_est": jnp.zeros(self.beta_dim).reshape(1, -1),
+                "beta_est": jnp.zeros(self.beta_dim),
                 "inc_data": {},
                 "total_obs": 0,
                 "seen_user_id": set(),
@@ -540,6 +540,8 @@ class SmoothPosteriorSampling:
         }
 
         self.all_policies.append(update_dict)
+
+        breakpoint()
 
     def get_all_users(self, study_df, user_id_column="user_id"):
         return study_df[user_id_column].unique()

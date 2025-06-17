@@ -10,6 +10,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # Arguments that affect RL study simulation side
 T=10
 decisions_between_updates=1
+update_cadence_offset=0
 min_update_time=0
 recruit_t=1
 n=100
@@ -48,7 +49,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -61,6 +62,7 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:
     n  | num_users )                                    needs_arg; n="$OPTARG" ;;
     u  | recruit_n )                                    needs_arg; recruit_n="$OPTARG" ;;
     d  | decisions_between_updates )                    needs_arg; decisions_between_updates="$OPTARG" ;;
+    o  | update_cadence_offset )                        needs_arg; update_cadence_offset="$OPTARG" ;;
     r  | RL_alg )                                       needs_arg; RL_alg="$OPTARG" ;;
     e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
@@ -113,6 +115,7 @@ python rl_study_simulation.py \
   --N=1 \
   --n=$n \
   --decisions_between_updates=$decisions_between_updates \
+  --update_cadence_offset=$update_cadence_offset \
   --recruit_n=$recruit_n \
   --recruit_t=$recruit_t \
   --synthetic_mode=$synthetic_mode \

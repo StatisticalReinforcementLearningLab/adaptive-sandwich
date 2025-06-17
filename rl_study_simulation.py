@@ -111,7 +111,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # TODO: recruit_t not respected here.  Either remove it or use here.
         if (
             t < study_env.calendar_T
-            and t % args.decisions_between_updates == 0
+            and t % args.decisions_between_updates == args.update_cadence_offset
             and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
             and t >= args.min_update_time
         ):
@@ -424,6 +424,12 @@ def main():
         type=int,
         default=1,
         help="Number of decision times beween algorithm updates",
+    )
+    parser.add_argument(
+        "--update_cadence_offset",
+        type=int,
+        default=1,
+        help="If nonzero, updates will occur whenever calendar_t (mod decisions_between_updates) == update_cadence_offset",
     )
     parser.add_argument(
         "--save_dir", type=str, default=".", help="Directory to save all results in"

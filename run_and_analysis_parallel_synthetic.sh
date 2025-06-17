@@ -32,6 +32,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 # that.
 T=50
 decisions_between_updates=1
+update_cadence_offset=0
 min_update_time=0
 recruit_t=1
 n=100
@@ -70,7 +71,7 @@ small_sample_correction="none"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -83,6 +84,7 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:
     n  | num_users )                                    needs_arg; n="$OPTARG" ;;
     u  | recruit_n )                                    needs_arg; recruit_n="$OPTARG" ;;
     d  | decisions_between_updates )                    needs_arg; decisions_between_updates="$OPTARG" ;;
+    o  | update_cadence_offset )                        needs_arg; update_cadence_offset="$OPTARG" ;;
     r  | RL_alg )                                       needs_arg; RL_alg="$OPTARG" ;;
     e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
@@ -164,6 +166,7 @@ python rl_study_simulation.py \
   --parallel_task_index=$SLURM_ARRAY_TASK_ID \
   --n=$n \
   --decisions_between_updates=$decisions_between_updates \
+  --update_cadence_offset=$update_cadence_offset \
   --recruit_n=$recruit_n \
   --recruit_t=$recruit_t \
   --synthetic_mode=$synthetic_mode \

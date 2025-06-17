@@ -2,6 +2,7 @@ import argparse
 
 import pandas as pd
 import numpy as np
+import jax.numpy as jnp
 
 import basic_RL_algorithms
 import constants
@@ -54,13 +55,13 @@ class TestSigmoidLS_T3_n2:
 
         self.sigmoid_3.all_policies.append(
             {
-                "beta_est": pd.DataFrame(
-                    {
-                        "intercept": [-0.16610159],
-                        "past_reward": [0.98683333],
-                        "action:intercept": [-1.287509],
-                        "action:past_reward": [-1.0602505],
-                    }
+                "beta_est": jnp.array(
+                    [
+                        -0.16610159,
+                        0.98683333,
+                        -1.287509,
+                        -1.0602505,
+                    ]
                 ),
                 "seen_user_id": {1, 2},
                 "XX": np.ones(self.sigmoid_3.beta_dim),
@@ -97,7 +98,7 @@ class TestSigmoidLS_T3_n2:
         beta_est = np.array([-0.16610159, 0.98683333, -1.287509, -1.0602505])
 
         np.testing.assert_equal(
-            basic_RL_algorithms.get_pis_batched(
+            basic_RL_algorithms.get_pis_batched_sigmoid(
                 beta_est=beta_est,
                 lower_clip=0.1,
                 steepness=10,

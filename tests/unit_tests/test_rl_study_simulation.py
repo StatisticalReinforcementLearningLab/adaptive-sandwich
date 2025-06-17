@@ -5,11 +5,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
 import pytest
+from jax import numpy as jnp
 
 import synthetic_env
 import basic_RL_algorithms
 import rl_study_simulation
 import constants
+from tests.unit_tests.test_utils import assert_dict_with_arrays_equal
 
 
 class TestRunStudySimulation:
@@ -743,29 +745,29 @@ class TestRunStudySimulation:
         expected_df = expected_df.astype({"policy_num": "float64"})
         pd.testing.assert_frame_equal(study_df, expected_df)
 
-        np.testing.assert_equal(
+        assert_dict_with_arrays_equal(
             self.sigmoid_1.pi_args,
             {
                 1: {
                     1: (
-                        np.array(
+                        jnp.array(
                             [0, 0, 0, 0],
                             dtype="float32",
                         ),
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.7], dtype="float32"),
+                        jnp.array([1, 0.7], dtype="float32"),
                     ),
                     2: (
-                        np.array(
+                        jnp.array(
                             [0, 0, 0, 0],
                             dtype="float32",
                         ),
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.2], dtype="float32"),
+                        jnp.array([1, 0.2], dtype="float32"),
                     ),
                     3: (),
                     4: (),
@@ -774,24 +776,24 @@ class TestRunStudySimulation:
                 },
                 2: {
                     1: (
-                        np.array(
+                        jnp.array(
                             [0, 0, 0, 0],
                             dtype="float32",
                         ),
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.1], dtype="float32"),
+                        jnp.array([1, 0.1], dtype="float32"),
                     ),
                     2: (
-                        np.array(
+                        jnp.array(
                             [0, 0, 0, 0],
                             dtype="float32",
                         ),
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.9], dtype="float32"),
+                        jnp.array([1, 0.9], dtype="float32"),
                     ),
                     3: (),
                     4: (),
@@ -800,64 +802,64 @@ class TestRunStudySimulation:
                 },
                 3: {
                     1: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.8], dtype="float32"),
+                        jnp.array([1, 0.8], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.6], dtype="float32"),
+                        jnp.array([1, 0.6], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.3], dtype="float32"),
+                        jnp.array([1, 0.3], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.4], dtype="float32"),
+                        jnp.array([1, 0.4], dtype="float32"),
                     ),
                     5: (),
                     6: (),
                 },
                 4: {
                     1: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 1.0], dtype="float32"),
+                        jnp.array([1, 1.0], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 1.0], dtype="float32"),
+                        jnp.array([1, 1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     5: (),
                     6: (),
@@ -866,64 +868,64 @@ class TestRunStudySimulation:
                     1: (),
                     2: (),
                     3: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, -1.0], dtype="float32"),
+                        jnp.array([1, -1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.5], dtype="float32"),
+                        jnp.array([1, 0.5], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.6], dtype="float32"),
+                        jnp.array([1, 0.6], dtype="float32"),
                     ),
                 },
                 6: {
                     1: (),
                     2: (),
                     3: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.5], dtype="float32"),
+                        jnp.array([1, 0.5], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 1.5], dtype="float32"),
+                        jnp.array([1, 1.5], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, -1.0], dtype="float32"),
+                        jnp.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[2]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                 },
                 7: {
@@ -932,18 +934,18 @@ class TestRunStudySimulation:
                     3: (),
                     4: (),
                     5: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, -1.0], dtype="float32"),
+                        jnp.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.9], dtype="float32"),
+                        jnp.array([1, 0.9], dtype="float32"),
                     ),
                 },
                 8: {
@@ -952,69 +954,69 @@ class TestRunStudySimulation:
                     3: (),
                     4: (),
                     5: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_1.all_policies[3]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                 },
             },
         )
 
-        np.testing.assert_equal(
+        assert_dict_with_arrays_equal(
             self.sigmoid_1.rl_update_args,
             {
                 2: {
                     1: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.7],
                                 [1, 0.1],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.7],
                                 [1, 0.1],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1]]),
-                        np.array([[0.1], [0.8]], dtype="float32"),
-                        np.array([[0.6], [0.6]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[1], [1]]),
+                        jnp.array([[0.1], [0.8]], dtype="float32"),
+                        jnp.array([[0.6], [0.6]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [0]]),
-                        np.array([[0.9], [0.6]], dtype="float32"),
-                        np.array([[0.3], [0.3]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[0], [0]]),
+                        jnp.array([[0.9], [0.6]], dtype="float32"),
+                        jnp.array([[0.3], [0.3]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     3: (),
@@ -1024,8 +1026,8 @@ class TestRunStudySimulation:
                 },
                 3: {
                     1: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[2]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.7],
                                 [1, 0.1],
@@ -1034,7 +1036,7 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.7],
                                 [1, 0.1],
@@ -1043,15 +1045,15 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1], [1], [1]]),
-                        np.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
-                        np.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
-                        np.array([[1], [2], [3], [4]], dtype="int32"),
+                        jnp.array([[1], [1], [1], [1]]),
+                        jnp.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
+                        jnp.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
+                        jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[2]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
@@ -1060,7 +1062,7 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
@@ -1069,65 +1071,65 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [0], [0], [0]]),
-                        np.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
-                        np.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
-                        np.array([[1], [2], [3], [4]], dtype="int32"),
+                        jnp.array([[0], [0], [0], [0]]),
+                        jnp.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
+                        jnp.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
+                        jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[2]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.3],
                                 [1, 1.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.3],
                                 [1, 1.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1]]),
-                        np.array([[1], [-1]], dtype="float32"),
-                        np.array([[0.6], [0.6]], dtype="float32"),
-                        np.array([[3], [4]], dtype="int32"),
+                        jnp.array([[1], [1]]),
+                        jnp.array([[1], [-1]], dtype="float32"),
+                        jnp.array([[0.6], [0.6]], dtype="float32"),
+                        jnp.array([[3], [4]], dtype="int32"),
                         0,
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[2]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[2]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.4],
                                 [1, 0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.4],
                                 [1, 0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [0],
                                 [0],
                             ]
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [0],
                                 [0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0.3], [0.3]], dtype="float32"),
-                        np.array([[3], [4]], dtype="int32"),
+                        jnp.array([[0.3], [0.3]], dtype="float32"),
+                        jnp.array([[3], [4]], dtype="int32"),
                         0,
                     ),
                     5: (),
@@ -1135,8 +1137,8 @@ class TestRunStudySimulation:
                 },
                 4: {
                     1: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[3]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.7],
                                 [1, 0.1],
@@ -1145,7 +1147,7 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.7],
                                 [1, 0.1],
@@ -1154,15 +1156,15 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1], [1], [1]]),
-                        np.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
-                        np.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
-                        np.array([[1], [2], [3], [4]], dtype="int32"),
+                        jnp.array([[1], [1], [1], [1]]),
+                        jnp.array([[0.1], [0.8], [1.0], [0.5]], dtype="float32"),
+                        jnp.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
+                        jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     2: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[3]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
@@ -1171,7 +1173,7 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
@@ -1180,15 +1182,15 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [0], [0], [0]]),
-                        np.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
-                        np.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
-                        np.array([[1], [2], [3], [4]], dtype="int32"),
+                        jnp.array([[0], [0], [0], [0]]),
+                        jnp.array([[0.9], [0.6], [0.0], [1.5]], dtype="float32"),
+                        jnp.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
+                        jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
                     ),
                     3: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[3]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.3],
                                 [1, 1.0],
@@ -1197,7 +1199,7 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.3],
                                 [1, 1.0],
@@ -1206,15 +1208,15 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1], [0], [1]]),
-                        np.array([[1], [-1], [0.5], [-0.5]], dtype="float32"),
-                        np.array([[0.6], [0.6], [0.5], [0.6]], dtype="float32"),
-                        np.array([[3], [4], [5], [6]], dtype="int32"),
+                        jnp.array([[1], [1], [0], [1]]),
+                        jnp.array([[1], [-1], [0.5], [-0.5]], dtype="float32"),
+                        jnp.array([[0.6], [0.6], [0.5], [0.6]], dtype="float32"),
+                        jnp.array([[3], [4], [5], [6]], dtype="int32"),
                         0,
                     ),
                     4: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[3]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.4],
                                 [1, 0],
@@ -1223,7 +1225,7 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.4],
                                 [1, 0],
@@ -1232,54 +1234,54 @@ class TestRunStudySimulation:
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [0], [0], [1]]),
-                        np.array([[0], [0], [1.5], [2.3]], dtype="float32"),
-                        np.array([[0.3], [0.3], [0.5], [0.3]], dtype="float32"),
-                        np.array([[3], [4], [5], [6]], dtype="int32"),
+                        jnp.array([[0], [0], [0], [1]]),
+                        jnp.array([[0], [0], [1.5], [2.3]], dtype="float32"),
+                        jnp.array([[0.3], [0.3], [0.5], [0.3]], dtype="float32"),
+                        jnp.array([[3], [4], [5], [6]], dtype="int32"),
                         0,
                     ),
                     5: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[3]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.5],
                                 [1, -1],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.5],
                                 [1, -1],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [0]]),
-                        np.array([[-1], [-1]], dtype="float32"),
-                        np.array([[0.5], [0.6]], dtype="float32"),
-                        np.array([[5], [6]], dtype="int32"),
+                        jnp.array([[1], [0]]),
+                        jnp.array([[-1], [-1]], dtype="float32"),
+                        jnp.array([[0.5], [0.6]], dtype="float32"),
+                        jnp.array([[5], [6]], dtype="int32"),
                         0,
                     ),
                     6: (
-                        self.sigmoid_1.all_policies[3]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_1.all_policies[3]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.6],
                                 [1, 0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.6],
                                 [1, 0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [1]]),
-                        np.array([[0], [0.9]], dtype="float32"),
-                        np.array([[0.5], [0.3]], dtype="float32"),
-                        np.array([[5], [6]], dtype="int32"),
+                        jnp.array([[0], [1]]),
+                        jnp.array([[0], [0.9]], dtype="float32"),
+                        jnp.array([[0.5], [0.3]], dtype="float32"),
+                        jnp.array([[5], [6]], dtype="int32"),
                         0,
                     ),
                 },
@@ -1553,321 +1555,321 @@ class TestRunStudySimulation:
         )
         pd.testing.assert_frame_equal(study_df, expected_df)
 
-        np.testing.assert_equal(
+        assert_dict_with_arrays_equal(
             self.sigmoid_2.pi_args,
             {
                 1: {
                     1: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.1], dtype="float32"),
+                        jnp.array([1, 0.1], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.2], dtype="float32"),
+                        jnp.array([1, 0.2], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.3], dtype="float32"),
+                        jnp.array([1, 0.3], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.4], dtype="float32"),
+                        jnp.array([1, 0.4], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.5], dtype="float32"),
+                        jnp.array([1, 0.5], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.6], dtype="float32"),
+                        jnp.array([1, 0.6], dtype="float32"),
                     ),
                 },
                 2: {
                     1: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.1], dtype="float32"),
+                        jnp.array([1, 0.1], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.9], dtype="float32"),
+                        jnp.array([1, 0.9], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 1.0], dtype="float32"),
+                        jnp.array([1, 1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, -1.0], dtype="float32"),
+                        jnp.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[0]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[0]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                 },
                 3: {
                     1: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.8], dtype="float32"),
+                        jnp.array([1, 0.8], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.6], dtype="float32"),
+                        jnp.array([1, 0.6], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, -1.0], dtype="float32"),
+                        jnp.array([1, -1.0], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, -1.0], dtype="float32"),
+                        jnp.array([1, -1.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.9], dtype="float32"),
+                        jnp.array([1, 0.9], dtype="float32"),
                     ),
                 },
                 4: {
                     1: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 1.0], dtype="float32"),
+                        jnp.array([1, 1.0], dtype="float32"),
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.5], dtype="float32"),
+                        jnp.array([1, 0.5], dtype="float32"),
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 1.5], dtype="float32"),
+                        jnp.array([1, 1.5], dtype="float32"),
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
+                        self.sigmoid_2.all_policies[1]["beta_est"],
                         0.1,
                         1.0,
                         0.9,
-                        np.array([1, 0.0], dtype="float32"),
+                        jnp.array([1, 0.0], dtype="float32"),
                     ),
                 },
             },
         )
-        np.testing.assert_equal(
+        assert_dict_with_arrays_equal(
             self.sigmoid_2.rl_update_args,
             {
                 2: {
                     1: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_2.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.1],
                                 [1, 0.1],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.1],
                                 [1, 0.1],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1]]),
-                        np.array([[0.1], [0.8]], dtype="float32"),
-                        np.array([[0.6], [0.6]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[1], [1]]),
+                        jnp.array([[0.1], [0.8]], dtype="float32"),
+                        jnp.array([[0.6], [0.6]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     2: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_2.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.2],
                                 [1, 0.9],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [0]]),
-                        np.array([[0.9], [0.6]], dtype="float32"),
-                        np.array([[0.3], [0.3]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[0], [0]]),
+                        jnp.array([[0.9], [0.6]], dtype="float32"),
+                        jnp.array([[0.3], [0.3]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     3: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_2.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.3],
                                 [1, 1.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.3],
                                 [1, 1.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [1]]),
-                        np.array([[1.0], [-1]], dtype="float32"),
-                        np.array([[0.6], [0.6]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[1], [1]]),
+                        jnp.array([[1.0], [-1]], dtype="float32"),
+                        jnp.array([[0.6], [0.6]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     4: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_2.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.4],
                                 [1, 0.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.4],
                                 [1, 0.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [0]]),
-                        np.array([[0], [0]], dtype="float32"),
-                        np.array([[0.3], [0.3]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[0], [0]]),
+                        jnp.array([[0], [0]], dtype="float32"),
+                        jnp.array([[0.3], [0.3]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     5: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_2.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.5],
                                 [1, -1.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.5],
                                 [1, -1.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[1], [0]]),
-                        np.array([[-1.0], [-1.0]], dtype="float32"),
-                        np.array([[0.5], [0.6]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[1], [0]]),
+                        jnp.array([[-1.0], [-1.0]], dtype="float32"),
+                        jnp.array([[0.5], [0.6]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                     6: (
-                        self.sigmoid_2.all_policies[1]["beta_est"].to_numpy().squeeze(),
-                        np.array(
+                        self.sigmoid_2.all_policies[1]["beta_est"],
+                        jnp.array(
                             [
                                 [1, 0.6],
                                 [1, 0.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array(
+                        jnp.array(
                             [
                                 [1, 0.6],
                                 [1, 0.0],
                             ],
                             dtype="float32",
                         ),
-                        np.array([[0], [1]]),
-                        np.array([[0], [0.9]], dtype="float32"),
-                        np.array([[0.5], [0.3]], dtype="float32"),
-                        np.array([[1], [2]], dtype="int32"),
+                        jnp.array([[0], [1]]),
+                        jnp.array([[0], [0.9]], dtype="float32"),
+                        jnp.array([[0.5], [0.3]], dtype="float32"),
+                        jnp.array([[1], [2]], dtype="int32"),
                         0,
                     ),
                 },

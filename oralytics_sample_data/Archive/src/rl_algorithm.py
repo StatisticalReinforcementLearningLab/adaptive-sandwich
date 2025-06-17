@@ -129,7 +129,6 @@ def compute_posterior_var(Phi, sigma_n_squared, prior_sigma):
 
 
 def compute_posterior_mean(Phi, R, sigma_n_squared, prior_mu, prior_sigma):
-
     return compute_posterior_var(Phi, sigma_n_squared, prior_sigma) @ (
         1 / sigma_n_squared * Phi.T @ R + np.linalg.inv(prior_sigma) @ prior_mu
     )

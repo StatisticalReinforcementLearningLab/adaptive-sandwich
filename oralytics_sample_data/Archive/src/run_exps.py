@@ -36,7 +36,7 @@ EXP_SETTINGS = {
     "effect_size_scale": "None",  # Don't be alarmed, this is not a parameter for the V3 algorithm
     "delayed_effect_scale": "LOW_R",
     "alg_type": "BLR_AC_V3",
-    "noise_var": "None",  # Don't be alarmed, this is not a paramter for the V3 algorithm
+    "noise_var": "None",  # Don't be alarmed, this is not a parameter for the V3 algorithm
     "clipping_vals": [0.2, 0.8],
     "b_logistic": 0.515,
     "num_decision_times_between_updates": 14,

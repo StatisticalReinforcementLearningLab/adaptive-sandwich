@@ -23,7 +23,7 @@ class RLStudyArgs:
     # RL Algorithm
     FIXED_RANDOMIZATION = "fixed_randomization"
     SIGMOID_LS = "sigmoid_LS"
-    POSTERIOR_SAMPLING = "posterior_sampling"
+    SMOOTH_POSTERIOR_SAMPLING = "smooth_posterior_sampling"
 
     # Noise error correlation
     TIME_CORR = "time_corr"

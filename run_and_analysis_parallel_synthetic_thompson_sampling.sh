@@ -11,7 +11,7 @@
 #SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
-# sbatch --array=[0-99] run_and_analysis_parallel_synthetic.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
+# sbatch --array=[0-99] run_and_analysis_parallel_synthetic_thompson_sampling.sh --T=25 --n=100 --recruit_n=100 --recruit_t=1
 
 # To analyze, run simulation_collect_analyses.sh as described in the
 # output of one of the simulation runs.
@@ -23,27 +23,33 @@
 # Stop on nonzero exit codes and use of undefined variables
 set -eu
 
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Parsing options.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Parsing options.
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
-# Arguments that affect RL study simulation side and then inference through
-# that.
-T=50
-decisions_between_updates=1
-min_update_time=0
-recruit_t=1
+# Arguments that affect RL study simulation side
+T=140
+decisions_between_updates=14
+min_update_time=14
+recruit_t=2 # How many UPDATES between recruitments
 n=100
 recruit_n=$n
-synthetic_mode='delayed_1_action_dosage'
-steepness=0.5
-RL_alg="sigmoid_LS"
+# synthetic_mode='delayed_1_action_dosage'
+# synthetic_mode='delayed_1_dosage_paper'
+# synthetic_mode='delayed_2_action_dosage'
+# synthetic_mode='delayed_2_dosage_paper'
+synthetic_mode='delayed_5_action_dosage'
+# synthetic_mode='delayed_5_dosage_paper'
+RL_alg="smooth_posterior_sampling"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 dynamic_seeds=0
+env_seed_override=-1
+alg_seed_override=-1
 
+# Arguments that only affect inference side.
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
 action_col_name="action"
@@ -51,13 +57,13 @@ policy_num_col_name="policy_num"
 calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
-action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
+action_prob_func_filename="functions_to_pass_to_analysis/synthetic_thompson_sampling_act_prob_function.py"
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
-alg_update_func_type="loss"
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering.py"
+alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
-alg_update_func_args_action_prob_index=5
-alg_update_func_args_action_prob_times_index=6
+alg_update_func_args_action_prob_index=-1
+alg_update_func_args_action_prob_times_index=-1
 inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
@@ -70,7 +76,7 @@ small_sample_correction="none"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:r:e:f:a:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -87,7 +93,6 @@ while getopts T:t:n:u:d:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:
     e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
     a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
-    s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
     Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
@@ -128,7 +133,7 @@ for arg in "$@"; do
 done
 
 # Load Python 3.10, among other things
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Loading mamba and CUDA modules.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01
 # if using GPU, something like the following will be necessary:
 # module load cuda/12.2.0-fasrc01
@@ -136,16 +141,16 @@ module load Mambaforge/22.11.1-fasrc01
 # Make virtualenv if necessary, and then activate it
 cd ~
 if ! test -d venv; then
-  echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Creating venv, as it did not exist.
+  echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Creating venv, as it did not exist.
   python3 -m venv venv
 fi
 source venv/bin/activate
 
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
 cd ~/adaptive-sandwich
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Making sure Python requirements are installed.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Making sure Python requirements are installed.
 pip install -r requirements.txt
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: All Python requirements installed.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/${SLURM_ARRAY_JOB_ID}"
 
@@ -157,7 +162,7 @@ save_dir_glob="${save_dir_prefix}/*"
 mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Beginning RL simulations.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning RL simulations.
 python rl_study_simulation.py \
   --T=$T \
   --N=1 \
@@ -167,7 +172,6 @@ python rl_study_simulation.py \
   --recruit_n=$recruit_n \
   --recruit_t=$recruit_t \
   --synthetic_mode=$synthetic_mode \
-  --steepness=$steepness \
   --RL_alg=$RL_alg \
   --err_corr=$err_corr \
   --alg_state_feats=$alg_state_feats \
@@ -175,15 +179,15 @@ python rl_study_simulation.py \
   --save_dir=$save_dir \
   --dynamic_seeds=$dynamic_seeds \
   --min_update_time=$min_update_time
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished RL simulations.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Beginning after-study analysis.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning after-study analysis.
 python after_study_analysis.py analyze-dataset \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
@@ -208,7 +212,7 @@ python after_study_analysis.py analyze-dataset \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished after-study analysis.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished after-study analysis.
 
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl --num_users=$n [--index_to_check_ci_coverage=<>]  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Simulation complete.
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl --num_users=$n [--index_to_check_ci_coverage=<>]  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"

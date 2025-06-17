@@ -4,16 +4,16 @@ Implementations of several RL algorithms that may be used in study simulations.
 
 import logging
 
-import pandas as pd
-import scipy.special
 import jax
-from jax import numpy as jnp
 import numpy as np
+from jax import numpy as jnp
 
+from functions_to_pass_to_analysis.synthetic_thompson_sampling_act_prob_function import (
+    synthetic_thompson_sampling_act_prob_function,
+)
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
     synthetic_get_action_1_prob_pure,
 )
-
 from helper_functions import clip
 
 logger = logging.getLogger(__name__)
@@ -35,15 +35,15 @@ class FixedRandomization:
         self.state_feats = state_feats
         self.treat_feats = treat_feats
 
-    def update_alg(self, new_data, t):
-        raise NotImplementedError("Fixed randomization never updated")
+    def update_alg(self, new_data):
+        raise NotImplementedError("Fixed randomization never updates")
 
-    def get_action_probs(self, curr_timestep_data, filter_keyval):
+    def get_action_probs(self, curr_timestep_data):
         raw_probs = jnp.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
         return clip(self.args.lower_clip, self.args.upper_clip, raw_probs)
 
 
-def get_pis_batched(
+def get_pis_batched_sigmoid(
     beta_est,
     lower_clip,
     steepness,
@@ -60,6 +60,27 @@ def get_pis_batched(
         steepness,
         upper_clip,
         batched_treat_states_tensor,
+    )
+
+
+def get_pis_batched_thompson_sampling(
+    beta_est,
+    batched_treat_states_tensor,
+    num_users_entered_before_last_update,
+    lower_clip,
+    upper_clip,
+):
+    return jax.vmap(
+        fun=synthetic_thompson_sampling_act_prob_function,
+        in_axes=(None, 0, None, None, None, None),
+        out_axes=0,
+    )(
+        beta_est,
+        batched_treat_states_tensor,
+        0,  # Unused arg
+        num_users_entered_before_last_update,
+        lower_clip,
+        upper_clip,
     )
 
 
@@ -103,18 +124,14 @@ class SigmoidLS:
             {
                 "RX": jnp.zeros(self.beta_dim),
                 "XX": jnp.zeros(self.beta_dim),
-                "beta_est": pd.DataFrame(
-                    jnp.zeros(self.beta_dim).reshape(1, -1),
-                    columns=self.state_feats + self.treat_feats_action,
-                ),
+                "beta_est": jnp.zeros(self.beta_dim),
                 "inc_data": {},
                 "total_obs": 0,
                 "seen_user_id": set(),
             }
         ]
-        self.upper_left_bread_inverse = None
-        self.algorithm_statistics_by_calendar_t = {}
         self.action_centering = action_centering
+        self.incremental_updates = True
 
     # TODO: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
@@ -152,8 +169,8 @@ class SigmoidLS:
         df,
         calendar_t_col="calendar_t",
     ):
-        action1probs = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
-        return jnp.array(action1probs)
+        action1probstimes = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        return jnp.array(action1probstimes)
 
     # TODO: Docstring
     def get_states(self, df):
@@ -204,10 +221,7 @@ class SigmoidLS:
         # users take same action
         inv_XX = jnp.linalg.inv(new_XX)
 
-        beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1))
-        beta_est_df = pd.DataFrame(
-            beta_est.reshape(1, -1), columns=self.state_feats + self.treat_feats_action
-        )
+        beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1)).squeeze()
 
         seen_user_id = self.all_policies[-1]["seen_user_id"].copy()
         seen_user_id.update(new_data["user_id"].to_numpy())
@@ -228,7 +242,7 @@ class SigmoidLS:
             "total_obs": self.all_policies[-1]["total_obs"] + len(new_data),
             "RX": new_RX,
             "XX": new_XX,
-            "beta_est": beta_est_df,
+            "beta_est": beta_est,
             "inc_data": inc_data,
             "seen_user_id": seen_user_id,
         }
@@ -239,9 +253,9 @@ class SigmoidLS:
         return study_df[user_id_column].unique()
 
     def get_current_beta_estimate(self):
-        return self.all_policies[-1]["beta_est"].to_numpy().squeeze()
+        return self.all_policies[-1]["beta_est"]
 
-    def collect_rl_update_args(self, all_prev_data, calendar_t, curr_beta_est):
+    def collect_rl_update_args(self, all_prev_data, calendar_t):
         """
         NOTE: Must be called AFTER the update it concerns happens, so that the
         beta the rest of the data already produced is used.
@@ -258,7 +272,7 @@ class SigmoidLS:
             ]
             self.rl_update_args[next_policy_num][user_id] = (
                 (
-                    curr_beta_est,
+                    self.get_current_beta_estimate(),
                     self.get_base_states(in_study_user_data),
                     self.get_treat_states(in_study_user_data),
                     self.get_actions(in_study_user_data),
@@ -276,7 +290,7 @@ class SigmoidLS:
                 else ()
             )
 
-    def collect_pi_args(self, all_prev_data, calendar_t, curr_beta_est):
+    def collect_pi_args(self, all_prev_data, calendar_t):
         logger.info(
             "Collecting args to pi function at time %d for each user in dictionary format",
             calendar_t,
@@ -286,7 +300,7 @@ class SigmoidLS:
         self.pi_args[calendar_t] = {
             user_id: (
                 (
-                    curr_beta_est,
+                    self.get_current_beta_estimate(),
                     self.lower_clip,
                     self.steepness,
                     self.upper_clip,
@@ -303,31 +317,7 @@ class SigmoidLS:
             for user_id in self.get_all_users(all_prev_data)
         }
 
-    def get_action_probs_inner(self, beta_est, prob_input_dict):
-        """
-        Form action selection probabilities from raw inputs (used to form importance weights)
-
-        Inputs:
-        - `beta_est`: Algorithm's beta estimators
-        - `prob_input_dict`: Dictionary of other information needed to form action selection probabilities
-            This dictionary should include:
-                - `treat_states` (matrix where each row is a state vector that interacts with treatment effect model)
-
-        Outputs:
-        - Numpy vector of action selection probabilities
-        """
-
-        treat_est = beta_est[self.treat_bool]
-        lin_est = jnp.matmul(prob_input_dict["treat_states"], treat_est)
-
-        raw_probs = scipy.special.expit(self.steepness * lin_est)
-        # TODO: hiding things in args like this makes code harder to follow
-        # TODO: can use np clip
-        probs = clip(self.lower_clip, self.upper_clip, raw_probs)
-
-        return probs.squeeze()
-
-    def get_action_probs(self, curr_timestep_data, filter_keyval=None):
+    def get_action_probs(self, curr_timestep_data):
         """
         Form action selection probabilities from newly current data (only use when running RL algorithm)
 
@@ -339,15 +329,303 @@ class SigmoidLS:
         - Numpy vector of action selection probabilities
         """
 
-        beta_est_df = self.all_policies[-1]["beta_est"].copy()
-        beta_est = beta_est_df.to_numpy()
-
         treat_states = curr_timestep_data[self.treat_feats].to_numpy()
 
-        return get_pis_batched(
-            beta_est.squeeze(),
+        return get_pis_batched_sigmoid(
+            self.get_current_beta_estimate(),
             self.lower_clip,
             self.steepness,
             self.upper_clip,
             treat_states,
+        )
+
+
+class SmoothPosteriorSampling:
+    """
+    Sigmoid Least Squares algorithm
+    """
+
+    def __init__(
+        self,
+        state_feats,
+        treat_feats,
+        alg_seed,
+        lower_clip,
+        upper_clip,
+        action_centering,
+        prior_mu,
+        prior_sigma,
+        noise_var,
+    ):
+        self.state_feats = state_feats
+        self.treat_feats = treat_feats
+        self.alg_seed = alg_seed
+        self.lower_clip = lower_clip
+        self.upper_clip = upper_clip
+        self.prior_mu = prior_mu
+        self.prior_sigma = prior_sigma
+        self.noise_var = noise_var
+        self.rng = np.random.default_rng(self.alg_seed)
+        self.beta_dim = len(self.state_feats) + len(self.treat_feats)
+        self.pi_args = {}
+        self.rl_update_args = {}
+
+        # Set an initial policy
+        self.all_policies = [
+            {
+                "beta_est": self.form_beta_from_posterior(
+                    self.prior_mu,
+                    self.prior_sigma,
+                    0,
+                ),
+                "inc_data": {},
+                "num_users_entered_before_last_update": 0,
+            }
+        ]
+        self.action_centering = action_centering
+        self.incremental_updates = False
+
+    # TODO: All of these functions arguably should not modify the dataframe...
+    # Should be making a new dataframe and modifying that, or expecting the data
+    # to be formatted as such (though I don't like the latter). Going with this
+    # for now. This modification also raises a warning about setting a slice on
+    # a copy, but it seems to work perfectly.
+
+    # TODO: Docstring
+    def get_base_states(self, df):
+        base_states = df[self.state_feats].to_numpy()
+        return jnp.array(base_states)
+
+    def get_treat_states(self, df):
+        treat_states = df[self.treat_feats].to_numpy()
+        return jnp.array(treat_states)
+
+    def get_rewards(self, df, reward_col="reward"):
+        rewards = df[reward_col].to_numpy().reshape(-1, 1)
+        return jnp.array(rewards)
+
+    def get_actions(self, df, action_col="action"):
+        actions = df[action_col].to_numpy().reshape(-1, 1)
+        return jnp.array(actions)
+
+    def get_action1probs(
+        self,
+        df,
+        actionprob_col="action1prob",
+    ):
+        action1probs = df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        return jnp.array(action1probs)
+
+    def get_action1probstimes(
+        self,
+        df,
+        calendar_t_col="calendar_t",
+    ):
+        action1probstimes = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        return jnp.array(action1probstimes)
+
+    # TODO: Docstring
+    def get_states(self, df):
+        base_states = df[self.state_feats].to_numpy()
+        treat_states = df[self.treat_feats].to_numpy()
+        return (base_states, treat_states)
+
+    def compute_posterior_var(self, design):
+        return np.linalg.inv(
+            1 / self.noise_var * design.T @ design + np.linalg.inv(self.prior_sigma)
+        )
+
+    def compute_posterior_mean(self, design, rewards):
+
+        return self.compute_posterior_var(design) @ (
+            1 / self.noise_var * design.T @ rewards
+            + np.linalg.inv(self.prior_sigma) @ self.prior_mu
+        )
+
+    # update posterior distribution
+    def compute_posterior(
+        self,
+        design,
+        rewards,
+    ):
+        mean = self.compute_posterior_mean(design, rewards)
+        var = self.compute_posterior_var(design)
+
+        return mean, var
+
+    @staticmethod
+    def form_beta_from_posterior(
+        posterior_mean: np.ndarray,
+        posterior_var: np.ndarray,
+        num_users_entered_before_update: int,
+    ) -> jnp.ndarray:
+        """
+        Form the beta vector from the posterior mean and variance.
+        This is for after-study analysis, concisely collecting all the information
+        in the posterior in a convenint form. Explicitly, we concatenate the posterior
+        mean with the upper triangular elements of the inverse posterior variance matrix.
+
+        Parameters:
+        posterior_mean (np.ndarray):
+            The posterior mean vector.
+        posterior_var (np.ndarray):
+            The posterior variance matrix.
+
+        Returns:
+        jnp.ndarray: The beta vector.
+        """
+        sigma_inv = np.linalg.inv(posterior_var)
+        ut_sigma_inv = sigma_inv[np.triu_indices_from(sigma_inv)]
+        return jnp.concatenate(
+            [
+                posterior_mean,
+                ut_sigma_inv.flatten() / max(1, num_users_entered_before_update),
+            ]
+        )
+
+    def update_alg(self, all_data):
+        """
+        Update algorithm with new data
+
+        Inputs:
+        - `all_data`: a pandas data frame all study data so far
+
+        Outputs:
+        - None
+        """
+
+        in_study_data = all_data[all_data["in_study"] == 1]
+        # update algorithm with new data
+        actions = in_study_data["action"].to_numpy()
+        action1probs = in_study_data["action1prob"].to_numpy()
+        rewards = in_study_data["reward"].to_numpy()
+        base_states, treat_states = self.get_states(in_study_data)
+        if self.action_centering:
+            logger.info("Action centering is TURNED ON for RL algorithm updates.")
+            design = np.hstack(
+                (
+                    base_states,
+                    np.multiply(treat_states.T, action1probs).T,
+                    np.multiply(treat_states.T, (actions - action1probs)).T,
+                )
+            )
+        else:
+            design = np.hstack((base_states, np.multiply(treat_states.T, actions).T))
+
+        posterior_mean, posterior_var = self.compute_posterior(
+            design,
+            rewards,
+        )
+
+        num_users_before_update = in_study_data["user_id"].nunique()
+        beta_est = self.form_beta_from_posterior(
+            posterior_mean,
+            posterior_var,
+            num_users_before_update,
+        )
+
+        # Save Data
+        inc_data = {
+            "reward": rewards.flatten(),
+            "action": actions.flatten(),
+            "action1prob": action1probs.flatten(),
+            "base_states": base_states,
+            "treat_states": treat_states,
+            "design": design,
+        }
+        update_dict = {
+            "beta_est": beta_est,
+            "num_users_entered_before_last_update": num_users_before_update,
+            "inc_data": inc_data,
+        }
+
+        self.all_policies.append(update_dict)
+
+    def get_all_users(self, study_df, user_id_column="user_id"):
+        return study_df[user_id_column].unique()
+
+    def get_current_beta_estimate(self):
+        return self.all_policies[-1]["beta_est"]
+
+    def get_num_users_entered_before_last_update(self):
+        return self.all_policies[-1]["num_users_entered_before_last_update"]
+
+    def collect_rl_update_args(self, all_prev_data, calendar_t):
+        """
+        NOTE: Must be called AFTER the update it concerns happens, so that the
+        beta the rest of the data already produced is used.
+        """
+        logger.info(
+            "Collecting args to loss/estimating function at time %d (last time included in update data) for each user in dictionary format",
+            calendar_t,
+        )
+        next_policy_num = int(all_prev_data["policy_num"].max() + 1)
+        self.rl_update_args[next_policy_num] = {}
+        for user_id in self.get_all_users(all_prev_data):
+            in_study_user_data = all_prev_data.loc[
+                (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
+            ]
+            self.rl_update_args[next_policy_num][user_id] = (
+                (
+                    self.get_current_beta_estimate(),
+                    self.get_num_users_entered_before_last_update(),
+                    self.get_treat_states(in_study_user_data),
+                    self.get_actions(in_study_user_data),
+                    self.get_rewards(in_study_user_data),
+                    self.prior_mu,
+                    jnp.linalg.inv(self.prior_sigma),
+                    self.noise_var,
+                )
+                # We only care about the data overall, however, if there is any
+                # in-study data for this user so far
+                if not in_study_user_data.empty
+                else ()
+            )
+
+    def collect_pi_args(self, all_prev_data, calendar_t):
+        logger.info(
+            "Collecting args to pi function at time %d for each user in dictionary format",
+            calendar_t,
+        )
+        assert calendar_t == jnp.max(all_prev_data["calendar_t"].to_numpy())
+
+        self.pi_args[calendar_t] = {
+            user_id: (
+                (
+                    self.get_current_beta_estimate(),
+                    self.get_treat_states(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    )[-1],
+                    0,  # Unused arg
+                    self.get_num_users_entered_before_last_update(),
+                    self.lower_clip,
+                    self.upper_clip,
+                )
+                if all_prev_data.loc[
+                    (all_prev_data.user_id == user_id)
+                    & (all_prev_data.calendar_t == calendar_t)
+                ].in_study.item()
+                else ()
+            )
+            for user_id in self.get_all_users(all_prev_data)
+        }
+
+    def get_action_probs(self, curr_timestep_data):
+        """
+        Form action selection probabilities
+
+        Inputs:
+        - `curr_timestep_data`: Pandas data frame of current data that can be used to form the states
+
+        Outputs:
+        - Numpy vector of action selection probabilities
+        """
+        treat_states = curr_timestep_data[self.treat_feats].to_numpy()
+
+        return get_pis_batched_thompson_sampling(
+            self.get_current_beta_estimate(),
+            treat_states,
+            self.get_num_users_entered_before_last_update(),
+            self.lower_clip,
+            self.upper_clip,
         )

@@ -1870,16 +1870,19 @@ def estimate_theta(
 @click.option(
     "--in_study_col_name",
     type=str,
+    required=True,
     help="Name of the binary column in the study dataframe that indicates whether a user is in the study.",
 )
 @click.option(
     "--action_col_name",
     type=str,
+    required=True,
     help="Name of the column in the study dataframe that indicates the action taken by the user.",
 )
 @click.option(
     "--action_prob_col_name",
     type=str,
+    required=True,
     help="Name of the column in the study dataframe that indicates the probability of taking action 1.",
 )
 @click.option(
@@ -1909,9 +1912,9 @@ def collect_existing_analyses(
             interval coverage for. If not provided, coverage will not be checked.
         in_study_col_name (str, optional): The name of the column indicating whether a user is in
             the study.
-        action_col_name (str, optional): The name of the column indicating the action taken by the
+        action_col_name (str): The name of the column indicating the action taken by the
             user.
-        action_prob_col_name (str, optional): The name of the column indicating the probability of
+        action_prob_col_name (str): The name of the column indicating the probability of
             taking action 1.
         study_df_filename (str): The filename of the pickled study DataFrame. Not the full path.
     """

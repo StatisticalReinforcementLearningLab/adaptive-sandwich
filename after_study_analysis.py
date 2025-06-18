@@ -1776,7 +1776,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
     )(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
-        # it is much more efficient to flatten them into a single array. This is done
+        # it is more efficient to flatten them into a single array. This is done
         # here to improve performance. We can simply unflatten them inside the function.
         flatten_params(all_post_update_betas, theta),
         all_post_update_betas.shape[1],
@@ -1910,7 +1910,7 @@ def collect_existing_analyses(
         num_users (int): The number of users in the study.
         index_to_check_ci_coverage (int, optional): The index of the parameter to check confidence
             interval coverage for. If not provided, coverage will not be checked.
-        in_study_col_name (str, optional): The name of the column indicating whether a user is in
+        in_study_col_name (str): The name of the column indicating whether a user is in
             the study.
         action_col_name (str): The name of the column indicating the action taken by the
             user.
@@ -1927,6 +1927,9 @@ def collect_existing_analyses(
     logger.info("Found %d files under the glob %s", len(filenames), input_glob)
     if len(filenames) == 0:
         raise RuntimeError("Aborting because no files found. Please check path.")
+
+    max_adaptive_estimate_at_index_filename = None
+    max_adaptive_estimate_at_index = -np.inf
 
     # Summary metrics to reduce memory footprint
     condition_numbers = []
@@ -1957,6 +1960,15 @@ def collect_existing_analyses(
             raw_theta_estimates.append(theta_est)
             raw_adaptive_sandwich_var_estimates.append(adaptive_sandwich_var)
             raw_classical_sandwich_var_estimates.append(classical_sandwich_var)
+
+            if index_to_check_ci_coverage is not None:
+                adaptive_estimate_at_index = adaptive_sandwich_var[
+                    index_to_check_ci_coverage
+                ][index_to_check_ci_coverage]
+
+                if adaptive_estimate_at_index > max_adaptive_estimate_at_index:
+                    max_adaptive_estimate_at_index = adaptive_estimate_at_index
+                    max_adaptive_estimate_at_index_filename = filename
         # Load and extract summary from debug pieces, then discard full object
         with open(filename.replace("analysis.pkl", "debug_pieces.pkl"), "rb") as f:
             debug_pieces = pickle.load(f)
@@ -2150,6 +2162,14 @@ def collect_existing_analyses(
         print(
             f"\nClassical sandwich {NOMINAL_COVERAGE * 100}% t({num_users - 1}) CI coverage:\n{np.mean(classical_t_covers)}\n",
         )
+
+        # Helpful for debugging large adaptive sandwich variance estimates.  Take the slurm job ID
+        # from the filename, look at the logs, grab the seeds, and then can, e.g.,  use seed
+        # overrides locally to examine behavior.
+        if max_adaptive_estimate_at_index_filename is not None:
+            print(
+                f"\nMaximum adaptive sandwich variance estimate at index {index_to_check_ci_coverage} was {max_adaptive_estimate_at_index} in file {max_adaptive_estimate_at_index_filename}\n"
+            )
 
         print("\nNow examining stability.\n")
 

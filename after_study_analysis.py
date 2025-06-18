@@ -2110,6 +2110,17 @@ def collect_existing_analyses(
         f"\nClassical sandwich variance estimate elementwise maxes:\n{classical_sandwich_var_estimate_maxes}\n",
     )
 
+    if condition_numbers:
+        print(
+            f"\nMedian joint adaptive inverse bread condition number:\n{np.median(condition_numbers)}\n",
+        )
+        print(
+            f"\nMinimum joint adaptive inverse bread condition number:\n{np.min(condition_numbers)}\n",
+        )
+        print(
+            f"\nMaximum joint adaptive inverse bread condition number:\n{np.max(condition_numbers)}\n",
+        )
+
     if theta_estimates[0].size == 1:
         index_to_check_ci_coverage = 0
     if index_to_check_ci_coverage is not None:
@@ -2315,10 +2326,35 @@ def collect_existing_analyses(
         # Plot the classical sandwich variance estimates sorted by adaptive sandwich variance
         # estimates for the coefficient of interest
         num_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
+        # Get indices sorted by adaptive variance estimate (ascending)
         sorted_experiment_indices_by_adaptive_est = np.argsort(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ]
+        )
+
+        # Use sorted indices to split into two lists: those with adaptive variance > 5x empirical, and those <= 5x empirical
+        empirical_var = empirical_var_normalized[
+            index_to_check_ci_coverage, index_to_check_ci_coverage
+        ]
+        adaptive_var_at_index_sorted = adaptive_sandwich_var_estimates[
+            sorted_experiment_indices_by_adaptive_est,
+            index_to_check_ci_coverage,
+            index_to_check_ci_coverage,
+        ]
+        # Find the split point
+        estimate_blowup_split_idx = np.searchsorted(
+            adaptive_var_at_index_sorted, 5 * empirical_var, side="right"
+        )
+        less_or_equal_5x_empirical = sorted_experiment_indices_by_adaptive_est[
+            :estimate_blowup_split_idx
+        ]
+        more_than_5x_empirical = sorted_experiment_indices_by_adaptive_est[
+            estimate_blowup_split_idx:
+        ]
+
+        print(
+            f"\nNumber of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > 5x empirical value: {estimate_blowup_split_idx}\n"
         )
 
         classical_var_estimates_sorted_by_adaptive_descending = (
@@ -2348,17 +2384,32 @@ def collect_existing_analyses(
         plt.xticks(range(1, num_experiments + 1, max(1, num_experiments // 10)))
         plt.show()
 
-        if len(condition_numbers) > 0:
+        if condition_numbers:
+
+            # Plot histogram of joint bread inverse condition numbers
+            plt.clear_figure()
+            plt.title("Histogram of Joint Bread Inverse Condition Numbers")
+            plt.xlabel("Condition Number")
+            plt.ylabel("Frequency")
+            plt.hist(condition_numbers, bins=20, color="purple")
+            plt.grid(True)
+            plt.show()
+
             sorted_condition_numbers = [
                 condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
             ]
             plt.clear_figure()
             plt.title(
-                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}. Red points are those with adaptive variance > 5x empirical value."
             )
             plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
-            plt.scatter(sorted_condition_numbers, color="purple")
+            plt.scatter(
+                sorted_condition_numbers[:estimate_blowup_split_idx], color="purple"
+            )
+            plt.scatter(
+                sorted_condition_numbers[estimate_blowup_split_idx:], color="red"
+            )
             plt.xticks(
                 range(
                     0,

@@ -2354,7 +2354,7 @@ def collect_existing_analyses(
         ]
 
         print(
-            f"\nNumber of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > 5x empirical value: {estimate_blowup_split_idx}\n"
+            f"\nNumber of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > 5x empirical value: {len(adaptive_sandwich_var_estimates) - estimate_blowup_split_idx}\n"
         )
 
         classical_var_estimates_sorted_by_adaptive_descending = (
@@ -2404,11 +2404,13 @@ def collect_existing_analyses(
             )
             plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
-            plt.scatter(
-                sorted_condition_numbers[:estimate_blowup_split_idx], color="purple"
+            # Plot all sorted condition numbers, coloring those after the split index red
+            colors = ["purple"] * estimate_blowup_split_idx + ["red"] * (
+                len(sorted_condition_numbers) - estimate_blowup_split_idx
             )
             plt.scatter(
-                sorted_condition_numbers[estimate_blowup_split_idx:], color="red"
+                sorted_condition_numbers,
+                color=colors,
             )
             plt.xticks(
                 range(

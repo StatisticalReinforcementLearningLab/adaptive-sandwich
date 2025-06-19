@@ -2342,13 +2342,24 @@ def collect_existing_analyses(
             index_to_check_ci_coverage,
             index_to_check_ci_coverage,
         ]
-        # Find the split point
+        # Find the point at which the adaptive variance estimate is more than
+        # EMP_VAR_BLOWUP_MULTIPLIER times the empirical variance.
+        EMP_VAR_BLOWUP_MULTIPLIER = 10
         estimate_blowup_split_idx = np.searchsorted(
-            adaptive_var_at_index_sorted, 25 * empirical_var, side="right"
+            adaptive_var_at_index_sorted,
+            EMP_VAR_BLOWUP_MULTIPLIER * empirical_var,
+            side="right",
+        )
+        # Find where the empirical variance would fit into the sorted adaptive estimates
+        empirical_variance_split_idx = np.searchsorted(
+            adaptive_var_at_index_sorted, empirical_var, side="right"
         )
 
         print(
-            f"\nNumber of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > 5x empirical value: {len(adaptive_sandwich_var_estimates) - estimate_blowup_split_idx}\n"
+            f"\nNumber of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > {EMP_VAR_BLOWUP_MULTIPLIER}x empirical value: {len(adaptive_sandwich_var_estimates) - estimate_blowup_split_idx}\n"
+        )
+        print(
+            f"Number of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > empirical value: {len(adaptive_sandwich_var_estimates) - empirical_variance_split_idx}\n"
         )
 
         classical_var_estimates_sorted_by_adaptive = classical_sandwich_var_estimates[
@@ -2395,12 +2406,12 @@ def collect_existing_analyses(
                 condition_numbers[estimate_blowup_split_idx:]
             )
             print(
-                f"\nMinimum joint bread inverse condition number for trials with adaptive variance estimate at index {index_to_check_ci_coverage} > 5x empirical value: {min_condition_number_for_large_estimates}\n"
+                f"\nMinimum joint bread inverse condition number for trials with adaptive variance estimate at index {index_to_check_ci_coverage} > {EMP_VAR_BLOWUP_MULTIPLIER}x empirical value: {min_condition_number_for_large_estimates}\n"
             )
 
             plt.clear_figure()
             plt.title(
-                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}. Points after vertical line are those with adaptive variance > 25x empirical value."
+                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}. Emp var insert idx in green, {EMP_VAR_BLOWUP_MULTIPLIER}x emp var insert idx in red."
             )
             plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
@@ -2409,6 +2420,10 @@ def collect_existing_analyses(
             plt.scatter(
                 condition_numbers_sorted_by_adaptive_est,
                 color="blue+",
+            )
+            plt.vertical_line(
+                empirical_variance_split_idx,
+                color="green+",
             )
             plt.vertical_line(
                 estimate_blowup_split_idx,

@@ -47,7 +47,7 @@ python RL_Study_Simulation.py --T=$T --N=$N --n=$n --min_users=$min_users --deci
 # Run Kelly's analysis.
 python After_Study_Analyses.py --T=$T --N=$N --n=$n --min_users=$min_users --decisions_between_updates $decisions_between_updates --recruit_n $recruit_n --recruit_t $recruit_t --synthetic_mode $synthetic_mode --steepness $steepness --debug $debug --RL_alg $RL_alg --eta $eta --alg_state_feats $alg_state_feats --inference_mode $inference_mode --action_centering $action_centering --redo_analyses $redo_analyses
 
-echo "Kelly's analysis complete.  The following command will run Nowell's analysis on a suitable branch (probably main):"
+echo "Kelly's analysis complete. DON'T BE ALARMED BY THE UNNORMALIZED VARIANCES IT PRINTS!!!! The following command will run Nowell's analysis on a suitable branch (probably main):"
 
 output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=0"
 in_study_col_name="in_study"

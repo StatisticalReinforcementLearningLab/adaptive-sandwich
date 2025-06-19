@@ -44,6 +44,7 @@ def compare_kelly_nowell_analyses(containing_folder) -> None:
     with open(f"{containing_folder}/study_RLalg.pkl", "rb") as f:
         rl_alg_obj = pickle.load(f)
 
+    breakpoint()
     print("*** High-level results ***")
     print("\nTheta estimates:")
     print("Kelly:\n", kelly_analysis["LS_estimator"])
@@ -54,8 +55,14 @@ def compare_kelly_nowell_analyses(containing_folder) -> None:
     print("Nowell:\n", nowell_analysis["classical_sandwich_var_estimate"])
 
     print("\nAdaptive sandwich estimates:")
-    print("Kelly:\n", kelly_analysis["adaptive_sandwich"])
-    print("Nowell:\n", nowell_analysis["adaptive_sandwich_var_estimate"])
+    print("Kelly (no corrections):\n", kelly_analysis["adaptive_sandwich"])
+    print(
+        "Nowell (no corrections):\n", nowell_analysis["adaptive_sandwich_var_estimate"]
+    )
+    print(
+        "Kelly (HC3 correction to RL and inference est funcs):\n",
+        kelly_analysis["adaptive_sandwich_HC3"],
+    )
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import numpy as np
 import jax
 from jax import numpy as jnp
 import pandas as pd
+import plotext as plt
 
 from constants import SmallSampleCorrections
 from helper_functions import (
@@ -613,6 +614,55 @@ def verify_study_df_summary_satisfactory(
         in_study_df[in_study_df[policy_num_col_name] == min_non_fallback_policy_num]
     )
 
+    median_action_probabilities = (
+        in_study_df.groupby(calendar_t_col_name)[action_prob_col_name]
+        .median()
+        .to_numpy()
+    )
+    quartiles = in_study_df.groupby(calendar_t_col_name)[action_prob_col_name].quantile(
+        [0.25, 0.75]
+    )
+    q25_action_probabilities = quartiles.xs(0.25, level=1).to_numpy()
+    q75_action_probabilities = quartiles.xs(0.75, level=1).to_numpy()
+
+    avg_rewards = in_study_df.groupby(calendar_t_col_name)[action_prob_col_name].mean()
+
+    # Plot action probability quartile trajectories
+    plt.clear_figure()
+    plt.title("Action 1 Probability 25/50/75 Quantile Trajectories")
+    plt.xlabel("Decision Time")
+    plt.ylabel("Action 1 Probability Quantiles")
+    plt.error(
+        median_action_probabilities,
+        yerr=q75_action_probabilities - q25_action_probabilities,
+        color="blue+",
+    )
+    plt.grid(True)
+    plt.xticks(
+        range(
+            0,
+            len(median_action_probabilities),
+            max(1, len(median_action_probabilities) // 10),
+        )
+    )
+    action_prob_trajectory_plot = plt.build()
+
+    # Plot avg reward trajectory
+    plt.clear_figure()
+    plt.title("Avg Reward Trajectory")
+    plt.xlabel("Decision Time")
+    plt.ylabel("Avg Reward")
+    plt.scatter(avg_rewards, color="blue+", marker="*")
+    plt.grid(True)
+    plt.xticks(
+        range(
+            0,
+            len(avg_rewards),
+            max(1, len(avg_rewards) // 10),
+        )
+    )
+    avg_reward_trajectory_plot = plt.build()
+
     confirm_input_check_result(
         f"\nYou provided a study dataframe reflecting a study with"
         f"\n* {num_users} users"
@@ -630,6 +680,8 @@ def verify_study_df_summary_satisfactory(
         f" for which multiple non-fallback policies were used"
         f"\n* Minimum action probability {min_action_prob}"
         f"\n* Maximum action probability {max_action_prob}"
+        f"\n* The following trajectories of action probability quartiles over time:\n {action_prob_trajectory_plot}"
+        f"\n* The following average reward trajectory over time:\n {avg_reward_trajectory_plot}"
         f" \n\nDoes this meet expectations? (y/n)\n",
         suppress_interactive_data_checks,
     )

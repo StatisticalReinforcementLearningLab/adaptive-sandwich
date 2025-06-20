@@ -44,7 +44,6 @@ def compare_kelly_nowell_analyses(containing_folder) -> None:
     with open(f"{containing_folder}/study_RLalg.pkl", "rb") as f:
         rl_alg_obj = pickle.load(f)
 
-    breakpoint()
     print("*** High-level results ***")
     print("\nTheta estimates:")
     print("Kelly:\n", kelly_analysis["LS_estimator"])

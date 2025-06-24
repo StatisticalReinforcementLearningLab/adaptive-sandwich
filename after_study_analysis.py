@@ -2110,6 +2110,17 @@ def collect_existing_analyses(
         f"\nClassical sandwich variance estimate elementwise maxes:\n{classical_sandwich_var_estimate_maxes}\n",
     )
 
+    if condition_numbers:
+        print(
+            f"\nMedian joint adaptive inverse bread condition number:\n{np.median(condition_numbers)}\n",
+        )
+        print(
+            f"\nMinimum joint adaptive inverse bread condition number:\n{np.min(condition_numbers)}\n",
+        )
+        print(
+            f"\nMaximum joint adaptive inverse bread condition number:\n{np.max(condition_numbers)}\n",
+        )
+
     if theta_estimates[0].size == 1:
         index_to_check_ci_coverage = 0
     if index_to_check_ci_coverage is not None:
@@ -2184,7 +2195,7 @@ def collect_existing_analyses(
         plt.ylabel("Theta Estimate")
         plt.scatter(
             theta_estimates[:, index_to_check_ci_coverage],
-            color="blue",
+            color="blue+",
         )
         plt.grid(True)
         plt.xticks(
@@ -2207,7 +2218,7 @@ def collect_existing_analyses(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="green",
+            color="green+",
         )
         plt.grid(True)
         plt.xticks(
@@ -2233,7 +2244,7 @@ def collect_existing_analyses(
             empirical_var_normalized[
                 index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="blue",
+            color="red+",
         )
         plt.show()
 
@@ -2248,7 +2259,7 @@ def collect_existing_analyses(
             classical_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="green",
+            color="green+",
         )
         plt.grid(True)
         plt.xticks(
@@ -2274,7 +2285,7 @@ def collect_existing_analyses(
             empirical_var_normalized[
                 index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="blue",
+            color="red+",
         )
         plt.show()
 
@@ -2290,7 +2301,7 @@ def collect_existing_analyses(
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
             bins=50,
-            color="red",
+            color="red+",
         )
         plt.grid(True)
         plt.show()
@@ -2307,7 +2318,7 @@ def collect_existing_analyses(
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
             bins=50,
-            color="red",
+            color="red+",
         )
         plt.grid(True)
         plt.show()
@@ -2315,19 +2326,47 @@ def collect_existing_analyses(
         # Plot the classical sandwich variance estimates sorted by adaptive sandwich variance
         # estimates for the coefficient of interest
         num_experiments = max(1, len(adaptive_sandwich_var_estimates) * 5 // 100)
+        # Get indices sorted by adaptive variance estimate (ascending)
         sorted_experiment_indices_by_adaptive_est = np.argsort(
             adaptive_sandwich_var_estimates[
                 :, index_to_check_ci_coverage, index_to_check_ci_coverage
             ]
         )
 
-        classical_var_estimates_sorted_by_adaptive_descending = (
-            classical_sandwich_var_estimates[
-                sorted_experiment_indices_by_adaptive_est,
-                index_to_check_ci_coverage,
-                index_to_check_ci_coverage,
-            ]
+        # Use sorted indices to split into two lists: those with adaptive variance > 5x empirical, and those <= 5x empirical
+        empirical_var = empirical_var_normalized[
+            index_to_check_ci_coverage, index_to_check_ci_coverage
+        ]
+        adaptive_var_at_index_sorted = adaptive_sandwich_var_estimates[
+            sorted_experiment_indices_by_adaptive_est,
+            index_to_check_ci_coverage,
+            index_to_check_ci_coverage,
+        ]
+        # Find the point at which the adaptive variance estimate is more than
+        # EMP_VAR_BLOWUP_MULTIPLIER times the empirical variance.
+        EMP_VAR_BLOWUP_MULTIPLIER = 10
+        estimate_blowup_split_idx = np.searchsorted(
+            adaptive_var_at_index_sorted,
+            EMP_VAR_BLOWUP_MULTIPLIER * empirical_var,
+            side="right",
         )
+        # Find where the empirical variance would fit into the sorted adaptive estimates
+        empirical_variance_split_idx = np.searchsorted(
+            adaptive_var_at_index_sorted, empirical_var, side="right"
+        )
+
+        print(
+            f"\nNumber of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > {EMP_VAR_BLOWUP_MULTIPLIER}x empirical value: {len(adaptive_sandwich_var_estimates) - estimate_blowup_split_idx}\n"
+        )
+        print(
+            f"Number of simulations with adaptive variance estimate at index {index_to_check_ci_coverage} > empirical value: {len(adaptive_sandwich_var_estimates) - empirical_variance_split_idx}\n"
+        )
+
+        classical_var_estimates_sorted_by_adaptive = classical_sandwich_var_estimates[
+            sorted_experiment_indices_by_adaptive_est,
+            index_to_check_ci_coverage,
+            index_to_check_ci_coverage,
+        ]
 
         plt.clear_figure()
         plt.title(
@@ -2336,29 +2375,60 @@ def collect_existing_analyses(
         plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Classical Variance Estimate")
         plt.scatter(
-            classical_var_estimates_sorted_by_adaptive_descending,
+            classical_var_estimates_sorted_by_adaptive,
             color="orange",
         )
         plt.horizontal_line(
             median_classical_sandwich_var_estimate[
                 index_to_check_ci_coverage, index_to_check_ci_coverage
             ],
-            color="blue",
+            color="red+",
         )
         plt.xticks(range(1, num_experiments + 1, max(1, num_experiments // 10)))
         plt.show()
 
-        if len(condition_numbers) > 0:
-            sorted_condition_numbers = [
+        if condition_numbers:
+
+            # Plot histogram of joint bread inverse condition numbers
+            plt.clear_figure()
+            plt.title("Histogram of Joint Bread Inverse Condition Numbers")
+            plt.xlabel("Condition Number")
+            plt.ylabel("Frequency")
+            plt.hist(condition_numbers, bins=20, color="purple")
+            plt.grid(True)
+            plt.show()
+
+            condition_numbers_sorted_by_adaptive_est = [
                 condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
             ]
+
+            min_condition_number_for_large_estimates = np.min(
+                condition_numbers[estimate_blowup_split_idx:]
+            )
+            print(
+                f"\nMinimum joint bread inverse condition number for trials with adaptive variance estimate at index {index_to_check_ci_coverage} > {EMP_VAR_BLOWUP_MULTIPLIER}x empirical value: {min_condition_number_for_large_estimates}\n"
+            )
+
             plt.clear_figure()
             plt.title(
-                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}"
+                f"Joint Bread Inverse Condition Numbers Sorted by Adaptive Variance Estimate at Index {index_to_check_ci_coverage}. Emp var insert idx in green, {EMP_VAR_BLOWUP_MULTIPLIER}x emp var insert idx in red."
             )
             plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Condition Number")
-            plt.scatter(sorted_condition_numbers, color="purple")
+            # Plot all sorted condition numbers and a threshold line after which
+            # adaptive variance is > 5x empirical value
+            plt.scatter(
+                condition_numbers_sorted_by_adaptive_est,
+                color="blue+",
+            )
+            plt.vertical_line(
+                empirical_variance_split_idx,
+                color="green+",
+            )
+            plt.vertical_line(
+                estimate_blowup_split_idx,
+                color="red+",
+            )
             plt.xticks(
                 range(
                     0,
@@ -2381,7 +2451,7 @@ def collect_existing_analyses(
             )
             plt.xlabel("Minimum Eigenvalue")
             plt.ylabel("Frequency")
-            plt.hist(min_eigenvalues_first_block, bins=20, color="green")
+            plt.hist(min_eigenvalues_first_block, bins=20, color="green+")
             plt.grid(True)
             plt.show()
 
@@ -2455,7 +2525,7 @@ def collect_existing_analyses(
                 plt.hist(
                     first_beta_coords_arr[:, coordinate],
                     bins=20,
-                    color="blue",
+                    color="blue+",
                 )
                 plt.grid(True)
                 plt.show()
@@ -2465,7 +2535,7 @@ def collect_existing_analyses(
         plt.title("Action 1 Fractions for All Simulations")
         plt.xlabel("Simulation Index")
         plt.ylabel("Action 1 Fraction")
-        plt.scatter(action_1_fractions, color="red")
+        plt.scatter(action_1_fractions, color="red+")
         plt.grid(True)
         plt.xticks(
             range(
@@ -2486,7 +2556,7 @@ def collect_existing_analyses(
         )
         plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Action 1 Fraction")
-        plt.scatter(sorted_action_1_fractions, color="red")
+        plt.scatter(sorted_action_1_fractions, color="red+")
         plt.xticks(
             range(
                 0,
@@ -2507,7 +2577,7 @@ def collect_existing_analyses(
         )
         plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
         plt.ylabel("Action Probability Variance")
-        plt.scatter(sorted_action_prob_variances, color="blue")
+        plt.scatter(sorted_action_prob_variances, color="blue+")
         plt.xticks(
             range(
                 0,

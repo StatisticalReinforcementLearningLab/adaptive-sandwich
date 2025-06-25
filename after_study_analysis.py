@@ -423,11 +423,15 @@ def analyze_dataset(
         invert_matrix_and_check_conditioning(joint_adaptive_bread_inverse_matrix)
     )
 
+    identity_diff_abs_max = None
+    identity_diff_frobenius_norm = None
     if not suppress_all_data_checks:
-        input_checks.require_adaptive_bread_inverse_is_true_inverse(
-            joint_adaptive_bread_matrix,
-            joint_adaptive_bread_inverse_matrix,
-            suppress_interactive_data_checks,
+        identity_diff_abs_max, identity_diff_frobenius_norm = (
+            input_checks.require_adaptive_bread_inverse_is_true_inverse(
+                joint_adaptive_bread_matrix,
+                joint_adaptive_bread_inverse_matrix,
+                suppress_interactive_data_checks,
+            )
         )
 
     logger.info("Forming joint adaptive sandwich variance estimate...")
@@ -480,6 +484,8 @@ def analyze_dataset(
                     joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
                 ),
                 "all_post_update_betas": all_post_update_betas,
+                "identity_diff_abs_max": identity_diff_abs_max,
+                "identity_diff_frobenius_norm": identity_diff_frobenius_norm,
             },
             f,
         )
@@ -1938,6 +1944,8 @@ def collect_existing_analyses(
     min_eigvals_first_block = []
     max_eigvals_first_block = []
     first_beta_coords = []
+    identity_diff_abs_maxes = []
+    identity_diff_frobenius_norms = []
 
     for i, filename in enumerate(filenames):
         if i and len(filenames) >= 10 and i % (len(filenames) // 10) == 0:
@@ -1983,6 +1991,13 @@ def collect_existing_analyses(
             if "all_post_update_betas" in debug_pieces:
                 first_beta = debug_pieces["all_post_update_betas"][0]
                 first_beta_coords.append(first_beta)
+            if "identity_diff_abs_max" in debug_pieces:
+                identity_diff_abs_maxes.append(debug_pieces["identity_diff_abs_max"])
+            if "identity_diff_frobenius_norm" in debug_pieces:
+                identity_diff_frobenius_norms.append(
+                    debug_pieces["identity_diff_frobenius_norm"]
+                )
+
             # Discard debug_pieces to free memory
             del debug_pieces
 
@@ -2434,6 +2449,80 @@ def collect_existing_analyses(
                     0,
                     len(condition_numbers),
                     max(1, len(condition_numbers) // 10),
+                )
+            )
+            plt.grid(True)
+            plt.show()
+
+        if identity_diff_abs_maxes:
+
+            identity_diff_abs_maxes_sorted_by_adaptive_est = [
+                identity_diff_abs_maxes[i]
+                for i in sorted_experiment_indices_by_adaptive_est
+            ]
+
+            plt.clear_figure()
+            plt.title(
+                f"Abs Max of Identity Diff Sorted by Adaptive Var Estimate at Index {index_to_check_ci_coverage}. Emp var insert idx in green, {EMP_VAR_BLOWUP_MULTIPLIER}x emp var insert idx in red."
+            )
+            plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
+            plt.ylabel("Abs Max of Identity Diff")
+            # Plot all sorted condition numbers and a threshold line after which
+            # adaptive variance is > 5x empirical value
+            plt.scatter(
+                identity_diff_abs_maxes_sorted_by_adaptive_est,
+                color="blue+",
+            )
+            plt.vertical_line(
+                empirical_variance_split_idx,
+                color="green+",
+            )
+            plt.vertical_line(
+                estimate_blowup_split_idx,
+                color="red+",
+            )
+            plt.xticks(
+                range(
+                    0,
+                    len(identity_diff_abs_maxes),
+                    max(1, len(identity_diff_abs_maxes) // 10),
+                )
+            )
+            plt.grid(True)
+            plt.show()
+
+        if identity_diff_frobenius_norms:
+
+            identity_diff_frobenius_norms_sorted_by_adaptive_est = [
+                identity_diff_frobenius_norms[i]
+                for i in sorted_experiment_indices_by_adaptive_est
+            ]
+
+            plt.clear_figure()
+            plt.title(
+                f"Frobenius Norm of Identity Diff Sorted by Adaptive Var Estimate at Index {index_to_check_ci_coverage}. Emp var insert idx in green, {EMP_VAR_BLOWUP_MULTIPLIER}x emp var insert idx in red."
+            )
+            plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
+            plt.ylabel("Frobenius Norm of Identity Diff")
+            # Plot all sorted condition numbers and a threshold line after which
+            # adaptive variance is > 5x empirical value
+            plt.scatter(
+                identity_diff_frobenius_norms_sorted_by_adaptive_est,
+                color="blue+",
+            )
+            plt.vertical_line(
+                empirical_variance_split_idx,
+                color="green+",
+            )
+            plt.vertical_line(
+                estimate_blowup_split_idx,
+                color="red+",
+            )
+            plt.xticks(
+                range(
+                    0,
+                    len(identity_diff_frobenius_norms),
+                    max(1, len(identity_diff_frobenius_norms) // 10),
                 )
             )
             plt.grid(True)

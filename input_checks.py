@@ -835,10 +835,14 @@ def require_adaptive_bread_inverse_is_true_inverse(
     sufficiently close to the identity matrix.  This is a direct check that the
     joint_adaptive_bread_inverse_matrix we create is "well-conditioned".
     """
+    should_be_identity = (
+        joint_adaptive_bread_matrix @ joint_adaptive_bread_inverse_matrix
+    )
+    identity = np.eye(joint_adaptive_bread_matrix.shape[0])
     try:
         np.testing.assert_allclose(
-            joint_adaptive_bread_matrix @ joint_adaptive_bread_inverse_matrix,
-            np.eye(joint_adaptive_bread_matrix.shape[0]),
+            should_be_identity,
+            identity,
             rtol=1e-5,
             atol=1e-5,
         )
@@ -848,6 +852,21 @@ def require_adaptive_bread_inverse_is_true_inverse(
             suppress_interactive_data_checks,
             e,
         )
+
+    # If we haven't already errored out, return some measures of how far off we are from identity
+    diff = should_be_identity - identity
+    logger.debug(
+        "Difference between should-be-identity produced by multiplying joint adaptive bread inverse and its computed inverse and actual identity:\n%s",
+        diff,
+    )
+
+    diff_abs_max = np.max(np.abs(diff))
+    diff_frobenius_norm = np.linalg.norm(diff, "fro")
+
+    logger.info("Maximum abs element of difference: %s", diff_abs_max)
+    logger.info("Frobenius norm of difference: %s", diff_frobenius_norm)
+
+    return diff_abs_max, diff_frobenius_norm
 
 
 def require_threaded_algorithm_estimating_function_args_equivalent(

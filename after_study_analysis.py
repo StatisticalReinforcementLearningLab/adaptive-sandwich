@@ -2467,8 +2467,6 @@ def collect_existing_analyses(
             )
             plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Abs Max of Identity Diff")
-            # Plot all sorted condition numbers and a threshold line after which
-            # adaptive variance is > 5x empirical value
             plt.scatter(
                 identity_diff_abs_maxes_sorted_by_adaptive_est,
                 color="blue+",
@@ -2504,8 +2502,6 @@ def collect_existing_analyses(
             )
             plt.xlabel("Experiment Index (sorted by Adaptive Variance)")
             plt.ylabel("Frobenius Norm of Identity Diff")
-            # Plot all sorted condition numbers and a threshold line after which
-            # adaptive variance is > 5x empirical value
             plt.scatter(
                 identity_diff_frobenius_norms_sorted_by_adaptive_est,
                 color="blue+",

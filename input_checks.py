@@ -855,13 +855,13 @@ def require_adaptive_bread_inverse_is_true_inverse(
 
     # If we haven't already errored out, return some measures of how far off we are from identity
     diff = should_be_identity - identity
-    logger.info(
+    logger.debug(
         "Difference between should-be-identity produced by multiplying joint adaptive bread inverse and its computed inverse and actual identity:\n%s",
         diff,
     )
 
     diff_abs_max = np.max(np.abs(diff))
-    diff_frobenius_norm = np.linalg.norm(diff, "frob")
+    diff_frobenius_norm = np.linalg.norm(diff, "fro")
 
     logger.info("Maximum abs element of difference: %s", diff_abs_max)
     logger.info("Frobenius norm of difference: %s", diff_frobenius_norm)

@@ -861,7 +861,7 @@ def require_adaptive_bread_inverse_is_true_inverse(
     )
 
     diff_abs_max = np.max(np.abs(diff))
-    diff_frobenius_norm = np.linalg.norm(should_be_identity - identity, "frob")
+    diff_frobenius_norm = np.linalg.norm(diff, "frob")
 
     logger.info("Maximum abs element of difference: %s", diff_abs_max)
     logger.info("Frobenius norm of difference: %s", diff_frobenius_norm)

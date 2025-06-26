@@ -444,7 +444,7 @@ def main():
     parser.add_argument(
         "--update_cadence_offset",
         type=int,
-        default=1,
+        default=0,
         help="If nonzero, updates will occur whenever calendar_t (mod decisions_between_updates) == update_cadence_offset",
     )
     parser.add_argument(

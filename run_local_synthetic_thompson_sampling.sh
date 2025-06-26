@@ -21,13 +21,21 @@ recruit_n=$n
 # synthetic_mode='delayed_2_dosage_paper'
 synthetic_mode='delayed_5_action_dosage'
 # synthetic_mode='delayed_5_dosage_paper'
+steepness=1.5
 RL_alg="smooth_posterior_sampling"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
+lclip=0.1
+uclip=0.9
 dynamic_seeds=1
 env_seed_override=-1
 alg_seed_override=-1
+# prior_mean="-0.37783337,0.18696958,2.3131008,0.32913807"
+# prior_var_upper_triangle="1000000,0,0,0,1000000,0,0,1000000,0,1000000"
+prior_mean="naive"
+prior_var_upper_triangle="naive"
+noise_var=1.0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -36,7 +44,7 @@ policy_num_col_name="policy_num"
 calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
-action_prob_func_filename="functions_to_pass_to_analysis/synthetic_thompson_sampling_act_prob_function.py"
+action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering.py"
 action_prob_func_args_beta_index=0
 alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering.py"
 alg_update_func_type="estimating"
@@ -53,7 +61,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:J:K:O:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -71,8 +79,11 @@ while getopts T:t:n:u:d:o:r:e:f:a:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:
     e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
     f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
     a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
+    s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
     Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
+    A  | uclip )                                        needs_arg; uclip="$OPTARG" ;;
+    G  | lclip )                                        needs_arg; lclip="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -96,6 +107,9 @@ while getopts T:t:n:u:d:o:r:e:f:a:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
+    J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
+    K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
+    O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
 
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
@@ -122,6 +136,7 @@ python rl_study_simulation.py \
   --recruit_n=$recruit_n \
   --recruit_t=$recruit_t \
   --synthetic_mode=$synthetic_mode \
+  --steepness=$steepness \
   --RL_alg=$RL_alg \
   --err_corr=$err_corr \
   --alg_state_feats=$alg_state_feats \
@@ -129,7 +144,13 @@ python rl_study_simulation.py \
   --dynamic_seeds=$dynamic_seeds \
   --env_seed_override=$env_seed_override \
   --alg_seed_override=$alg_seed_override \
-  --min_update_time=$min_update_time
+  --min_update_time=$min_update_time \
+  --upper_clip=$uclip \
+  --lower_clip=$lclip \
+  --prior_mean=$prior_mean \
+  --prior_var_upper_triangle=$prior_var_upper_triangle \
+  --noise_var=$noise_var
+
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

@@ -39,7 +39,6 @@ class TestSigmoidLS_T3_n2:
             T=3,
             recruit_n=50,
             recruit_t=1,
-            allocation_sigma=1,
             noise_var=1,
         )
 

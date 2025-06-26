@@ -45,8 +45,6 @@ class RLStudyArgs:
     T = "T"
     RECRUIT_N = "recruit_n"
     RECRUIT_T = "recruit_t"
-    ALLOCATION_SIGMA = "allocation_sigma"
-    NOISE_VAR = "noise_var"
 
 
 class SmallSampleCorrections:

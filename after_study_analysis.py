@@ -2417,8 +2417,10 @@ def collect_existing_analyses(
                 condition_numbers[i] for i in sorted_experiment_indices_by_adaptive_est
             ]
 
-            min_condition_number_for_large_estimates = np.min(
-                condition_numbers[estimate_blowup_split_idx:]
+            min_condition_number_for_large_estimates = (
+                np.min(condition_numbers[estimate_blowup_split_idx:])
+                if condition_numbers[estimate_blowup_split_idx:]
+                else None
             )
             print(
                 f"\nMinimum joint bread inverse condition number for trials with adaptive variance estimate at index {index_to_check_ci_coverage} > {EMP_VAR_BLOWUP_MULTIPLIER}x empirical value: {min_condition_number_for_large_estimates}\n"

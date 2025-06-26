@@ -21,6 +21,8 @@ RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
+lclip=0.1
+uclip=0.9
 dynamic_seeds=1
 env_seed_override=-1
 alg_seed_override=-1
@@ -49,7 +51,7 @@ small_sample_correction="none"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -70,6 +72,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:
     s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
     Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
+    A  | uclip )                                        needs_arg; uclip="$OPTARG" ;;
+    G  | lclip )                                        needs_arg; lclip="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -127,7 +131,9 @@ python rl_study_simulation.py \
   --dynamic_seeds=$dynamic_seeds \
   --env_seed_override=$env_seed_override \
   --alg_seed_override=$alg_seed_override \
-  --min_update_time=$min_update_time
+  --min_update_time=$min_update_time \
+  --upper_clip=$uclip \
+  --lower_clip=$lclip
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

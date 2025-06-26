@@ -269,11 +269,26 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 action_centering=args.action_centering,
             )
         elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
-            # TODO: Set these 1. sensibly, definitely 2. dynamically, ideally
-            # prior_mu = np.zeros(len(alg_state_feats + alg_treat_feats))
-            prior_mu = np.array([-0.37783337, 0.18696958, 2.3131008, 0.32913807])
-            prior_var = 1000000 * np.eye(len(alg_state_feats + alg_treat_feats))
-            noise_var = 1
+            num_regression_params = len(alg_state_feats + alg_treat_feats)
+            if args.prior_mean == RLStudyArgs.NAIVE:
+                prior_mean = np.zeros(num_regression_params)
+            else:
+                prior_mean = np.array(args.prior_mean.split(","), dtype=np.float32)
+
+            if args.prior_var_upper_triangle == RLStudyArgs.NAIVE:
+                prior_var = 1000000 * np.eye(num_regression_params)
+            else:
+                # Note this is row-major, moving left to right across rows in sequence
+                upper_triangle_terms = np.array(
+                    args.prior_var_upper_triangle.split(","), dtype=np.float32
+                )
+                upper_triangle_indices = np.triu_indices(num_regression_params)
+
+                prior_var = np.zeros(
+                    (num_regression_params, num_regression_params), dtype=np.float32
+                )
+                prior_var[upper_triangle_indices] = upper_triangle_terms
+                prior_var = prior_var + prior_var.T - np.diag(np.diag(prior_var))
 
             study_RLalg = SmoothPosteriorSampling(
                 state_feats=alg_state_feats,
@@ -281,10 +296,11 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 alg_seed=alg_seed,
                 lower_clip=args.lower_clip,
                 upper_clip=args.upper_clip,
+                steepness=args.steepness,
                 action_centering=args.action_centering,
-                prior_mu=prior_mu,
+                prior_mu=prior_mean,
                 prior_sigma=prior_var,
-                noise_var=noise_var,
+                noise_var=args.noise_var,
             )
         else:
             raise ValueError("Invalid RL Algorithm Type")
@@ -456,11 +472,22 @@ def main():
         help="The algorithm will not update before this decision time",
     )
     parser.add_argument(
-        "--prior",
+        "--prior_mean",
         type=str,
         default=RLStudyArgs.NAIVE,
-        choices=[RLStudyArgs.NAIVE, RLStudyArgs.ORALYTICS],
-        help="Prior for posterior sampling algorithm",
+        help="Prior mean for posterior sampling algorithm. This is a comma-separated list of values. If 'NAIVE', then a zero vector is used.",
+    )
+    parser.add_argument(
+        "--prior_var_upper_triangle",
+        type=str,
+        default=RLStudyArgs.NAIVE,
+        help="Upper triangle of posterior variance for sampling algorithm. This is a comma-separated list of values, row-major, moving left to right across rows in sequence. If NAIVE, then a diagonal matrix with large values is used.",
+    )
+    parser.add_argument(
+        "--noise_var",
+        type=float,
+        default=1.0,
+        help="Noise variance for the Bayesian Linear Regression used with the posterior sampling algorithm. Should be scaled for environment.",
     )
     parser.add_argument(
         "--profile",
@@ -492,8 +519,6 @@ def main():
             RLStudyArgs.T: 2,
             RLStudyArgs.RECRUIT_N: tmp_args.n,
             RLStudyArgs.RECRUIT_T: 1,
-            RLStudyArgs.ALLOCATION_SIGMA: 1,
-            RLStudyArgs.NOISE_VAR: 1,
         }
 
         # Algorithm state features
@@ -529,18 +554,6 @@ def main():
         type=int,
         default=default_arg_dict[RLStudyArgs.RECRUIT_T],
         help="Number of updates between recruitment times (minimum 1)",
-    )
-    parser.add_argument(
-        "--allocation_sigma",
-        type=float,
-        default=default_arg_dict[RLStudyArgs.ALLOCATION_SIGMA],
-        help="Sigma used in allocation of algorithm",
-    )
-    parser.add_argument(
-        "--noise_var",
-        type=float,
-        default=default_arg_dict[RLStudyArgs.NOISE_VAR],
-        help="Posterior sampling noise variance",
     )
 
     args = parser.parse_args()

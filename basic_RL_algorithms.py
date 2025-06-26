@@ -8,8 +8,8 @@ import jax
 import numpy as np
 from jax import numpy as jnp
 
-from functions_to_pass_to_analysis.synthetic_thompson_sampling_act_prob_function import (
-    synthetic_thompson_sampling_act_prob_function,
+from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering import (
+    smooth_thompson_sampling_act_prob_function_no_action_centering,
 )
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
     synthetic_get_action_1_prob_pure,
@@ -69,18 +69,19 @@ def get_pis_batched_thompson_sampling(
     num_users_entered_before_last_update,
     lower_clip,
     upper_clip,
+    steepness,
 ):
     return jax.vmap(
-        fun=synthetic_thompson_sampling_act_prob_function,
+        fun=smooth_thompson_sampling_act_prob_function_no_action_centering,
         in_axes=(None, 0, None, None, None, None),
         out_axes=0,
     )(
         beta_est,
         batched_treat_states_tensor,
-        0,  # Unused arg
         num_users_entered_before_last_update,
         lower_clip,
         upper_clip,
+        steepness,
     )
 
 
@@ -352,6 +353,7 @@ class SmoothPosteriorSampling:
         alg_seed,
         lower_clip,
         upper_clip,
+        steepness,
         action_centering,
         prior_mu,
         prior_sigma,
@@ -362,6 +364,7 @@ class SmoothPosteriorSampling:
         self.alg_seed = alg_seed
         self.lower_clip = lower_clip
         self.upper_clip = upper_clip
+        self.steepness = steepness
         self.prior_mu = prior_mu
         self.prior_sigma = prior_sigma
         self.noise_var = noise_var
@@ -596,10 +599,10 @@ class SmoothPosteriorSampling:
                     self.get_treat_states(
                         all_prev_data.loc[all_prev_data.user_id == user_id]
                     )[-1],
-                    0,  # Unused arg
                     self.get_num_users_entered_before_last_update(),
                     self.lower_clip,
                     self.upper_clip,
+                    self.steepness,
                 )
                 if all_prev_data.loc[
                     (all_prev_data.user_id == user_id)
@@ -628,4 +631,5 @@ class SmoothPosteriorSampling:
             self.get_num_users_entered_before_last_update(),
             self.lower_clip,
             self.upper_clip,
+            self.steepness,
         )

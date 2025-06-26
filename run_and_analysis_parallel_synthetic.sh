@@ -43,7 +43,11 @@ RL_alg="sigmoid_LS"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
+lclip=0.1
+uclip=0.9
 dynamic_seeds=0
+env_seed_override=-1
+alg_seed_override=-1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -92,6 +96,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:
     s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
     y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
     Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
+    A  | uclip )                                        needs_arg; uclip="$OPTARG" ;;
+    G  | lclip )                                        needs_arg; lclip="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -177,7 +183,9 @@ python rl_study_simulation.py \
   --action_centering=$action_centering_RL \
   --save_dir=$save_dir \
   --dynamic_seeds=$dynamic_seeds \
-  --min_update_time=$min_update_time
+  --min_update_time=$min_update_time \
+  --upper_clip=$uclip \
+  --lower_clip=$lclip
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script

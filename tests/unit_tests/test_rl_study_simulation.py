@@ -40,7 +40,6 @@ class TestRunStudySimulation:
             prior="naive",
             T=4,
             recruit_t=1,
-            allocation_sigma=1,
             noise_var=1,
             min_update_time=0,
         )
@@ -66,7 +65,6 @@ class TestRunStudySimulation:
             prior="naive",
             T=4,
             recruit_t=1,
-            allocation_sigma=1,
             noise_var=1,
             min_update_time=0,
         )

@@ -14,7 +14,7 @@ update_cadence_offset=0
 min_update_time=14
 recruit_t=2 # How many UPDATES between recruitments
 n=100
-recruit_n=$n
+# recruit_n=$n is done below unless the user specifies recruit_n
 # synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
 # synthetic_mode='delayed_2_action_dosage'
@@ -124,6 +124,10 @@ for arg in "$@"; do
     die "Invalid argument: $arg. Options must start with a dash (- or --)."
   fi
 done
+
+if [ -z "${recruit_n:-}" ]; then
+  recruit_n=$n
+fi
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning RL study simulation."

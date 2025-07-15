@@ -35,7 +35,7 @@ update_cadence_offset=0
 min_update_time=14
 recruit_t=2 # How many UPDATES between recruitments
 n=100
-recruit_n=$n
+# recruit_n=$n is done below unless the user specifies recruit_n
 # synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
 # synthetic_mode='delayed_2_action_dosage'
@@ -84,7 +84,7 @@ small_sample_correction="none"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:Q:q:z:J:K:O:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:J:K:O:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -125,6 +125,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
     H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     F  | dynamic_seeds )                                needs_arg; dynamic_seeds="$OPTARG" ;;
+    L  | env_seed_override )                            needs_arg; env_seed_override="$OPTARG" ;;
+    M  | alg_seed_override )                            needs_arg; alg_seed_override="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
@@ -146,6 +148,10 @@ for arg in "$@"; do
     die "Invalid argument: $arg. Options must start with a dash (- or --)."
   fi
 done
+
+if [ -z "${recruit_n:-}" ]; then
+  recruit_n=$n
+fi
 
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Loading mamba and CUDA modules.
@@ -195,6 +201,8 @@ python rl_study_simulation.py \
   --action_centering=$action_centering_RL \
   --save_dir=$save_dir \
   --dynamic_seeds=$dynamic_seeds \
+  --env_seed_override=$env_seed_override \
+  --alg_seed_override=$alg_seed_override \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \

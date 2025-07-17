@@ -82,6 +82,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "all_post_update_betas",
             "identity_diff_abs_max",
             "identity_diff_frobenius_norm",
+            "joint_bread_inverse_first_block_condition_number",
         ]
 
         assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys

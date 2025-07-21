@@ -8,7 +8,6 @@ from jax import numpy as jnp
 import pandas as pd
 import plotext as plt
 
-from constants import SmallSampleCorrections
 from helper_functions import (
     confirm_input_check_result,
     load_function_from_same_named_file,
@@ -166,11 +165,6 @@ def perform_first_wave_input_checks(
 
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
-
-    ### Validate small sample correction
-    require_custom_small_sample_correction_function_provided_if_selected(
-        small_sample_correction
-    )
 
 
 def require_action_probabilities_in_study_df_can_be_reconstructed(
@@ -812,16 +806,6 @@ def require_estimating_functions_sum_to_zero(
             f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result, taking into account the above breakdown by update number and inference. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
             e,
-        )
-
-
-# TODO: Either implement and remove NotImplementedError or remove the option.
-def require_custom_small_sample_correction_function_provided_if_selected(
-    small_sample_correction,
-):
-    if small_sample_correction == SmallSampleCorrections.custom_meat_modifier:
-        raise NotImplementedError(
-            "Custom small sample correction function not yet implemented."
         )
 
 

@@ -25,16 +25,47 @@ def clip(lower_clip, upper_clip, vals):
 
 
 def invert_matrix_and_check_conditioning(
-    matrix, try_tikhonov_if_poorly_conditioned=False, condition_num_threshold=10**3
+    matrix,
+    trim_small_singular_values=False,
+    try_tikhonov_if_poorly_conditioned=False,
+    condition_num_threshold=10**4,
 ):
+    inverse = None
     condition_number = np.linalg.cond(matrix)
-    inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
     if condition_number > condition_num_threshold:
         logger.warning(
             "You are inverting a matrix with a large condition number: %s",
             condition_number,
         )
+        # TODO: could try largest condition number to trim to such that original
+        # times trimmed pseudoinverse is close to identity (or could minimize identity diff)
+        if trim_small_singular_values:
+            logger.info("Trimming small singular values to improve conditioning.")
+            u, s, vT = np.linalg.svd(matrix, full_matrices=False)
+            logger.info(
+                " Sorted singular values: %s",
+                s,
+            )
+            sing_values_above_threshold_cond = s > s.max() / condition_num_threshold
+            if not np.any(sing_values_above_threshold_cond):
+                raise RuntimeError(
+                    f"All singular values are below the threshold of {s.max() / condition_num_threshold}. Singular value trimming will not work.",
+                )
+            trimmed_pseudoinverse = (
+                vT.T[:, sing_values_above_threshold_cond]
+                / s[sing_values_above_threshold_cond]
+            ) @ u[:, sing_values_above_threshold_cond].T
+            inverse = trimmed_pseudoinverse
+            condition_number = np.linalg.cond(trimmed_pseudoinverse)
+            logger.info(
+                "Kept %s out of %s singular values. Condition number of resulting lower-rank-approximation: %s",
+                sum(sing_values_above_threshold_cond),
+                len(s),
+                s[sing_values_above_threshold_cond].max()
+                / s[sing_values_above_threshold_cond].min(),
+            )
         if try_tikhonov_if_poorly_conditioned:
+            inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
             supposed_identity = inverse * matrix
             min_distance_from_identity = np.sum(
                 (supposed_identity - np.eye(matrix.shape[0])) ** 2
@@ -68,6 +99,8 @@ def invert_matrix_and_check_conditioning(
                         "Tikhonov regularization with lambda = %s did not improve the inverse.",
                         lambd,
                     )
+    if inverse is None:
+        inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
     return inverse, condition_number
 
 

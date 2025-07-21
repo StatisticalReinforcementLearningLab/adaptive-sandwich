@@ -418,9 +418,12 @@ def analyze_dataset(
 
     # TODO: decide whether to in fact scrap the structure-based inversion
     # TODO: Could inspect condition number of each of the diagonal matrices
+    # TODO: Make singular value trimming a command line option?
     logger.info("Inverting joint bread inverse matrix...")
     joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
-        invert_matrix_and_check_conditioning(joint_adaptive_bread_inverse_matrix)
+        invert_matrix_and_check_conditioning(
+            joint_adaptive_bread_inverse_matrix, trim_small_singular_values=True
+        )
     )
 
     identity_diff_abs_max = None
@@ -2478,7 +2481,7 @@ def collect_existing_analyses(
             # Plot the adaptive sandwich variance estimates to look for blowup, compared with condition numbers
             plt.clear_figure()
             plt.title(
-                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical w/ Joint Adaptive Bread Inv Condition Numbers"
+                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates (green) vs Empirical w/ Joint Adaptive Bread Inv Condition Numbers (blue)"
             )
             plt.xlabel("Simulation Index")
             plt.ylabel("Adaptive Variance Estimate")
@@ -2525,7 +2528,9 @@ def collect_existing_analyses(
 
         if condition_numbers_first_block:
 
-            log_condition_numbers_first_block = np.log(condition_numbers_first_block)
+            log_condition_numbers_first_block = np.array(
+                condition_numbers_first_block
+            ).astype(np.float64)
 
             # Plot histogram of joint bread inverse first block condition numbers
             plt.clear_figure()
@@ -2583,7 +2588,7 @@ def collect_existing_analyses(
             # Plot the adaptive sandwich variance estimates to look for blowup, compared with first block condition numbers
             plt.clear_figure()
             plt.title(
-                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical w/ First Block Condition Numbers"
+                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates (green) vs Empirical w/ First Block Condition Numbers (blue)"
             )
             plt.xlabel("Simulation Index")
             plt.ylabel("Adaptive Variance Estimate")
@@ -2666,7 +2671,7 @@ def collect_existing_analyses(
             # Plot the adaptive sandwich variance estimates to look for blowup, compared with identity diff abs maxes
             plt.clear_figure()
             plt.title(
-                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical w/ Identity Diff Abs Maxes"
+                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates (green) vs Empirical w/ Identity Diff Abs Maxes (blue)"
             )
             plt.xlabel("Simulation Index")
             plt.ylabel("Adaptive Variance Estimate")
@@ -2749,7 +2754,7 @@ def collect_existing_analyses(
             # Plot the adaptive sandwich variance estimates to look for blowup, compared with identity diff frobenius norms
             plt.clear_figure()
             plt.title(
-                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates vs Empirical w/ Identity Diff Frobenius Norms"
+                f"Index {index_to_check_ci_coverage} of Adaptive Variance Estimates (green) vs Empirical w/ Identity Diff Frobenius Norms (blue)"
             )
             plt.xlabel("Simulation Index")
             plt.ylabel("Adaptive Variance Estimate")

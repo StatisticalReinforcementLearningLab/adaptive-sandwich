@@ -196,11 +196,18 @@ def cli():
         [
             SmallSampleCorrections.none,
             SmallSampleCorrections.HC1,
-            SmallSampleCorrections.custom_meat_modifier,
+            SmallSampleCorrections.HC2,
+            SmallSampleCorrections.HC3,
         ]
     ),
-    default=SmallSampleCorrections.HC1,
+    default=SmallSampleCorrections.none,
     help="Type of small sample correction to apply to the variance estimate",
+)
+@click.option(
+    "--trim_small_singular_values",
+    type=bool,
+    default=False,
+    help="Whether to trim small singular values when inverting the joint bread inverse matrix. This can prevent adaptive sandwich variance estimates from blowing up due to poor conditioning.",
 )
 def analyze_dataset(
     study_df_pickle: click.File,
@@ -226,6 +233,7 @@ def analyze_dataset(
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
     small_sample_correction: str,
+    trim_small_singular_values: bool,
 ) -> None:
     """
     Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
@@ -276,6 +284,7 @@ def analyze_dataset(
     suppress_all_data_checks (bool):
         Whether to suppress all data checks. Not recommended.
     small_sample_correction (str): Type of small sample correction to apply.
+    trim_small_singular_values (bool): Whether to trim small singular values when inverting the joint bread inverse matrix.
 
     Returns:
     None: The function writes analysis results and debug pieces to files in the same directory as the input files.

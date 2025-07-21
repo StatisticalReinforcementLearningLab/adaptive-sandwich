@@ -70,12 +70,13 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimat
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none"
+trim_small_singular_values=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:w:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -121,6 +122,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
+    w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -226,7 +228,8 @@ python after_study_analysis.py analyze-dataset \
   --action_prob_col_name=$action_prob_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
-  --small_sample_correction=$small_sample_correction
+  --small_sample_correction=$small_sample_correction \
+  --trim_small_singular_values=$trim_small_singular_values
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Simulation complete.

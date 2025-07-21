@@ -50,7 +50,8 @@ class RLStudyArgs:
 class SmallSampleCorrections:
     none = "none"
     HC1 = "HC1"
-    custom_meat_modifier = "custom_meat_modifier"
+    HC2 = "HC2"
+    HC3 = "HC3"
 
 
 class FunctionTypes:

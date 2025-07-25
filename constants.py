@@ -53,13 +53,17 @@ class SmallSampleCorrections:
     HC1thetaplusbeta = "HC1thetaplusbeta"
     HC2 = "HC2"
     HC3 = "HC3"
+    HC2andHC1theta = "HC2andHC1theta"
+    HC2andHC1thetaplusbeta = "HC2andHC1thetaplusbeta"
+    HC3andHC1theta = "HC3andHC1theta"
+    HC3andHC1thetaplusbeta = "HC3andHC1thetaplusbeta"
 
 
 class InverseStabilizationMethods:
     NONE = "none"
     TRIM_SMALL_SINGULAR_VALUES = "trim_small_singular_values"
     ZERO_OUT_SMALL_OFF_DIAGONALS = "zero_out_small_off_diagonals"
-    ADD_RIDGE_FIXED_CONDITION_NUMBER = "add_ridge_fixed_cond_number"
+    ADD_RIDGE_FIXED_CONDITION_NUMBER = "add_ridge_fixed_condition_number"
     ADD_RIDGE_MEDIAN_SINGULAR_VALUE_FRACTION = (
         "add_ridge_median_singular_value_fraction"
     )

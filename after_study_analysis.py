@@ -203,6 +203,10 @@ def cli():
             SmallSampleCorrections.HC1thetaplusbeta,
             SmallSampleCorrections.HC2,
             SmallSampleCorrections.HC3,
+            SmallSampleCorrections.HC2andHC1theta,
+            SmallSampleCorrections.HC2andHC1thetaplusbeta,
+            SmallSampleCorrections.HC3andHC1theta,
+            SmallSampleCorrections.HC3andHC1thetaplusbeta,
         ]
     ),
     default=SmallSampleCorrections.HC3,
@@ -1885,6 +1889,8 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         inverse_stabilization_method=InverseStabilizationMethods.NONE,
     )[0]
 
+    # TODO: split out corrections into separate function and don't allow them
+    # to give stupid answers, like HC1 with num parameters too large.
     num_users = len(user_ids)
     per_user_adaptive_correction_weights = np.ones(num_users)
     per_user_classical_correction_weights = np.ones(num_users)
@@ -1911,6 +1917,10 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
     elif small_sample_correction in {
         SmallSampleCorrections.HC2,
         SmallSampleCorrections.HC3,
+        SmallSampleCorrections.HC2andHC1theta,
+        SmallSampleCorrections.HC2andHC1thetaplusbeta,
+        SmallSampleCorrections.HC3andHC1theta,
+        SmallSampleCorrections.HC3andHC1thetaplusbeta,
     }:
         logger.info("Using %s small sample correction at the user trajectory level.")
 
@@ -1919,7 +1929,7 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         # simple inverse of the average of the per-user joint adaptive bread inverse contributions.
         # This seems correct, since directly working with the "inverse" of an unstable matrix
         # is unreliable.
-        power = 1 if small_sample_correction == SmallSampleCorrections.HC2 else 2
+        power = 1 if "HC2" in small_sample_correction else 2
 
         adaptive_leverages_per_user = (
             np.einsum(
@@ -1933,8 +1943,6 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
             (1 - adaptive_leverages_per_user) ** power
         )
 
-        breakpoint()
-
         classical_leverages_per_user = (
             np.einsum(
                 "nij,ji->n",
@@ -1946,6 +1954,27 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         per_user_classical_correction_weights = 1 / (
             (1 - classical_leverages_per_user) ** power
         )
+
+        if "HC1thetaplusbeta" in small_sample_correction:
+            logger.info(
+                "Adding additional HC1 small sample correction at the user trajectory level. Note that we are treating the number of parameters as the size of theta plus the size of the betas from one update.  This is a somewhat reasonable notion of the number of free parameters in a stationary setting, at least."
+            )
+            per_user_adaptive_correction_weights *= num_users / (
+                num_users - theta.shape[0] - all_post_update_betas.shape[1]
+            )
+            per_user_classical_correction_weights *= num_users / (
+                num_users - theta.shape[0] - all_post_update_betas.shape[1]
+            )
+        elif "HC1theta" in small_sample_correction:
+            logger.info(
+                "Adding additional HC1 small sample correction at the user trajectory level. Note that we are treating the number of parameters as simply the size of theta, despite the presence of betas."
+            )
+            per_user_adaptive_correction_weights *= num_users / (
+                num_users - theta.shape[0]
+            )
+            per_user_classical_correction_weights *= num_users / (
+                num_users - theta.shape[0]
+            )
     else:
         raise ValueError(
             f"Unknown small sample correction: {small_sample_correction}. "

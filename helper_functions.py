@@ -6,6 +6,8 @@ import logging
 import numpy as np
 import jax.numpy as jnp
 
+from constants import InverseStabilizationMethods
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -25,21 +27,29 @@ def clip(lower_clip, upper_clip, vals):
 
 
 def invert_matrix_and_check_conditioning(
-    matrix,
-    trim_small_singular_values=False,
-    try_tikhonov_if_poorly_conditioned=False,
-    condition_num_threshold=10**4,
+    matrix: np.ndarray,
+    inverse_stabilization_method: str,
+    condition_num_threshold: float = 10**4,
+    ridge_median_singular_value_fraction: str = 0.01,
+    beta_dim: int = None,
+    theta_dim: int = None,
 ):
+    """
+    Check a matrix's condition number and invert it. If the condition number is
+    above a threshold, apply stabilization methods to improve conditioning.
+    Parameters
+    """
     inverse = None
-    condition_number = np.linalg.cond(matrix)
-    if condition_number > condition_num_threshold:
+    pre_inversion_condition_number = np.linalg.cond(matrix)
+    if pre_inversion_condition_number > condition_num_threshold:
         logger.warning(
             "You are inverting a matrix with a large condition number: %s",
-            condition_number,
+            pre_inversion_condition_number,
         )
-        # TODO: could try largest condition number to trim to such that original
-        # times trimmed pseudoinverse is close to identity (or could minimize identity diff)
-        if trim_small_singular_values:
+        if (
+            inverse_stabilization_method
+            == InverseStabilizationMethods.TRIM_SMALL_SINGULAR_VALUES
+        ):
             logger.info("Trimming small singular values to improve conditioning.")
             u, s, vT = np.linalg.svd(matrix, full_matrices=False)
             logger.info(
@@ -56,55 +66,184 @@ def invert_matrix_and_check_conditioning(
                 / s[sing_values_above_threshold_cond]
             ) @ u[:, sing_values_above_threshold_cond].T
             inverse = trimmed_pseudoinverse
-            condition_number = np.linalg.cond(trimmed_pseudoinverse)
+            pre_inversion_condition_number = (
+                s[sing_values_above_threshold_cond].max()
+                / s[sing_values_above_threshold_cond].min()
+            )
+
             logger.info(
-                "Kept %s out of %s singular values. Condition number of resulting lower-rank-approximation: %s",
+                "Kept %s out of %s singular values. Condition number of resulting lower-rank-approximation before inversion: %s",
                 sum(sing_values_above_threshold_cond),
                 len(s),
-                s[sing_values_above_threshold_cond].max()
-                / s[sing_values_above_threshold_cond].min(),
+                pre_inversion_condition_number,
             )
-        if try_tikhonov_if_poorly_conditioned:
-            inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
-            supposed_identity = inverse * matrix
-            min_distance_from_identity = np.sum(
-                (supposed_identity - np.eye(matrix.shape[0])) ** 2
+        elif (
+            inverse_stabilization_method
+            == InverseStabilizationMethods.ADD_RIDGE_FIXED_CONDITION_NUMBER
+        ):
+            logger.info("Adding ridge/Tikhonov regularization to improve conditioning.")
+            _, singular_values, _ = np.linalg.svd(matrix, full_matrices=False)
+            logger.info(
+                "Using fixed condition number threshold of %s to determine lambda.",
+                condition_num_threshold,
             )
-            for exponent in range(1, 7):
-                lambd = 10 ** (-exponent)
-                new_matrix_to_invert = matrix.T @ matrix + lambd * np.eye(
-                    matrix.shape[1]
+            lambda_ = (
+                singular_values.max() / condition_num_threshold - singular_values.min()
+            )
+            logger.info("Lambda for ridge regularization: %s", lambda_)
+            new_matrix = matrix + lambda_ * np.eye(matrix.shape[0])
+            pre_inversion_condition_number = np.linalg.cond(new_matrix)
+            logger.info(
+                "Condition number of matrix after ridge regularization: %s",
+                pre_inversion_condition_number,
+            )
+            inverse = np.linalg.solve(new_matrix, np.eye(matrix.shape[0]))
+        elif (
+            inverse_stabilization_method
+            == InverseStabilizationMethods.ADD_RIDGE_MEDIAN_SINGULAR_VALUE_FRACTION
+        ):
+            logger.info("Adding ridge/Tikhonov regularization to improve conditioning.")
+            _, singular_values, _ = np.linalg.svd(matrix, full_matrices=False)
+            logger.info(
+                "Using median singular value times %s as lambda.",
+                ridge_median_singular_value_fraction,
+            )
+            lambda_ = ridge_median_singular_value_fraction * np.median(singular_values)
+            logger.info("Lambda for ridge regularization: %s", lambda_)
+            new_matrix = matrix + lambda_ * np.eye(matrix.shape[0])
+            pre_inversion_condition_number = np.linalg.cond(new_matrix)
+            logger.info(
+                "Condition number of matrix after ridge regularization: %s",
+                pre_inversion_condition_number,
+            )
+            inverse = np.linalg.solve(new_matrix, np.eye(matrix.shape[0]))
+        elif (
+            inverse_stabilization_method
+            == InverseStabilizationMethods.INVERSE_BREAD_STRUCTURE_AWARE_INVERSION
+        ):
+            if not beta_dim or not theta_dim:
+                raise ValueError(
+                    "When using structure-aware inversion, beta_dim and theta_dim must be provided."
                 )
-                inverse_candidate = np.linalg.inv(new_matrix_to_invert) @ matrix.T
-                condition_number = np.linalg.cond(new_matrix_to_invert)
-                logger.info(
-                    "Trying Tikhonov regularization with lambda = %s to improve conditioning. New condition number of matrix to be inverted: %s",
-                    lambd,
-                    condition_number,
+            logger.info(
+                "Using inverse bread's block lower triangular structure to invert only diagonal blocks."
+            )
+            pre_inversion_condition_number = np.linalg.cond(matrix)
+            inverse = invert_inverse_bread_matrix(
+                matrix,
+                beta_dim,
+                theta_dim,
+                InverseStabilizationMethods.ADD_RIDGE_FIXED_CONDITION_NUMBER,
+            )
+        elif (
+            inverse_stabilization_method
+            == InverseStabilizationMethods.ZERO_OUT_SMALL_OFF_DIAGONALS
+        ):
+            if not beta_dim or not theta_dim:
+                raise ValueError(
+                    "When zeroing out small off diagonals, beta_dim and theta_dim must be provided."
                 )
-
-                supposed_identity = inverse_candidate * matrix
-                distance_from_identity = np.sum(
-                    (supposed_identity - np.eye(matrix.shape[0])) ** 2
-                )
-                if distance_from_identity < min_distance_from_identity:
-                    logger.info(
-                        "Tikhonov regularization with lambda = %s got us an improved inverse.",
-                        lambd,
-                    )
-                    min_distance_from_identity = distance_from_identity
-                    inverse = inverse_candidate
-                else:
-                    logger.info(
-                        "Tikhonov regularization with lambda = %s did not improve the inverse.",
-                        lambd,
-                    )
+            logger.info(
+                "Zeroing out small off-diagonal blocks to improve conditioning."
+            )
+            zeroed_matrix = zero_small_off_diagonal_blocks(
+                matrix,
+                ([beta_dim] * (matrix.shape[0] // beta_dim)) + [theta_dim],
+            )
+            pre_inversion_condition_number = np.linalg.cond(zeroed_matrix)
+            logger.info(
+                "Condition number of matrix after zeroing out small off-diagonal blocks: %s",
+                pre_inversion_condition_number,
+            )
+            inverse = np.linalg.solve(zeroed_matrix, np.eye(zeroed_matrix.shape[0]))
+        elif (
+            inverse_stabilization_method
+            == InverseStabilizationMethods.ALL_METHODS_COMPETITION
+        ):
+            # TODO: Choose right metric for competition... identity diff might not be it.
+            raise NotImplementedError(
+                "All methods competition is not implemented yet. Please choose a specific method."
+            )
+        elif inverse_stabilization_method == InverseStabilizationMethods.NONE:
+            logger.info("No inverse stabilization method applied. Inverting directly.")
+        else:
+            raise ValueError(
+                f"Unknown inverse stabilization method: {inverse_stabilization_method}"
+            )
     if inverse is None:
         inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
-    return inverse, condition_number
+    return inverse, pre_inversion_condition_number
 
 
-def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
+def zero_small_off_diagonal_blocks(
+    matrix: jnp.ndarray,
+    block_sizes: list[int],
+    frobenius_norm_threshold_fraction: float = 1e-3,
+):
+    """
+    Zero off-diagonal blocks whose Frobenius norm is < frobenius_norm_threshold_fraction x
+    Frobenius norm of the diagonal block in the same ROW. One could compare to
+    the same column or both the row and column, but we choose row here since
+    rows correspond to a single RL update or inference step in the adaptive bread
+    inverse matrices this method is designed for.
+
+    Args:
+        matrix (jnp.ndarray):
+            2-D ndarray, square (q_total x q_total)
+        block_sizes (list[int]):
+            list like [p1, p2, ..., pT]
+        frobenius_norm_threshold_fraction (float):
+            frobenius norm fraction relative to same-row diagonal block under which we zero a block
+
+    Returns
+        ndarray with selected off-blocks zeroed
+    """
+
+    bounds = np.cumsum([0] + list(block_sizes))
+    num_block_rows_cols = len(block_sizes)
+    J_trim = matrix.copy()
+
+    # 1. collect Frobenius norms of every diagonal block in one pass
+    diag_norm = np.empty(num_block_rows_cols)
+    for t in range(num_block_rows_cols):
+        sl = slice(bounds[t], bounds[t + 1])
+        diag_norm[t] = np.linalg.norm(matrix[sl, sl], ord="fro")
+
+    # 2. Zero all sufficiently small off-diagonal blocks
+    for t in range(num_block_rows_cols):
+        source_norm = diag_norm[t]
+        r0, r1 = bounds[t], bounds[t + 1]  # rows belonging to block t
+
+        # rows BELOW the diagonal (lower-triangular part)
+        for tau in range(t + 1, num_block_rows_cols):
+            c0, c1 = bounds[tau], bounds[tau + 1]
+            block = J_trim[r0:r1, c0:c1]
+            block_norm = np.linalg.norm(block, ord="fro")
+            if (
+                block_norm
+                and block_norm < frobenius_norm_threshold_fraction * source_norm
+            ):
+                logger.info(
+                    "Zeroing out block [%s:%s, %s:%s] with Frobenius norm %s < %s * %s",
+                    r0,
+                    r1,
+                    c0,
+                    c1,
+                    block_norm,
+                    frobenius_norm_threshold_fraction,
+                    source_norm,
+                )
+                J_trim = J_trim.at[r0:r1, c0:c1].set(0.0)
+
+    return J_trim
+
+
+def invert_inverse_bread_matrix(
+    inverse_bread,
+    beta_dim,
+    theta_dim,
+    diag_inverse_stabilization_method=InverseStabilizationMethods.TRIM_SMALL_SINGULAR_VALUES,
+):
     """
     Invert the inverse bread matrix to get the bread matrix.  This is a special
     function in order to take advantage of the block lower triangular structure.
@@ -132,7 +271,7 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
                 beta_dim * i : beta_dim * (i + 1),
                 beta_dim * i : beta_dim * (i + 1),
             ],
-            try_tikhonov_if_poorly_conditioned=True,
+            diag_inverse_stabilization_method,
         )[0]
         for j in range(0, num_beta_block_rows):
             if i > j:
@@ -164,7 +303,8 @@ def invert_inverse_bread_matrix(inverse_bread, beta_dim, theta_dim):
         inverse_bread[
             -theta_dim:,
             -theta_dim:,
-        ]
+        ],
+        diag_inverse_stabilization_method,
     )[0]
     for k in range(0, num_beta_block_rows):
         theta_block_row.append(

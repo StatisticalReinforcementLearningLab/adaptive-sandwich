@@ -18,7 +18,11 @@ import scipy
 import pandas
 import plotext as plt
 
-from constants import FunctionTypes, SmallSampleCorrections
+from constants import (
+    InverseStabilizationMethods,
+    FunctionTypes,
+    SmallSampleCorrections,
+)
 import input_checks
 from vmap_helpers import stack_batched_arg_lists_into_tensors
 
@@ -194,20 +198,31 @@ def cli():
     "--small_sample_correction",
     type=click.Choice(
         [
-            SmallSampleCorrections.none,
-            SmallSampleCorrections.HC1,
+            SmallSampleCorrections.NONE,
+            SmallSampleCorrections.HC1theta,
+            SmallSampleCorrections.HC1thetaplusbeta,
             SmallSampleCorrections.HC2,
             SmallSampleCorrections.HC3,
         ]
     ),
-    default=SmallSampleCorrections.none,
+    default=SmallSampleCorrections.HC3,
     help="Type of small sample correction to apply to the variance estimate",
 )
 @click.option(
-    "--trim_small_singular_values",
-    type=bool,
-    default=False,
-    help="Whether to trim small singular values when inverting the joint bread inverse matrix. This can prevent adaptive sandwich variance estimates from blowing up due to poor conditioning.",
+    "--adaptive_bread_inverse_stabilization_method",
+    type=click.Choice(
+        [
+            InverseStabilizationMethods.NONE,
+            InverseStabilizationMethods.TRIM_SMALL_SINGULAR_VALUES,
+            InverseStabilizationMethods.ZERO_OUT_SMALL_OFF_DIAGONALS,
+            InverseStabilizationMethods.ADD_RIDGE_FIXED_CONDITION_NUMBER,
+            InverseStabilizationMethods.ADD_RIDGE_MEDIAN_SINGULAR_VALUE_FRACTION,
+            InverseStabilizationMethods.INVERSE_BREAD_STRUCTURE_AWARE_INVERSION,
+            InverseStabilizationMethods.ALL_METHODS_COMPETITION,
+        ]
+    ),
+    default=InverseStabilizationMethods.TRIM_SMALL_SINGULAR_VALUES,
+    help="What measures to take to prevent adaptive sandwich variance estimates from blowing up due to poor conditioning of the adaptive bread inverse matrix",
 )
 def analyze_dataset(
     study_df_pickle: click.File,
@@ -233,7 +248,7 @@ def analyze_dataset(
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
     small_sample_correction: str,
-    trim_small_singular_values: bool,
+    adaptive_bread_inverse_stabilization_method: str,
 ) -> None:
     """
     Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
@@ -283,11 +298,14 @@ def analyze_dataset(
         Whether to suppress interactive data checks. This should be used in simulations, for example.
     suppress_all_data_checks (bool):
         Whether to suppress all data checks. Not recommended.
-    small_sample_correction (str): Type of small sample correction to apply.
-    trim_small_singular_values (bool): Whether to trim small singular values when inverting the joint bread inverse matrix.
+    small_sample_correction (str):
+        Type of small sample correction to apply.
+    adaptive_bread_inverse_stabilization_method (bool):
+        Whether to trim small singular values when inverting the joint bread inverse matrix.
 
     Returns:
-    None: The function writes analysis results and debug pieces to files in the same directory as the input files.
+    None: The function writes analysis results and debug pieces to files in the same directory as
+    the input files.
     """
 
     logging.basicConfig(
@@ -325,6 +343,7 @@ def analyze_dataset(
             beta_dim,
             suppress_interactive_data_checks,
             small_sample_correction,
+            adaptive_bread_inverse_stabilization_method,
         )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
@@ -374,12 +393,17 @@ def analyze_dataset(
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     (
         joint_adaptive_bread_inverse_matrix,
+        joint_adaptive_bread_matrix,
         joint_adaptive_meat_matrix,
         classical_bread_inverse_matrix,
+        classical_bread_matrix,
         classical_meat_matrix,
         avg_estimating_function_stack,
-        all_per_user_estimating_function_stacks,
-    ) = construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
+        per_user_estimating_function_stacks,
+        joint_adaptive_bread_inverse_cond,
+        per_user_adaptive_correction_weights,
+        per_user_classical_correction_weights,
+    ) = construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_stack(
         theta_est,
         all_post_update_betas,
         user_ids,
@@ -404,6 +428,8 @@ def analyze_dataset(
         action_by_decision_time_by_user_id,
         suppress_all_data_checks,
         suppress_interactive_data_checks,
+        small_sample_correction,
+        adaptive_bread_inverse_stabilization_method,
     )
 
     theta_dim = len(theta_est)
@@ -416,9 +442,6 @@ def analyze_dataset(
         )
 
     logger.info("Forming classical sandwich variance estimate...")
-    classical_bread_matrix = invert_matrix_and_check_conditioning(
-        classical_bread_inverse_matrix
-    )[0]
     classical_sandwich_var_estimate = (
         classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
     ) / len(user_ids)
@@ -428,12 +451,6 @@ def analyze_dataset(
     # TODO: decide whether to in fact scrap the structure-based inversion
     # TODO: Could inspect condition number of each of the diagonal matrices
     # TODO: Make singular value trimming a command line option?
-    logger.info("Inverting joint bread inverse matrix...")
-    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
-        invert_matrix_and_check_conditioning(
-            joint_adaptive_bread_inverse_matrix, trim_small_singular_values=True
-        )
-    )
 
     identity_diff_abs_max = None
     identity_diff_frobenius_norm = None
@@ -490,7 +507,7 @@ def analyze_dataset(
                 "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
                 "classical_bread_matrix": classical_bread_matrix,
                 "classical_meat_matrix": classical_meat_matrix,
-                "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
+                "all_estimating_function_stacks": per_user_estimating_function_stacks,
                 "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
                 "joint_bread_inverse_first_block_eigvals": jnp.linalg.eigvals(
                     joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
@@ -1059,7 +1076,7 @@ def single_user_weighted_estimating_function_stacker(
     # b. The average outer product of these per-user stacks across users is the adaptive joint meat
     # matrix, hence the second output.
     # c. The third output is averaged across users to obtain the classical meat matrix.
-    # d. The fourth output is averaged across users to obtatin the inverse classical bread
+    # d. The fourth output is averaged across users to obtain the inverse classical bread
     # matrix.
     return (
         weighted_stack,
@@ -1407,7 +1424,7 @@ def thread_inference_func_args(
 
 
 # TODO: vmap
-def get_avg_weighted_estimating_function_stack_and_aux_values(
+def get_weighted_estimating_function_stacks_and_aux_values(
     flattened_betas_and_theta: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
@@ -1445,7 +1462,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
     """
-    Computes the average of the weighted estimating function stacks for all users, along with
+    Computes the weighted estimating function stacks for all users, along with
     auxiliary values used to construct the adaptive and classical sandwich variances.
 
     Args:
@@ -1516,11 +1533,18 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
 
     Returns:
         jnp.ndarray:
-            A 1D JAX NumPy array representing the average weighted estimating function stack.
+            A 2D JAX NumPy array holding all weighted estimating function stacks. We used to return
+            the average of these and differentiate that, but now we return the full stack for each
+            user, since we need access to the user-specific derivatives in order to do small-sample
+            corrections to our sandwich variances.
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            A tuple containing the average weighted estimating function stack, the adaptive meat
-            matrix, the classical meat matrix, the inverse classical bread matrix, and the raw
-            per-user weighted estimating function stacks.
+            A tuple containing
+            1. the average weighted estimating function stack
+            2. the user-level adaptive meat matrix contributions
+            3. the user-level classical meat matrix contributions
+            4. the user-level inverse classical bread matrix contributions
+            5. raw per-user weighted estimating function
+            stacks.
     """
 
     # 1. Collect the necessary function objects
@@ -1651,19 +1675,19 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     inference_hessians = jnp.array([result[3] for result in results])
 
     # 6. Note this strange return structure! We will differentiate the first output,
-    # but the second output will be passed along without modification via has_aux=True and then used
+    # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices. The raw per-user stacks are also returned for debugging purposes.
-    return jnp.mean(stacks, axis=0), (
+    # bread matrices. The raw per-user stacks are also returned again for debugging purposes.
+    return stacks, (
         jnp.mean(stacks, axis=0),
-        jnp.mean(outer_products, axis=0),
-        jnp.mean(inference_only_outer_products, axis=0),
-        jnp.mean(inference_hessians, axis=0),
+        outer_products,
+        inference_only_outer_products,
+        inference_hessians,
         stacks,
     )
 
 
-def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_function_stack(
+def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_stack(
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
@@ -1696,7 +1720,13 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
+    small_sample_correction: str,
+    adaptive_bread_inverse_stabilization_method: str,
 ) -> tuple[
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
+    jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1772,6 +1802,11 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
             If True, suppresses interactive data checks that would otherwise be performed to ensure
             the correctness of the threaded arguments. The checks are still performed, but
             any interactive prompts are suppressed.
+        small_sample_correction (str):
+            The type of small sample correction to apply. See SmallSampleCorrections class for
+            options.
+        adaptive_bread_inverse_stabilization_method (str):
+            The method to use for stabilizing the adaptive bread inverse matrix inversion.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -1787,14 +1822,15 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     )
     # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
     # slow.
-    joint_adaptive_bread_inverse_pieces, (
+    # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
+    per_user_joint_adaptive_bread_inverse_contributions, (
         avg_estimating_function_stack,
-        joint_adaptive_meat,
-        classical_meat,
-        classical_bread_inverse,
-        all_per_user_estimating_function_stacks,
+        per_user_joint_adaptive_meat_contributions,
+        per_user_classical_meat_contributions,
+        per_user_classical_bread_inverse_contributions,
+        per_user_estimating_function_stacks,
     ) = jax.jacrev(
-        get_avg_weighted_estimating_function_stack_and_aux_values, has_aux=True
+        get_weighted_estimating_function_stacks_and_aux_values, has_aux=True
     )(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
         # it is more efficient to flatten them into a single array. This is done
@@ -1826,15 +1862,121 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         suppress_interactive_data_checks,
     )
 
+    # We first compute the inverse bread matrices and invert them, the latter of
+    # which is potentially quite an involved process due to conditioning issue.
+    # This is done now because the bread matrices may be needed to form a
+    # small-sample correction to the meat matrices.
+    joint_adaptive_bread_inverse_matrix = jnp.mean(
+        per_user_joint_adaptive_bread_inverse_contributions, axis=0
+    )
+    classical_bread_inverse_matrix = jnp.mean(
+        per_user_classical_bread_inverse_contributions, axis=0
+    )
+    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
+        invert_matrix_and_check_conditioning(
+            joint_adaptive_bread_inverse_matrix,
+            inverse_stabilization_method=adaptive_bread_inverse_stabilization_method,
+            beta_dim=all_post_update_betas.shape[1],
+            theta_dim=theta.shape[0],
+        )
+    )
+    classical_bread_matrix = invert_matrix_and_check_conditioning(
+        classical_bread_inverse_matrix,
+        inverse_stabilization_method=InverseStabilizationMethods.NONE,
+    )[0]
+
+    num_users = len(user_ids)
+    per_user_adaptive_correction_weights = np.ones(num_users)
+    per_user_classical_correction_weights = np.ones(num_users)
+    if small_sample_correction == SmallSampleCorrections.NONE:
+        logger.info(
+            "No small sample correction requested. Using the raw per-user joint adaptive bread inverse contributions."
+        )
+    elif small_sample_correction == SmallSampleCorrections.HC1theta:
+        logger.info(
+            "Using HC1 small sample correction at the user trajectory level. Note that we are treating the number of parameters as simply the size of theta, despite the presence of betas."
+        )
+        per_user_adaptive_correction_weights = per_user_classical_correction_weights = (
+            num_users / (num_users - theta.shape[0]) * np.ones(num_users)
+        )
+    elif small_sample_correction == SmallSampleCorrections.HC1thetaplusbeta:
+        logger.info(
+            "Using HC1 small sample correction at the user trajectory level. Note that we are treating the number of parameters as the size of theta plus the size of the betas from one update.  This is a somewhat reasonable notion of the number of free parameters in a stationary setting, at least."
+        )
+        per_user_adaptive_correction_weights = per_user_classical_correction_weights = (
+            num_users
+            / (num_users - theta.shape[0] - all_post_update_betas.shape[1])
+            * np.ones(num_users)
+        )
+    elif small_sample_correction in {
+        SmallSampleCorrections.HC2,
+        SmallSampleCorrections.HC3,
+    }:
+        logger.info("Using %s small sample correction at the user trajectory level.")
+
+        # Note this uses the joint adaptive bread matrix that resulted from whatever stabilizing
+        # methods were used to invert the joint adaptive bread inverse matrix, so it may not be the
+        # simple inverse of the average of the per-user joint adaptive bread inverse contributions.
+        # This seems correct, since directly working with the "inverse" of an unstable matrix
+        # is unreliable.
+        power = 1 if small_sample_correction == SmallSampleCorrections.HC2 else 2
+
+        adaptive_leverages_per_user = (
+            np.einsum(
+                "nij,ji->n",
+                per_user_joint_adaptive_bread_inverse_contributions,
+                joint_adaptive_bread_matrix,
+            )
+            / num_users
+        )
+        per_user_adaptive_correction_weights = 1 / (
+            (1 - adaptive_leverages_per_user) ** power
+        )
+
+        breakpoint()
+
+        classical_leverages_per_user = (
+            np.einsum(
+                "nij,ji->n",
+                per_user_classical_bread_inverse_contributions,
+                classical_bread_matrix,
+            )
+            / num_users
+        )
+        per_user_classical_correction_weights = 1 / (
+            (1 - classical_leverages_per_user) ** power
+        )
+    else:
+        raise ValueError(
+            f"Unknown small sample correction: {small_sample_correction}. "
+            "Please choose from values in SmallSampleCorrections class."
+        )
+
+    joint_adaptive_meat_matrix = jnp.mean(
+        per_user_adaptive_correction_weights[:, None, None]
+        * per_user_joint_adaptive_meat_contributions,
+        axis=0,
+    )
+    classical_meat_matrix = jnp.mean(
+        per_user_classical_correction_weights[:, None, None]
+        * per_user_classical_meat_contributions,
+        axis=0,
+    )
+
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        joint_adaptive_bread_inverse_pieces,
-        joint_adaptive_meat,
-        classical_bread_inverse,
-        classical_meat,
+        joint_adaptive_bread_inverse_matrix,
+        joint_adaptive_bread_matrix,
+        joint_adaptive_meat_matrix,
+        classical_bread_inverse_matrix,
+        classical_bread_matrix,
+        classical_meat_matrix,
         avg_estimating_function_stack,
-        all_per_user_estimating_function_stacks,
+        per_user_estimating_function_stacks,
+        joint_adaptive_bread_inverse_cond,
+        per_user_adaptive_correction_weights,
+        per_user_classical_correction_weights,
     )
 
 

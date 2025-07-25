@@ -231,7 +231,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -573,7 +573,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -917,7 +917,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -1535,7 +1535,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -2070,7 +2070,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -2538,7 +2538,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],

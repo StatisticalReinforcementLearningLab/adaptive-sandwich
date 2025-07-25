@@ -23,7 +23,7 @@ alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 lclip=0.1
 uclip=0.9
-dynamic_seeds=1
+dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
 
@@ -48,7 +48,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimat
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"
-trim_small_singular_values=0
+adaptive_bread_inverse_stabilization_method="trim_small_singular_values"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -98,7 +98,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
+    w  | adaptive_bread_inverse_stabilization_method )  needs_arg; adaptive_bread_inverse_stabilization_method="$OPTARG" ;;
 
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
@@ -172,7 +172,7 @@ python after_study_analysis.py analyze-dataset \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \
-  --trim_small_singular_values=$trim_small_singular_values
+  --adaptive_bread_inverse_stabilization_method=$adaptive_bread_inverse_stabilization_method
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Ending after-study analysis."
 

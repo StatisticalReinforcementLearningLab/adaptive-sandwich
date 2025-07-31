@@ -2070,8 +2070,6 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
             adaptive_correction_matrices,
         )
 
-        breakpoint()
-
         per_user_adaptive_corrections = adaptive_correction_matrices
         per_user_classical_corrections = classical_correction_matrices
     else:

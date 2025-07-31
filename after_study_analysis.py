@@ -408,8 +408,8 @@ def analyze_dataset(
         avg_estimating_function_stack,
         per_user_estimating_function_stacks,
         joint_adaptive_bread_inverse_cond,
-        per_user_adaptive_correction_weights,
-        per_user_classical_correction_weights,
+        per_user_adaptive_corrections,
+        per_user_classical_corrections,
     ) = construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_stack(
         theta_est,
         all_post_update_betas,
@@ -525,6 +525,8 @@ def analyze_dataset(
                 "all_post_update_betas": all_post_update_betas,
                 "identity_diff_abs_max": identity_diff_abs_max,
                 "identity_diff_frobenius_norm": identity_diff_frobenius_norm,
+                "per_user_adaptive_corrections": per_user_adaptive_corrections,
+                "per_user_classical_corrections": per_user_classical_corrections,
             },
             f,
         )
@@ -1954,7 +1956,7 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         # ALSO note that one way to test correctness of the leverages is that they should sum
         # to the number of inference parameters, ie the size of theta.  I tested that this is
         # true both for the classical leverages and the larger joint adaptive leverages when they
-        # were still used, lending credence to the below calculations
+        # were still used, lending credence to the below calculations.
         classical_leverages_per_user = (
             np.einsum(
                 "nij,ji->n",

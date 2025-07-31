@@ -33,6 +33,7 @@ from helper_functions import (
     get_in_study_df_column,
     invert_matrix_and_check_conditioning,
     load_function_from_same_named_file,
+    matrix_inv_sqrt,
     replace_tuple_index,
     get_action_1_fraction,
 )
@@ -207,6 +208,8 @@ def cli():
             SmallSampleCorrections.HC2andHC1thetaplusbeta,
             SmallSampleCorrections.HC3andHC1theta,
             SmallSampleCorrections.HC3andHC1thetaplusbeta,
+            SmallSampleCorrections.CR2,
+            SmallSampleCorrections.CR3,
         ]
     ),
     default=SmallSampleCorrections.HC3,
@@ -1815,11 +1818,16 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
             - The joint adaptive inverse bread matrix.
+            - The joint adaptive bread matrix.
             - The joint adaptive meat matrix.
             - The classical inverse bread matrix.
+            - The classical bread matrix.
             - The classical meat matrix.
             - The average weighted estimating function stack.
             - All per-user weighted estimating function stacks.
+            - The joint adaptive inverse bread matrix condition number.
+            - The per-user adaptive meat small-sample corrections.
+            - The per-user classical meat small-sample corrections.
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
@@ -1889,9 +1897,18 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         inverse_stabilization_method=InverseStabilizationMethods.NONE,
     )[0]
 
+    joint_adaptive_meat_matrix = None
+    classical_meat_matrix = None
+
     # TODO: split out corrections into separate function and don't allow them
     # to give stupid answers, like HC1 with num parameters too large.
     num_users = len(user_ids)
+
+    # These will hold either corrective matrices or scalar weights depending on
+    # what small sample correction is requested.
+    per_user_adaptive_corrections = None
+    per_user_classical_corrections = None
+
     per_user_adaptive_correction_weights = np.ones(num_users)
     per_user_classical_correction_weights = np.ones(num_users)
     if small_sample_correction == SmallSampleCorrections.NONE:
@@ -1924,25 +1941,20 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
     }:
         logger.info("Using %s small sample correction at the user trajectory level.")
 
-        # Note this uses the joint adaptive bread matrix that resulted from whatever stabilizing
-        # methods were used to invert the joint adaptive bread inverse matrix, so it may not be the
-        # simple inverse of the average of the per-user joint adaptive bread inverse contributions.
-        # This seems correct, since directly working with the "inverse" of an unstable matrix
-        # is unreliable.
         power = 1 if "HC2" in small_sample_correction else 2
 
-        adaptive_leverages_per_user = (
-            np.einsum(
-                "nij,ji->n",
-                per_user_joint_adaptive_bread_inverse_contributions,
-                joint_adaptive_bread_matrix,
-            )
-            / num_users
-        )
-        per_user_adaptive_correction_weights = 1 / (
-            (1 - adaptive_leverages_per_user) ** power
-        )
+        # It turns out to typically not make sense to compute the adaptive analog
+        # of the classical leverages, since this involves correcting the joint adaptive meat matrix
+        # involving all beta and theta parameters.  HC2/HC3 corrections assume that
+        # the number of parameters is smaller than the number of users, which will not typically be
+        # the case if the number of users is small enough for these corrections to be important.
+        # Therefore we also use the "classical" leverages for the adaptive correction weights, which
+        # is sensible, corresponding to only adjusting based on the estimating equations for theta.
 
+        # ALSO note that one way to test correctness of the leverages is that they should sum
+        # to the number of inference parameters, ie the size of theta.  I tested that this is
+        # true both for the classical leverages and the larger joint adaptive leverages when they
+        # were still used, lending credence to the below calculations
         classical_leverages_per_user = (
             np.einsum(
                 "nij,ji->n",
@@ -1955,32 +1967,129 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
             (1 - classical_leverages_per_user) ** power
         )
 
+        per_user_adaptive_correction_weights = per_user_classical_correction_weights
+
         if "HC1thetaplusbeta" in small_sample_correction:
             logger.info(
                 "Adding additional HC1 small sample correction at the user trajectory level. Note that we are treating the number of parameters as the size of theta plus the size of the betas from one update.  This is a somewhat reasonable notion of the number of free parameters in a stationary setting, at least."
             )
-            per_user_adaptive_correction_weights *= num_users / (
-                num_users - theta.shape[0] - all_post_update_betas.shape[1]
-            )
             per_user_classical_correction_weights *= num_users / (
                 num_users - theta.shape[0] - all_post_update_betas.shape[1]
             )
+            per_user_adaptive_correction_weights = per_user_classical_correction_weights
         elif "HC1theta" in small_sample_correction:
             logger.info(
                 "Adding additional HC1 small sample correction at the user trajectory level. Note that we are treating the number of parameters as simply the size of theta, despite the presence of betas."
             )
-            per_user_adaptive_correction_weights *= num_users / (
-                num_users - theta.shape[0]
-            )
             per_user_classical_correction_weights *= num_users / (
                 num_users - theta.shape[0]
             )
+            per_user_adaptive_correction_weights = per_user_classical_correction_weights
+    elif small_sample_correction == SmallSampleCorrections.CR2:
+        logger.info("Using CR2 small sample correction at the user trajectory level.")
+
+        # This is slightly more involved than the CR3 correction, since the fractional matrix powers
+        # are not as easily batched as the simple inverses there. The list comprehension could be
+        # avoided but we don't bother for now.
+
+        I = np.eye(per_user_classical_bread_inverse_contributions.shape[1])
+        classical_H_matrices = np.einsum(
+            "nij,jk->nik",
+            per_user_classical_bread_inverse_contributions,
+            classical_bread_matrix,
+        )
+        classical_correction_matrices = np.array(
+            [
+                matrix_inv_sqrt(I - classical_H_matrices[i])
+                for i in range(classical_H_matrices.shape[0])
+            ]
+        )
+
+        I = np.eye(per_user_joint_adaptive_bread_inverse_contributions.shape[1])
+        adaptive_H_matrices = np.einsum(
+            "nij,jk->nik",
+            per_user_joint_adaptive_bread_inverse_contributions,
+            joint_adaptive_bread_matrix,
+        )
+        adaptive_correction_matrices = np.array(
+            [
+                matrix_inv_sqrt(I - adaptive_H_matrices[i])
+                for i in range(adaptive_H_matrices.shape[0])
+            ]
+        )
+
+        per_user_classical_meat_contributions = np.einsum(
+            "nij,njk,nlk->nil",
+            classical_correction_matrices,
+            per_user_classical_meat_contributions,
+            classical_correction_matrices,
+        )
+
+        per_user_joint_adaptive_meat_contributions = np.einsum(
+            "nij,njk,nlk->nil",
+            adaptive_correction_matrices,
+            per_user_joint_adaptive_meat_contributions,
+            adaptive_correction_matrices,
+        )
+
+        per_user_adaptive_corrections = adaptive_correction_matrices
+        per_user_classical_corrections = classical_correction_matrices
+
+    elif small_sample_correction == SmallSampleCorrections.CR3:
+        logger.info("Using CR3 small sample correction at the user trajectory level.")
+        classical_correction_matrices = np.linalg.inv(
+            np.eye(per_user_classical_bread_inverse_contributions.shape[1])[None, :, :]
+            - np.einsum(
+                "nij,jk->nik",
+                per_user_classical_bread_inverse_contributions,
+                classical_bread_matrix,
+            )
+        )
+
+        adaptive_correction_matrices = np.linalg.inv(
+            np.eye(per_user_joint_adaptive_bread_inverse_contributions.shape[1])[
+                None, :, :
+            ]
+            - np.einsum(
+                "nij,jk->nik",
+                per_user_joint_adaptive_bread_inverse_contributions,
+                joint_adaptive_bread_matrix,
+            )
+        )
+        per_user_classical_meat_contributions = np.einsum(
+            "nij,njk,nlk->nil",
+            classical_correction_matrices,
+            per_user_classical_meat_contributions,
+            classical_correction_matrices,
+        )
+
+        per_user_joint_adaptive_meat_contributions = np.einsum(
+            "nij,njk,nlk->nil",
+            adaptive_correction_matrices,
+            per_user_joint_adaptive_meat_contributions,
+            adaptive_correction_matrices,
+        )
+
+        breakpoint()
+
+        per_user_adaptive_corrections = adaptive_correction_matrices
+        per_user_classical_corrections = classical_correction_matrices
     else:
         raise ValueError(
             f"Unknown small sample correction: {small_sample_correction}. "
             "Please choose from values in SmallSampleCorrections class."
         )
 
+    # If we used matrix corrections, they will be stored as these corrections.
+    # Otherwise, store the scalar weights.
+    if per_user_adaptive_corrections is None:
+        per_user_adaptive_corrections = per_user_adaptive_correction_weights
+    if per_user_classical_corrections is None:
+        per_user_classical_corrections = per_user_classical_correction_weights
+
+    # The scalar corrections will have computed weights that need to be applied here,
+    # whereas the matrix corrections will have been applied to the per-user
+    # contributions.
     joint_adaptive_meat_matrix = jnp.mean(
         per_user_adaptive_correction_weights[:, None, None]
         * per_user_joint_adaptive_meat_contributions,
@@ -2004,8 +2113,8 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         avg_estimating_function_stack,
         per_user_estimating_function_stacks,
         joint_adaptive_bread_inverse_cond,
-        per_user_adaptive_correction_weights,
-        per_user_classical_correction_weights,
+        per_user_adaptive_corrections,
+        per_user_classical_corrections,
     )
 
 

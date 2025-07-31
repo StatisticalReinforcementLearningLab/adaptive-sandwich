@@ -57,6 +57,8 @@ class SmallSampleCorrections:
     HC2andHC1thetaplusbeta = "HC2andHC1thetaplusbeta"
     HC3andHC1theta = "HC3andHC1theta"
     HC3andHC1thetaplusbeta = "HC3andHC1thetaplusbeta"
+    CR2 = "CR2"
+    CR3 = "CR3"
 
 
 class InverseStabilizationMethods:

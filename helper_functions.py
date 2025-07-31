@@ -325,6 +325,13 @@ def invert_inverse_bread_matrix(
     return np.block(blocks)
 
 
+def matrix_inv_sqrt(mat: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    """Return (mat)^{-1/2} with eigenvalues clipped at `eps`."""
+    eigval, eigvec = np.linalg.eigh(mat)
+    eigval = np.clip(eigval, eps, None)  # ensure strictly positive
+    return eigvec @ np.diag(eigval**-0.5) @ eigvec.T
+
+
 def load_module_from_source_file(modname, filename):
     loader = importlib.machinery.SourceFileLoader(modname, filename)
     spec = importlib.util.spec_from_file_location(modname, filename, loader=loader)

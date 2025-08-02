@@ -37,7 +37,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/oralytics_estimat
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"
-adaptive_bread_inverse_stabilization_method="trim_small_singular_values"
+adaptive_bread_inverse_stabilization_method="add_ridge_fixed_condition_number"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.

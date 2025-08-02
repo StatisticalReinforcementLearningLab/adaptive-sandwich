@@ -231,7 +231,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -347,31 +347,26 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     )
     np.testing.assert_allclose(
         result[0],
-        jnp.mean(
-            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
-        ),
+        jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]),
         rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],
-        result[0],
+        jnp.mean(result[0], axis=0),
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.mean(
-            jnp.array(
-                [
-                    jnp.outer(
-                        expected_weighted_stack_1,
-                        expected_weighted_stack_1,
-                    ),
-                    jnp.outer(
-                        expected_weighted_stack_2,
-                        expected_weighted_stack_2,
-                    ),
-                ]
-            ),
-            axis=0,
+        jnp.array(
+            [
+                jnp.outer(
+                    expected_weighted_stack_1,
+                    expected_weighted_stack_1,
+                ),
+                jnp.outer(
+                    expected_weighted_stack_2,
+                    expected_weighted_stack_2,
+                ),
+            ]
         ),
         rtol=1e-6,
     )
@@ -573,7 +568,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -689,31 +684,26 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     )
     np.testing.assert_allclose(
         result[0],
-        jnp.mean(
-            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
-        ),
+        jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]),
         rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],
-        result[0],
+        jnp.mean(result[0], axis=0),
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.mean(
-            jnp.array(
-                [
-                    jnp.outer(
-                        expected_weighted_stack_1,
-                        expected_weighted_stack_1,
-                    ),
-                    jnp.outer(
-                        expected_weighted_stack_2,
-                        expected_weighted_stack_2,
-                    ),
-                ]
-            ),
-            axis=0,
+        jnp.array(
+            [
+                jnp.outer(
+                    expected_weighted_stack_1,
+                    expected_weighted_stack_1,
+                ),
+                jnp.outer(
+                    expected_weighted_stack_2,
+                    expected_weighted_stack_2,
+                ),
+            ]
         ),
         rtol=1e-6,
     )
@@ -917,7 +907,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -1291,31 +1281,26 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 
     np.testing.assert_allclose(
         result[0],
-        jnp.mean(
-            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
-        ),
+        jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]),
         rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],
-        result[0],
+        jnp.mean(result[0], axis=0),
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.mean(
-            jnp.array(
-                [
-                    jnp.outer(
-                        expected_weighted_stack_1,
-                        expected_weighted_stack_1,
-                    ),
-                    jnp.outer(
-                        expected_weighted_stack_2,
-                        expected_weighted_stack_2,
-                    ),
-                ]
-            ),
-            axis=0,
+        jnp.array(
+            [
+                jnp.outer(
+                    expected_weighted_stack_1,
+                    expected_weighted_stack_1,
+                ),
+                jnp.outer(
+                    expected_weighted_stack_2,
+                    expected_weighted_stack_2,
+                ),
+            ]
         ),
         rtol=1e-6,
     )
@@ -1535,7 +1520,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -1837,31 +1822,26 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
 
     np.testing.assert_allclose(
         result[0],
-        jnp.mean(
-            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
-        ),
+        jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]),
         rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],
-        result[0],
+        jnp.mean(result[0], axis=0),
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.mean(
-            jnp.array(
-                [
-                    jnp.outer(
-                        expected_weighted_stack_1,
-                        expected_weighted_stack_1,
-                    ),
-                    jnp.outer(
-                        expected_weighted_stack_2,
-                        expected_weighted_stack_2,
-                    ),
-                ]
-            ),
-            axis=0,
+        jnp.array(
+            [
+                jnp.outer(
+                    expected_weighted_stack_1,
+                    expected_weighted_stack_1,
+                ),
+                jnp.outer(
+                    expected_weighted_stack_2,
+                    expected_weighted_stack_2,
+                ),
+            ]
         ),
         rtol=1e-6,
     )
@@ -2070,7 +2050,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -2286,31 +2266,26 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
 
     np.testing.assert_allclose(
         result[0],
-        jnp.mean(
-            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
-        ),
+        jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]),
         rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],
-        result[0],
+        jnp.mean(result[0], axis=0),
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.mean(
-            jnp.array(
-                [
-                    jnp.outer(
-                        expected_weighted_stack_1,
-                        expected_weighted_stack_1,
-                    ),
-                    jnp.outer(
-                        expected_weighted_stack_2,
-                        expected_weighted_stack_2,
-                    ),
-                ]
-            ),
-            axis=0,
+        jnp.array(
+            [
+                jnp.outer(
+                    expected_weighted_stack_1,
+                    expected_weighted_stack_1,
+                ),
+                jnp.outer(
+                    expected_weighted_stack_2,
+                    expected_weighted_stack_2,
+                ),
+            ]
         ),
         rtol=1e-6,
     )
@@ -2538,7 +2513,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     user_ids = jnp.array([1, 2])
 
     result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stack_and_aux_values(
+        after_study_analysis.get_weighted_estimating_function_stacks_and_aux_values(
             after_study_analysis.flatten_params(all_post_update_betas, theta),
             all_post_update_betas.shape[1],
             theta.shape[0],
@@ -3017,31 +2992,26 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
 
     np.testing.assert_allclose(
         result[0],
-        jnp.mean(
-            jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
-        ),
+        jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]),
         rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],
-        result[0],
+        jnp.mean(result[0], axis=0),
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.mean(
-            jnp.array(
-                [
-                    jnp.outer(
-                        expected_weighted_stack_1,
-                        expected_weighted_stack_1,
-                    ),
-                    jnp.outer(
-                        expected_weighted_stack_2,
-                        expected_weighted_stack_2,
-                    ),
-                ]
-            ),
-            axis=0,
+        jnp.array(
+            [
+                jnp.outer(
+                    expected_weighted_stack_1,
+                    expected_weighted_stack_1,
+                ),
+                jnp.outer(
+                    expected_weighted_stack_2,
+                    expected_weighted_stack_2,
+                ),
+            ]
         ),
         rtol=1e-5,
     )

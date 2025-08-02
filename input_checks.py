@@ -8,6 +8,7 @@ from jax import numpy as jnp
 import pandas as pd
 import plotext as plt
 
+from constants import InverseStabilizationMethods, SmallSampleCorrections
 from helper_functions import (
     confirm_input_check_result,
     load_function_from_same_named_file,
@@ -44,6 +45,7 @@ def perform_first_wave_input_checks(
     beta_dim,
     suppress_interactive_data_checks,
     small_sample_correction,
+    adaptive_bread_inverse_stabilization_method,
 ):
     ### Validate algorithm loss/estimating function and args
     require_alg_update_args_given_for_all_users_at_each_update(
@@ -86,6 +88,14 @@ def perform_first_wave_input_checks(
         calendar_t_col_name,
         alg_update_func_args,
         alg_update_func_args_action_prob_times_index,
+    )
+
+    confirm_no_small_sample_correction_desired_if_not_requested(
+        small_sample_correction, suppress_interactive_data_checks
+    )
+    confirm_no_adaptive_bread_inverse_stabilization_method_desired_if_not_requested(
+        adaptive_bread_inverse_stabilization_method,
+        suppress_interactive_data_checks,
     )
 
     ### Validate action prob function and args
@@ -509,6 +519,34 @@ def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
     if alg_update_func_args_action_prob_index < 0:
         confirm_input_check_result(
             "\nYou specified that the algorithm update function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
+        )
+
+
+def confirm_no_small_sample_correction_desired_if_not_requested(
+    small_sample_correction,
+    suppress_interactive_data_checks,
+):
+    logger.info(
+        "Confirming that no small sample correction is desired if it's not requested."
+    )
+    if small_sample_correction == SmallSampleCorrections.NONE:
+        confirm_input_check_result(
+            "\nYou specified that you would not like to perform any small-sample corrections. Please verify that this is correct.\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
+        )
+
+
+def confirm_no_adaptive_bread_inverse_stabilization_method_desired_if_not_requested(
+    adaptive_bread_inverse_stabilization_method,
+    suppress_interactive_data_checks,
+):
+    logger.info(
+        "Confirming that no adaptive bread inverse stabilization method is desired if it's not requested."
+    )
+    if adaptive_bread_inverse_stabilization_method == InverseStabilizationMethods.NONE:
+        confirm_input_check_result(
+            "\nYou specified that you would not like to perform any inverse stabilization while forming the adaptive variance. This is not usually recommended. Please verify that it is correct or select one of the available options.\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
         )
 

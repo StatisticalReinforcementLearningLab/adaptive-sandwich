@@ -681,6 +681,12 @@ def analyze_dataset(
             beta_dim,
         )
 
+        np.testing.assert_allclose(
+            np.zeros_like(premature_avg_inference_estimating_functions),
+            premature_avg_inference_estimating_functions,
+            atol=1e-4,
+        )
+
         # Plot premature joint adaptive bread inverse log condition numbers
         plt.clear_figure()
         plt.title("Premature Joint Adaptive Bread Inverse Log Condition Numbers")
@@ -705,12 +711,13 @@ def analyze_dataset(
 
         # Plot each diagonal element of premature adaptive sandwiches
         num_diag = premature_adaptive_sandwiches.shape[-1]
+        EMPIRICAL_VARIANCES = [0.06861418, 0.00028827, 0.08233865]
         for i in range(num_diag):
             plt.clear_figure()
             plt.title(f"Premature Adaptive Sandwich Diagonal Element {i}")
             plt.xlabel("Premature Update Index")
             plt.ylabel(f"Variance (Diagonal {i})")
-            plt.scatter(np.array(premature_adaptive_sandwiches[:, i, i]), color="red+")
+            plt.scatter(np.array(premature_adaptive_sandwiches[:, i, i]), color="blue+")
             plt.grid(True)
             plt.xticks(
                 range(
@@ -718,6 +725,10 @@ def analyze_dataset(
                     int(premature_adaptive_sandwiches.shape[0]),
                     max(1, int(premature_adaptive_sandwiches.shape[0]) // 10),
                 )
+            )
+            plt.horizontal_line(
+                EMPIRICAL_VARIANCES[i],
+                color="red+",
             )
             plt.show()
 
@@ -731,6 +742,23 @@ def analyze_dataset(
                 np.array(premature_adaptive_sandwiches[:, i, i])
                 / np.array(premature_classical_sandwiches[:, i, i]),
                 color="red+",
+            )
+            plt.grid(True)
+            plt.xticks(
+                range(
+                    0,
+                    int(premature_adaptive_sandwiches.shape[0]),
+                    max(1, int(premature_adaptive_sandwiches.shape[0]) // 10),
+                )
+            )
+            plt.show()
+
+            plt.clear_figure()
+            plt.title(f"Premature Adaptive Sandwich Diagonal Element {i}")
+            plt.xlabel("Premature Update Index")
+            plt.ylabel(f"Variance (Diagonal {i})")
+            plt.scatter(
+                np.array(premature_adaptive_sandwiches[:, i, i]), color="green+"
             )
             plt.grid(True)
             plt.xticks(
@@ -809,6 +837,28 @@ def analyze_dataset(
                 for t in range(len(reward_stds_by_t))
             },
             **{f"theta_est_{i}": theta_est[i].item() for i in range(len(theta_est))},
+            **{
+                f"premature_joint_adaptive_bread_inverse_condition_number_{i}": premature_joint_adaptive_bread_inverse_condition_numbers[
+                    i
+                ]
+                for i in range(
+                    len(premature_joint_adaptive_bread_inverse_condition_numbers)
+                )
+            },
+            **{
+                f"premature_adaptive_sandwich_update_{i}_diag_position_{j}": premature_adaptive_sandwich[
+                    j, j
+                ]
+                for premature_adaptive_sandwich in premature_adaptive_sandwiches
+                for j in range(theta_dim)
+            },
+            **{
+                f"premature_classical_sandwich_update_{i}_diag_position_{j}": premature_classical_sandwich[
+                    j, j
+                ]
+                for premature_classical_sandwich in premature_classical_sandwiches
+                for j in range(theta_dim)
+            },
         }
 
         with open(f"{folder_path}/supervised_learning_datum.pkl", "wb") as f:

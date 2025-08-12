@@ -56,6 +56,7 @@ policy_num_col_name="policy_num"
 calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
+reward_col_name="reward"
 action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py"
 action_prob_func_args_beta_index=0
 alg_update_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
@@ -76,7 +77,7 @@ adaptive_bread_inverse_stabilization_method="add_ridge_fixed_condition_number"
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:w:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:w:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -105,6 +106,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:
     C  | calendar_t_col_name )                          needs_arg; calendar_t_col_name="$OPTARG" ;;
     U  | user_id_col_name )                             needs_arg; user_id_col_name="$OPTARG" ;;
     E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
+    X  | reward_col_name )                              needs_arg; reward_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
     b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
     l  | alg_update_func_filename )                     needs_arg; alg_update_func_filename="$OPTARG" ;;
@@ -226,6 +228,7 @@ python after_study_analysis.py analyze-dataset \
   --calendar_t_col_name=$calendar_t_col_name \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
+  --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \

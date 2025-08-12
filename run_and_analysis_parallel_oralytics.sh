@@ -42,6 +42,7 @@ policy_num_col_name="policy_idx"
 calendar_t_col_name="calendar_decision_t"
 user_id_col_name="user_idx"
 action_prob_col_name="act_prob"
+reward_col_name="reward"
 action_prob_func_filename="functions_to_pass_to_analysis/oralytics_act_prob_function.py"
 action_prob_func_args_beta_index=0
 alg_update_func_filename="functions_to_pass_to_analysis/oralytics_RL_estimating_function.py"
@@ -60,7 +61,7 @@ adaptive_bread_inverse_stabilization_method="add_ridge_fixed_condition_number"
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:u:v:w:-: OPT; do
+while getopts o:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:u:v:w:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -75,6 +76,7 @@ while getopts o:i:c:p:C:U:E:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:u:v:w:-: OPT; do
     C  | calendar_t_col_name )                          needs_arg; calendar_t_col_name="$OPTARG" ;;
     U  | user_id_col_name )                             needs_arg; user_id_col_name="$OPTARG" ;;
     E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
+    X  | reward_col_name )                              needs_arg; reward_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
     b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
     l  | alg_update_func_filename )                     needs_arg; alg_update_func_filename="$OPTARG" ;;
@@ -177,6 +179,7 @@ python after_study_analysis.py analyze-dataset \
   --calendar_t_col_name=$calendar_t_col_name \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
+  --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \

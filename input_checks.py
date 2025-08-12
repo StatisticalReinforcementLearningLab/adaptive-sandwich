@@ -34,6 +34,7 @@ def perform_first_wave_input_checks(
     calendar_t_col_name,
     user_id_col_name,
     action_prob_col_name,
+    reward_col_name,
     action_prob_func_filename,
     action_prob_func_args,
     action_prob_func_args_beta_index,
@@ -138,6 +139,7 @@ def perform_first_wave_input_checks(
         calendar_t_col_name,
         in_study_col_name,
         action_prob_col_name,
+        reward_col_name,
         beta_dim,
         len(theta_est),
         suppress_interactive_data_checks,
@@ -616,6 +618,7 @@ def verify_study_df_summary_satisfactory(
     calendar_t_col_name,
     in_study_col_name,
     action_prob_col_name,
+    reward_col_name,
     beta_dim,
     theta_dim,
     suppress_interactive_data_checks,
@@ -657,7 +660,7 @@ def verify_study_df_summary_satisfactory(
     q25_action_probabilities = quartiles.xs(0.25, level=1).to_numpy()
     q75_action_probabilities = quartiles.xs(0.75, level=1).to_numpy()
 
-    avg_rewards = in_study_df.groupby(calendar_t_col_name)[action_prob_col_name].mean()
+    avg_rewards = in_study_df.groupby(calendar_t_col_name)[reward_col_name].mean()
 
     # Plot action probability quartile trajectories
     plt.clear_figure()

@@ -1,0 +1,493 @@
+import argparse
+import glob
+import logging
+import math
+import os
+import pickle
+
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from scipy.stats import mode
+from sklearn.metrics import auc, f1_score, r2_score, roc_curve
+from sklearn.model_selection import train_test_split
+
+matplotlib.use("Agg")  # headless backend
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+    datefmt="%Y-%m-%d:%H:%M:%S",
+    level=logging.INFO,
+)
+
+EMPIRICAL_TRACE = 0.15124110  # Trace of Empirical Covariance Matrix
+
+parser = argparse.ArgumentParser(description="Train XGBoost models on pickled data.")
+parser.add_argument(
+    "--input_glob", type=str, required=True, help="Glob pattern for input pickle files."
+)
+parser.add_argument(
+    "--output_dir", type=str, required=True, help="Directory to save model outputs."
+)
+parser.add_argument(
+    "--empirical_trace_blowup_factor",
+    type=float,
+    required=True,
+    help="The factor by which the empirical trace is multiplied to define the blowup threshold.",
+)
+
+args = parser.parse_args()
+
+INPUT_GLOB = args.input_glob
+OUTPUT_DIR = args.output_dir
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+# ---------------------------------------------------------------------
+# 1. Collect file paths
+# ---------------------------------------------------------------------
+
+file_list = sorted(glob.glob(INPUT_GLOB, recursive=True))
+if not file_list:
+    raise RuntimeError("No pickle files found. Check INPUT_GLOB.")
+
+logger.info("Found %d pickled dicts", len(file_list))
+
+# ---------------------------------------------------------------------
+# 2. Load pickles -> list of dicts
+# ---------------------------------------------------------------------
+dicts = []
+for path in file_list:
+    with open(path, "rb") as f:
+        d = pickle.load(f)
+    dicts.append(d)
+
+logger.info("Loaded all dictionaries into memory")
+
+# ---------------------------------------------------------------------
+# 3. Build DataFrame  (label column must be numeric)
+# ---------------------------------------------------------------------
+df = pd.DataFrame(dicts)
+if "label" not in df.columns:
+    raise KeyError("'label' key missing from dictionaries")
+
+# Ensure numeric dtypes
+df = df.astype("float32")
+
+# Take log(1 + label) for compress the scale of the target.
+y = np.log1p(df["label"].values.astype("float32"))
+y_binary = (
+    df["label"] > math.sqrt(args.empirical_trace_blowup_factor * EMPIRICAL_TRACE)
+).astype("int32")
+
+X = df
+X.pop("label")  # Remove label column from features
+
+# Also create a version of X with the best predictors removed.
+X_no_overall_cond_and_min_singular_value = df.copy()
+X_no_overall_cond_and_min_singular_value.pop("joint_bread_inverse_condition_number")
+X_no_overall_cond_and_min_singular_value.pop("joint_bread_inverse_min_singular_value")
+
+logger.info("Shape after load  ->  X: %s,  y: %s", X.shape, y.shape)
+
+# ---------------------------------------------------------------------
+# 4. Train / validation split
+# ---------------------------------------------------------------------
+# First split off the validation set (10 % of all data)
+X_train, X_val, y_train, y_val = train_test_split(
+    X.values, y, test_size=0.1, random_state=42
+)
+
+
+feature_names = X.columns.tolist()
+dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
+dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
+
+
+# Set up a second training set with the best predictors removed.
+# This is to see if we can get decent performance without the overall condition number
+# and minimum singular value predictors.
+X_trunc_train, X_trunc_val, _, _ = train_test_split(
+    X_no_overall_cond_and_min_singular_value.values, y, test_size=0.1, random_state=42
+)
+
+feature_names_trunc = X_no_overall_cond_and_min_singular_value.columns.tolist()
+dtrain_trunc = xgb.DMatrix(
+    X_trunc_train, label=y_train, feature_names=feature_names_trunc
+)
+dval_trunc = xgb.DMatrix(X_trunc_val, label=y_val, feature_names=feature_names_trunc)
+
+# Set up a binary classification version of the training and validation sets.
+_, _, y_train_binary, y_val_binary = train_test_split(
+    X.values, y_binary, test_size=0.1, random_state=42
+)
+dtrain_binary = xgb.DMatrix(X_train, label=y_train_binary, feature_names=feature_names)
+dval_binary = xgb.DMatrix(X_val, label=y_val_binary, feature_names=feature_names)
+
+# ---------------------------------------------------------------------
+# 5. XGBoost parameters and training
+# ---------------------------------------------------------------------
+
+watchlist = [(dtrain, "train"), (dval, "val")]
+watchlist_trunc = [(dtrain_trunc, "train"), (dval_trunc, "val")]
+watchlist_binary = [(dtrain_binary, "train"), (dval_binary, "val")]
+
+# default learning rate and regularization
+params_1 = {
+    "objective": "reg:squarederror",
+    "eval_metric": "rmse",
+    "tree_method": "hist",
+    "device": "cuda",
+    "seed": 42,
+}
+logger.info("Training model 1, with default parameters...")
+model_1 = xgb.train(
+    params_1,
+    dtrain,
+    num_boost_round=2000,
+    evals=watchlist,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+logger.info(
+    "Training model 2, with default parameters like model 1 but no early stopping..."
+)
+model_2 = xgb.train(
+    params_1,
+    dtrain,
+    num_boost_round=2000,
+    evals=watchlist,
+    verbose_eval=100,
+)
+
+params_2 = {
+    "objective": "reg:squarederror",
+    "eval_metric": "rmse",
+    "learning_rate": 0.05,  # small steps to avoid overfitting, not so small to drag out training
+    "max_depth": 4,  # shallow trees to limit overfitting
+    "subsample": 0.8,  # makes each tree see only a subset of data
+    "colsample_bytree": 0.35,  # make only a subset of features available to each tree
+    "reg_lambda": 2.0,  # moderate ridge to penalize leaf weights
+    "reg_alpha": 0.1,  # light lasso to encourage some sparsity
+    "tree_method": "hist",
+    "device": "cuda",
+    "seed": 42,
+}
+
+logger.info("Training model 3, with more regularization and tuned learning rate...")
+model_3 = xgb.train(
+    params_2,
+    dtrain,
+    num_boost_round=2000,
+    evals=watchlist,
+    # if validation metric doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+logger.info(
+    "Training model 4, with more regularization and tuned learning rate like model 2 but no early stopping"
+)
+model_4 = xgb.train(
+    params_2,
+    dtrain,
+    num_boost_round=2000,
+    evals=watchlist,
+    verbose_eval=100,
+)
+
+
+logger.info("Training model 5, with truncated feature set...")
+model_5 = xgb.train(
+    params_1,
+    dtrain_trunc,
+    num_boost_round=2000,
+    evals=watchlist_trunc,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+logger.info(
+    "Training model 6, with truncated feature set like model 5 but with no early stopping..."
+)
+model_6 = xgb.train(
+    params_1,
+    dtrain_trunc,
+    num_boost_round=2000,
+    evals=watchlist_trunc,
+    verbose_eval=100,
+)
+
+logger.info("Training model 7, with truncated feature set and more regularization...")
+model_7 = xgb.train(
+    params_2,
+    dtrain_trunc,
+    num_boost_round=2000,
+    evals=watchlist_trunc,
+    # if validation metric doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+
+logger.info(
+    "Training model 8, with truncated feature set and more regularization like model 7 but with no early stopping..."
+)
+model_8 = xgb.train(
+    params_2,
+    dtrain_trunc,
+    num_boost_round=2000,
+    evals=watchlist_trunc,
+    verbose_eval=100,
+)
+
+regression_models_and_data = [
+    (model_1, dtrain, dval, "continuous outcome, default parameters, early stopping"),
+    (
+        model_2,
+        dtrain,
+        dval,
+        "continuous outcome, default parameters, no early stopping",
+    ),
+    (
+        model_3,
+        dtrain,
+        dval,
+        "continuous outcome, more regularization and tuned learning rate, early stopping",
+    ),
+    (
+        model_4,
+        dtrain,
+        dval,
+        "continuous outcome, more regularization and tuned learning rate, no early stopping",
+    ),
+    (
+        model_5,
+        dtrain_trunc,
+        dval_trunc,
+        "continuous outcome, truncated feature set, default parameters, early stopping",
+    ),
+    (
+        model_6,
+        dtrain_trunc,
+        dval_trunc,
+        "continuous outcome, truncated feature set, no early stopping",
+    ),
+    (
+        model_7,
+        dtrain_trunc,
+        dval_trunc,
+        "continuous outcome, truncated feature set, more regularization, early stopping",
+    ),
+    (
+        model_8,
+        dtrain_trunc,
+        dval_trunc,
+        "continuous outcome, truncated feature set, more regularization, no early stopping",
+    ),
+]
+
+params_3 = {
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+    "tree_method": "hist",
+    "device": "cuda",
+    "seed": 42,
+}
+params_4 = {
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+    "learning_rate": 0.05,  # small steps to avoid overfitting
+    "max_depth": 4,  # shallow trees to limit overfitting
+    "subsample": 0.8,  # makes each tree see only a subset of data
+    "colsample_bytree": 0.35,  # make only a subset of features available to each tree
+    "reg_lambda": 2.0,  # moderate ridge to penalize leaf weights
+    "reg_alpha": 0.1,  # light lasso to encourage some sparsity
+    "tree_method": "hist",
+    "device": "cuda",
+    "seed": 42,
+}
+
+logger.info("Training model 9, binary classification with default parameters...")
+model_9 = xgb.train(
+    params_3,
+    dtrain_binary,
+    num_boost_round=2000,
+    evals=watchlist_binary,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+logger.info(
+    "Training model 10, binary classification with more regularization and tuned learning rate..."
+)
+model_10 = xgb.train(
+    params_4,
+    dtrain_binary,
+    num_boost_round=2000,
+    evals=watchlist_binary,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+classification_models_and_data = [
+    (
+        model_9,
+        dtrain_binary,
+        dval_binary,
+        "binary outcome, default parameters, early stopping",
+    ),
+    (
+        model_10,
+        dtrain_binary,
+        dval_binary,
+        "binary outcome, more regularization and tuned learning rate, early stopping",
+    ),
+]
+
+# ---------------------------------------------------------------------
+# 6. Performance report for all models, examine feature importance,
+#    then persist artifacts
+# ---------------------------------------------------------------------
+logger.info("Evaluating models...")
+back_transformed_ybar = np.expm1(y_train.mean())
+back_transformed_y_val = np.expm1(y_val)
+
+rmse_baseline = np.sqrt(((back_transformed_y_val - back_transformed_ybar) ** 2).mean())
+logger.info(
+    "Baseline Validation RMSE (training-mean-only, raw scale): %.4f", rmse_baseline
+)
+
+for i, (model, train, val, description) in enumerate(regression_models_and_data, 1):
+    logger.info("Evaluating model %d: %s", i, description)
+    if hasattr(model, "best_iteration"):
+        # early stopping occurred: don't include trees
+        # that hurt or at least didn't help validation performance
+        val_pred = model.predict(val, iteration_range=(0, model.best_iteration + 1))
+    else:
+        # no early stopping: use the full model
+        val_pred = model.predict(val)
+
+    back_transformed_val_pred = np.expm1(val_pred)
+
+    rmse = np.sqrt(np.mean((back_transformed_y_val - back_transformed_val_pred) ** 2))
+    logger.info("Model %d Validation RMSE (raw scale): %.4f", i, rmse)
+
+    mape = (
+        np.mean(
+            np.abs(
+                (back_transformed_y_val - back_transformed_val_pred)
+                / back_transformed_y_val
+            )
+        )
+        * 100
+    )
+    logger.info("Model %d Mean-absolute-percentage error (raw scale): %.2f%%", i, mape)
+
+    r2 = r2_score(y_val, val_pred)
+    logger.info(
+        "Model %d R^2 score between validation set and predictions (log scale): %.4f",
+        i,
+        r2,
+    )
+
+    plt.figure(figsize=(4, 4))
+    plt.scatter(
+        back_transformed_y_val, back_transformed_val_pred, s=8, alpha=0.6, linewidths=0
+    )
+    lims = [
+        min(back_transformed_y_val.min(), back_transformed_val_pred.min()),
+        max(back_transformed_y_val.max(), back_transformed_val_pred.max()),
+    ]
+    plt.plot(lims, lims, color="k", lw=1)
+    plt.xlabel("True Adaptive Sandwich Trace")
+    plt.ylabel("Predicted Trace")
+    plt.title("Validation Set Parity plot (raw scale)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "parity_plot.png"), dpi=150)
+    plt.close()
+
+    # ---------- residual histogram ----------
+    resid = back_transformed_y_val - back_transformed_val_pred
+    plt.figure(figsize=(4, 3))
+    plt.hist(resid, bins=30, edgecolor="k", alpha=0.7)
+    plt.xlabel("Residual (true - pred)")
+    plt.ylabel("Count")
+    plt.title("Residual histogram for Validation Set (raw scale)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "residual_hist.png"), dpi=150)
+    plt.close()
+
+    # # Feature importance by weight (number of times feature used in a split)
+    # importance = model.get_score(importance_type="weight")
+    # importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    # logger.info("Model %d top 100 features (by weight):", i)
+    # for feat, score in importance[:100]:
+    #     logger.info("Model %d feature: %s, Weight: %s", i, feat, score)
+
+    # Feature importance by total gain (total loss reduction of splits which use the feature)
+    importance = model.get_score(importance_type="total_gain")
+    importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    logger.info("Model %d top 100 features (by total gain):", i)
+    for feat, score in importance[:100]:
+        logger.info("Model %d feature: %s, Total Gain: %s", i, feat, score)
+
+    model_path = os.path.join(OUTPUT_DIR, f"adaptive_sandwich_xgb_model_{i}.json")
+    model.save_model(model_path)
+    feature_order_path = os.path.join(OUTPUT_DIR, f"feature_order_model_{i}.txt")
+    with open(feature_order_path, "w", encoding="utf-8") as f:
+        for col in df.columns:
+            f.write(col + "\n")
+    logger.info("Model %d saved to %s", i, model_path)
+
+
+# Calculate the mode of the training binary labels
+majority_class = mode(y_train_binary, keepdims=True).mode[0]
+binary_accuracy_baseline = (y_val_binary == majority_class).mean()
+
+logger.info(
+    "Baseline Validation Accuracy (always predict majority class): %.4f",
+    binary_accuracy_baseline,
+)
+for i, (model, train, val, description) in enumerate(classification_models_and_data, 1):
+    logger.info("Evaluating binary classification model %d: %s", i, description)
+    if hasattr(model, "best_iteration"):
+        # early stopping occurred: don't include trees
+        # that hurt or at least didn't help validation performance
+        val_pred = model.predict(val, iteration_range=(0, model.best_iteration + 1))
+    else:
+        # no early stopping: use the full model
+        val_pred = model.predict(val)
+
+    val_pred_binary = (val_pred > 0.5).astype("int32")
+    accuracy = (val_pred_binary == y_val_binary).mean()
+    logger.info("Model %d Validation Accuracy: %.4f", i, accuracy)
+
+    f1 = f1_score(y_val_binary, val_pred_binary)
+    logger.info("Model %d Validation F1 Score: %.4f", i, f1)
+
+    # Plotting ROC curve
+    fpr, tpr, _ = roc_curve(
+        y_val_binary, val_pred
+    )  # Get false positive rate, true positive rate, and thresholds
+    roc_auc = auc(fpr, tpr)
+    logger.info("Model %d Validation ROC AUC: %.4f", i, roc_auc)
+
+    # Feature importance by total gain (total loss reduction of splits which use the feature)
+    importance = model.get_score(importance_type="total_gain")
+    importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    logger.info("Model %d top 100 features (by total gain):", i)
+    for feat, score in importance[:100]:
+        logger.info("Model %d feature: %s, Total Gain: %s", i, feat, score)
+
+    model_path = os.path.join(
+        OUTPUT_DIR, f"adaptive_sandwich_xgb_model_binary_{i}.json"
+    )
+    model.save_model(model_path)
+    logger.info("Binary classification Model %d saved to %s", i, model_path)

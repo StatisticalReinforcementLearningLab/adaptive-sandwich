@@ -754,12 +754,10 @@ def analyze_dataset(
             plt.show()
 
             plt.clear_figure()
-            plt.title(f"Premature Adaptive Sandwich Diagonal Element {i}")
+            plt.title(f"Premature Theta Estimates At Index {i}")
             plt.xlabel("Premature Update Index")
-            plt.ylabel(f"Variance (Diagonal {i})")
-            plt.scatter(
-                np.array(premature_adaptive_sandwiches[:, i, i]), color="green+"
-            )
+            plt.ylabel(f"Theta element {i}")
+            plt.scatter(np.array(premature_thetas[:, i]), color="green+")
             plt.grid(True)
             plt.xticks(
                 range(

@@ -13,6 +13,7 @@ import xgboost as xgb
 from scipy.stats import mode
 from sklearn.metrics import auc, f1_score, r2_score, roc_curve
 from sklearn.model_selection import train_test_split
+import re
 
 matplotlib.use("Agg")  # headless backend
 
@@ -39,6 +40,46 @@ parser.add_argument(
     help="The factor by which the empirical trace is multiplied to define the blowup threshold.",
 )
 
+
+def regression_label_type(value):
+    if value in ["log1p_trace", "raw_trace"]:
+        return value
+    if value.startswith("index_"):
+        try:
+            int(value.split("_")[1])
+            return value
+        except (IndexError, ValueError) as e:
+            raise argparse.ArgumentTypeError from e(
+                f"Invalid index_x format: {value}. Must be index_<int>."
+            )
+    raise argparse.ArgumentTypeError(
+        f"Invalid regression_label_type: {value}. Must be 'log1p_trace', 'raw_trace', or 'index_<int>'."
+    )
+
+
+parser.add_argument(
+    "--regression_label_type",
+    type=regression_label_type,
+    default="log1p_trace",
+    help="Label transformation for regression. Choices: 'log1p_trace', 'raw_trace', or 'index_<int>'.",
+)
+
+
+def classification_label_type(value):
+    if value in ["trace_blowup"] or re.match(r"^index_\d+_blowup$", value):
+        return value
+    raise argparse.ArgumentTypeError(
+        f"Invalid classification_label_type: {value}. Must be 'trace_blowup', or 'index_<int>_blowup'."
+    )
+
+
+parser.add_argument(
+    "--classification_label_type",
+    type=regression_label_type,
+    default="trace_blowup",
+    help="Label transformation for classification. Choices: 'trace_blowup', 'index_<int>_blowup'.",
+)
+
 args = parser.parse_args()
 
 INPUT_GLOB = args.input_glob
@@ -58,10 +99,13 @@ logger.info("Found %d pickled dicts", len(file_list))
 # 2. Load pickles -> list of dicts
 # ---------------------------------------------------------------------
 dicts = []
+labels = []
 for path in file_list:
     with open(path, "rb") as f:
         d = pickle.load(f)
+        label = d.pop("label")
     dicts.append(d)
+    labels.append(label)
 
 logger.info("Loaded all dictionaries into memory")
 
@@ -69,13 +113,13 @@ logger.info("Loaded all dictionaries into memory")
 # 3. Build DataFrame  (label column must be numeric)
 # ---------------------------------------------------------------------
 df = pd.DataFrame(dicts)
-if "label" not in df.columns:
-    raise KeyError("'label' key missing from dictionaries")
+labels = np.array(labels, dtype="float32")
 
 # Ensure numeric dtypes
 df = df.astype("float32")
 
 # Take log(1 + label) for compress the scale of the target.
+
 y = np.log1p(df["label"].values.astype("float32"))
 y_binary = (
     df["label"] > math.sqrt(args.empirical_trace_blowup_factor * EMPIRICAL_TRACE)

@@ -40,6 +40,8 @@ echo $(date +"%Y-%m-%d %T") do_blowup_supervised_learning_slurm_driver.sh: Runni
 python do_blowup_supervised_learning.py \
     --input_glob="$1" \
     --output_dir=/n/netscratch/murphy_lab/Lab/nclosser/blowup_supervised_learning/${SLURM_JOB_ID} \
-    --empirical_trace_blowup_factor="$2"
+    --empirical_trace_blowup_factor="$2" \
+    --regression_label_type="$3" \
+    --classification_label_type="$4"
 
 echo $(date +"%Y-%m-%d %T") do_blowup_supervised_learning_slurm_driver.sh: Finished running do_blowup_supervised_learning.py. Exiting.

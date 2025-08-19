@@ -1,7 +1,7 @@
 import argparse
 import glob
 import logging
-import math
+import re
 import os
 import pickle
 
@@ -13,7 +13,6 @@ import xgboost as xgb
 from scipy.stats import mode
 from sklearn.metrics import auc, f1_score, r2_score, roc_curve
 from sklearn.model_selection import train_test_split
-import re
 
 matplotlib.use("Agg")  # headless backend
 
@@ -75,7 +74,7 @@ def classification_label_type(value):
 
 parser.add_argument(
     "--classification_label_type",
-    type=regression_label_type,
+    type=classification_label_type,
     default="trace_blowup",
     help="Label transformation for classification. Choices: 'trace_blowup', 'index_<int>_blowup'.",
 )
@@ -118,15 +117,41 @@ labels = np.array(labels, dtype="float32")
 # Ensure numeric dtypes
 df = df.astype("float32")
 
-# Take log(1 + label) for compress the scale of the target.
 
-y = np.log1p(df["label"].values.astype("float32"))
-y_binary = (
-    df["label"] > math.sqrt(args.empirical_trace_blowup_factor * EMPIRICAL_TRACE)
-).astype("int32")
+# Determine appropriate label transformations for regression
+if args.regression_label_type == "log1p_trace":
+    y = np.log1p(np.trace(labels, axis1=1, axis2=2).astype("float32"))
+elif args.regression_label_type == "raw_trace":
+    y = np.trace(labels, axis1=1, axis2=2).astype("float32")
+elif args.regression_label_type.startswith("index_"):
+    index = int(args.regression_label_type.split("_")[1])
+    if index < 0 or index >= labels.shape[1]:
+        raise ValueError(
+            f"Index {index} out of bounds for label array with shape {labels.shape}"
+        )
+    y = labels[:, index, index].astype("float32")
+else:
+    raise ValueError("Invalid regression_label_type")
+
+# Determine appropriate label transformations for classification
+if args.classification_label_type == "trace_blowup":
+    traces = np.trace(labels, axis1=1, axis2=2)
+    y_binary = (traces > args.empirical_trace_blowup_factor * EMPIRICAL_TRACE).astype(
+        "int32"
+    )
+elif args.classification_label_type.startswith("index_"):
+    index = int(args.classification_label_type.split("_")[1])
+    if index < 0 or index >= labels.shape[1]:
+        raise ValueError(
+            f"Index {index} out of bounds for label array with shape {labels.shape}"
+        )
+    y_binary = (
+        labels[:, index, index] > args.empirical_trace_blowup_factor * EMPIRICAL_TRACE
+    ).astype("int32")
+else:
+    raise ValueError("Invalid classification_label_type")
 
 X = df
-X.pop("label")  # Remove label column from features
 
 # Also create a version of X with the best predictors removed.
 X_no_overall_cond_and_min_singular_value = df.copy()
@@ -169,6 +194,14 @@ _, _, y_train_binary, y_val_binary = train_test_split(
 dtrain_binary = xgb.DMatrix(X_train, label=y_train_binary, feature_names=feature_names)
 dval_binary = xgb.DMatrix(X_val, label=y_val_binary, feature_names=feature_names)
 
+# Set up a binary classification version of the training and validation sets with best predictors removed.
+dtrain_binary_trunc = xgb.DMatrix(
+    X_trunc_train, label=y_train_binary, feature_names=feature_names_trunc
+)
+dval_binary_trunc = xgb.DMatrix(
+    X_trunc_val, label=y_val_binary, feature_names=feature_names_trunc
+)
+
 # ---------------------------------------------------------------------
 # 5. XGBoost parameters and training
 # ---------------------------------------------------------------------
@@ -176,6 +209,7 @@ dval_binary = xgb.DMatrix(X_val, label=y_val_binary, feature_names=feature_names
 watchlist = [(dtrain, "train"), (dval, "val")]
 watchlist_trunc = [(dtrain_trunc, "train"), (dval_trunc, "val")]
 watchlist_binary = [(dtrain_binary, "train"), (dval_binary, "val")]
+watchlist_binary_trunc = [(dtrain_binary_trunc, "train"), (dval_binary_trunc, "val")]
 
 # default learning rate and regularization
 params_1 = {
@@ -412,6 +446,47 @@ model_11 = xgb.train(
     verbose_eval=100,
 )
 
+logger.info(
+    "Training model 12, binary classification with default parameters and truncated feature set..."
+)
+model_12 = xgb.train(
+    params_3,
+    dtrain_binary_trunc,
+    num_boost_round=2000,
+    evals=watchlist_binary_trunc,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+logger.info(
+    "Training model 13, binary classification with more regularization and tuned learning rate and truncated feature set..."
+)
+model_13 = xgb.train(
+    params_4,
+    dtrain_binary_trunc,
+    num_boost_round=2000,
+    evals=watchlist_binary_trunc,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds, stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+logger.info(
+    "Training model 14, binary classification with more regularization and tuned learning rate, scale_pos_weight and truncated feature set..."
+)
+model_14 = xgb.train(
+    params_5,
+    dtrain_binary_trunc,
+    num_boost_round=2000,
+    evals=watchlist_binary_trunc,
+    # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds
+    # stop training
+    early_stopping_rounds=100,
+    verbose_eval=100,
+)
+
+
 classification_models_and_data = [
     (
         model_9,
@@ -431,6 +506,24 @@ classification_models_and_data = [
         dval_binary,
         "binary outcome, more regularization and tuned learning rate, scale_pos_weight, early stopping",
     ),
+    (
+        model_12,
+        dtrain_binary_trunc,
+        dval_binary_trunc,
+        "binary outcome, truncated feature set, default parameters, early stopping",
+    ),
+    (
+        model_13,
+        dtrain_binary_trunc,
+        dval_binary_trunc,
+        "binary outcome, truncated feature set, more regularization and tuned learning rate, early stopping",
+    ),
+    (
+        model_14,
+        dtrain_binary_trunc,
+        dval_binary_trunc,
+        "binary outcome, truncated feature set, more regularization and tuned learning rate, scale_pos_weight, early stopping",
+    ),
 ]
 
 # ---------------------------------------------------------------------
@@ -438,10 +531,20 @@ classification_models_and_data = [
 #    then persist artifacts
 # ---------------------------------------------------------------------
 logger.info("Evaluating models...")
-back_transformed_ybar = np.expm1(y_train.mean())
-back_transformed_y_val = np.expm1(y_val)
 
-rmse_baseline = np.sqrt(((back_transformed_y_val - back_transformed_ybar) ** 2).mean())
+if args.regression_label_type == "log1p_trace":
+    back_transformation_func = np.expm1
+else:
+    back_transformation_func = (
+        lambda x: x
+    )  # No transformation needed if we didn't take a log of the outputs
+
+# Apply the back transformation to the validation labels (and the training
+# label mean baseline predictor) if necessary
+y_val = back_transformation_func(y_val)
+y_bar = back_transformation_func(y_train.mean())
+
+rmse_baseline = np.sqrt(((y_train - y_bar) ** 2).mean())
 logger.info(
     "Baseline Model Validation RMSE (training-mean-only, raw scale): %.4f",
     rmse_baseline,
@@ -457,20 +560,13 @@ for i, (model, train, val, description) in enumerate(regression_models_and_data,
         # no early stopping: use the full model
         val_pred = model.predict(val)
 
-    back_transformed_val_pred = np.expm1(val_pred)
+    # Move the validation set predictions back to the raw scale if necessary
+    val_pred = back_transformation_func(val_pred)
 
-    rmse = np.sqrt(np.mean((back_transformed_y_val - back_transformed_val_pred) ** 2))
+    rmse = np.sqrt(np.mean((y_val - val_pred) ** 2))
     logger.info("Model %d Validation RMSE (raw scale): %.4f", i, rmse)
 
-    mape = (
-        np.mean(
-            np.abs(
-                (back_transformed_y_val - back_transformed_val_pred)
-                / back_transformed_y_val
-            )
-        )
-        * 100
-    )
+    mape = np.mean(np.abs((y_val - val_pred) / y_val)) * 100
     logger.info(
         "Model %d Validation Mean-absolute-percentage error (raw scale): %.2f%%",
         i,
@@ -485,12 +581,10 @@ for i, (model, train, val, description) in enumerate(regression_models_and_data,
     )
 
     plt.figure(figsize=(4, 4))
-    plt.scatter(
-        back_transformed_y_val, back_transformed_val_pred, s=8, alpha=0.6, linewidths=0
-    )
+    plt.scatter(y_val, val_pred, s=8, alpha=0.6, linewidths=0)
     lims = [
-        min(back_transformed_y_val.min(), back_transformed_val_pred.min()),
-        max(back_transformed_y_val.max(), back_transformed_val_pred.max()),
+        min(y_val.min(), val_pred.min()),
+        max(y_val.max(), val_pred.max()),
     ]
     plt.plot(lims, lims, color="k", lw=1)
     plt.xlabel("True Adaptive Sandwich Trace")
@@ -501,7 +595,7 @@ for i, (model, train, val, description) in enumerate(regression_models_and_data,
     plt.close()
 
     # ---------- residual histogram ----------
-    resid = back_transformed_y_val - back_transformed_val_pred
+    resid = y_val - val_pred
     plt.figure(figsize=(4, 3))
     plt.hist(resid, bins=30, edgecolor="k", alpha=0.7)
     plt.xlabel("Residual (true - pred)")

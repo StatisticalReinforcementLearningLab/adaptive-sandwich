@@ -8,20 +8,20 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 
 # Arguments that affect RL study simulation side
-T=140
-decisions_between_updates=14
+T=50
+decisions_between_updates=1
 update_cadence_offset=0
-min_update_time=14
-recruit_t=2 # How many UPDATES between recruitments
+min_update_time=0
+recruit_t=1 # How many UPDATES between recruitments
 n=100
 # recruit_n=$n is done below unless the user specifies recruit_n
-# synthetic_mode='delayed_1_action_dosage'
+synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
 # synthetic_mode='delayed_2_action_dosage'
 # synthetic_mode='delayed_2_dosage_paper'
-synthetic_mode='delayed_5_action_dosage'
+# synthetic_mode='delayed_5_action_dosage'
 # synthetic_mode='delayed_5_dosage_paper'
-steepness=1.5
+steepness=5.0
 RL_alg="smooth_posterior_sampling"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
@@ -51,10 +51,12 @@ alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
-inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+# inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
-theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
+# theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_sum.py"
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"

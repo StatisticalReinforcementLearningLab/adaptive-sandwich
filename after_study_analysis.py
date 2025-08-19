@@ -241,7 +241,7 @@ def cli():
 @click.option(
     "--collect_data_for_blowup_supervised_learning",
     type=bool,
-    default=True,
+    default=False,
     help="Flag to collect data for supervised learning blowup detection. This will write a single datum and label to a file in the same directory as the input files.",
 )
 def analyze_dataset(

@@ -417,20 +417,23 @@ def analyze_dataset(
     logger.info(
         "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
     )
+    # TODO: If QR preconditioning works, refactor to only return the full sandwiches.
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     (
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_bread_matrix,
         joint_adaptive_meat_matrix,
+        joint_adaptive_sandwich_matrix,
         classical_bread_inverse_matrix,
         classical_bread_matrix,
         classical_meat_matrix,
+        classical_sandwich_matrix,
         avg_estimating_function_stack,
         per_user_estimating_function_stacks,
         joint_adaptive_bread_inverse_cond,
         per_user_adaptive_corrections,
         per_user_classical_corrections,
-    ) = construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_stack(
+    ) = construct_classical_and_adaptive_sandwiches(
         theta_est,
         all_post_update_betas,
         user_ids,
@@ -469,9 +472,11 @@ def analyze_dataset(
         )
 
     logger.info("Forming classical sandwich variance estimate...")
-    classical_sandwich_var_estimate = (
-        classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
-    ) / len(user_ids)
+    # classical_sandwich_var_estimate = (
+    #     classical_bread_matrix @ classical_meat_matrix @ classical_bread_matrix.T
+    # ) / len(user_ids)
+
+    classical_sandwich_var_estimate = classical_sandwich_matrix
 
     identity_diff_abs_max = None
     identity_diff_frobenius_norm = None
@@ -485,23 +490,27 @@ def analyze_dataset(
         )
 
     logger.info("Forming joint adaptive sandwich variance estimate...")
-    joint_adaptive_var_estimate = (
-        joint_adaptive_bread_matrix
-        @ joint_adaptive_meat_matrix
-        @ joint_adaptive_bread_matrix.T
-    ) / len(user_ids)
+    # joint_adaptive_var_estimate = (
+    #     joint_adaptive_bread_matrix
+    #     @ joint_adaptive_meat_matrix
+    #     @ joint_adaptive_bread_matrix.T
+    # ) / len(user_ids)
 
     # This bottom right corner of the joint variance matrix is the portion
     # corresponding to just theta.  This distinguishes this matrix from the
     # *joint* adaptive variance matrix above, which covers both beta and theta.
-    adaptive_sandwich_var_estimate = joint_adaptive_var_estimate[
+    # adaptive_sandwich_var_estimate = joint_adaptive_var_estimate[
+    #     -theta_dim:, -theta_dim:
+    # ]
+
+    adaptive_sandwich_var_estimate = joint_adaptive_sandwich_matrix[
         -theta_dim:, -theta_dim:
     ]
 
     # Ensure diagonal entries of the adaptive sandwich variance estimate are non-negative
-    adaptive_sandwich_var_estimate = adaptive_sandwich_var_estimate.at[
-        jnp.diag_indices_from(adaptive_sandwich_var_estimate)
-    ].set(jnp.maximum(jnp.diag(adaptive_sandwich_var_estimate), 0))
+    # adaptive_sandwich_var_estimate = adaptive_sandwich_var_estimate.at[
+    #     jnp.diag_indices_from(adaptive_sandwich_var_estimate)
+    # ].set(jnp.maximum(jnp.diag(adaptive_sandwich_var_estimate), 0))
 
     logger.info("Writing results to file...")
     # Write analysis results to same directory that input files are in
@@ -2408,7 +2417,8 @@ def get_weighted_inference_estimating_functions_only(
     )
 
 
-def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_stack(
+# TODO: Update docstring and remove unnecessary returns if the sandwich construction stays here.
+def construct_classical_and_adaptive_sandwiches(
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
@@ -2534,9 +2544,11 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
             - The joint adaptive inverse bread matrix.
             - The joint adaptive bread matrix.
             - The joint adaptive meat matrix.
+            - The joint adaptive sandwich matrix.
             - The classical inverse bread matrix.
             - The classical bread matrix.
             - The classical meat matrix.
+            - The classical sandwich matrix.
             - The average weighted estimating function stack.
             - All per-user weighted estimating function stacks.
             - The joint adaptive inverse bread matrix condition number.
@@ -2801,7 +2813,7 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
 
     # The scalar corrections will have computed weights that need to be applied here,
     # whereas the matrix corrections will have been applied to the per-user
-    # contributions.
+    # contributions already.
     joint_adaptive_meat_matrix = jnp.mean(
         per_user_adaptive_correction_weights[:, None, None]
         * per_user_joint_adaptive_meat_contributions,
@@ -2813,21 +2825,102 @@ def construct_classical_and_adaptive_bread_and_meat_and_avg_estimating_function_
         axis=0,
     )
 
+    joint_adaptive_sandwich = form_sandwich_from_bread_inverse_and_meat(
+        joint_adaptive_bread_inverse_matrix,
+        joint_adaptive_meat_matrix,
+        num_users,
+        method="bread_inverse_T_qr",
+    )
+    classical_sandwich = form_sandwich_from_bread_inverse_and_meat(
+        classical_bread_inverse_matrix,
+        classical_meat_matrix,
+        num_users,
+        method="bread_inverse_T_qr",
+    )
+
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_bread_matrix,
         joint_adaptive_meat_matrix,
+        joint_adaptive_sandwich,
         classical_bread_inverse_matrix,
         classical_bread_matrix,
         classical_meat_matrix,
+        classical_sandwich,
         avg_estimating_function_stack,
         per_user_estimating_function_stacks,
         joint_adaptive_bread_inverse_cond,
         per_user_adaptive_corrections,
         per_user_classical_corrections,
     )
+
+
+def form_sandwich_from_bread_inverse_and_meat(
+    bread_inverse: jnp.ndarray,
+    meat: jnp.ndarray,
+    num_users: int,
+    method: str,
+) -> jnp.ndarray:
+    """
+    Forms a sandwich variance matrix from the provided bread inverse and meat matrices.
+
+    Does so STABLY without ever forming the bread matrix itself.  Take a QR
+    decomposition of the transpose of the bread inverse matrix, Q orthogonal and R upper triangular,
+    so that the bread inverse = (R.T)(Q.T).
+
+    Then instead of forming the inverse of R.T explicitly we use a triangular solver
+    left or right multiply by that inverse.
+
+    Args:
+        bread_inverse (jnp.ndarray):
+            A 2-D JAX NumPy array representing the bread inverse matrix.
+        meat (jnp.ndarray):
+            A 2-D JAX NumPy array representing the meat matrix.
+        num_users (int):
+            The number of users in the study, used to scale the sandwich appropriately.
+        method (str):
+            The method to use for forming the sandwich.
+            "bread_inverse_T_qr" uses the QR decomposition of the transpose of the bread inverse matrix.
+            "meat_decomposition_solve" uses a decomposition of the meat matrix.
+
+
+    Returns:
+        jnp.ndarray:
+            A 2-D JAX NumPy array representing the sandwich variance matrix.
+    """
+
+    if method == "bread_inverse_T_qr":
+        # QR of B^T → Q orthogonal, R upper triangular; L = R^T lower triangular
+        Q, R = np.linalg.qr(bread_inverse.T, mode="reduced")
+        L = R.T
+
+        new_meat = scipy.linalg.solve_triangular(
+            L, scipy.linalg.solve_triangular(L, meat.T, lower=True).T, lower=True
+        )
+
+        return Q @ new_meat @ Q.T / num_users
+    elif method == "meat_decomposition_solve":
+        # Factor the meat via SVD without any symmetrization or truncation.
+        # For general (possibly slightly nonsymmetric) M, SVD gives M = U @ diag(s) @ Vh.
+        # We construct two square-root factors C_left = U * sqrt(s) and C_right = V * sqrt(s)
+        # so that M = C_left @ C_right.T exactly, then solve once per factor.
+        U, s, Vh = scipy.linalg.svd(meat, full_matrices=False)
+        C_left = U * np.sqrt(s)
+        C_right = Vh.T * np.sqrt(s)
+
+        # Solve B W_left = C_left and B W_right = C_right (no explicit inverses).
+        W_left = scipy.linalg.solve(bread_inverse, C_left)
+        W_right = scipy.linalg.solve(bread_inverse, C_right)
+
+        # Return the exact sandwich: V = (B^{-1} C_left) (B^{-1} C_right)^T / num_users
+        return W_left @ W_right.T / num_users
+
+    else:
+        raise ValueError(
+            f"Unknown sandwich method: {method}. Please use 'bread_inverse_t_qr' or 'meat_decomposition_solve'."
+        )
 
 
 def construct_premature_classical_and_joint_adaptive_bread_and_meat(

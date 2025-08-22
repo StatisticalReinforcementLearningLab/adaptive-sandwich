@@ -164,7 +164,10 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         if len(env_params.shape) == 2:
             assert env_params.shape[0] >= args.T
 
-        if args.RL_alg == RLStudyArgs.SIGMOID_LS:
+        if args.RL_alg in (
+            RLStudyArgs.SIGMOID_LS_HARD_CLIP,
+            RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
+        ):
             exp_str = (
                 f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
                 f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
@@ -258,7 +261,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             study_RLalg = FixedRandomization(
                 args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed
             )
-        elif args.RL_alg == RLStudyArgs.SIGMOID_LS:
+        elif args.RL_alg == RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP:
             study_RLalg = SigmoidLS(
                 state_feats=alg_state_feats,
                 treat_feats=alg_treat_feats,
@@ -267,6 +270,18 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 lower_clip=args.lower_clip,
                 upper_clip=args.upper_clip,
                 action_centering=args.action_centering,
+                smooth_clip=True,
+            )
+        elif args.RL_alg == RLStudyArgs.SIGMOID_LS_HARD_CLIP:
+            study_RLalg = SigmoidLS(
+                state_feats=alg_state_feats,
+                treat_feats=alg_treat_feats,
+                alg_seed=alg_seed,
+                steepness=args.steepness,
+                lower_clip=args.lower_clip,
+                upper_clip=args.upper_clip,
+                action_centering=args.action_centering,
+                smooth_clip=False,
             )
         elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
             num_regression_params = len(alg_state_feats + alg_treat_feats)
@@ -393,10 +408,11 @@ def main():
     )
     parser.add_argument(
         "--RL_alg",
-        default=RLStudyArgs.SIGMOID_LS,
+        default=RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
         choices=[
             RLStudyArgs.FIXED_RANDOMIZATION,
-            RLStudyArgs.SIGMOID_LS,
+            RLStudyArgs.SIGMOID_LS_HARD_CLIP,
+            RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
             RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING,
         ],
         help="RL algorithm used to select actions",

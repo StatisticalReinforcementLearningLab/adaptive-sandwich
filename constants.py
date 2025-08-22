@@ -22,7 +22,8 @@ class RLStudyArgs:
 
     # RL Algorithm
     FIXED_RANDOMIZATION = "fixed_randomization"
-    SIGMOID_LS = "sigmoid_LS"
+    SIGMOID_LS_HARD_CLIP = "sigmoid_LS_hard_clip"
+    SIGMOID_LS_SMOOTH_CLIP = "sigmoid_LS_smooth_clip"
     SMOOTH_POSTERIOR_SAMPLING = "smooth_posterior_sampling"
 
     # Noise error correlation

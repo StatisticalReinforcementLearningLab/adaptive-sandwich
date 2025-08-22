@@ -158,14 +158,20 @@ X_no_overall_cond_and_min_singular_value = df.copy()
 X_no_overall_cond_and_min_singular_value.pop("joint_bread_inverse_condition_number")
 X_no_overall_cond_and_min_singular_value.pop("joint_bread_inverse_min_singular_value")
 
+X_no_premature_adaptive_sandwich_features = df.copy()
+for col in list(X_no_premature_adaptive_sandwich_features.columns):
+    if col.startswith("premature_"):
+        X_no_premature_adaptive_sandwich_features.pop(col)
+
 logger.info("Shape after load  ->  X: %s,  y: %s", X.shape, y.shape)
 
 # ---------------------------------------------------------------------
 # 4. Train / validation split
 # ---------------------------------------------------------------------
-# First split off the validation set (10 % of all data)
+# First split off the validation set (30 % of all data)
+# Stratify by the true binary blowup label since the dataset is imbalanced.
 X_train, X_val, y_train, y_val = train_test_split(
-    X.values, y, test_size=0.1, random_state=42
+    X.values, y, test_size=0.3, random_state=42, stratify=y_binary
 )
 
 
@@ -175,21 +181,26 @@ dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
 
 
 # Set up a second training set with the best predictors removed.
-# This is to see if we can get decent performance without the overall condition number
-# and minimum singular value predictors.
+# This is to see if we can get decent performance without the premature adaptive sandwich features.
+# Note that the labels are the same as before, we can reuse them. Just generate new features.
 X_trunc_train, X_trunc_val, _, _ = train_test_split(
-    X_no_overall_cond_and_min_singular_value.values, y, test_size=0.1, random_state=42
+    X_no_premature_adaptive_sandwich_features.values,
+    y,
+    test_size=0.3,
+    random_state=42,
+    stratify=y_binary,
 )
 
-feature_names_trunc = X_no_overall_cond_and_min_singular_value.columns.tolist()
+feature_names_trunc = X_no_premature_adaptive_sandwich_features.columns.tolist()
 dtrain_trunc = xgb.DMatrix(
     X_trunc_train, label=y_train, feature_names=feature_names_trunc
 )
 dval_trunc = xgb.DMatrix(X_trunc_val, label=y_val, feature_names=feature_names_trunc)
 
 # Set up a binary classification version of the training and validation sets.
+# Note only the labels are new, can reuse the features from before.
 _, _, y_train_binary, y_val_binary = train_test_split(
-    X.values, y_binary, test_size=0.1, random_state=42
+    X.values, y_binary, test_size=0.3, random_state=42, stratify=y_binary
 )
 dtrain_binary = xgb.DMatrix(X_train, label=y_train_binary, feature_names=feature_names)
 dval_binary = xgb.DMatrix(X_val, label=y_val_binary, feature_names=feature_names)

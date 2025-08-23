@@ -431,7 +431,8 @@ def analyze_dataset(
     logger.info("Inverting joint bread inverse matrix...")
     joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
         invert_matrix_and_check_conditioning(
-            joint_adaptive_bread_inverse_matrix, trim_small_singular_values=True
+            joint_adaptive_bread_inverse_matrix,
+            trim_small_singular_values=trim_small_singular_values,
         )
     )
 

@@ -17,6 +17,8 @@ from jax import numpy as jnp
 import scipy
 import pandas as pd
 import plotext as plt
+import seaborn as sns
+import matplotlib.pyplot as pyplt
 
 from constants import (
     InverseStabilizationMethods,
@@ -3885,7 +3887,7 @@ def collect_existing_analyses(
         plt.grid(True)
         plt.show()
 
-        # Plot histogram of adaptive sandwich variance estimates
+        # Plot histogram of classical sandwich variance estimates
         plt.clear_figure()
         plt.title(
             "Histogram of Classical Sandwich Variance Estimates for Coefficient of Interest"
@@ -3901,6 +3903,153 @@ def collect_existing_analyses(
         )
         plt.grid(True)
         plt.show()
+
+        plt.clear_figure()
+        plt.title(
+            "Overlaid Histograms of Adaptive(red) and Classical(blue) SEs for Coefficient of Interest"
+        )
+        # Compute the x range from the adaptive estimates
+        adaptive_ses = np.sqrt(
+            adaptive_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+        classical_ses = np.sqrt(
+            classical_sandwich_var_estimates[
+                :, index_to_check_ci_coverage, index_to_check_ci_coverage
+            ]
+        )
+        x_min, x_max = np.min(adaptive_ses), np.max(adaptive_ses)
+
+        # Plot classical SEs histogram with adaptive x range
+        plt.clear_figure()
+        plt.title("Histogram of Classical SEs for Coefficient of Interest")
+        plt.xlabel("Estimate")
+        plt.ylabel("Frequency")
+        plt.hist(classical_ses, bins=50, color="blue+")
+        plt.xlim(x_min, x_max)
+        plt.grid(True)
+        plt.show()
+
+        # Plot adaptive SEs histogram with same x range
+        plt.clear_figure()
+        plt.title("Histogram of Adaptive SEs for Coefficient of Interest")
+        plt.xlabel("Estimate")
+        plt.ylabel("Frequency")
+        plt.hist(adaptive_ses, bins=50, color="red+")
+        plt.xlim(x_min, x_max)
+        plt.grid(True)
+        plt.show()
+
+        # Plot log classical SEs histogram with adaptive x range
+        plt.clear_figure()
+        plt.title("Histogram of Log Classical SEs for Coefficient of Interest")
+        plt.xlabel("Log(Estimate)")
+        plt.ylabel("Frequency")
+        plt.hist(np.log(classical_ses), bins=50, marker="|", color="blue+")
+        plt.xlim(np.log(x_min), np.log(x_max))
+        plt.grid(True)
+        plt.show()
+
+        # Plot log adaptive SEs histogram with same x range
+        plt.clear_figure()
+        plt.title("Histogram of Log Adaptive SEs for Coefficient of Interest")
+        plt.xlabel("Log(Estimate)")
+        plt.ylabel("Frequency")
+        plt.hist(np.log(adaptive_ses), bins=50, marker="|", color="red+")
+        plt.xlim(np.log(x_min), np.log(x_max))
+        plt.grid(True)
+        plt.show()
+
+        # Classical SEs (log scale)
+        pyplt.figure(figsize=(8, 4))
+        sns.histplot(np.log(classical_ses), color="blue", edgecolor="black")
+        pyplt.title("Histogram of Log Classical SEs for Coefficient of Interest")
+        pyplt.xlabel("Log(SE Estimate)")
+        pyplt.ylabel("Frequency")
+        pyplt.xlim(np.log(x_min), np.log(x_max))
+        pyplt.grid(True, linestyle="--", alpha=0.6)
+        # Add vertical line at log(sqrt(0.0378)), labeled "empirical log(SE)"
+        pyplt.axvline(
+            np.log(np.sqrt(0.0378)),
+            color="green",
+            linestyle="--",
+            linewidth=2,
+            label="empirical log(SE)",
+        )
+        pyplt.legend()
+        pyplt.tight_layout()
+        pyplt.savefig("classical_histogram_output.png", dpi=300, bbox_inches="tight")
+
+        ### Print some fancier plots to files using seaborn/matplotlib
+
+        # Adaptive SEs (log scale)
+        pyplt.figure(figsize=(8, 4))
+        sns.histplot(np.log(adaptive_ses), color="red", edgecolor="black")
+        pyplt.title("Histogram of Log Adaptive SEs for Coefficient of Interest")
+        pyplt.xlabel("Log(SE Estimate)")
+        pyplt.ylabel("Frequency")
+        pyplt.xlim(np.log(x_min), np.log(x_max))
+        pyplt.grid(True, linestyle="--", alpha=0.6)
+        # Add vertical line at log(sqrt(0.0378)), labeled "empirical log(SE)"
+        pyplt.axvline(
+            np.log(np.sqrt(0.0378)),
+            color="green",
+            linestyle="--",
+            linewidth=2,
+            label="empirical log(SE)",
+        )
+        pyplt.legend()
+        pyplt.tight_layout()
+        pyplt.savefig("adaptive_histogram_output.png", dpi=300, bbox_inches="tight")
+
+        # Overlayed log-scale histograms of classical and adaptive SEs, mixing to purple where they overlap
+        pyplt.figure(figsize=(8, 4))
+        bins = np.linspace(np.log(x_min), np.log(x_max), 50)
+        # Classical SEs histogram
+        counts_classical, _, _ = pyplt.hist(
+            np.log(classical_ses),
+            bins=bins,
+            color="blue",
+            alpha=0.5,
+            label="Log Classical SEs",
+        )
+        # Adaptive SEs histogram
+        counts_adaptive, _, _ = pyplt.hist(
+            np.log(adaptive_ses),
+            bins=bins,
+            color="red",
+            alpha=0.5,
+            label="Log Adaptive SEs",
+        )
+        # Where both histograms have nonzero counts, overlay a purple bar
+        for i in range(len(bins) - 1):
+            if counts_classical[i] > 0 and counts_adaptive[i] > 0:
+                pyplt.bar(
+                    (bins[i] + bins[i + 1]) / 2,
+                    min(counts_classical[i], counts_adaptive[i]),
+                    width=(bins[i + 1] - bins[i]),
+                    color="purple",
+                    alpha=0.7,
+                    label="Overlap" if i == 0 else None,
+                )
+        pyplt.title(
+            "Overlayed Histogram of Log SEs (Classical: Blue, Adaptive: Red, Overlap: Purple)"
+        )
+        pyplt.xlabel("Log(SE Estimate)")
+        pyplt.ylabel("Frequency")
+        pyplt.xlim(np.log(x_min), np.log(x_max))
+        pyplt.grid(True, linestyle="--", alpha=0.6)
+        pyplt.axvline(
+            np.log(np.sqrt(0.0378)),
+            color="green",
+            linestyle="--",
+            linewidth=2,
+            label="empirical log(SE)",
+        )
+        pyplt.legend()
+        pyplt.tight_layout()
+        pyplt.savefig("overlayed_histogram_output.png", dpi=300, bbox_inches="tight")
 
         # Plot the classical sandwich variance estimates sorted by adaptive sandwich variance
         # estimates for the coefficient of interest

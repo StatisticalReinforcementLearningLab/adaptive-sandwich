@@ -23,7 +23,7 @@ class TestRunStudySimulation:
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
-            RL_alg="sigmoid_LS",
+            RL_alg=constants.RLStudyArgs.SIGMOID_LS_HARD_CLIP,
             N=1,
             n=6,
             recruit_n=2,
@@ -48,7 +48,7 @@ class TestRunStudySimulation:
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
-            RL_alg="sigmoid_LS",
+            RL_alg=constants.RLStudyArgs.SIGMOID_LS_HARD_CLIP,
             N=1,
             n=6,
             recruit_n=6,
@@ -82,6 +82,10 @@ class TestRunStudySimulation:
             lower_clip=self.args_incremental_1.lower_clip,
             upper_clip=self.args_incremental_1.upper_clip,
             action_centering=self.args_incremental_1.action_centering,
+            smooth_clip=(
+                self.args_incremental_1.RL_alg
+                == constants.RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP
+            ),
         )
         self.sigmoid_1.rng = MagicMock(autospec=True)
         self.sigmoid_1.get_action_probs = MagicMock(autospec=True)
@@ -130,6 +134,10 @@ class TestRunStudySimulation:
             lower_clip=self.args_no_incremental_1.lower_clip,
             upper_clip=self.args_no_incremental_1.upper_clip,
             action_centering=self.args_no_incremental_1.action_centering,
+            smooth_clip=(
+                self.args_no_incremental_1.RL_alg
+                == constants.RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP
+            ),
         )
         self.sigmoid_2.rng = MagicMock(autospec=True)
         self.sigmoid_2.get_action_probs = MagicMock(autospec=True)

@@ -220,9 +220,9 @@ def cli():
     help="Type of small sample correction to apply to the variance estimate",
 )
 @click.option(
-    "--collect_datum_for_blowup_supervised_learning",
+    "--collect_data_for_blowup_supervised_learning",
     type=bool,
-    default=True,
+    default=False,
     help="Flag to collect data for supervised learning blowup detection. This will write a single datum and label to a file in the same directory as the input files.",
 )
 def analyze_dataset(
@@ -250,7 +250,7 @@ def analyze_dataset(
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
     small_sample_correction: str,
-    collect_datum_for_blowup_supervised_learning: bool,
+    collect_data_for_blowup_supervised_learning: bool,
 ) -> None:
     """
     Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
@@ -502,7 +502,7 @@ def analyze_dataset(
             f,
         )
 
-    if collect_datum_for_blowup_supervised_learning:
+    if collect_data_for_blowup_supervised_learning:
         datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
             joint_adaptive_bread_inverse_matrix,
             joint_adaptive_bread_inverse_cond,
@@ -2105,7 +2105,7 @@ def construct_classical_and_adaptive_sandwiches(
         joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
         num_users,
-        method="bread_inverse_T_qr",
+        method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
     )
     classical_bread_inverse_matrix = jnp.mean(
         per_user_classical_bread_inverse_contributions, axis=0
@@ -2114,7 +2114,7 @@ def construct_classical_and_adaptive_sandwiches(
         classical_bread_inverse_matrix,
         classical_meat_matrix,
         num_users,
-        method="bread_inverse_T_qr",
+        method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
     )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
@@ -2158,8 +2158,13 @@ def form_sandwich_from_bread_inverse_and_meat(
             The number of users in the study, used to scale the sandwich appropriately.
         method (str):
             The method to use for forming the sandwich.
-            "bread_inverse_T_qr" uses the QR decomposition of the transpose of the bread inverse matrix.
-            "meat_decomposition_solve" uses a decomposition of the meat matrix.
+
+            SandwichFormationMethods.BREAD_INVERSE_T_QR uses the QR decomposition of the transpose
+            of the bread inverse matrix.
+
+            SandwichFormationMethods.MEAT_SVD_SOLVE uses a decomposition of the meat matrix.
+
+            SandwichFormationMethods.NAIVE simply inverts the bread inverse and forms the sandwich.
 
 
     Returns:

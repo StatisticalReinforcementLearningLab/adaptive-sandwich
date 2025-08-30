@@ -23,7 +23,7 @@ class TestSigmoidLS_T3_n2:
             dataset_type="synthetic",
             verbose=0,
             synthetic_mode="delayed_1_dosage",
-            RL_alg="sigmoid_LS",
+            RL_alg=constants.RLStudyArgs.SIGMOID_LS_HARD_CLIP,
             N=5,
             n=2,
             upper_clip=0.9,
@@ -50,6 +50,7 @@ class TestSigmoidLS_T3_n2:
             lower_clip=args_2.lower_clip,
             upper_clip=args_2.upper_clip,
             action_centering=args_2.action_centering,
+            smooth_clip=(args_2.RL_alg == constants.RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP),
         )
 
         self.sigmoid_3.all_policies.append(
@@ -102,6 +103,7 @@ class TestSigmoidLS_T3_n2:
                 lower_clip=0.1,
                 steepness=10,
                 upper_clip=0.9,
+                smooth_clip=False,
                 batched_treat_states_tensor=treat_states,
             ),
             np.array([0.1693274, 0.1], dtype=np.float32),

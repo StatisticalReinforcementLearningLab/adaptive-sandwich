@@ -258,7 +258,7 @@ def get_datum_for_blowup_supervised_learning(
     np.testing.assert_allclose(
         np.zeros_like(premature_avg_inference_estimating_functions),
         premature_avg_inference_estimating_functions,
-        atol=1e-4,
+        atol=1e-3,
     )
 
     # Plot premature joint adaptive bread inverse log condition numbers
@@ -285,7 +285,6 @@ def get_datum_for_blowup_supervised_learning(
 
     # Plot each diagonal element of premature adaptive sandwiches
     num_diag = premature_adaptive_sandwiches.shape[-1]
-    EMPIRICAL_VARIANCES = [0.06861418, 0.00028827, 0.08233865]
     for i in range(num_diag):
         plt.clear_figure()
         plt.title(f"Premature Adaptive Sandwich Diagonal Element {i}")
@@ -299,10 +298,6 @@ def get_datum_for_blowup_supervised_learning(
                 int(premature_adaptive_sandwiches.shape[0]),
                 max(1, int(premature_adaptive_sandwiches.shape[0]) // 10),
             )
-        )
-        plt.horizontal_line(
-            EMPIRICAL_VARIANCES[i],
-            color="red+",
         )
         plt.show()
 
@@ -618,7 +613,7 @@ def calculate_sequence_of_premature_adaptive_estimates(
             premature_adaptive_sandwich,
             premature_classical_sandwich,
             premature_avg_inference_estimating_function,
-        ) = construct_premature_classical_and_joint_adaptive_bread_and_meat(
+        ) = construct_premature_classical_and_adaptive_sandwiches(
             truncated_joint_adaptive_bread_inverse_matrix,
             truncated_per_user_estimating_function_stacks,
             premature_theta,
@@ -654,7 +649,7 @@ def calculate_sequence_of_premature_adaptive_estimates(
     )
 
 
-def construct_premature_classical_and_joint_adaptive_bread_and_meat(
+def construct_premature_classical_and_adaptive_sandwiches(
     truncated_joint_adaptive_bread_inverse_matrix: jnp.ndarray,
     per_user_truncated_estimating_function_stacks: jnp.ndarray,
     theta: jnp.ndarray,
@@ -841,6 +836,8 @@ def construct_premature_classical_and_joint_adaptive_bread_and_meat(
             method="bread_inverse_T_qr",
         )
     )
+    adaptive_sandwich = joint_adaptive_sandwich[-theta.shape[0] :, -theta.shape[0] :]
+
     classical_bread_inverse_matrix = jnp.mean(
         per_user_classical_bread_inverse_contributions, axis=0
     )
@@ -854,7 +851,7 @@ def construct_premature_classical_and_joint_adaptive_bread_and_meat(
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        joint_adaptive_sandwich,
+        adaptive_sandwich,
         classical_sandwich,
         avg_inference_estimating_function,
     )

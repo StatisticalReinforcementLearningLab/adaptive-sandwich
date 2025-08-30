@@ -615,12 +615,9 @@ def calculate_sequence_of_premature_adaptive_estimates(
         )
 
         (
-            premature_joint_adaptive_bread_matrix,
-            premature_joint_adaptive_meat_matrix,
-            premature_classical_bread_matrix,
-            premature_classical_meat_matrix,
+            premature_adaptive_sandwich,
+            premature_classical_sandwich,
             premature_avg_inference_estimating_function,
-            premature_joint_adaptive_bread_inverse_cond,
         ) = construct_premature_classical_and_joint_adaptive_bread_and_meat(
             truncated_joint_adaptive_bread_inverse_matrix,
             truncated_per_user_estimating_function_stacks,
@@ -642,24 +639,9 @@ def calculate_sequence_of_premature_adaptive_estimates(
             truncated_action_by_decision_time_by_user_id,
         )
 
-        premature_adaptive_sandwich = (
-            premature_joint_adaptive_bread_matrix
-            @ premature_joint_adaptive_meat_matrix
-            @ premature_joint_adaptive_bread_matrix.T
-        )[-premature_theta.shape[0] :, -premature_theta.shape[0] :] / len(user_ids)
-
-        premature_classical_sandwich = (
-            premature_classical_bread_matrix
-            @ premature_classical_meat_matrix
-            @ premature_classical_bread_matrix.T
-        ) / len(user_ids)
-
         premature_adaptive_sandwiches.append(premature_adaptive_sandwich)
         premature_classical_sandwiches.append(premature_classical_sandwich)
         premature_thetas.append(premature_theta)
-        premature_joint_adaptive_bread_inverse_condition_numbers.append(
-            premature_joint_adaptive_bread_inverse_cond
-        )
         premature_avg_inference_estimating_functions.append(
             premature_avg_inference_estimating_function
         )
@@ -788,7 +770,7 @@ def construct_premature_classical_and_joint_adaptive_bread_and_meat(
     # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
     # slow.
     # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
-    per_user_joint_adaptive_bread_inverse_inference_row_contributions, (
+    new_inference_block_row, (
         per_user_inference_estimating_functions,
         avg_inference_estimating_function,
         per_user_classical_meat_contributions,
@@ -816,9 +798,6 @@ def construct_premature_classical_and_joint_adaptive_bread_and_meat(
         action_by_decision_time_by_user_id,
     )
 
-    new_inference_block_row = jnp.mean(
-        per_user_joint_adaptive_bread_inverse_inference_row_contributions, axis=0
-    )
     joint_adaptive_bread_inverse_matrix = jnp.block(
         [
             [
@@ -853,26 +832,31 @@ def construct_premature_classical_and_joint_adaptive_bread_and_meat(
     )
     classical_meat_matrix = jnp.mean(per_user_classical_meat_contributions, axis=0)
 
-    joint_adaptive_bread_matrix, joint_adaptive_bread_inverse_cond = (
-        invert_matrix_and_check_conditioning(
+    num_users = user_ids.shape[0]
+    joint_adaptive_sandwich = (
+        after_study_analysis.form_sandwich_from_bread_inverse_and_meat(
             joint_adaptive_bread_inverse_matrix,
-            inverse_stabilization_method=InverseStabilizationMethods.NONE,
+            joint_adaptive_meat_matrix,
+            num_users,
+            method="bread_inverse_T_qr",
         )
     )
-    classical_bread_matrix = invert_matrix_and_check_conditioning(
+    classical_bread_inverse_matrix = jnp.mean(
+        per_user_classical_bread_inverse_contributions, axis=0
+    )
+    classical_sandwich = after_study_analysis.form_sandwich_from_bread_inverse_and_meat(
         classical_bread_inverse_matrix,
-        inverse_stabilization_method=InverseStabilizationMethods.NONE,
-    )[0]
+        classical_meat_matrix,
+        num_users,
+        method="bread_inverse_T_qr",
+    )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        joint_adaptive_bread_matrix,
-        joint_adaptive_meat_matrix,
-        classical_bread_matrix,
-        classical_meat_matrix,
+        joint_adaptive_sandwich,
+        classical_sandwich,
         avg_inference_estimating_function,
-        joint_adaptive_bread_inverse_cond,
     )
 
 
@@ -904,7 +888,7 @@ def get_weighted_inference_estimating_functions_only(
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
     """
-    Computes the weighted estimating function stacks for all users, along with
+    Computes the average weighted inference estimating function across users, along with
     auxiliary values used to construct the adaptive and classical sandwich variances.
 
     Note that input data should have been adjusted to only correspond to updates/decision times
@@ -957,12 +941,13 @@ def get_weighted_inference_estimating_functions_only(
 
     Returns:
         jnp.ndarray:
-            A 2D JAX NumPy array holding all weighted inference estimating functions.
+            A 2D JAX NumPy array holding the average weighted inference estimating function.
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing
-            1. the average weighted inference estimating function
-            2. the user-level classical meat matrix contributions
-            3. the user-level inverse classical bread matrix contributions
+            1. the per-user weighted inference estimating function stacks
+            2. the average weighted inference estimating function
+            3. the user-level classical meat matrix contributions
+            4. the user-level inverse classical bread matrix contributions
             stacks.
     """
 
@@ -1049,7 +1034,8 @@ def get_weighted_inference_estimating_functions_only(
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices. The raw per-user stacks are also returned again for debugging purposes.
+    # bread matrices. The raw per-user estimating functions are also returned again for debugging
+    # purposes.
     return jnp.mean(weighted_inference_estimating_functions, axis=0), (
         weighted_inference_estimating_functions,
         jnp.mean(weighted_inference_estimating_functions, axis=0),

@@ -51,15 +51,8 @@ class RLStudyArgs:
 class SmallSampleCorrections:
     NONE = "none"
     HC1theta = "HC1theta"
-    HC1thetaplusbeta = "HC1thetaplusbeta"
-    HC2 = "HC2"
-    HC3 = "HC3"
-    HC2andHC1theta = "HC2andHC1theta"
-    HC2andHC1thetaplusbeta = "HC2andHC1thetaplusbeta"
-    HC3andHC1theta = "HC3andHC1theta"
-    HC3andHC1thetaplusbeta = "HC3andHC1thetaplusbeta"
-    CR2 = "CR2"
-    CR3 = "CR3"
+    HC2theta = "HC2theta"
+    HC3theta = "HC3theta"
 
 
 class InverseStabilizationMethods:
@@ -77,3 +70,9 @@ class InverseStabilizationMethods:
 class FunctionTypes:
     LOSS = "loss"
     ESTIMATING = "estimating"
+
+
+class SandwichFormationMethods:
+    BREAD_INVERSE_T_QR = "bread_inverse_T_qr"
+    MEAT_SVD_SOLVE = "meat_svd_solve"
+    NAIVE = "naive"

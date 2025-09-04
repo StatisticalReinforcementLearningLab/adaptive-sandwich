@@ -158,14 +158,44 @@ X_no_overall_cond_and_min_singular_value = df.copy()
 X_no_overall_cond_and_min_singular_value.pop("joint_bread_inverse_condition_number")
 X_no_overall_cond_and_min_singular_value.pop("joint_bread_inverse_min_singular_value")
 
+X_no_premature_adaptive_sandwich_features = df.copy()
+for col in list(X_no_premature_adaptive_sandwich_features.columns):
+    if col.startswith("premature_"):
+        X_no_premature_adaptive_sandwich_features.pop(col)
+
 logger.info("Shape after load  ->  X: %s,  y: %s", X.shape, y.shape)
+
+
+# Include premature adaptive sandwich estimates only up to certain update numbers.
+# Note that this filters out the condition numbers and classical estimates,
+# which don't seem to be that important.
+X_premature_adaptive_sandwich_features_up_to_max_update = {}
+for max_update_num in (2, 3, 4):
+    X_premature_adaptive_sandwich_features_up_to_max_update[max_update_num] = df.copy()
+    for col in list(
+        X_premature_adaptive_sandwich_features_up_to_max_update[max_update_num].columns
+    ):
+        if col.startswith("premature_"):
+            match = re.match(r"^premature_adaptive_sandwich_update_(\d+)_", col)
+            if match:
+                # Note the + 1 here because the updates are 0-indexed in the feature names
+                update_num = int(match.group(1)) + 1
+                if update_num > max_update_num:
+                    X_premature_adaptive_sandwich_features_up_to_max_update[
+                        max_update_num
+                    ].pop(col)
+            else:
+                X_premature_adaptive_sandwich_features_up_to_max_update[
+                    max_update_num
+                ].pop(col)
 
 # ---------------------------------------------------------------------
 # 4. Train / validation split
 # ---------------------------------------------------------------------
-# First split off the validation set (10 % of all data)
+# First split off the validation set (30 % of all data)
+# Stratify by the true binary blowup label since the dataset is imbalanced.
 X_train, X_val, y_train, y_val = train_test_split(
-    X.values, y, test_size=0.1, random_state=42
+    X.values, y, test_size=0.3, random_state=42, stratify=y_binary
 )
 
 
@@ -175,21 +205,26 @@ dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
 
 
 # Set up a second training set with the best predictors removed.
-# This is to see if we can get decent performance without the overall condition number
-# and minimum singular value predictors.
+# This is to see if we can get decent performance without the premature adaptive sandwich features.
+# Note that the labels are the same as before, we can reuse them. Just generate new features.
 X_trunc_train, X_trunc_val, _, _ = train_test_split(
-    X_no_overall_cond_and_min_singular_value.values, y, test_size=0.1, random_state=42
+    X_no_premature_adaptive_sandwich_features.values,
+    y,
+    test_size=0.3,
+    random_state=42,
+    stratify=y_binary,
 )
 
-feature_names_trunc = X_no_overall_cond_and_min_singular_value.columns.tolist()
+feature_names_trunc = X_no_premature_adaptive_sandwich_features.columns.tolist()
 dtrain_trunc = xgb.DMatrix(
     X_trunc_train, label=y_train, feature_names=feature_names_trunc
 )
 dval_trunc = xgb.DMatrix(X_trunc_val, label=y_val, feature_names=feature_names_trunc)
 
 # Set up a binary classification version of the training and validation sets.
+# Note only the labels are new, can reuse the features from before.
 _, _, y_train_binary, y_val_binary = train_test_split(
-    X.values, y_binary, test_size=0.1, random_state=42
+    X.values, y_binary, test_size=0.3, random_state=42, stratify=y_binary
 )
 dtrain_binary = xgb.DMatrix(X_train, label=y_train_binary, feature_names=feature_names)
 dval_binary = xgb.DMatrix(X_val, label=y_val_binary, feature_names=feature_names)
@@ -201,6 +236,38 @@ dtrain_binary_trunc = xgb.DMatrix(
 dval_binary_trunc = xgb.DMatrix(
     X_trunc_val, label=y_val_binary, feature_names=feature_names_trunc
 )
+
+
+# Set up binary classification training and validation sets only allowed to use
+# premature adaptive sandwich features up to certain update numbers.
+X_partial_premature_features_training_sets = {}
+X_partial_premature_features_validation_sets = {}
+dtrain_dval_tuples_for_partial_premature_features = {}
+for (
+    max_update_num,
+    X_subset,
+) in X_premature_adaptive_sandwich_features_up_to_max_update.items():
+    (
+        X_partial_premature_features_training_sets[max_update_num],
+        X_partial_premature_features_validation_sets[max_update_num],
+        _,
+        _,
+    ) = train_test_split(
+        X_subset.values, y, test_size=0.3, random_state=42, stratify=y_binary
+    )
+    feature_names_partial = X_subset.columns.tolist()
+    dtrain_dval_tuples_for_partial_premature_features[max_update_num] = (
+        xgb.DMatrix(
+            X_partial_premature_features_training_sets[max_update_num],
+            label=y_train_binary,
+            feature_names=feature_names_partial,
+        ),
+        xgb.DMatrix(
+            X_partial_premature_features_validation_sets[max_update_num],
+            label=y_val_binary,
+            feature_names=feature_names_partial,
+        ),
+    )
 
 # ---------------------------------------------------------------------
 # 5. XGBoost parameters and training
@@ -525,6 +592,36 @@ classification_models_and_data = [
         "binary outcome, truncated feature set, more regularization and tuned learning rate, scale_pos_weight, early stopping",
     ),
 ]
+
+for max_update_num, (
+    partial_premature_training_set,
+    partial_premature_validation_set,
+) in dtrain_dval_tuples_for_partial_premature_features.items():
+    logger.info(
+        "Training binary classification model with premature adaptive sandwich features up to update number %d...",
+        max_update_num,
+    )
+    model = xgb.train(
+        params_3,
+        partial_premature_training_set,
+        num_boost_round=2000,
+        evals=[
+            (partial_premature_training_set, "train"),
+            (partial_premature_validation_set, "val"),
+        ],
+        # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds
+        # stop training
+        early_stopping_rounds=100,
+        verbose_eval=100,
+    )
+    classification_models_and_data.append(
+        (
+            model,
+            partial_premature_training_set,
+            partial_premature_validation_set,
+            f"binary outcome, premature adaptive sandwich features up to update number {max_update_num}, early stopping",
+        )
+    )
 
 # ---------------------------------------------------------------------
 # 6. Performance report for all models, examine feature importance,

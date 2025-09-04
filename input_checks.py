@@ -46,7 +46,6 @@ def perform_first_wave_input_checks(
     beta_dim,
     suppress_interactive_data_checks,
     small_sample_correction,
-    adaptive_bread_inverse_stabilization_method,
 ):
     ### Validate algorithm loss/estimating function and args
     require_alg_update_args_given_for_all_users_at_each_update(
@@ -93,10 +92,6 @@ def perform_first_wave_input_checks(
 
     confirm_no_small_sample_correction_desired_if_not_requested(
         small_sample_correction, suppress_interactive_data_checks
-    )
-    confirm_no_adaptive_bread_inverse_stabilization_method_desired_if_not_requested(
-        adaptive_bread_inverse_stabilization_method,
-        suppress_interactive_data_checks,
     )
 
     ### Validate action prob function and args

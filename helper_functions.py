@@ -28,7 +28,7 @@ def clip(lower_clip, upper_clip, vals):
 
 def invert_matrix_and_check_conditioning(
     matrix: np.ndarray,
-    inverse_stabilization_method: str,
+    inverse_stabilization_method: str = InverseStabilizationMethods.NONE,
     condition_num_threshold: float = 10**4,
     ridge_median_singular_value_fraction: str = 0.01,
     beta_dim: int = None,

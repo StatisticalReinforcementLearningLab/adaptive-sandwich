@@ -14,6 +14,9 @@ from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
     synthetic_get_action_1_prob_pure,
 )
+from functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
+    synthetic_get_action_1_prob_generalized_logistic,
+)
 from helper_functions import clip
 
 logger = logging.getLogger(__name__)
@@ -48,10 +51,15 @@ def get_pis_batched_sigmoid(
     lower_clip,
     steepness,
     upper_clip,
+    smooth_clip,
     batched_treat_states_tensor,
 ):
     return jax.vmap(
-        fun=synthetic_get_action_1_prob_pure,
+        fun=(
+            synthetic_get_action_1_prob_generalized_logistic
+            if smooth_clip
+            else synthetic_get_action_1_prob_pure
+        ),
         in_axes=(None, None, None, None, 0),
         out_axes=0,
     )(
@@ -99,6 +107,7 @@ class SigmoidLS:
         lower_clip,
         upper_clip,
         action_centering,
+        smooth_clip,
     ):
         self.state_feats = state_feats
         self.treat_feats = treat_feats
@@ -133,6 +142,7 @@ class SigmoidLS:
         ]
         self.action_centering = action_centering
         self.incremental_updates = True
+        self.smooth_clip = smooth_clip
 
     # TODO: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
@@ -337,6 +347,7 @@ class SigmoidLS:
             self.lower_clip,
             self.steepness,
             self.upper_clip,
+            self.smooth_clip,
             treat_states,
         )
 

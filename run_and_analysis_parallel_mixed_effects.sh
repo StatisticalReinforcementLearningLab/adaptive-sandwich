@@ -61,11 +61,11 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/mixed_effects_est
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none"
-adaptive_bread_inverse_stabilization_method="add_ridge_fixed_condition_number"
+collect_data_for_blowup_supervised_learning=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts m:T:s:S:G:t:g:e:O:o:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:J:H:Q:q:z:w:-: OPT; do
+while getopts m:T:s:S:G:t:g:e:O:o:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:J:H:Q:q:z:k:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -104,7 +104,7 @@ while getopts m:T:s:S:G:t:g:e:O:o:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:J:H:Q:q:z:w:-:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    w  | adaptive_bread_inverse_stabilization_method )  needs_arg; adaptive_bread_inverse_stabilization_method="$OPTARG" ;;
+    k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -198,7 +198,7 @@ python after_study_analysis.py analyze-dataset \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \
-  --adaptive_bread_inverse_stabilization_method=$adaptive_bread_inverse_stabilization_method
+  --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_mixed_effects.sh: Simulation complete.

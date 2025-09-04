@@ -20,6 +20,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         inference_func_type="estimating",
         alg_update_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
         alg_update_func_type="estimating",
+        action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
         env_seed_override="1726458459",
         alg_seed_override="1726463458",
         suppress_interactive_data_checks="1",

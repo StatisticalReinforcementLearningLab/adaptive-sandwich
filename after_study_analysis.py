@@ -21,7 +21,6 @@ import seaborn as sns
 import matplotlib.pyplot as pyplt
 
 from constants import (
-    InverseStabilizationMethods,
     FunctionTypes,
     SandwichFormationMethods,
     SmallSampleCorrections,
@@ -36,9 +35,7 @@ from helper_functions import (
     conditional_x_or_one_minus_x,
     get_action_prob_variance,
     get_in_study_df_column,
-    invert_matrix_and_check_conditioning,
     load_function_from_same_named_file,
-    matrix_inv_sqrt,
     replace_tuple_index,
     get_action_1_fraction,
 )
@@ -66,7 +63,6 @@ def cli():
 # otherwise need to add a check here to verify required format.
 # TODO: Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
 # Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
-# TODO: Make the user give the min and max probabilities, and I'll enforce it?
 @cli.command()
 @click.option(
     "--study_df_pickle",
@@ -394,7 +390,7 @@ def analyze_dataset(
     logger.info(
         "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
     )
-    # TODO: If QR preconditioning works, refactor to only return the full sandwiches.
+
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     (
         joint_adaptive_bread_inverse_matrix,
@@ -1104,208 +1100,6 @@ def single_user_weighted_estimating_function_stacker(
     )
 
 
-def single_user_weighted_inference_estimating_function(
-    user_id: collections.abc.Hashable,
-    action_prob_func: callable,
-    inference_estimating_func: callable,
-    action_prob_func_args_beta_index: int,
-    inference_func_args_theta_index: int,
-    action_prob_func_args_by_decision_time: dict[
-        int, dict[collections.abc.Hashable, tuple[Any, ...]]
-    ],
-    threaded_action_prob_func_args_by_decision_time: dict[
-        collections.abc.Hashable, dict[int, tuple[Any, ...]]
-    ],
-    threaded_inference_func_args: dict[collections.abc.Hashable, tuple[Any, ...]],
-    policy_num_by_decision_time: dict[collections.abc.Hashable, dict[int, int | float]],
-    action_by_decision_time: dict[collections.abc.Hashable, dict[int, int]],
-    beta_index_by_policy_num: dict[int | float, int],
-) -> tuple[
-    jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
-]:
-    """
-    Computes a weighted estimating function stack for a given algorithm estimating function
-    and arguments, inference estimating functio and arguments, and action probability function and
-    arguments.
-
-    Args:
-        user_id (collections.abc.Hashable):
-            The user ID for which to compute the weighted estimating function stack.
-
-        action_prob_func (callable):
-            The function used to compute the probability of action 1 at a given decision time for
-            a particular user given their state and the algorithm parameters.
-
-        inference_estimating_func (callable):
-            The estimating function that corresponds to inference.
-
-        action_prob_func_args_beta_index (int):
-            The index of the beta argument in the action probability function's arguments.
-
-        inference_func_args_theta_index (int):
-            The index of the theta parameter in the inference loss or estimating function arguments.
-
-        action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for this user for the action
-            probability function. This is for all decision times (args are an empty
-            tuple if they are not in the study). Should be sorted by decision time. NOTE THAT THESE
-            ARGS DO NOT CONTAIN THE SHARED BETAS, making them impervious to the differentiation that
-            will occur.
-
-        threaded_action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for the action
-            probability function, with the shared betas threaded in for differentation. Decision
-            times should be sorted.
-
-        threaded_inference_func_args (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A tuple containing the arguments for the inference
-            estimating function for this user, with the shared betas threaded in for differentiation.
-
-        policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A dictionary mapping decision times to the policy number in use. This may be
-            user-specific. Should be sorted by decision time. Only applies to in-study decision
-            times!
-
-        action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping decision times to actions taken. Only applies to in-study decision
-            times!
-
-        beta_index_by_policy_num (dict[int | float, int]):
-            A dictionary mapping policy numbers to the index of the corresponding beta in
-            all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-
-    Returns:
-        jnp.ndarray: A 1-D JAX NumPy array representing the user's weighted inference estimating function.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical meat contribution.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical bread contribution.
-    """
-
-    logger.info(
-        "Computing only weighted inference estimating function stack for user %s.",
-        user_id,
-    )
-
-    # First, reformat the supplied data into more convienent structures.
-
-    # 1. Get the first time after the first update for convenience.
-    # This is used to form the Radon-Nikodym weights for the right times.
-    _, first_time_after_first_update = get_min_time_by_policy_num(
-        policy_num_by_decision_time,
-        beta_index_by_policy_num,
-    )
-
-    # 2. Get the start and end times for this user.
-    user_start_time = math.inf
-    user_end_time = -math.inf
-    for decision_time in action_by_decision_time:
-        user_start_time = min(user_start_time, decision_time)
-        user_end_time = max(user_end_time, decision_time)
-
-    # 3. Calculate the Radon-Nikodym weights for the inference estimating function.
-    in_study_action_prob_func_args = [
-        args for args in action_prob_func_args_by_decision_time.values() if args
-    ]
-    in_study_betas_list_by_decision_time_index = jnp.array(
-        [
-            action_prob_func_args[action_prob_func_args_beta_index]
-            for action_prob_func_args in in_study_action_prob_func_args
-        ]
-    )
-    in_study_actions_list_by_decision_time_index = jnp.array(
-        list(action_by_decision_time.values())
-    )
-
-    # Sort the threaded args by decision time to be cautious. We check if the
-    # user id is present in the user args dict because we may call this on a
-    # subset of the user arg dict when we are batching arguments by shape
-    sorted_threaded_action_prob_args_by_decision_time = {
-        decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
-        for decision_time in range(user_start_time, user_end_time + 1)
-        if decision_time in threaded_action_prob_func_args_by_decision_time
-    }
-
-    num_args = None
-    for args in sorted_threaded_action_prob_args_by_decision_time.values():
-        if args:
-            num_args = len(args)
-            break
-
-    # NOTE: Cannot do [[]] * num_args here! Then all lists point
-    # same object...
-    batched_threaded_arg_lists = [[] for _ in range(num_args)]
-    for (
-        decision_time,
-        args,
-    ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        if not args:
-            continue
-        for idx, arg in enumerate(args):
-            batched_threaded_arg_lists[idx].append(arg)
-
-    batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
-        batched_threaded_arg_lists
-    )
-
-    # Note that we do NOT use the shared betas in the first arg to the weight function,
-    # since we don't want differentiation to happen with respect to them.
-    # Just grab the original beta from the update function arguments. This is the same
-    # value, but impervious to differentiation with respect to all_post_update_betas. The
-    # args, on the other hand, are a function of all_post_update_betas.
-    in_study_weights = jax.vmap(
-        fun=get_radon_nikodym_weight,
-        in_axes=[0, None, None, 0] + batch_axes,
-        out_axes=0,
-    )(
-        in_study_betas_list_by_decision_time_index,
-        action_prob_func,
-        action_prob_func_args_beta_index,
-        in_study_actions_list_by_decision_time_index,
-        *batched_threaded_arg_tensors,
-    )
-
-    in_study_index = 0
-    decision_time_to_all_weights_index_offset = min(
-        sorted_threaded_action_prob_args_by_decision_time
-    )
-    all_weights_raw = []
-    for (
-        decision_time,
-        args,
-    ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        all_weights_raw.append(in_study_weights[in_study_index] if args else 1.0)
-        in_study_index += 1
-    all_weights = jnp.array(all_weights_raw)
-
-    # 4. Form the weighted inference estimating equation.
-    weighted_inference_estimating_function = jnp.prod(
-        all_weights[
-            max(first_time_after_first_update, user_start_time)
-            - decision_time_to_all_weights_index_offset : user_end_time
-            + 1
-            - decision_time_to_all_weights_index_offset,
-        ]
-        # If the user exited the study before there were any updates,
-        # this variable will be None and the above code to grab a weight would
-        # throw an error. Just use 1 to include the unweighted estimating function
-        # if they have data to contribute here (pretty sure everyone should?)
-        if first_time_after_first_update is not None
-        else 1
-    ) * inference_estimating_func(*threaded_inference_func_args)
-
-    return (
-        weighted_inference_estimating_function,
-        jnp.outer(
-            weighted_inference_estimating_function,
-            weighted_inference_estimating_function,
-        ),
-        jax.jacrev(inference_estimating_func, argnums=inference_func_args_theta_index)(
-            *threaded_inference_func_args
-        ),
-    )
-
-
 def thread_action_prob_func_args(
     action_prob_func_args_by_user_id_by_decision_time: dict[
         int, dict[collections.abc.Hashable, tuple[Any, ...]]
@@ -1954,10 +1748,11 @@ def construct_classical_and_adaptive_sandwiches(
 ]:
     """
     Constructs the classical and adaptive inverse bread and meat matrices, as well as the average
-    estimating function stack.
+    estimating function stack and some other intermediate pieces.
+
     This is done by computing and differentiating the average weighted estimating function stack
-    with respect to the betas and theta, and then using the resulting Jacobian to compute the inverse bread and meat
-    matrices.
+    with respect to the betas and theta, using the resulting Jacobian to compute the inverse bread
+    and meat matrices, and then stably computing sandwiches.
 
     Args:
         theta (jnp.ndarray):
@@ -2027,24 +1822,19 @@ def construct_classical_and_adaptive_sandwiches(
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
             - The joint adaptive inverse bread matrix.
-            - The joint adaptive bread matrix.
             - The joint adaptive meat matrix.
             - The joint adaptive sandwich matrix.
             - The classical inverse bread matrix.
-            - The classical bread matrix.
             - The classical meat matrix.
             - The classical sandwich matrix.
             - The average weighted estimating function stack.
             - All per-user weighted estimating function stacks.
-            - The joint adaptive inverse bread matrix condition number.
             - The per-user adaptive meat small-sample corrections.
             - The per-user classical meat small-sample corrections.
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
-    # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
-    # slow.
     # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
     joint_adaptive_bread_inverse_matrix, (
         avg_estimating_function_stack,
@@ -2056,7 +1846,7 @@ def construct_classical_and_adaptive_sandwiches(
         get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
     )(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
-        # it is more efficient to flatten them into a single array. This is done
+        # it is apparently more efficient to flatten them into a single array. This is done
         # here to improve performance. We can simply unflatten them inside the function.
         flatten_params(all_post_update_betas, theta),
         all_post_update_betas.shape[1],

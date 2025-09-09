@@ -11,6 +11,7 @@ seed=0
 num_users=70
 users_per_recruitment=5
 num_users_before_update=15
+per_user_weeks_in_study=10
 only_analysis=0
 ignore_variance_for_rl_parameter_definition=0
 
@@ -42,7 +43,7 @@ collect_data_for_blowup_supervised_learning=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:v:z:k:-: OPT; do
+while getopts i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:w:v:z:k:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -75,9 +76,10 @@ while getopts i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:s:o:Q:q:n:r:u:v:z:k:-: OPT; do
     n  | num_users )                                    needs_arg; num_users="$OPTARG" ;;
     r  | users_per_recruitment )                        needs_arg; users_per_recruitment="$OPTARG" ;;
     u  | num_users_before_update )                      needs_arg; num_users_before_update="$OPTARG" ;;
+    w  | per_user_weeks_in_study )                      needs_arg; per_user_weeks_in_study="$OPTARG" ;;
     v  | ignore_variance_for_rl_parameter_definition )  needs_arg; ignore_variance_for_rl_parameter_definition="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    k  | collect_data_for_blowup_supervised_learning )         needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
+    k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -102,6 +104,7 @@ if [ "$only_analysis" -eq "0" ]; then
     --num_users ${num_users} \
     --users_per_recruitment ${users_per_recruitment} \
     --num_users_before_update ${num_users_before_update} \
+    --per_user_weeks_in_study ${per_user_weeks_in_study} \
     --ignore_variance_for_rl_parameter_definition $ignore_variance_for_rl_parameter_definition
   echo "$(date +"%Y-%m-%d %T") run_local_oralytics.sh: Finished RL study simulation."
 fi

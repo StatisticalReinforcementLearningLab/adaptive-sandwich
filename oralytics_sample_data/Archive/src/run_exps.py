@@ -131,6 +131,7 @@ def run(
     num_users: int,
     users_per_recruitment: int,
     num_users_before_update: int,
+    per_user_weeks_in_study: int,
     ignore_variance_for_rl_parameter_definition: bool,
     use_monte_carlo_expectation: bool,
 ) -> tuple[
@@ -184,7 +185,7 @@ def run(
         users_per_recruitment,
         algorithm,
         environment_module,
-        EXP_SETTINGS["per_user_weeks_in_study"],
+        per_user_weeks_in_study,
         num_users_before_update,
         EXP_SETTINGS["num_decision_times_per_day_per_user"],
         EXP_SETTINGS["weeks_between_recruitments"],
@@ -223,6 +224,11 @@ def run(
     help="The number of users required before the first update.",
 )
 @click.option(
+    "--per_user_weeks_in_study",
+    default=10,
+    help="The number of weeks each user is in the study.",
+)
+@click.option(
     "--ignore_variance_for_rl_parameter_definition",
     default=0,
     type=click.Choice(["0", "1"]),
@@ -240,6 +246,7 @@ def main(
     num_users,
     users_per_recruitment,
     num_users_before_update,
+    per_user_weeks_in_study,
     ignore_variance_for_rl_parameter_definition,
     use_numerical_expectation,
 ):
@@ -257,6 +264,8 @@ def main(
             The number of users recruited per recruitment.
         num_users_before_update (int):
             The number of users required before the first update.
+        per_user_weeks_in_study (int):
+            The number of weeks each user is in the study.
         ignore_variance_for_rl_parameter_definition (bool):
             If set, the RL parameters are treated as the posterior mean, and the posterior variance is treated as covariates.
         use_numerical_expectation (bool):
@@ -295,17 +304,18 @@ def main(
         num_users,
         users_per_recruitment,
         num_users_before_update,
+        per_user_weeks_in_study,
         ignore_variance_for_rl_parameter_definition,
         not use_numerical_expectation,
     )
 
     # Write the pickled results to file.
-    pd.to_pickle(data_df, exp_path + f"/data_df.pkl")
-    pd.to_pickle(update_df, exp_path + f"/update_df.pkl")
-    pd.to_pickle(study_df, exp_path + f"/study_df.pkl")
-    with open(exp_path + f"/loss_fn_data.pkl", "wb") as f:
+    pd.to_pickle(data_df, exp_path + "/data_df.pkl")
+    pd.to_pickle(update_df, exp_path + "/update_df.pkl")
+    pd.to_pickle(study_df, exp_path + "/study_df.pkl")
+    with open(exp_path + "/loss_fn_data.pkl", "wb") as f:
         pkl.dump(alg_update_function_args, f)
-    with open(exp_path + f"/action_data.pkl", "wb") as f:
+    with open(exp_path + "/action_data.pkl", "wb") as f:
         pkl.dump(action_prob_function_args, f)
 
     logger.info("Experiment and post-processing complete.")

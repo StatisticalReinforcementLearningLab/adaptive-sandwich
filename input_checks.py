@@ -388,7 +388,7 @@ def require_all_named_columns_not_object_type_in_study_df(
     user_id_col_name,
     action_prob_col_name,
 ):
-    logger.info("Checking that all named columns are present in the study dataframe.")
+    logger.info("Checking that all named columns are not type object.")
     for colname in (
         in_study_col_name,
         action_col_name,

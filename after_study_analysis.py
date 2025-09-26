@@ -20,6 +20,10 @@ import plotext as plt
 import seaborn as sns
 import matplotlib.pyplot as pyplt
 
+from calculate_derivatives import (
+    calculate_inference_loss_derivatives,
+    calculate_pi_and_weight_gradients,
+)
 from constants import (
     FunctionTypes,
     SandwichFormationMethods,
@@ -221,6 +225,12 @@ def cli():
     default=False,
     help="Flag to collect data for supervised learning blowup detection. This will write a single datum and label to a file in the same directory as the input files.",
 )
+@click.option(
+    "--form_adaptive_meat_adjustments_explicitly",
+    type=bool,
+    default=False,
+    help="If True, explicitly forms the per-user meat adjustments that differentiate the adaptive sandwich from the classical sandwich. This is for diagnostic purposes, as the adaptive sandwich is formed without doing this.",
+)
 def analyze_dataset(
     study_df_pickle: click.File,
     action_prob_func_filename: str,
@@ -247,6 +257,7 @@ def analyze_dataset(
     suppress_all_data_checks: bool,
     small_sample_correction: str,
     collect_data_for_blowup_supervised_learning: bool,
+    form_adaptive_meat_adjustments_explicitly: bool,
 ) -> None:
     """
     Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
@@ -302,6 +313,10 @@ def analyze_dataset(
         Type of small sample correction to apply.
     collect_data_for_blowup_supervised_learning (bool):
         Whether to collect data for doing supervised learning about adaptive sandwich blowup.
+    form_adaptive_meat_adjustments_explicitly (bool):
+        If True, explicitly forms the per-user meat adjustments that differentiate the adaptive
+        sandwich from the classical sandwich. This is for diagnostic purposes, as the
+        adaptive sandwich is formed without doing this.
 
     Returns:
     None: The function writes analysis results and debug pieces to files in the same directory as
@@ -403,6 +418,7 @@ def analyze_dataset(
         per_user_estimating_function_stacks,
         per_user_adaptive_corrections,
         per_user_classical_corrections,
+        per_user_adaptive_meat_adjustments,
     ) = construct_classical_and_adaptive_sandwiches(
         theta_est,
         all_post_update_betas,
@@ -429,6 +445,16 @@ def analyze_dataset(
         suppress_all_data_checks,
         suppress_interactive_data_checks,
         small_sample_correction,
+        form_adaptive_meat_adjustments_explicitly,
+        study_df,
+        in_study_col_name,
+        action_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_func_args,
+        inference_func_filename,
+        inference_func_args_theta_index,
+        action_prob_col_name,
     )
 
     joint_adaptive_bread_inverse_cond = jnp.linalg.cond(
@@ -485,15 +511,10 @@ def analyze_dataset(
                 "classical_meat_matrix": classical_meat_matrix,
                 "all_estimating_function_stacks": per_user_estimating_function_stacks,
                 "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
-                "joint_bread_inverse_first_block_eigvals": jnp.linalg.eigvals(
-                    joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
-                ),
-                "joint_bread_inverse_first_block_condition_number": jnp.linalg.cond(
-                    joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
-                ).item(),
                 "all_post_update_betas": all_post_update_betas,
                 "per_user_adaptive_corrections": per_user_adaptive_corrections,
                 "per_user_classical_corrections": per_user_classical_corrections,
+                "per_user_adaptive_meat_adjustments": per_user_adaptive_meat_adjustments,
             },
             f,
         )
@@ -1734,7 +1755,18 @@ def construct_classical_and_adaptive_sandwiches(
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
     small_sample_correction: str,
+    form_adaptive_meat_adjustments_explicitly: bool,
+    study_df: pd.DataFrame | None,
+    in_study_col_name: str | None,
+    action_col_name: str | None,
+    calendar_t_col_name: str | None,
+    user_id_col_name: str | None,
+    action_prob_func_args: tuple | None,
+    inference_loss_func_filename: str | None,
+    inference_loss_func_args_theta_index: int | None,
+    action_prob_col_name: str | None,
 ) -> tuple[
+    jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1818,6 +1850,32 @@ def construct_classical_and_adaptive_sandwiches(
         small_sample_correction (str):
             The type of small sample correction to apply. See SmallSampleCorrections class for
             options.
+        form_adaptive_meat_adjustments_explicitly (bool):
+            If True, explicitly forms the per-user meat adjustments that differentiate the adaptive
+            sandwich from the classical sandwich. This is for diagnostic purposes, as the
+            adaptive sandwich is formed without doing this.
+        study_df (pd.DataFrame):
+            The full study dataframe, needed if forming the adaptive meat adjustments explicitly.
+        in_study_col_name (str):
+            The name of the column in study_df indicating whether a user is in-study at a given     decision time.
+        action_col_name (str):
+            The name of the column in study_df indicating the action taken at a given decision time.
+        calendar_t_col_name (str):
+            The name of the column in study_df indicating the calendar time of a given decision time.
+        user_id_col_name (str):
+            The name of the column in study_df indicating the user ID.
+        action_prob_func_args (tuple):
+            The arguments to be passed to the action probability function, needed if forming the
+            adaptive meat adjustments explicitly.
+        inference_loss_func_filename (str):
+            The name of the file containing the inference loss function, needed if forming the
+            adaptive meat adjustments explicitly.
+        inference_loss_func_args_theta_index (int):
+            The index of theta in the inference loss function arguments tuples, needed if forming the
+            adaptive meat adjustments explicitly.
+        action_prob_col_name (str):
+            The name of the column in study_df indicating the action probability of the action taken,
+            needed if forming the adaptive meat adjustments explicitly.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -1831,10 +1889,13 @@ def construct_classical_and_adaptive_sandwiches(
             - All per-user weighted estimating function stacks.
             - The per-user adaptive meat small-sample corrections.
             - The per-user classical meat small-sample corrections.
+            - The per-user adaptive meat adjustments, if form_adaptive_meat_adjustments_explicitly
+              is True, otherwise an array of NaNs.
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
+    theta_dim = theta.shape[0]
     # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
     joint_adaptive_bread_inverse_matrix, (
         avg_estimating_function_stack,
@@ -1850,7 +1911,7 @@ def construct_classical_and_adaptive_sandwiches(
         # here to improve performance. We can simply unflatten them inside the function.
         flatten_params(all_post_update_betas, theta),
         all_post_update_betas.shape[1],
-        theta.shape[0],
+        theta_dim,
         user_ids,
         action_prob_func_filename,
         action_prob_func_args_beta_index,
@@ -1888,7 +1949,7 @@ def construct_classical_and_adaptive_sandwiches(
         per_user_classical_meat_contributions,
         per_user_classical_bread_inverse_contributions,
         num_users,
-        theta.shape[0],
+        theta_dim,
     )
 
     joint_adaptive_sandwich = form_sandwich_from_bread_inverse_and_meat(
@@ -1907,6 +1968,65 @@ def construct_classical_and_adaptive_sandwiches(
         method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
     )
 
+    per_user_adaptive_meat_adjustments = jnp.full(
+        (len(user_ids), theta_dim, theta_dim), jnp.nan
+    )
+    if form_adaptive_meat_adjustments_explicitly:
+        per_user_adjusted_classical_meat_contributions = (
+            form_adaptive_meat_adjustments_directly(
+                theta_dim,
+                all_post_update_betas.shape[1],
+                joint_adaptive_bread_inverse_matrix,
+                per_user_estimating_function_stacks,
+                study_df,
+                in_study_col_name,
+                action_col_name,
+                calendar_t_col_name,
+                user_id_col_name,
+                action_prob_func_filename,
+                action_prob_func_args,
+                action_prob_func_args_beta_index,
+                theta,
+                inference_loss_func_filename,
+                inference_loss_func_args_theta_index,
+                user_ids,
+                action_prob_col_name,
+            )
+        )
+        # Validate that the adaptive meat adjustments we just formed are accurate by constructing
+        # the theta-only adaptive sandwich from them and checking that it matches the standard result
+        # we get by taking a subset of the joint adaptive sandwich.
+        # First just apply any small-sample correction for parity.
+        (
+            _,
+            theta_only_adaptive_meat_matrix_v2,
+            _,
+            _,
+        ) = perform_desired_small_sample_correction(
+            small_sample_correction,
+            per_user_joint_adaptive_meat_contributions,
+            per_user_adjusted_classical_meat_contributions,
+            per_user_classical_bread_inverse_contributions,
+            num_users,
+            theta_dim,
+        )
+        theta_only_adaptive_sandwich_from_adjustments = (
+            form_sandwich_from_bread_inverse_and_meat(
+                classical_bread_inverse_matrix,
+                theta_only_adaptive_meat_matrix_v2,
+                num_users,
+                method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
+            )
+        )
+        theta_only_adaptive_sandwich = joint_adaptive_sandwich[-theta_dim:, -theta_dim:]
+
+        np.testing.assert_allclose(
+            theta_only_adaptive_sandwich,
+            theta_only_adaptive_sandwich_from_adjustments,
+            rtol=3e-2,
+            err_msg="There may be a bug; we've calculated the theta-only adaptive sandwich two different ways and they do not match sufficiently.",
+        )
+
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
@@ -1920,6 +2040,7 @@ def construct_classical_and_adaptive_sandwiches(
         per_user_estimating_function_stacks,
         per_user_adaptive_corrections,
         per_user_classical_corrections,
+        per_user_adaptive_meat_adjustments,
     )
 
 
@@ -1932,12 +2053,8 @@ def form_sandwich_from_bread_inverse_and_meat(
     """
     Forms a sandwich variance matrix from the provided bread inverse and meat matrices.
 
-    Does so STABLY without ever forming the bread matrix itself.  Take a QR
-    decomposition of the transpose of the bread inverse matrix, Q orthogonal and R upper triangular,
-    so that the bread inverse = (R.T)(Q.T).
-
-    Then instead of forming the inverse of R.T explicitly we use a triangular solver
-    left or right multiply by that inverse.
+    Attempts to do so STABLY without ever forming the bread matrix itself
+    (except with naive option).
 
     Args:
         bread_inverse (jnp.ndarray):
@@ -2036,6 +2153,230 @@ def estimate_theta(
     )
 
     return theta_calculation_func(study_df)
+
+
+def form_adaptive_meat_adjustments_directly(
+    theta_dim: int,
+    beta_dim: int,
+    joint_adaptive_bread_inverse_matrix: jnp.ndarray,
+    per_user_estimating_function_stacks: jnp.ndarray,
+    study_df: pd.DataFrame,
+    in_study_col_name: str,
+    action_col_name: str,
+    calendar_t_col_name: str,
+    user_id_col_name: str,
+    action_prob_func_filename: str,
+    action_prob_func_args: dict,
+    action_prob_func_args_beta_index: int,
+    theta_est,
+    inference_loss_func_filename,
+    inference_loss_func_args_theta_index,
+    user_ids,
+    action_prob_col_name,
+) -> jnp.ndarray:
+    logger.info(
+        "Explicitly forming the per-user meat adjustments that differentiate the adaptive sandwich from the classical sandwich."
+    )
+
+    # 1. Form the M-matrices, which are shared across users.
+    # This is not quite the paper definition of the M-matrices, which
+    # includes multiplication by the classical bread.  We don't care about
+    # that here, since in forming the adjustments there is a multiplication
+    # by the classical bread inverse that cancels it out.
+    V_blocks_together = joint_adaptive_bread_inverse_matrix[-theta_dim:, :-theta_dim]
+    RL_stack_beta_derivatives_block = joint_adaptive_bread_inverse_matrix[
+        :-theta_dim, :-theta_dim
+    ]
+    effective_M_blocks_together = np.linalg.solve(
+        RL_stack_beta_derivatives_block.T, V_blocks_together.T
+    ).T
+
+    # 2. Extract the RL-only parts of the per-user estimating function stacks
+    per_user_RL_only_est_fn_stacks_together = per_user_estimating_function_stacks[
+        :, :-theta_dim
+    ]
+
+    # 3. Split the effective M blocks into (theta_dim, beta_dim) blocks and the
+    # estimating function stacks into (num_updates, beta_dim) stacks.
+
+    # effective_M_blocks is shape (theta_dim, num_updates * beta_dim)
+    # We want to split it into a list of (theta_dim, beta_dim) arrays
+    M_blocks = np.split(
+        effective_M_blocks_together,
+        effective_M_blocks_together.shape[1] // beta_dim,
+        axis=1,
+    )
+    # Now stack into a 3D array of shape (num_updates, theta_dim, beta_dim)
+    M_blocks_stacked = np.stack(M_blocks, axis=0)
+
+    # per_user_RL_only_est_fn_stacks is shape (num_users, num_updates * beta_dim)
+    # We want to split it into a list of (num_updates, beta_dim) arrays per user
+    per_user_RL_only_est_fns = np.split(
+        per_user_RL_only_est_fn_stacks_together,
+        per_user_RL_only_est_fn_stacks_together.shape[1] // beta_dim,
+        axis=1,
+    )
+    # Stack into a 3D array of shape (num_users, num_updates, beta_dim)
+    # Note the difference between this and the original format of these estimating functions,
+    # which was not broken down by update
+    per_user_RL_only_est_fns_stacked = np.stack(per_user_RL_only_est_fns, axis=1)
+
+    # Now multiply the M matrices and the per-user estimating functions
+    # and sum over the updates to get the per-user meat adjustments (to be more precise, what would
+    # be added to each users inference estimating function before an outer product is taken with
+    # itself to get each users's contributioan theta-only meat matrix).
+    # Result is shape (num_users, theta_dim).
+    # Form the per-user adaptive meat adjustments explicitly for diagnostic purposes.
+    per_user_meat_adjustments_stacked = np.einsum(
+        "utb,nub->nt", M_blocks_stacked, per_user_RL_only_est_fns_stacked
+    )
+
+    # Log some diagnostics about the pieces going into the adaptive meat adjustments
+    # and the adjustments themselves.
+    V_blocks = np.split(
+        V_blocks_together, V_blocks_together.shape[1] // beta_dim, axis=1
+    )
+    logger.info("Examining adaptive meat adjustments.")
+    # No scientific notation
+    np.set_printoptions(suppress=True)
+
+    per_user_inference_estimating_functions_stacked = (
+        per_user_estimating_function_stacks[:, -theta_dim:]
+    )
+    logger.info(
+        "Per-user inference estimating functions. Without adjustment, the average of the outer products of these is the classical meat: %s",
+        per_user_inference_estimating_functions_stacked,
+    )
+    logger.info(
+        "Norms of per-user inference estimating functions: %s",
+        np.linalg.norm(per_user_inference_estimating_functions_stacked, axis=1),
+    )
+
+    logger.info(
+        "Per-user adaptive meat adjustments, to be added to inference estimating functions before forming the meat. Formed from the sum of the products of the M-blocks and the corresponding RL update estimating functions for each user: %s",
+        per_user_meat_adjustments_stacked,
+    )
+    logger.info(
+        "Norms of per-user adaptive meat adjustments: %s",
+        np.linalg.norm(per_user_meat_adjustments_stacked, axis=1),
+    )
+
+    per_user_fractional_adjustments = (
+        per_user_meat_adjustments_stacked
+        / per_user_inference_estimating_functions_stacked
+    )
+    logger.info(
+        "Per-user fractional adjustments (elementwise ratio of adjustment to original inference estimating function): %s",
+        per_user_fractional_adjustments,
+    )
+    logger.info(
+        "Norms of per-user fractional adjustments: %s",
+        np.linalg.norm(per_user_fractional_adjustments, axis=1),
+    )
+
+    V_blocks_stacked = np.stack(V_blocks, axis=0)
+    logger.info(
+        "V_blocks, one per update, each shape theta_dim x beta_dim. These measure the sensitivity of the estimating function for theta to the limiting policy parameters per update: %s",
+        V_blocks_stacked,
+    )
+    logger.info("Norms of V-blocks: %s", np.linalg.norm(V_blocks_stacked, axis=(1, 2)))
+
+    logger.info(
+        "M_blocks, one per update, each shape theta_dim x beta_dim. The sum of the products "
+        "of each of these times a user's corresponding RL estimating function forms their adaptive "
+        "adjustment. The M's are the blocks of the the product of the V's concatened and the inverse of "
+        "the RL-only upper-left block of the joint adaptive bread inverse. In other words, the lower "
+        "left block of the joint adaptive bread. Also note that the inference estimating function "
+        "derivative inverse is omitted here despite the definition of the M's in the paper, because "
+        "that factor simply cancels later: %s",
+        M_blocks_stacked,
+    )
+    logger.info("Norms of M-blocks: %s", np.linalg.norm(M_blocks_stacked, axis=(1, 2)))
+
+    logger.info(
+        "RL block of joint adaptive bread inverse. This goes into the M's: %s",
+        RL_stack_beta_derivatives_block,
+    )
+    logger.info(
+        "Norm of RL block of joint adaptive bread inverse: %s",
+        np.linalg.norm(RL_stack_beta_derivatives_block),
+    )
+
+    logger.info(
+        "Per-update RL-only estimating function elemetwise maxes across users: %s",
+        np.max(per_user_RL_only_est_fns_stacked, axis=0),
+    )
+    logger.info(
+        "Per-update RL-only estimating function elementwise mins across users: %s",
+        np.min(per_user_RL_only_est_fns_stacked, axis=0),
+    )
+    logger.info(
+        "Per-user average RL-only estimating functions across updates: %s",
+        np.mean(per_user_RL_only_est_fns_stacked, axis=1),
+    )
+    logger.info(
+        "Norms of per-user RL-only estimating functions (num users x num updates): %s",
+        np.linalg.norm(per_user_RL_only_est_fns_stacked, axis=2),
+    )
+
+    # Now dig even deeper to get weight derivatives and inference estimating function mixed
+    # derivatives that go into the V's
+
+    pi_and_weight_gradients_by_calendar_t = calculate_pi_and_weight_gradients(
+        study_df,
+        in_study_col_name,
+        action_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        action_prob_func_filename,
+        action_prob_func_args,
+        action_prob_func_args_beta_index,
+    )
+
+    _, _, loss_gradient_pi_derivatives = calculate_inference_loss_derivatives(
+        study_df,
+        theta_est,
+        inference_loss_func_filename,
+        inference_loss_func_args_theta_index,
+        user_ids,
+        user_id_col_name,
+        action_prob_col_name,
+        in_study_col_name,
+        calendar_t_col_name,
+    )
+    # Take the outer product of each row of (per_user_meat_adjustments_stacked + per_user_inference_estimating_functions_stacked)
+    per_user_adjusted_inference_estimating_functions_stacked = (
+        per_user_meat_adjustments_stacked
+        + per_user_inference_estimating_functions_stacked
+    )
+    per_user_theta_only_adaptive_meat_contributions = jnp.einsum(
+        "ni,nj->nij",
+        per_user_adjusted_inference_estimating_functions_stacked,
+        per_user_adjusted_inference_estimating_functions_stacked,
+    )
+    adaptive_theta_only_meat_matrix = jnp.mean(
+        per_user_theta_only_adaptive_meat_contributions, axis=0
+    )
+    logger.info(
+        "Theta-only adaptive meat matrix (no small sample corrections): %s",
+        adaptive_theta_only_meat_matrix,
+    )
+    classical_theta_only_meat_matrix = jnp.mean(
+        jnp.einsum(
+            "ni,nj->nij",
+            per_user_inference_estimating_functions_stacked,
+            per_user_inference_estimating_functions_stacked,
+        ),
+        axis=0,
+    )
+    logger.info(
+        "Classical meat matrix (no small sample corrections): %s",
+        classical_theta_only_meat_matrix,
+    )
+
+    breakpoint()
+
+    return per_user_theta_only_adaptive_meat_contributions
 
 
 @cli.command()

@@ -76,11 +76,10 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "classical_meat_matrix",
             "all_estimating_function_stacks",
             "joint_bread_inverse_condition_number",
-            "joint_bread_inverse_first_block_eigvals",
-            "joint_bread_inverse_first_block_condition_number",
             "all_post_update_betas",
             "per_user_adaptive_corrections",
             "per_user_classical_corrections",
+            "per_user_adaptive_meat_adjustments",
         ]
 
         assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys

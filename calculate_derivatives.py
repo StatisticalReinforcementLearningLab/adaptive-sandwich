@@ -213,7 +213,7 @@ def calculate_pi_and_weight_gradients(
     functions as described in the paper)
     """
 
-    logger.info("Calculating pi and weight gradients with respect to beta.")
+    logger.debug("Calculating pi and weight gradients with respect to beta.")
 
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
 
@@ -239,12 +239,12 @@ def calculate_pi_and_weight_gradients(
             sorted_user_ids,
         )
 
-        logger.info("Collecting pi gradients into algorithm stats dictionary.")
+        logger.debug("Collecting pi gradients into algorithm stats dictionary.")
         pi_and_weight_gradients_by_calendar_t.setdefault(calendar_t, {})[
             "pi_gradients_by_user_id"
         ] = {user_id: pi_gradients[i] for i, user_id in enumerate(sorted_user_ids)}
 
-        logger.info("Collecting weight gradients into algorithm stats dictionary.")
+        logger.debug("Collecting weight gradients into algorithm stats dictionary.")
         pi_and_weight_gradients_by_calendar_t.setdefault(calendar_t, {})[
             "weight_gradients_by_user_id"
         ] = {user_id: weight_gradients[i] for i, user_id in enumerate(sorted_user_ids)}
@@ -264,7 +264,7 @@ def calculate_pi_and_weight_gradients_specific_t(
     args_by_user_id,
     sorted_user_ids,
 ):
-    logger.info(
+    logger.debug(
         "Calculating pi and weight gradients for decision time %d.",
         calendar_t,
     )
@@ -277,7 +277,7 @@ def calculate_pi_and_weight_gradients_specific_t(
     # This also supports very large simulations by making things fast as long
     # as there is 1 or a small number of shape batches.
     nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(args_by_user_id)
-    logger.info(
+    logger.debug(
         "Found %d set(s) of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
     )
@@ -301,12 +301,12 @@ def calculate_pi_and_weight_gradients_specific_t(
         if not batched_arg_lists[0]:
             continue
 
-        logger.info("Reforming batched data lists into tensors.")
+        logger.debug("Reforming batched data lists into tensors.")
         batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
             batched_arg_lists
         )
 
-        logger.info("Forming pi gradients with respect to beta.")
+        logger.debug("Forming pi gradients with respect to beta.")
         # Note that we care about the probability of action 1 specifically,
         # not the taken action.
         in_study_pi_gradients_subset = get_pi_gradients_batched(
@@ -317,7 +317,7 @@ def calculate_pi_and_weight_gradients_specific_t(
         )
 
         # TODO: betas should be verified to be the same across users now or earlier
-        logger.info("Forming weight gradients with respect to beta.")
+        logger.debug("Forming weight gradients with respect to beta.")
         in_study_batched_actions_tensor = collect_batched_in_study_actions(
             study_df,
             calendar_t,
@@ -480,7 +480,7 @@ def calculate_rl_update_derivatives(
     policy_num_col_name,
     calendar_t_col_name,
 ):
-    logger.info(
+    logger.debug(
         "Calculating RL loss gradients and hessians with respect to beta and mixed beta/action probability derivatives for each user at all update times."
     )
     rl_update_func = load_function_from_same_named_file(rl_update_func_filename)
@@ -547,7 +547,7 @@ def calculate_rl_update_derivatives_specific_update(
     sorted_user_ids,
     first_applicable_time,
 ):
-    logger.info(
+    logger.debug(
         "Calculating RL update derivatives for the update that first applies at time %d.",
         first_applicable_time,
     )
@@ -561,7 +561,7 @@ def calculate_rl_update_derivatives_specific_update(
     # as there is 1 or a small number of shape batches.
     # NOTE: Susan and Kelly think we might actually have uniqueish shapes pretty often
     nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(args_by_user_id)
-    logger.info(
+    logger.debug(
         "Found %d set(s) of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
     )
@@ -586,14 +586,14 @@ def calculate_rl_update_derivatives_specific_update(
         if not batched_arg_lists[0]:
             continue
 
-        logger.info("Reforming batched data lists into tensors.")
+        logger.debug("Reforming batched data lists into tensors.")
         # Now just transform the previous list of lists into a jnp array for each
         # index (a tensor for each argument).  This is for passing to vmap.
         batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
             batched_arg_lists
         )
 
-        logger.info("Forming loss gradients with respect to beta.")
+        logger.debug("Forming loss gradients with respect to beta.")
         in_study_loss_gradients_subset = get_loss_gradients_batched(
             rl_update_func,
             rl_update_func_type,
@@ -602,7 +602,7 @@ def calculate_rl_update_derivatives_specific_update(
             *batched_arg_tensors,
         )
 
-        logger.info("Forming loss hessians with respect to beta.")
+        logger.debug("Forming loss hessians with respect to beta.")
         in_study_loss_hessians_subset = get_loss_hessians_batched(
             rl_update_func,
             rl_update_func_type,
@@ -610,7 +610,7 @@ def calculate_rl_update_derivatives_specific_update(
             batch_axes,
             *batched_arg_tensors,
         )
-        logger.info(
+        logger.debug(
             "Forming derivatives of loss with respect to beta and then the action probabilites vector at each time."
         )
         if rl_update_func_args_action_prob_index >= 0:
@@ -784,23 +784,28 @@ def get_first_applicable_time(
 def calculate_inference_loss_derivatives(
     study_df,
     theta_est,
-    inference_loss_func_filename,
-    inference_loss_func_args_theta_index,
+    inference_func_filename,
+    inference_func_args_theta_index,
     user_ids,
     user_id_col_name,
     action_prob_col_name,
     in_study_col_name,
     calendar_t_col_name,
+    inference_func_type=FunctionTypes.LOSS,
 ):
-    logger.info("Calculating inference loss derivatives.")
+    logger.debug("Calculating inference loss derivatives.")
+
+    # Convert to list if needed (from jnp array, etc)
+    try:
+        user_ids = user_ids.tolist()
+    except Exception:
+        pass
 
     # Retrieve the inference loss function from file
-    inference_loss_func = load_function_from_same_named_file(
-        inference_loss_func_filename
-    )
+    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
 
     num_args = inference_loss_func.__code__.co_argcount
-    inference_loss_func_arg_names = inference_loss_func.__code__.co_varnames[:num_args]
+    inference_func_arg_names = inference_loss_func.__code__.co_varnames[:num_args]
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]
@@ -810,18 +815,18 @@ def calculate_inference_loss_derivatives(
     # might as well collect them in this format and then use previous machinery
     # to process them. There are a few extra loops but more shared code this way.
     args_by_user_id = {}
-    using_action_probs = action_prob_col_name in inference_loss_func_arg_names
+    using_action_probs = action_prob_col_name in inference_func_arg_names
     if using_action_probs:
-        inference_loss_func_args_action_prob_index = (
-            inference_loss_func_arg_names.index(action_prob_col_name)
+        inference_func_args_action_prob_index = inference_func_arg_names.index(
+            action_prob_col_name
         )
         action_prob_decision_times_by_user_id = {}
         max_calendar_time = study_df[calendar_t_col_name].max()
     for user_id in user_ids:
         user_args_list = []
         filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
-        for idx, col_name in enumerate(inference_loss_func_arg_names):
-            if idx == inference_loss_func_args_theta_index:
+        for idx, col_name in enumerate(inference_func_arg_names):
+            if idx == inference_func_args_theta_index:
                 user_args_list.append(theta_est)
             else:
                 user_args_list.append(
@@ -847,7 +852,7 @@ def calculate_inference_loss_derivatives(
     nontrivial_user_args_grouped_by_shape = group_user_args_by_shape(
         args_by_user_id, empty_allowed=False
     )
-    logger.info(
+    logger.debug(
         "Found %d set(s) of users with different arg shapes.",
         len(nontrivial_user_args_grouped_by_shape),
     )
@@ -865,29 +870,29 @@ def calculate_inference_loss_derivatives(
         )
         all_involved_user_ids |= involved_user_ids
 
-        logger.info("Reforming batched data lists into tensors.")
+        logger.debug("Reforming batched data lists into tensors.")
         batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
             batched_arg_lists
         )
 
-        logger.info("Forming loss gradients with respect to theta.")
+        logger.debug("Forming loss gradients with respect to theta.")
         loss_gradients_subset = get_loss_gradients_batched(
             inference_loss_func,
-            FunctionTypes.LOSS,
-            inference_loss_func_args_theta_index,
+            inference_func_type,
+            inference_func_args_theta_index,
             batch_axes,
             *batched_arg_tensors,
         )
 
-        logger.info("Forming loss hessians with respect to theta.")
+        logger.debug("Forming loss hessians with respect to theta.")
         loss_hessians_subset = get_loss_hessians_batched(
             inference_loss_func,
-            FunctionTypes.LOSS,
-            inference_loss_func_args_theta_index,
+            inference_func_type,
+            inference_func_args_theta_index,
             batch_axes,
             *batched_arg_tensors,
         )
-        logger.info(
+        logger.debug(
             "Forming derivatives of loss with respect to theta and then the action probabilities vector at each time."
         )
         # If there is an action probability argument in the loss,
@@ -896,9 +901,9 @@ def calculate_inference_loss_derivatives(
             loss_gradient_pi_derivatives_subset = (
                 get_loss_gradient_derivatives_wrt_pi_batched(
                     inference_loss_func,
-                    FunctionTypes.LOSS,
-                    inference_loss_func_args_theta_index,
-                    inference_loss_func_args_action_prob_index,
+                    inference_func_type,
+                    inference_func_args_theta_index,
+                    inference_func_args_action_prob_index,
                     batch_axes,
                     *batched_arg_tensors,
                 )

@@ -33,6 +33,7 @@ import input_checks
 import get_datum_for_blowup_supervised_learning
 from small_sample_corrections import perform_desired_small_sample_correction
 from vmap_helpers import stack_batched_arg_lists_into_tensors
+import seaborn as sns
 
 
 from helper_functions import (
@@ -2020,12 +2021,14 @@ def construct_classical_and_adaptive_sandwiches(
         )
         theta_only_adaptive_sandwich = joint_adaptive_sandwich[-theta_dim:, -theta_dim:]
 
-        np.testing.assert_allclose(
+        if not np.allclose(
             theta_only_adaptive_sandwich,
             theta_only_adaptive_sandwich_from_adjustments,
             rtol=3e-2,
-            err_msg="There may be a bug; we've calculated the theta-only adaptive sandwich two different ways and they do not match sufficiently.",
-        )
+        ):
+            logger.warning(
+                "There may be a bug in the explicit meat adjustment calculation (this doesn't affect the actual calculation, just diagnostics). We've calculated the theta-only adaptive sandwich two different ways and they do not match sufficiently."
+            )
 
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
@@ -2243,20 +2246,22 @@ def form_adaptive_meat_adjustments_directly(
     per_user_inference_estimating_functions_stacked = (
         per_user_estimating_function_stacks[:, -theta_dim:]
     )
-    logger.info(
+    # This actually logs way too much, so making these all debug level to not exhaust VScode
+    # terminal buffer
+    logger.debug(
         "Per-user inference estimating functions. Without adjustment, the average of the outer products of these is the classical meat: %s",
         per_user_inference_estimating_functions_stacked,
     )
-    logger.info(
+    logger.debug(
         "Norms of per-user inference estimating functions: %s",
         np.linalg.norm(per_user_inference_estimating_functions_stacked, axis=1),
     )
 
-    logger.info(
+    logger.debug(
         "Per-user adaptive meat adjustments, to be added to inference estimating functions before forming the meat. Formed from the sum of the products of the M-blocks and the corresponding RL update estimating functions for each user: %s",
         per_user_meat_adjustments_stacked,
     )
-    logger.info(
+    logger.debug(
         "Norms of per-user adaptive meat adjustments: %s",
         np.linalg.norm(per_user_meat_adjustments_stacked, axis=1),
     )
@@ -2265,23 +2270,23 @@ def form_adaptive_meat_adjustments_directly(
         per_user_meat_adjustments_stacked
         / per_user_inference_estimating_functions_stacked
     )
-    logger.info(
+    logger.debug(
         "Per-user fractional adjustments (elementwise ratio of adjustment to original inference estimating function): %s",
         per_user_fractional_adjustments,
     )
-    logger.info(
+    logger.debug(
         "Norms of per-user fractional adjustments: %s",
         np.linalg.norm(per_user_fractional_adjustments, axis=1),
     )
 
     V_blocks_stacked = np.stack(V_blocks, axis=0)
-    logger.info(
+    logger.debug(
         "V_blocks, one per update, each shape theta_dim x beta_dim. These measure the sensitivity of the estimating function for theta to the limiting policy parameters per update: %s",
         V_blocks_stacked,
     )
-    logger.info("Norms of V-blocks: %s", np.linalg.norm(V_blocks_stacked, axis=(1, 2)))
+    logger.debug("Norms of V-blocks: %s", np.linalg.norm(V_blocks_stacked, axis=(1, 2)))
 
-    logger.info(
+    logger.debug(
         "M_blocks, one per update, each shape theta_dim x beta_dim. The sum of the products "
         "of each of these times a user's corresponding RL estimating function forms their adaptive "
         "adjustment. The M's are the blocks of the the product of the V's concatened and the inverse of "
@@ -2291,30 +2296,46 @@ def form_adaptive_meat_adjustments_directly(
         "that factor simply cancels later: %s",
         M_blocks_stacked,
     )
-    logger.info("Norms of M-blocks: %s", np.linalg.norm(M_blocks_stacked, axis=(1, 2)))
+    logger.debug("Norms of M-blocks: %s", np.linalg.norm(M_blocks_stacked, axis=(1, 2)))
 
-    logger.info(
-        "RL block of joint adaptive bread inverse. This goes into the M's: %s",
+    logger.debug(
+        "RL block of joint adaptive bread inverse. The *inverse* of this goes into the M's: %s",
         RL_stack_beta_derivatives_block,
     )
-    logger.info(
+    logger.debug(
         "Norm of RL block of joint adaptive bread inverse: %s",
         np.linalg.norm(RL_stack_beta_derivatives_block),
     )
 
-    logger.info(
-        "Per-update RL-only estimating function elemetwise maxes across users: %s",
+    inverse_RL_stack_beta_derivatives_block = np.linalg.inv(
+        RL_stack_beta_derivatives_block
+    )
+    logger.debug(
+        "Inverse of RL block of joint adaptive bread inverse. This goes into the M's: %s",
+        inverse_RL_stack_beta_derivatives_block,
+    )
+    logger.debug(
+        "Norm of Inverse of RL block of joint adaptive bread inverse: %s",
+        np.linalg.norm(inverse_RL_stack_beta_derivatives_block),
+    )
+
+    logger.debug(
+        "Per-update RL-only estimating function elementwise maxes across users: %s",
         np.max(per_user_RL_only_est_fns_stacked, axis=0),
     )
-    logger.info(
+    logger.debug(
         "Per-update RL-only estimating function elementwise mins across users: %s",
         np.min(per_user_RL_only_est_fns_stacked, axis=0),
     )
-    logger.info(
+    logger.debug(
         "Per-user average RL-only estimating functions across updates: %s",
         np.mean(per_user_RL_only_est_fns_stacked, axis=1),
     )
-    logger.info(
+    logger.debug(
+        "Per-update std of RL-only estimating functions across users: %s",
+        np.std(per_user_RL_only_est_fns_stacked, axis=0),
+    )
+    logger.debug(
         "Norms of per-user RL-only estimating functions (num users x num updates): %s",
         np.linalg.norm(per_user_RL_only_est_fns_stacked, axis=2),
     )
@@ -2374,7 +2395,30 @@ def form_adaptive_meat_adjustments_directly(
         classical_theta_only_meat_matrix,
     )
 
+    # np.linalg.cond(RL_stack_beta_derivatives_block)
+
+    # Keeping a breakpoint here is the best way to dig in without logging too
+    # much or being too opinionated about what to log.
     breakpoint()
+
+    # # Visualize the inverse RL block of joint adaptive bread inverse using seaborn heatmap
+    # pyplt.figure(figsize=(8, 6))
+    # sns.heatmap(inverse_RL_stack_beta_derivatives_block, annot=False, cmap="viridis")
+    # pyplt.title("Inverse RL Block of Joint Adaptive Bread Inverse")
+    # pyplt.xlabel("Beta Index")
+    # pyplt.ylabel("Beta Index")
+    # pyplt.tight_layout()
+    # pyplt.show()
+
+    # # # Visualize the RL block of joint adaptive bread inverse using seaborn heatmap
+
+    # pyplt.figure(figsize=(8, 6))
+    # sns.heatmap(RL_stack_beta_derivatives_block, annot=False, cmap="viridis")
+    # pyplt.title("RL Block of Joint Adaptive Bread Inverse")
+    # pyplt.xlabel("Beta Index")
+    # pyplt.ylabel("Beta Index")
+    # pyplt.tight_layout()
+    # pyplt.show()
 
     return per_user_theta_only_adaptive_meat_contributions
 

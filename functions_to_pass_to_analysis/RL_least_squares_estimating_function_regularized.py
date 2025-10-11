@@ -3,7 +3,7 @@ from jax import numpy as jnp
 
 
 @jax.jit
-def RL_least_squares_loss_regularized(
+def RL_least_squares_estimating_function_regularized(
     beta_est,
     base_states,
     treat_states,

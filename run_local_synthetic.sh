@@ -23,6 +23,7 @@ alg_state_feats="intercept,past_reward"
 action_centering_RL=0
 lclip=0.1
 uclip=0.9
+lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
@@ -37,7 +38,7 @@ action_prob_col_name="action1prob"
 reward_col_name="reward"
 action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_generalized_logistic.py"
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py"
+alg_update_func_filename="functions_to_pass_to_analysis/RL_least_squares_loss_regularized.py"
 alg_update_func_type="loss"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=5
@@ -54,7 +55,7 @@ form_adaptive_meat_adjustments_explicitly=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:K:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:K:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -77,6 +78,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
     A  | uclip )                                        needs_arg; uclip="$OPTARG" ;;
     G  | lclip )                                        needs_arg; lclip="$OPTARG" ;;
+    J  | lambda_ )                                      needs_arg; lambda_="$OPTARG" ;;
     i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
@@ -142,12 +144,13 @@ python rl_study_simulation.py \
   --alg_seed_override=$alg_seed_override \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
-  --lower_clip=$lclip
+  --lower_clip=$lclip \
+  --lambda_=$lambda_
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
+output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_steepness=${steepness}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}_lambda=${lambda_}_lowerclip=${lclip}_upperclip=${uclip}"
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Beginning after-study analysis."

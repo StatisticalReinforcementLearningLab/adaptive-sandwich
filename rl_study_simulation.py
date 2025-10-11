@@ -172,14 +172,14 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
                 f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
                 f"steepness={args.steepness}_algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
-                f"actionC={args.action_centering}"
+                f"actionC={args.action_centering}_lambda={args.lambda_}_lowerclip={args.lower_clip}_upperclip={args.upper_clip}"
             )
         elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
             exp_str = (
                 f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_"
                 f"recruitN={args.recruit_n}_decisionsBtwnUpdates={args.decisions_between_updates}_"
                 f"algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
-                f"actionC={args.action_centering}"
+                f"actionC={args.action_centering}_lowerclip={args.lower_clip}_upperclip={args.upper_clip}"
             )
         else:
             raise ValueError("Invalid RL Algorithm Type For Synthetic Dataset")
@@ -271,6 +271,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 upper_clip=args.upper_clip,
                 action_centering=args.action_centering,
                 smooth_clip=True,
+                lambda_=args.lambda_,
             )
         elif args.RL_alg == RLStudyArgs.SIGMOID_LS_HARD_CLIP:
             study_RLalg = SigmoidLS(
@@ -282,6 +283,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 upper_clip=args.upper_clip,
                 action_centering=args.action_centering,
                 smooth_clip=False,
+                lambda_=args.lambda_,
             )
         elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
             num_regression_params = len(alg_state_feats + alg_treat_feats)
@@ -438,6 +440,12 @@ def main():
         type=float,
         default=0.1,
         help="Lower action selection probability constraint",
+    )
+    parser.add_argument(
+        "--lambda_",
+        type=float,
+        default=1,
+        help="L2 Regularization for sigmoid LS algorithm linear regression updates",
     )
     parser.add_argument(
         "--fixed_action_prob",

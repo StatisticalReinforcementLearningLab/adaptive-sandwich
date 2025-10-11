@@ -107,6 +107,7 @@ class SigmoidLS:
         lower_clip,
         upper_clip,
         action_centering,
+        lambda_,
         smooth_clip,
     ):
         self.state_feats = state_feats
@@ -116,6 +117,7 @@ class SigmoidLS:
         self.steepness = steepness
         self.lower_clip = lower_clip
         self.upper_clip = upper_clip
+        self.lambda_ = lambda_
         self.rng = np.random.default_rng(self.alg_seed)
         self.beta_dim = len(self.state_feats) + len(self.treat_feats)
         self.pi_args = {}
@@ -229,9 +231,10 @@ class SigmoidLS:
         )
 
         # NOTE: this gives NANs and breaks action selection when all
-        # users take same action
-        inv_XX = jnp.linalg.inv(new_XX)
+        # users take same action, at least with no regularization
+        inv_XX = jnp.linalg.inv(new_XX + self.lambda_ * np.eye(design.shape[1]))
 
+        # TODO: Do this multiplication with a solve instead, or use QR decomposition even.
         beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1)).squeeze()
 
         seen_user_id = self.all_policies[-1]["seen_user_id"].copy()
@@ -294,6 +297,8 @@ class SigmoidLS:
                     self.get_action1probs(in_study_user_data),
                     self.get_action1probstimes(in_study_user_data),
                     self.action_centering,
+                    self.lambda_,
+                    len(all_prev_data["user_id"].unique()),
                 )
                 # We only care about the data overall, however, if there is any
                 # in-study data for this user so far

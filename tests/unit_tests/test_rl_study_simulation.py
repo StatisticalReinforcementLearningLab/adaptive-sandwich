@@ -29,6 +29,7 @@ class TestRunStudySimulation:
             recruit_n=2,
             upper_clip=0.9,
             lower_clip=0.1,
+            lambda_=0.0,
             fixed_action_prob=0.5,
             err_corr="time_corr",
             decisions_between_updates=2,
@@ -54,6 +55,7 @@ class TestRunStudySimulation:
             recruit_n=6,
             upper_clip=0.9,
             lower_clip=0.1,
+            lambda_=0.0,
             fixed_action_prob=0.5,
             err_corr="time_corr",
             decisions_between_updates=2,
@@ -81,6 +83,7 @@ class TestRunStudySimulation:
             steepness=self.args_incremental_1.steepness,
             lower_clip=self.args_incremental_1.lower_clip,
             upper_clip=self.args_incremental_1.upper_clip,
+            lambda_=self.args_incremental_1.lambda_,
             action_centering=self.args_incremental_1.action_centering,
             smooth_clip=(
                 self.args_incremental_1.RL_alg
@@ -133,6 +136,7 @@ class TestRunStudySimulation:
             steepness=self.args_no_incremental_1.steepness,
             lower_clip=self.args_no_incremental_1.lower_clip,
             upper_clip=self.args_no_incremental_1.upper_clip,
+            lambda_=self.args_no_incremental_1.lambda_,
             action_centering=self.args_no_incremental_1.action_centering,
             smooth_clip=(
                 self.args_no_incremental_1.RL_alg
@@ -1004,6 +1008,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     2: (
                         self.sigmoid_1.all_policies[1]["beta_est"],
@@ -1026,6 +1032,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     3: (),
                     4: (),
@@ -1058,6 +1066,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
                         jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     2: (
                         self.sigmoid_1.all_policies[2]["beta_est"],
@@ -1084,6 +1094,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
                         jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     3: (
                         self.sigmoid_1.all_policies[2]["beta_est"],
@@ -1106,6 +1118,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6]], dtype="float32"),
                         jnp.array([[3], [4]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     4: (
                         self.sigmoid_1.all_policies[2]["beta_est"],
@@ -1139,6 +1153,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3]], dtype="float32"),
                         jnp.array([[3], [4]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     5: (),
                     6: (),
@@ -1169,6 +1185,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6], [0.6], [0.6]], dtype="float32"),
                         jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     2: (
                         self.sigmoid_1.all_policies[3]["beta_est"],
@@ -1195,6 +1213,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3], [0.3], [0.3]], dtype="float32"),
                         jnp.array([[1], [2], [3], [4]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     3: (
                         self.sigmoid_1.all_policies[3]["beta_est"],
@@ -1221,6 +1241,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6], [0.5], [0.6]], dtype="float32"),
                         jnp.array([[3], [4], [5], [6]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     4: (
                         self.sigmoid_1.all_policies[3]["beta_est"],
@@ -1247,6 +1269,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3], [0.5], [0.3]], dtype="float32"),
                         jnp.array([[3], [4], [5], [6]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     5: (
                         self.sigmoid_1.all_policies[3]["beta_est"],
@@ -1269,6 +1293,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.5], [0.6]], dtype="float32"),
                         jnp.array([[5], [6]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     6: (
                         self.sigmoid_1.all_policies[3]["beta_est"],
@@ -1291,6 +1317,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.5], [0.3]], dtype="float32"),
                         jnp.array([[5], [6]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                 },
             },
@@ -1769,6 +1797,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     2: (
                         self.sigmoid_2.all_policies[1]["beta_est"],
@@ -1791,6 +1821,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     3: (
                         self.sigmoid_2.all_policies[1]["beta_est"],
@@ -1813,6 +1845,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.6], [0.6]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     4: (
                         self.sigmoid_2.all_policies[1]["beta_est"],
@@ -1835,6 +1869,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.3], [0.3]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     5: (
                         self.sigmoid_2.all_policies[1]["beta_est"],
@@ -1857,6 +1893,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.5], [0.6]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                     6: (
                         self.sigmoid_2.all_policies[1]["beta_est"],
@@ -1879,6 +1917,8 @@ class TestRunStudySimulation:
                         jnp.array([[0.5], [0.3]], dtype="float32"),
                         jnp.array([[1], [2]], dtype="int32"),
                         0,
+                        0.0,
+                        6,
                     ),
                 },
             },

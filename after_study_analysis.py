@@ -2397,6 +2397,56 @@ def form_adaptive_meat_adjustments_directly(
 
     # np.linalg.cond(RL_stack_beta_derivatives_block)
 
+    # Print the condition number of each upper left block of RL_stack_beta_derivatives_block
+    # as if we stopped after first update, then second update, etc, up to full beta_dim * num_updates
+    num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
+    whole_block_condition_numbers = []
+    diagonal_block_condition_numbers = []
+    for i in range(1, num_updates + 1):
+        whole_block_size = i * beta_dim
+        whole_block = RL_stack_beta_derivatives_block[
+            :whole_block_size, :whole_block_size
+        ]
+        whole_block_cond_number = np.linalg.cond(whole_block)
+        whole_block_condition_numbers.append(whole_block_cond_number)
+        logger.info(
+            "Condition number of whole RL_stack_beta_derivatives_block (after update %s): %s",
+            i,
+            whole_block_cond_number,
+        )
+        diagonal_block = RL_stack_beta_derivatives_block[
+            (i - 1) * beta_dim : i * beta_dim, (i - 1) * beta_dim : i * beta_dim
+        ]
+        diagonal_block_cond_number = np.linalg.cond(diagonal_block)
+        diagonal_block_condition_numbers.append(diagonal_block_cond_number)
+        logger.info(
+            "Condition number of just RL_stack_beta_derivatives_block *diagonal block* for update %s: %s",
+            i,
+            diagonal_block_cond_number,
+        )
+
+        off_diagonal_scaled_block_norm_sum = 0
+        for j in range(1, i):
+            off_diagonal_block = RL_stack_beta_derivatives_block[
+                (i - 1) * beta_dim : i * beta_dim, (j - 1) * beta_dim : j * beta_dim
+            ]
+            off_diagonal_scaled_block_norm = np.linalg.norm(
+                np.linalg.solve(diagonal_block, off_diagonal_block)
+            )
+            off_diagonal_scaled_block_norm_sum += off_diagonal_scaled_block_norm
+            logger.debug(
+                "Norm of off-diagonal block (%s, %s) scaled by inverse of diagonal block: %s",
+                i,
+                j,
+                off_diagonal_scaled_block_norm,
+            )
+
+        logger.info(
+            "Sum of norms of off-diagonal blocks in row %s scaled by inverse of diagonal block: %s",
+            i,
+            off_diagonal_scaled_block_norm_sum,
+        )
+
     # Keeping a breakpoint here is the best way to dig in without logging too
     # much or being too opinionated about what to log.
     breakpoint()

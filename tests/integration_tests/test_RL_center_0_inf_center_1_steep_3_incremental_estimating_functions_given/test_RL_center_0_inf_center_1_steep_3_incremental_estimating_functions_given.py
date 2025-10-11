@@ -18,7 +18,7 @@ def test_RL_center_0_inf_center_1_steep_3_incremental(
         theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_action_centering.py",
         inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_action_centering.py",
         inference_func_type="estimating",
-        alg_update_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
+        alg_update_func_filename="functions_to_pass_to_analysis/RL_least_squares_loss_regularized.py",
         alg_update_func_type="estimating",
         action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
         env_seed_override="1726458459",

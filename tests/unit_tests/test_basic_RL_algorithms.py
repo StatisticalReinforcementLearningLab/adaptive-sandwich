@@ -47,6 +47,7 @@ class TestSigmoidLS_T3_n2:
             treat_feats=self.treat_feats,
             alg_seed=1,
             steepness=args_2.steepness,
+            lambda_=0.0,
             lower_clip=args_2.lower_clip,
             upper_clip=args_2.upper_clip,
             action_centering=args_2.action_centering,

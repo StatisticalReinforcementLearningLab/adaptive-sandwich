@@ -339,6 +339,64 @@ def get_datum_for_blowup_supervised_learning(
         )
         plt.show()
 
+        # Grab predictors related to premature Phi-dot-bars
+        RL_stack_beta_derivatives_block = joint_adaptive_bread_inverse_matrix[
+            :-theta_dim, :-theta_dim
+        ]
+        num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
+        premature_RL_block_condition_numbers = []
+        premature_RL_block_inverse_norms = []
+        diagonal_RL_block_condition_numbers = []
+        off_diagonal_RL_scaled_block_norm_sums = []
+        for i in range(1, num_updates + 1):
+            whole_block_size = i * beta_dim
+            whole_block = RL_stack_beta_derivatives_block[
+                :whole_block_size, :whole_block_size
+            ]
+            whole_RL_block_cond_number = np.linalg.cond(whole_block)
+            premature_RL_block_condition_numbers.append(whole_RL_block_cond_number)
+            logger.info(
+                "Condition number of whole RL_stack_beta_derivatives_block (after update %s): %s",
+                i,
+                whole_RL_block_cond_number,
+            )
+            diagonal_block = RL_stack_beta_derivatives_block[
+                (i - 1) * beta_dim : i * beta_dim, (i - 1) * beta_dim : i * beta_dim
+            ]
+            diagonal_RL_block_cond_number = np.linalg.cond(diagonal_block)
+            diagonal_RL_block_condition_numbers.append(diagonal_RL_block_cond_number)
+            logger.info(
+                "Condition number of just RL_stack_beta_derivatives_block *diagonal block* for update %s: %s",
+                i,
+                diagonal_RL_block_cond_number,
+            )
+
+            premature_RL_block_inverse_norms.append(
+                np.linalg.norm(np.linalg.inv(whole_block))
+            )
+            logger.info(
+                "Norm of inverse of whole RL_stack_beta_derivatives_block (after update %s): %s",
+                i,
+                premature_RL_block_inverse_norms[-1],
+            )
+
+            off_diagonal_RL_scaled_block_norm_sum = 0
+            for j in range(1, i):
+                off_diagonal_block = RL_stack_beta_derivatives_block[
+                    (i - 1) * beta_dim : i * beta_dim, (j - 1) * beta_dim : j * beta_dim
+                ]
+                off_diagonal_scaled_block_norm = np.linalg.norm(
+                    np.linalg.solve(diagonal_block, off_diagonal_block)
+                )
+                off_diagonal_RL_scaled_block_norm_sum += off_diagonal_scaled_block_norm
+            off_diagonal_RL_scaled_block_norm_sums.append(
+                off_diagonal_RL_scaled_block_norm_sum
+            )
+            logger.info(
+                "Sum of norms of off-diagonal blocks in row %s scaled by inverse of diagonal block: %s",
+                i,
+                off_diagonal_RL_scaled_block_norm_sum,
+            )
     return {
         **{
             "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
@@ -419,6 +477,24 @@ def get_datum_for_blowup_supervised_learning(
             ]
             for premature_classical_sandwich in premature_classical_sandwiches
             for j in range(theta_dim)
+        },
+        **{
+            f"off_diagonal_RL_scaled_block_norm_sum_for_update_{i}": off_diagonal_RL_scaled_block_norm_sums[
+                i
+            ]
+            for i in range(len(off_diagonal_RL_scaled_block_norm_sums))
+        },
+        **{
+            f"premature_RL_block_condition_number_after_update_{i}": premature_RL_block_condition_numbers[
+                i
+            ]
+            for i in range(len(premature_RL_block_condition_numbers))
+        },
+        **{
+            f"premature_RL_block_inverse_norm_after_update_{i}": premature_RL_block_inverse_norms[
+                i
+            ]
+            for i in range(len(premature_RL_block_inverse_norms))
         },
     }
 

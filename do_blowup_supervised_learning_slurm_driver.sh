@@ -8,8 +8,7 @@
 #SBATCH --mem=8G
 #SBATCH --output=/n/netscratch/murphy_lab/Lab/nclosser/blowup_supervised_learning/%A/results.out            # STDOUT
 #SBATCH --error=/n/netscratch/murphy_lab/Lab/nclosser/blowup_supervised_learning/%A/results.out             # STDERR
-#SBATCH --mail-type=END                                                                                     # We send an email when the job ends.
-#SBATCH --mail-type=FAIL                                                                                    # We send an email when the job fails.
+#SBATCH --mail-type=END,FAIL                                                                                # We send an email when the job ends.                                                                                 # We send an email when the job fails.
 #SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent
 
 # Stop on nonzero exit codes and use of undefined variables

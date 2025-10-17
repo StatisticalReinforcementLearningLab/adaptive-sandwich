@@ -13,6 +13,7 @@ import xgboost as xgb
 from scipy.stats import mode
 from sklearn.metrics import auc, f1_score, r2_score, roc_curve
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 matplotlib.use("Agg")  # headless backend
 
@@ -99,7 +100,7 @@ logger.info("Found %d pickled dicts", len(file_list))
 # ---------------------------------------------------------------------
 dicts = []
 labels = []
-for path in file_list:
+for path in tqdm(file_list, desc="Loading pickles"):
     with open(path, "rb") as f:
         d = pickle.load(f)
         label = d.pop("label")
@@ -189,6 +190,72 @@ for max_update_num in (2, 3, 4):
                     max_update_num
                 ].pop(col)
 
+
+# Now play a similar game with premature predictors based only on the RL portion
+# of the inverse bread matrix.
+X_RL_only_premature_adaptive_sandwich_features_up_to_max_update = {}
+for max_update_num in (1, 2, 3, 4, 5):
+    X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[max_update_num] = (
+        df.copy()
+    )
+    for col in list(
+        X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[
+            max_update_num
+        ].columns
+    ):
+        # Remove premature features that are not RL-only
+        if col.startswith("premature_"):
+            if not col.startswith("premature_RL_"):
+                X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[
+                    max_update_num
+                ].pop(col)
+                continue
+
+        # Now remove RL-only premature features that are beyond the max update number
+        match_1 = re.match(
+            r"^off_diagonal_RL_scaled_block_norm_sum_for_update_(\d+)", col
+        )
+        match_2 = re.match(
+            r"^premature_RL_block_condition_number_after_update_(\d+)", col
+        )
+        match_3 = re.match(r"^premature_RL_block_inverse_norm_after_update_(\d+)", col)
+        match_4 = re.match(r"^diag_block_(\d+)_norm", col)
+        match_5 = re.match(r"^diag_block_(\d+)_cond", col)
+        match_6 = re.match(r"^off_diag_block_(\d+)_(\d+)_norm", col)
+        match_7 = re.match(r"^off_diag_row_(\d+)_norm", col)
+        match_8 = re.match(r"^off_diag_col_(\d+)_norm", col)
+        match = (
+            match_1
+            or match_2
+            or match_3
+            or match_4
+            or match_5
+            or match_6
+            or match_7
+            or match_8
+        )
+        match_9 = re.match(r"^successive_beta_diff_norm_(\d+)_", col)
+        if match:
+            # Note the + 1 here because the updates are 0-indexed in the feature names
+            update_num = int(match.group(1)) + 1
+            if update_num > max_update_num:
+                X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[
+                    max_update_num
+                ].pop(col)
+        # Handle successive update differences specially since they are off by one
+        elif match_9:
+            update_num = int(match_9.group(1)) + 2
+            if update_num > max_update_num:
+                X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[
+                    max_update_num
+                ].pop(col)
+        # Drop everything else
+        else:
+            X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[
+                max_update_num
+            ].pop(col)
+
+
 # ---------------------------------------------------------------------
 # 4. Train / validation split
 # ---------------------------------------------------------------------
@@ -268,6 +335,38 @@ for (
             feature_names=feature_names_partial,
         ),
     )
+
+# Set up binary classification training and validation sets only allowed to use
+# premature adaptive sandwich features up to certain update numbers.
+X_RL_only_partial_premature_features_training_sets = {}
+X_RL_only_partial_premature_features_validation_sets = {}
+dtrain_dval_tuples_for_RL_only_partial_premature_features = {}
+for (
+    max_update_num,
+    X_subset,
+) in X_RL_only_premature_adaptive_sandwich_features_up_to_max_update.items():
+    (
+        X_RL_only_partial_premature_features_training_sets[max_update_num],
+        X_RL_only_partial_premature_features_validation_sets[max_update_num],
+        _,
+        _,
+    ) = train_test_split(
+        X_subset.values, y, test_size=0.3, random_state=42, stratify=y_binary
+    )
+    feature_names_partial = X_subset.columns.tolist()
+    dtrain_dval_tuples_for_RL_only_partial_premature_features[max_update_num] = (
+        xgb.DMatrix(
+            X_RL_only_partial_premature_features_training_sets[max_update_num],
+            label=y_train_binary,
+            feature_names=feature_names_partial,
+        ),
+        xgb.DMatrix(
+            X_RL_only_partial_premature_features_validation_sets[max_update_num],
+            label=y_val_binary,
+            feature_names=feature_names_partial,
+        ),
+    )
+
 
 # ---------------------------------------------------------------------
 # 5. XGBoost parameters and training
@@ -620,6 +719,36 @@ for max_update_num, (
             partial_premature_training_set,
             partial_premature_validation_set,
             f"binary outcome, premature adaptive sandwich features up to update number {max_update_num}, early stopping",
+        )
+    )
+
+for max_update_num, (
+    RL_only_partial_premature_training_set,
+    RL_only_partial_premature_validation_set,
+) in dtrain_dval_tuples_for_RL_only_partial_premature_features.items():
+    logger.info(
+        "Training binary classification model with premature adaptive sandwich features up to update number %d...",
+        max_update_num,
+    )
+    model = xgb.train(
+        params_3,
+        RL_only_partial_premature_training_set,
+        num_boost_round=2000,
+        evals=[
+            (RL_only_partial_premature_training_set, "train"),
+            (RL_only_partial_premature_validation_set, "val"),
+        ],
+        # if validation metric (uses first non-training eval set) doesn't improve for 100 rounds
+        # stop training
+        early_stopping_rounds=100,
+        verbose_eval=100,
+    )
+    classification_models_and_data.append(
+        (
+            model,
+            RL_only_partial_premature_training_set,
+            RL_only_partial_premature_validation_set,
+            f"binary outcome, RL-only premature adaptive sandwich features up to update number {max_update_num}, early stopping",
         )
     )
 

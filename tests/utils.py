@@ -97,7 +97,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
 
         np.testing.assert_allclose(
             observed_debug_pieces_dict["raw_joint_bread_inverse_matrix"],
-            expected_debug_pieces_dict["raw_joint_bread_inverse_matrix"],
+            expected_debug_pieces_dict["joint_bread_inverse_matrix"],
             atol=1e-5,
         )
 

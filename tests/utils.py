@@ -70,7 +70,8 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "theta_est",
             "adaptive_sandwich_var_estimate",
             "classical_sandwich_var_estimate",
-            "joint_bread_inverse_matrix",
+            "raw_joint_bread_inverse_matrix",
+            "stabilized_joint_bread_inverse_matrix",
             "joint_meat_matrix",
             "classical_bread_inverse_matrix",
             "classical_meat_matrix",
@@ -82,7 +83,10 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "per_user_adaptive_meat_adjustments",
         ]
 
-        assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys
+        observed_keys = list(observed_debug_pieces_dict.keys())
+        assert (
+            observed_keys == expected_debug_keys
+        ), f"The observed debug pieces dict does not have the expected keys: {observed_keys} vs. {expected_debug_keys}"
 
         ### Check joint meat and bread inverse, uniting RL and inference
         np.testing.assert_allclose(
@@ -92,7 +96,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         )
 
         np.testing.assert_allclose(
-            observed_debug_pieces_dict["joint_bread_inverse_matrix"],
+            observed_debug_pieces_dict["raw_joint_bread_inverse_matrix"],
             expected_debug_pieces_dict["joint_bread_inverse_matrix"],
             atol=1e-5,
         )

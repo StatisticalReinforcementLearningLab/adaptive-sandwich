@@ -33,7 +33,6 @@ import input_checks
 import get_datum_for_blowup_supervised_learning
 from small_sample_corrections import perform_desired_small_sample_correction
 from vmap_helpers import stack_batched_arg_lists_into_tensors
-import seaborn as sns
 
 
 from helper_functions import (
@@ -232,6 +231,12 @@ def cli():
     default=False,
     help="If True, explicitly forms the per-user meat adjustments that differentiate the adaptive sandwich from the classical sandwich. This is for diagnostic purposes, as the adaptive sandwich is formed without doing this.",
 )
+@click.option(
+    "--stabilize_joint_adaptive_bread_inverse",
+    type=bool,
+    default=True,
+    help="If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning thresholds.",
+)
 def analyze_dataset(
     study_df_pickle: click.File,
     action_prob_func_filename: str,
@@ -259,6 +264,7 @@ def analyze_dataset(
     small_sample_correction: str,
     collect_data_for_blowup_supervised_learning: bool,
     form_adaptive_meat_adjustments_explicitly: bool,
+    stabilize_joint_adaptive_bread_inverse: bool,
 ) -> None:
     """
     Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
@@ -409,7 +415,8 @@ def analyze_dataset(
 
     user_ids = jnp.array(study_df[user_id_col_name].unique())
     (
-        joint_adaptive_bread_inverse_matrix,
+        stabilized_joint_adaptive_bread_inverse_matrix,
+        raw_joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
         joint_adaptive_sandwich_matrix,
         classical_bread_inverse_matrix,
@@ -447,6 +454,7 @@ def analyze_dataset(
         suppress_interactive_data_checks,
         small_sample_correction,
         form_adaptive_meat_adjustments_explicitly,
+        stabilize_joint_adaptive_bread_inverse,
         study_df,
         in_study_col_name,
         action_col_name,
@@ -459,7 +467,7 @@ def analyze_dataset(
     )
 
     joint_adaptive_bread_inverse_cond = jnp.linalg.cond(
-        joint_adaptive_bread_inverse_matrix
+        stabilized_joint_adaptive_bread_inverse_matrix
     )
 
     theta_dim = len(theta_est)
@@ -506,7 +514,8 @@ def analyze_dataset(
                 "theta_est": theta_est,
                 "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
                 "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-                "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+                "raw_joint_bread_inverse_matrix": raw_joint_adaptive_bread_inverse_matrix,
+                "stabilized_joint_bread_inverse_matrix": stabilized_joint_adaptive_bread_inverse_matrix,
                 "joint_meat_matrix": joint_adaptive_meat_matrix,
                 "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
                 "classical_meat_matrix": classical_meat_matrix,
@@ -522,7 +531,7 @@ def analyze_dataset(
 
     if collect_data_for_blowup_supervised_learning:
         datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
-            joint_adaptive_bread_inverse_matrix,
+            raw_joint_adaptive_bread_inverse_matrix,
             joint_adaptive_bread_inverse_cond,
             avg_estimating_function_stack,
             per_user_estimating_function_stacks,
@@ -1757,6 +1766,7 @@ def construct_classical_and_adaptive_sandwiches(
     suppress_interactive_data_checks: bool,
     small_sample_correction: str,
     form_adaptive_meat_adjustments_explicitly: bool,
+    stabilize_joint_adaptive_bread_inverse: bool,
     study_df: pd.DataFrame | None,
     in_study_col_name: str | None,
     action_col_name: str | None,
@@ -1897,8 +1907,9 @@ def construct_classical_and_adaptive_sandwiches(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
     theta_dim = theta.shape[0]
+    beta_dim = all_post_update_betas.shape[1]
     # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
-    joint_adaptive_bread_inverse_matrix, (
+    raw_joint_adaptive_bread_inverse_matrix, (
         avg_estimating_function_stack,
         per_user_joint_adaptive_meat_contributions,
         per_user_classical_meat_contributions,
@@ -1911,7 +1922,7 @@ def construct_classical_and_adaptive_sandwiches(
         # it is apparently more efficient to flatten them into a single array. This is done
         # here to improve performance. We can simply unflatten them inside the function.
         flatten_params(all_post_update_betas, theta),
-        all_post_update_betas.shape[1],
+        beta_dim,
         theta_dim,
         user_ids,
         action_prob_func_filename,
@@ -1953,8 +1964,23 @@ def construct_classical_and_adaptive_sandwiches(
         theta_dim,
     )
 
+    # Increase diagonal block dominance possibly improve conditioning of diagonal
+    # blocks as necessary, to ensure mathematical stability of joint bread inverse
+    stabilized_joint_adaptive_bread_inverse_matrix = (
+        (
+            stabilize_joint_adaptive_bread_inverse_if_necessary(
+                raw_joint_adaptive_bread_inverse_matrix,
+                beta_dim,
+                theta_dim,
+            )
+        )
+        if stabilize_joint_adaptive_bread_inverse
+        else raw_joint_adaptive_bread_inverse_matrix
+    )
+
+    # Now stably (no explicit inversion) form our sandwiches.
     joint_adaptive_sandwich = form_sandwich_from_bread_inverse_and_meat(
-        joint_adaptive_bread_inverse_matrix,
+        stabilized_joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
         num_users,
         method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
@@ -1977,7 +2003,7 @@ def construct_classical_and_adaptive_sandwiches(
             form_adaptive_meat_adjustments_directly(
                 theta_dim,
                 all_post_update_betas.shape[1],
-                joint_adaptive_bread_inverse_matrix,
+                stabilized_joint_adaptive_bread_inverse_matrix,
                 per_user_estimating_function_stacks,
                 study_df,
                 in_study_col_name,
@@ -2033,7 +2059,8 @@ def construct_classical_and_adaptive_sandwiches(
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        joint_adaptive_bread_inverse_matrix,
+        raw_joint_adaptive_bread_inverse_matrix,
+        stabilized_joint_adaptive_bread_inverse_matrix,
         joint_adaptive_meat_matrix,
         joint_adaptive_sandwich,
         classical_bread_inverse_matrix,
@@ -2044,6 +2071,163 @@ def construct_classical_and_adaptive_sandwiches(
         per_user_adaptive_corrections,
         per_user_classical_corrections,
         per_user_adaptive_meat_adjustments,
+    )
+
+
+def stabilize_joint_adaptive_bread_inverse_if_necessary(
+    joint_adaptive_bread_inverse_matrix: jnp.ndarray,
+    beta_dim: int,
+    theta_dim: int,
+) -> jnp.ndarray:
+    """
+    Stabilizes the joint adaptive bread inverse matrix if necessary by increasing diagonal block
+    dominance and/or adding a small ridge penalty to the diagonal blocks.
+
+    Args:
+        joint_adaptive_bread_inverse_matrix (jnp.ndarray):
+            A 2-D JAX NumPy array representing the joint adaptive bread inverse matrix.
+        beta_dim (int):
+            The dimension of each beta parameter.
+        theta_dim (int):
+            The dimension of the theta parameter.
+    Returns:
+        jnp.ndarray:
+            A 2-D NumPy array representing the stabilized joint adaptive bread inverse matrix.
+    """
+
+    # TODO: come up with more sophisticated settings here. These are maybe a little loose,
+    # but I especially want to avoid adding ridge penalties if possible.
+    # Would be interested in dividing each by 10, though.
+
+    # Set thresholds to guide stabilization.
+    diagonal_block_cond_threshold = 2e2
+    whole_RL_block_cond_threshold = 1e4
+
+    # Grab just the RL block and convert numpy array for easier manipulation.
+    RL_stack_beta_derivatives_block = np.array(
+        joint_adaptive_bread_inverse_matrix[:-theta_dim, :-theta_dim]
+    )
+    num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
+    for i in range(1, num_updates + 1):
+
+        # Add ridge penalty to diagonal block to control its condition number if necessary.
+        # Define the slice for the current diagonal block
+        diagonal_block_slice = slice((i - 1) * beta_dim, i * beta_dim)
+        diagonal_block = RL_stack_beta_derivatives_block[
+            diagonal_block_slice, diagonal_block_slice
+        ]
+        diagonal_block_cond_number = np.linalg.cond(diagonal_block)
+        svs = np.linalg.svd(diagonal_block, compute_uv=False)
+        max_sv = svs[0]
+        min_sv = svs[-1]
+
+        ridge_penalty = max(
+            0,
+            (max_sv - diagonal_block_cond_threshold * min_sv)
+            / (diagonal_block_cond_threshold + 1),
+        )
+
+        if ridge_penalty:
+            new_block = diagonal_block + ridge_penalty * np.eye(beta_dim)
+            new_diagonal_block_cond_number = np.linalg.cond(new_block)
+            RL_stack_beta_derivatives_block[
+                diagonal_block_slice, diagonal_block_slice
+            ] = diagonal_block + ridge_penalty * np.eye(beta_dim)
+            # TODO: Require user input here in interactive settings?
+            logger.info(
+                "Added ridge penalty of %s to diagonal block for update %s to improve conditioning from %s to %s",
+                ridge_penalty,
+                i,
+                diagonal_block_cond_number,
+                new_diagonal_block_cond_number,
+            )
+
+        # Damp off-diagonal blocks to improve conditioning of whole RL block if necessary.
+        off_diagonal_block_row_slices = (
+            slice((i - 1) * beta_dim, i * beta_dim),
+            slice((i - 1) * beta_dim),
+        )
+        whole_block_cur_update_size = i * beta_dim
+        initial_whole_block_cond_number = None
+        incremental_damping_factor = 0.9
+        max_iterations = 100
+        damping_applied = 1
+
+        for _ in range(max_iterations):
+            whole_block_cur_update = RL_stack_beta_derivatives_block[
+                :whole_block_cur_update_size, :whole_block_cur_update_size
+            ]
+            whole_block_cur_update_cond_number = np.linalg.cond(whole_block_cur_update)
+            if initial_whole_block_cond_number is None:
+                initial_whole_block_cond_number = whole_block_cur_update_cond_number
+
+            if whole_block_cur_update_cond_number <= whole_RL_block_cond_threshold:
+                break
+
+            damping_applied *= incremental_damping_factor
+            RL_stack_beta_derivatives_block[
+                off_diagonal_block_row_slices
+            ] *= incremental_damping_factor
+        else:
+            damping_applied = 0
+            RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= 0
+
+            if whole_block_cur_update_cond_number > whole_RL_block_cond_threshold:
+                logger.warning(
+                    "Off-diagonal blocks were zeroed for update %s, but conditioning is still poor: %s > %s. Adding extra ridge penalty to entire RL block so far.",
+                    i,
+                    whole_block_cur_update_cond_number,
+                    whole_RL_block_cond_threshold,
+                )
+
+            svs = np.linalg.svd(whole_block_cur_update, compute_uv=False)
+            max_sv = svs[0]
+            min_sv = svs[-1]
+
+            ridge_penalty = max(
+                0,
+                (max_sv - whole_RL_block_cond_threshold * min_sv)
+                / (whole_RL_block_cond_threshold + 1),
+            )
+
+            # TODO: This is highly questionable, potentially modifying the matrix very significantly.
+            new_block = whole_block_cur_update + ridge_penalty * np.eye(
+                whole_block_cur_update_size
+            )
+            new_whole_block_cond_number = np.linalg.cond(new_block)
+            RL_stack_beta_derivatives_block[
+                :whole_block_cur_update_size, :whole_block_cur_update_size
+            ] += ridge_penalty * np.eye(whole_block_cur_update_size)
+            logger.info(
+                "Added ridge penalty of %s to entire RL block up to update %s to improve conditioning from %s to %s",
+                ridge_penalty,
+                i,
+                whole_block_cur_update_cond_number,
+                new_whole_block_cond_number,
+            )
+
+            # Add ridge penalty to off-diagonal blocks if necessary.
+
+        if damping_applied < 1:
+            logger.info(
+                "Applied damping factor of %s to off-diagonal blocks for update %s to improve conditioning of whole RL block up to that update from %s to %s",
+                damping_applied,
+                i,
+                initial_whole_block_cond_number,
+                whole_block_cur_update_cond_number,
+            )
+
+    return np.block(
+        [
+            [
+                RL_stack_beta_derivatives_block,
+                joint_adaptive_bread_inverse_matrix[:-theta_dim, -theta_dim:],
+            ],
+            [
+                joint_adaptive_bread_inverse_matrix[-theta_dim:, :-theta_dim],
+                joint_adaptive_bread_inverse_matrix[-theta_dim:, -theta_dim:],
+            ],
+        ]
     )
 
 

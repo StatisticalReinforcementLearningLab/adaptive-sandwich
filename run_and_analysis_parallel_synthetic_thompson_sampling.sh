@@ -6,8 +6,7 @@
 #SBATCH -p serial_requeue                                                                                   # Target Partition
 #SBATCH -o /n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out       # STDOUT
 #SBATCH -e /n/netscratch/murphy_lab/Lab/nclosser/adaptive_sandwich_simulation_results/%A/slurm.%a.out       # STDERR
-#SBATCH --mail-type=END                                                                                     # This command would send an email when the job ends.
-#SBATCH --mail-type=FAIL                                                                                    # This command would send an email when the job ends.
+#SBATCH --mail-type=START,END,FAIL                                                                                   # This command would send an email when the job ends.
 #SBATCH --mail-user=nowellclosser@g.harvard.edu                                                             # Email to which notifications will be sent
 
 # Note this script is to be run with something like the following command:
@@ -81,12 +80,13 @@ suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none"
 collect_data_for_blowup_supervised_learning=0
+stabilize_joint_adaptive_bread_inverse=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:J:K:O:k:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:J:K:O:k:m:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -137,6 +137,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
     O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
+    m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
+
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -247,7 +249,8 @@ python after_study_analysis.py analyze-dataset \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \
-  --adaptive_bread_inverse_stabilization_method=$adaptive_bread_inverse_stabilization_method
+  --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
+  --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Simulation complete.

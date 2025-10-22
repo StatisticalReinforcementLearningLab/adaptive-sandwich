@@ -82,7 +82,10 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "per_user_adaptive_meat_adjustments",
         ]
 
-        assert list(observed_debug_pieces_dict.keys()) == expected_debug_keys
+        observed_keys = list(observed_debug_pieces_dict.keys())
+        assert (
+            observed_keys == expected_debug_keys
+        ), f"The observed debug pieces dict does not have the expected keys: {observed_keys} vs. {expected_debug_keys}"
 
         ### Check joint meat and bread inverse, uniting RL and inference
         np.testing.assert_allclose(

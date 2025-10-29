@@ -6,7 +6,8 @@ import pytest
 
 import after_study_analysis
 from constants import FunctionTypes
-from helper_functions import load_function_from_same_named_file, replace_tuple_index
+from helper_functions import load_function_from_same_named_file
+from arg_threading_helpers import replace_tuple_index
 from tests.utils import get_abs_path
 
 # TODO: Add checking of all aux values.

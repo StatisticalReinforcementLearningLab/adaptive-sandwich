@@ -8,6 +8,9 @@ import jax
 import numpy as np
 from jax import numpy as jnp
 
+from functions_to_pass_to_analysis.RL_least_squares_loss_regularized import (
+    RL_least_squares_loss_regularized,
+)
 from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering import (
     smooth_thompson_sampling_act_prob_function_no_action_centering,
 )
@@ -145,6 +148,21 @@ class SigmoidLS:
         self.action_centering = action_centering
         self.incremental_updates = True
         self.smooth_clip = smooth_clip
+
+        # These are used for passing to a after-study-analysis bread inverse conditioning
+        # monitor if desired
+        self.action_prob_func = (
+            synthetic_get_action_1_prob_generalized_logistic
+            if smooth_clip
+            else synthetic_get_action_1_prob_pure
+        )
+        self.action_prob_func_args_beta_index = 0
+
+        self.alg_update_func = RL_least_squares_loss_regularized
+        self.alg_update_func_type = "loss"
+        self.alg_update_func_args_beta_index = 0
+        self.alg_update_func_args_action_prob_index = 5
+        self.alg_update_func_args_action_prob_times_index = 6
 
     # TODO: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data

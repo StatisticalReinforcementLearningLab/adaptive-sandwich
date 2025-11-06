@@ -225,7 +225,7 @@ class TrialConditioningMonitor:
 
         if whole_RL_block_condition_number > self.whole_RL_block_conditioning_threshold:
             logger.warning(
-                "The RL portion of the bread inverse up to this point exceeds the threshold set (condition number: %s, threshold: %s). Consider an alternative update strategy which produces less dependence on previous RL parameters (via the data they produced) and/or increases the conditioning each update itself.  Regularization may help with both of these.",
+                "The RL portion of the bread inverse up to this point exceeds the threshold set (condition number: %s, threshold: %s). Consider an alternative update strategy which produces less dependence on previous RL parameters (via the data they produced) and/or improves the conditioning of each update itself.  Regularization may help with both of these.",
                 whole_RL_block_condition_number,
                 self.whole_RL_block_conditioning_threshold,
             )

@@ -362,9 +362,9 @@ def load_function_from_same_named_file(filename):
         ) from e
 
 
-def confirm_input_check_result(message, suppress_interactive_data_checks, error=None):
+def confirm_input_check_result(message, suppress_interaction, error=None):
 
-    if suppress_interactive_data_checks:
+    if suppress_interaction:
         logger.info(
             "Skipping the following interactive data check, as requested:\n%s", message
         )

@@ -26,7 +26,7 @@ lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-monitor_bread_inverse_conditioning_and_intervene=1
+monitor_bread_inverse_conditioning_and_intervene=0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"

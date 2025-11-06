@@ -108,7 +108,6 @@ def perform_first_wave_input_checks(
         user_id_col_name,
         in_study_col_name,
         action_prob_func_args,
-        suppress_interactive_data_checks,
         action_prob_func_filename=action_prob_func_filename,
     )
 
@@ -244,7 +243,6 @@ def perform_alg_only_input_checks(
         user_id_col_name,
         in_study_col_name,
         action_prob_func_args,
-        suppress_interactive_data_checks,
         action_prob_func=action_prob_func,
     )
 
@@ -263,6 +261,7 @@ def perform_alg_only_input_checks(
     )
 
 
+# TODO: Give a hard-to-use option to loosen this check somehow
 def require_action_probabilities_in_study_df_can_be_reconstructed(
     study_df,
     action_prob_col_name,
@@ -270,10 +269,15 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
     user_id_col_name,
     in_study_col_name,
     action_prob_func_args,
-    suppress_interactive_data_checks,
     action_prob_func_filename=None,
     action_prob_func=None,
 ):
+    """
+    Check that the action probabilities in the study dataframe can be reconstructed from the supplied
+    action probability function and its arguments.
+
+    NOTE THAT THIS IS A HARD FAILURE IF THE RECONSTRUCTION DOESN'T PASS.
+    """
     logger.info("Reconstructing action probabilities from function and arguments.")
     if not action_prob_func and not action_prob_func_filename:
         raise ValueError(
@@ -291,18 +295,12 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
         ),
         axis=1,
     )
-    try:
-        np.testing.assert_allclose(
-            in_study_df[action_prob_col_name].to_numpy(dtype="float64"),
-            reconstructed_action_probs.to_numpy(dtype="float64"),
-            atol=1e-6,
-        )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nThe action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable. If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
-        )
+
+    np.testing.assert_allclose(
+        in_study_df[action_prob_col_name].to_numpy(dtype="float64"),
+        reconstructed_action_probs.to_numpy(dtype="float64"),
+        atol=1e-6,
+    )
 
 
 def require_all_users_have_all_times_in_study_df(
@@ -916,15 +914,46 @@ def require_estimating_functions_sum_to_zero(
     """
 
     logger.info("Checking that estimating functions average to zero across users")
+
+    # Have a looser hard failure cutoff before the typical interactive check
     try:
         np.testing.assert_allclose(
-            jnp.zeros(mean_estimating_function_stack.size),
             mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
+            atol=1e-2,
+        )
+    except AssertionError as e:
+        logger.info(
+            "Estimating function stacks do not average to within loose tolerance of zero across users.  Drilling in to specific updates and inference component."
+        )
+        # If this is not true there is an internal problem in the package.
+        assert (mean_estimating_function_stack.size - theta_dim) % beta_dim == 0
+        num_updates = (mean_estimating_function_stack.size - theta_dim) // beta_dim
+        for i in range(num_updates):
+            logger.info(
+                "Mean estimating function contribution for update %s:\n%s",
+                i + 1,
+                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
+            )
+        logger.info(
+            "Mean estimating function contribution for inference:\n%s",
+            mean_estimating_function_stack[-theta_dim:],
+        )
+
+        raise e
+
+    logger.info(
+        "Estimating functions pass loose tolerance check, proceeding to tighter check."
+    )
+    try:
+        np.testing.assert_allclose(
+            mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
             atol=1e-5,
         )
     except AssertionError as e:
         logger.info(
-            "Estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
+            "Estimating function stacks do not average to within specified tolerance of zero across users.  Drilling in to specific updates and inference component."
         )
         # If this is not true there is an internal problem in the package.
         assert (mean_estimating_function_stack.size - theta_dim) % beta_dim == 0
@@ -973,10 +1002,32 @@ def require_RL_estimating_functions_sum_to_zero(
     """
 
     logger.info("Checking that RL estimating functions average to zero across users")
+
+    # Have a looser hard failure cutoff before the typical interactive check
     try:
         np.testing.assert_allclose(
-            jnp.zeros(mean_estimating_function_stack.size),
             mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
+            atol=1e-2,
+        )
+    except AssertionError as e:
+        logger.info(
+            "RL estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
+        )
+        num_updates = (mean_estimating_function_stack.size) // beta_dim
+        for i in range(num_updates):
+            logger.info(
+                "Mean estimating function contribution for update %s:\n%s",
+                i + 1,
+                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
+            )
+        # TODO: We may need to email instead of failing here for monitoring algorithm.
+        raise e
+
+    try:
+        np.testing.assert_allclose(
+            mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
             atol=1e-5,
         )
     except AssertionError as e:

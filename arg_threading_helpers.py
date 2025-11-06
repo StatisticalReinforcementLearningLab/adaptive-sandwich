@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 import collections
+import logging
 
 import jax
 import jax.numpy as jnp
-import logging
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

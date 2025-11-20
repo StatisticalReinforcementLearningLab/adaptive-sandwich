@@ -5,7 +5,7 @@ from scipy import stats
 
 import reward_definition
 
-RANDOM_VARS = jax.random.normal(jax.random.PRNGKey(0), (10000,))
+RANDOM_VARS = jax.random.normal(jax.random.PRNGKey(0), (50,))
 
 
 class RLAlgorithm:

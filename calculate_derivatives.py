@@ -202,7 +202,7 @@ def calculate_pi_and_weight_gradients(
     action_col_name,
     calendar_t_col_name,
     user_id_col_name,
-    action_prob_func_filename,
+    action_prob_func,
     action_prob_func_args,
     action_prob_func_args_beta_index,
 ):
@@ -214,8 +214,6 @@ def calculate_pi_and_weight_gradients(
     """
 
     logger.debug("Calculating pi and weight gradients with respect to beta.")
-
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
 
     pi_and_weight_gradients_by_calendar_t = {}
 
@@ -784,7 +782,7 @@ def get_first_applicable_time(
 def calculate_inference_loss_derivatives(
     study_df,
     theta_est,
-    inference_func_filename,
+    inference_func,
     inference_func_args_theta_index,
     user_ids,
     user_id_col_name,
@@ -801,11 +799,8 @@ def calculate_inference_loss_derivatives(
     except Exception:
         pass
 
-    # Retrieve the inference loss function from file
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    num_args = inference_loss_func.__code__.co_argcount
-    inference_func_arg_names = inference_loss_func.__code__.co_varnames[:num_args]
+    num_args = inference_func.__code__.co_argcount
+    inference_func_arg_names = inference_func.__code__.co_varnames[:num_args]
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]
@@ -865,7 +860,7 @@ def calculate_inference_loss_derivatives(
     for args_by_user_id_subset in nontrivial_user_args_grouped_by_shape:
         batched_arg_lists, involved_user_ids = (
             get_batched_arg_lists_and_involved_user_ids(
-                inference_loss_func, sorted_user_ids, args_by_user_id_subset
+                inference_func, sorted_user_ids, args_by_user_id_subset
             )
         )
         all_involved_user_ids |= involved_user_ids
@@ -877,7 +872,7 @@ def calculate_inference_loss_derivatives(
 
         logger.debug("Forming loss gradients with respect to theta.")
         loss_gradients_subset = get_loss_gradients_batched(
-            inference_loss_func,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             batch_axes,
@@ -886,7 +881,7 @@ def calculate_inference_loss_derivatives(
 
         logger.debug("Forming loss hessians with respect to theta.")
         loss_hessians_subset = get_loss_hessians_batched(
-            inference_loss_func,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             batch_axes,
@@ -900,7 +895,7 @@ def calculate_inference_loss_derivatives(
         if using_action_probs:
             loss_gradient_pi_derivatives_subset = (
                 get_loss_gradient_derivatives_wrt_pi_batched(
-                    inference_loss_func,
+                    inference_func,
                     inference_func_type,
                     inference_func_args_theta_index,
                     inference_func_args_action_prob_index,

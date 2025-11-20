@@ -7,7 +7,6 @@ from typing import Any
 import click
 import numpy as np
 import pandas as pd
-import jax.numpy as jnp
 
 import rl_experiments
 import rl_algorithm

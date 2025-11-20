@@ -922,9 +922,15 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
         [1, 2],
         6,
     )
-    np.testing.assert_allclose(non_zero_padded_result[0], expected_result[0], rtol=1e-07)
-    np.testing.assert_allclose(non_zero_padded_result[1], expected_result[1], rtol=1e-07)
-    np.testing.assert_allclose(non_zero_padded_result[2], expected_result[2], rtol=1e-07)
+    np.testing.assert_allclose(
+        non_zero_padded_result[0], expected_result[0], rtol=1e-07
+    )
+    np.testing.assert_allclose(
+        non_zero_padded_result[1], expected_result[1], rtol=1e-07
+    )
+    np.testing.assert_allclose(
+        non_zero_padded_result[2], expected_result[2], rtol=1e-07
+    )
 
     assert len(non_zero_padded_result) == len(expected_result)
 
@@ -1051,15 +1057,9 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
         6,
     )
 
-    np.testing.assert_allclose(
-        zero_padded_result[0], expected_result[0], rtol=1e-07
-    )
-    np.testing.assert_allclose(
-        zero_padded_result[1], expected_result[1], rtol=1e-07
-    )
-    np.testing.assert_allclose(
-        zero_padded_result[2], expected_result[2], rtol=1e-07
-    )
+    np.testing.assert_allclose(zero_padded_result[0], expected_result[0], rtol=1e-07)
+    np.testing.assert_allclose(zero_padded_result[1], expected_result[1], rtol=1e-07)
+    np.testing.assert_allclose(zero_padded_result[2], expected_result[2], rtol=1e-07)
 
     assert len(zero_padded_result) == len(expected_result)
 
@@ -3628,7 +3628,7 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
     calculated_result = calculate_derivatives.calculate_inference_loss_derivatives(
         study_df,
         theta,
-        "functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_action_centering.py",
+        functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering.synthetic_get_least_squares_loss_inference_action_centering,
         0,
         [1, 2],
         "user_id",
@@ -3636,15 +3636,9 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
         "in_study",
         "calendar_t",
     )
-    np.testing.assert_allclose(
-        calculated_result[0], expected_result[0], rtol=1e-07
-    )
-    np.testing.assert_allclose(
-        calculated_result[1], expected_result[1], rtol=1e-07
-    )
-    np.testing.assert_allclose(
-        calculated_result[2], expected_result[2], rtol=1e-07
-    )
+    np.testing.assert_allclose(calculated_result[0], expected_result[0], rtol=1e-07)
+    np.testing.assert_allclose(calculated_result[1], expected_result[1], rtol=1e-07)
+    np.testing.assert_allclose(calculated_result[2], expected_result[2], rtol=1e-07)
 
     assert len(calculated_result) == len(expected_result)
 
@@ -4655,7 +4649,7 @@ def test_oralytics_inference_derivatives_against_finite_differences():
     result = calculate_derivatives.calculate_inference_loss_derivatives(
         study_df,
         theta,
-        "functions_to_pass_to_analysis/oralytics_primary_analysis_loss.py",
+        functions_to_pass_to_analysis.oralytics_primary_analysis_loss.oralytics_primary_analysis_loss,
         0,
         [0],
         "user_idx",
@@ -4918,7 +4912,7 @@ def test_oralytics_act_prob_derivatives_against_finite_differences():
 
     def pi_func_of_beta(_beta):
         return functions_to_pass_to_analysis.oralytics_act_prob_function.oralytics_act_prob_function(
-            _beta, advantage, 15
+            _beta, advantage, 15, 1
         )
 
     def weight_func_of_beta(_beta):

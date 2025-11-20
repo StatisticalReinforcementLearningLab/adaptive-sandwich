@@ -124,7 +124,7 @@ output_folder="mixed_effects_sample_data/results/num_users${num_users}_num_time_
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_mixed_effects.sh: Beginning after-study analysis."
-python after_study_analysis.py analyze-dataset \
+python after_study_analysis.py analyze-dataset-wrapper \
   --study_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/action_selection_function_dict.pkl" \

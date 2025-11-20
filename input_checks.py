@@ -11,7 +11,6 @@ import plotext as plt
 from constants import InverseStabilizationMethods, SmallSampleCorrections
 from helper_functions import (
     confirm_input_check_result,
-    load_function_from_same_named_file,
 )
 
 # When we print out objects for debugging, show the whole thing.
@@ -35,7 +34,7 @@ def perform_first_wave_input_checks(
     user_id_col_name,
     action_prob_col_name,
     reward_col_name,
-    action_prob_func_filename,
+    action_prob_func,
     action_prob_func_args,
     action_prob_func_args_beta_index,
     alg_update_func_args,
@@ -107,9 +106,8 @@ def perform_first_wave_input_checks(
         calendar_t_col_name,
         user_id_col_name,
         in_study_col_name,
-        action_prob_func_filename,
         action_prob_func_args,
-        suppress_interactive_data_checks,
+        action_prob_func,
     )
 
     require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
@@ -174,18 +172,111 @@ def perform_first_wave_input_checks(
     require_theta_is_1D_array(theta_est)
 
 
+def perform_alg_only_input_checks(
+    study_df,
+    in_study_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    user_id_col_name,
+    action_prob_col_name,
+    action_prob_func,
+    action_prob_func_args,
+    action_prob_func_args_beta_index,
+    alg_update_func_args,
+    alg_update_func_args_beta_index,
+    alg_update_func_args_action_prob_index,
+    alg_update_func_args_action_prob_times_index,
+    suppress_interactive_data_checks,
+):
+    ### Validate algorithm loss/estimating function and args
+    require_alg_update_args_given_for_all_users_at_each_update(
+        study_df, user_id_col_name, alg_update_func_args
+    )
+    require_beta_is_1D_array_in_alg_update_args(
+        alg_update_func_args, alg_update_func_args_beta_index
+    )
+    require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_alg_update_args(
+        study_df, in_study_col_name, policy_num_col_name, alg_update_func_args
+    )
+    confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
+        alg_update_func_args_action_prob_index, suppress_interactive_data_checks
+    )
+    require_action_prob_times_given_if_index_supplied(
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+    )
+    require_action_prob_index_given_if_times_supplied(
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+    )
+    require_betas_match_in_alg_update_args_each_update(
+        alg_update_func_args, alg_update_func_args_beta_index
+    )
+    require_action_prob_args_in_alg_update_func_correspond_to_study_df(
+        study_df,
+        action_prob_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        alg_update_func_args,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+    )
+    require_valid_action_prob_times_given_if_index_supplied(
+        study_df,
+        calendar_t_col_name,
+        alg_update_func_args,
+        alg_update_func_args_action_prob_times_index,
+    )
+
+    ### Validate action prob function and args
+    require_action_prob_func_args_given_for_all_users_at_each_decision(
+        study_df, user_id_col_name, action_prob_func_args
+    )
+    require_action_prob_func_args_given_for_all_decision_times(
+        study_df, calendar_t_col_name, action_prob_func_args
+    )
+    require_action_probabilities_in_study_df_can_be_reconstructed(
+        study_df,
+        action_prob_col_name,
+        calendar_t_col_name,
+        user_id_col_name,
+        in_study_col_name,
+        action_prob_func_args,
+        action_prob_func=action_prob_func,
+    )
+
+    require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
+        study_df,
+        calendar_t_col_name,
+        action_prob_func_args,
+        in_study_col_name,
+        user_id_col_name,
+    )
+    require_beta_is_1D_array_in_action_prob_args(
+        action_prob_func_args, action_prob_func_args_beta_index
+    )
+    require_betas_match_in_action_prob_func_args_each_decision(
+        action_prob_func_args, action_prob_func_args_beta_index
+    )
+
+
+# TODO: Give a hard-to-use option to loosen this check somehow
 def require_action_probabilities_in_study_df_can_be_reconstructed(
     study_df,
     action_prob_col_name,
     calendar_t_col_name,
     user_id_col_name,
     in_study_col_name,
-    action_prob_func_filename,
     action_prob_func_args,
-    suppress_interactive_data_checks,
+    action_prob_func,
 ):
+    """
+    Check that the action probabilities in the study dataframe can be reconstructed from the supplied
+    action probability function and its arguments.
+
+    NOTE THAT THIS IS A HARD FAILURE IF THE RECONSTRUCTION DOESN'T PASS.
+    """
     logger.info("Reconstructing action probabilities from function and arguments.")
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
     reconstructed_action_probs = in_study_df.apply(
@@ -194,18 +285,12 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
         ),
         axis=1,
     )
-    try:
-        np.testing.assert_allclose(
-            in_study_df[action_prob_col_name].to_numpy(dtype="float64"),
-            reconstructed_action_probs.to_numpy(dtype="float64"),
-            atol=1e-6,
-        )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nThe action probabilities could not be exactly reconstructed by the function and arguments given. Please decide if the following result is acceptable. If not, see the contract for next steps:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
-        )
+
+    np.testing.assert_allclose(
+        in_study_df[action_prob_col_name].to_numpy(dtype="float64"),
+        reconstructed_action_probs.to_numpy(dtype="float64"),
+        atol=1e-6,
+    )
 
 
 def require_all_users_have_all_times_in_study_df(
@@ -481,9 +566,13 @@ def require_no_policy_numbers_present_in_alg_update_args_but_not_study_df(
     logger.info(
         "Checking that policy numbers in algorithm update function args are present in the study dataframe."
     )
-    assert set(alg_update_func_args.keys()).issubset(
-        study_df[policy_num_col_name].unique()
-    ), "There are policy numbers present in algorithm update function args but not in the study dataframe. Please see the contract for details."
+    alg_update_policy_nums = sorted(alg_update_func_args.keys())
+    study_df_policy_nums = sorted(study_df[policy_num_col_name].unique())
+    assert set(alg_update_policy_nums).issubset(set(study_df_policy_nums)), (
+        f"There are policy numbers present in algorithm update function args but not in the study dataframe. "
+        f"\nalg_update_func_args policy numbers: {alg_update_policy_nums}"
+        f"\nstudy_df policy numbers: {study_df_policy_nums}.\nPlease see the contract for details."
+    )
 
 
 def require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_alg_update_args(
@@ -814,16 +903,18 @@ def require_estimating_functions_sum_to_zero(
     None
     """
 
-    logger.info("Checking that estimating functions sum to zero across users")
+    logger.info("Checking that estimating functions average to zero across users")
+
+    # Have a looser hard failure cutoff before the typical interactive check
     try:
         np.testing.assert_allclose(
-            jnp.zeros(mean_estimating_function_stack.size),
             mean_estimating_function_stack,
-            atol=1e-5,
+            jnp.zeros(mean_estimating_function_stack.size),
+            atol=1e-2,
         )
     except AssertionError as e:
         logger.info(
-            "Estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
+            "Estimating function stacks do not average to within loose tolerance of zero across users.  Drilling in to specific updates and inference component."
         )
         # If this is not true there is an internal problem in the package.
         assert (mean_estimating_function_stack.size - theta_dim) % beta_dim == 0
@@ -838,6 +929,109 @@ def require_estimating_functions_sum_to_zero(
             "Mean estimating function contribution for inference:\n%s",
             mean_estimating_function_stack[-theta_dim:],
         )
+
+        raise e
+
+    logger.info(
+        "Estimating functions pass loose tolerance check, proceeding to tighter check."
+    )
+    try:
+        np.testing.assert_allclose(
+            mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
+            atol=1e-5,
+        )
+    except AssertionError as e:
+        logger.info(
+            "Estimating function stacks do not average to within specified tolerance of zero across users.  Drilling in to specific updates and inference component."
+        )
+        # If this is not true there is an internal problem in the package.
+        assert (mean_estimating_function_stack.size - theta_dim) % beta_dim == 0
+        num_updates = (mean_estimating_function_stack.size - theta_dim) // beta_dim
+        for i in range(num_updates):
+            logger.info(
+                "Mean estimating function contribution for update %s:\n%s",
+                i + 1,
+                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
+            )
+        logger.info(
+            "Mean estimating function contribution for inference:\n%s",
+            mean_estimating_function_stack[-theta_dim:],
+        )
+        confirm_input_check_result(
+            f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result, taking into account the above breakdown by update number and inference. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
+            e,
+        )
+
+
+def require_RL_estimating_functions_sum_to_zero(
+    mean_estimating_function_stack: jnp.ndarray,
+    beta_dim: int,
+    suppress_interactive_data_checks: bool,
+):
+    """
+    This is a test that the correct loss/estimating functions have
+    been given for both the algorithm updates and inference. If that is true, then the
+    loss/estimating functions when evaluated should sum to approximately zero across users.  These
+    values have been stacked and averaged across users in mean_estimating_function_stack, which
+    we simply compare to the zero vector.  We can isolate components for each update and inference
+    by considering the dimensions of the beta vectors and the theta vector.
+
+    Inputs:
+    mean_estimating_function_stack:
+        The mean of the estimating function stack (a component for each algorithm update and
+        inference) across users. This should be a 1D array.
+    beta_dim:
+        The dimension of the beta vectors that parameterize the algorithm.
+    theta_dim:
+        The dimension of the theta vector that we estimate during after-study analysis.
+
+    Returns:
+    None
+    """
+
+    logger.info("Checking that RL estimating functions average to zero across users")
+
+    # Have a looser hard failure cutoff before the typical interactive check
+    try:
+        np.testing.assert_allclose(
+            mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
+            atol=1e-2,
+        )
+    except AssertionError as e:
+        logger.info(
+            "RL estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
+        )
+        num_updates = (mean_estimating_function_stack.size) // beta_dim
+        for i in range(num_updates):
+            logger.info(
+                "Mean estimating function contribution for update %s:\n%s",
+                i + 1,
+                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
+            )
+        # TODO: We may need to email instead of failing here for monitoring algorithm.
+        raise e
+
+    try:
+        np.testing.assert_allclose(
+            mean_estimating_function_stack,
+            jnp.zeros(mean_estimating_function_stack.size),
+            atol=1e-5,
+        )
+    except AssertionError as e:
+        logger.info(
+            "RL estimating function stacks do not average to zero across users.  Drilling in to specific updates and inference component."
+        )
+        num_updates = (mean_estimating_function_stack.size) // beta_dim
+        for i in range(num_updates):
+            logger.info(
+                "Mean estimating function contribution for update %s:\n%s",
+                i + 1,
+                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
+            )
+        # TODO: Email instead of requiring user input for monitoring alg.
         confirm_input_check_result(
             f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result, taking into account the above breakdown by update number and inference. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
@@ -900,36 +1094,29 @@ def require_threaded_algorithm_estimating_function_args_equivalent(
     when called with the original arguments and when called with the
     reconstructed action probabilities substituted in.
     """
-    try:
+    for (
+        policy_num,
+        update_func_args_by_user_id,
+    ) in update_func_args_by_by_user_id_by_policy_num.items():
         for (
-            policy_num,
-            update_func_args_by_user_id,
-        ) in update_func_args_by_by_user_id_by_policy_num.items():
-            for (
-                user_id,
-                unthreaded_args,
-            ) in update_func_args_by_user_id.items():
-                if not unthreaded_args:
-                    continue
-                np.testing.assert_allclose(
-                    algorithm_estimating_func(*unthreaded_args),
-                    # Need to stop gradient here because we can't convert a traced value to np array
-                    jax.lax.stop_gradient(
-                        algorithm_estimating_func(
-                            *threaded_update_func_args_by_policy_num_by_user_id[
-                                user_id
-                            ][policy_num]
-                        )
-                    ),
-                    atol=1e-7,
-                    rtol=1e-3,
-                )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nAt least one algorithm estimating function value is not approximately equal with the original arguments and with reconstructed action probabilities substituted in. The following occurred for user {user_id} and policy {policy_num}:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
-        )
+            user_id,
+            unthreaded_args,
+        ) in update_func_args_by_user_id.items():
+            if not unthreaded_args:
+                continue
+            np.testing.assert_allclose(
+                algorithm_estimating_func(*unthreaded_args),
+                # Need to stop gradient here because we can't convert a traced value to np array
+                jax.lax.stop_gradient(
+                    algorithm_estimating_func(
+                        *threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                            policy_num
+                        ]
+                    )
+                ),
+                atol=1e-7,
+                rtol=1e-3,
+            )
 
 
 def require_threaded_inference_estimating_function_args_equivalent(
@@ -943,23 +1130,16 @@ def require_threaded_inference_estimating_function_args_equivalent(
     when called with the original arguments and when called with the
     reconstructed action probabilities substituted in.
     """
-    try:
-        for user_id, unthreaded_args in inference_func_args_by_user_id.items():
-            if not unthreaded_args:
-                continue
-            np.testing.assert_allclose(
-                inference_estimating_func(*unthreaded_args),
-                # Need to stop gradient here because we can't convert a traced value to np array
-                jax.lax.stop_gradient(
-                    inference_estimating_func(
-                        *threaded_inference_func_args_by_user_id[user_id]
-                    )
-                ),
-                rtol=1e-2,
-            )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nAt least one inference estimating function value is not approximately equal with the original arguments and with reconstructed action probabilities substituted in. The following occurred for user {user_id}:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
+    for user_id, unthreaded_args in inference_func_args_by_user_id.items():
+        if not unthreaded_args:
+            continue
+        np.testing.assert_allclose(
+            inference_estimating_func(*unthreaded_args),
+            # Need to stop gradient here because we can't convert a traced value to np array
+            jax.lax.stop_gradient(
+                inference_estimating_func(
+                    *threaded_inference_func_args_by_user_id[user_id]
+                )
+            ),
+            rtol=1e-2,
         )

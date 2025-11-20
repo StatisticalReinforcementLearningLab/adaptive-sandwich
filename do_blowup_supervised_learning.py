@@ -24,8 +24,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-EMPIRICAL_TRACE = 0.15124110  # Trace of Empirical Covariance Matrix
-
 parser = argparse.ArgumentParser(description="Train XGBoost models on pickled data.")
 parser.add_argument(
     "--input_glob", type=str, required=True, help="Glob pattern for input pickle files."
@@ -38,6 +36,14 @@ parser.add_argument(
     type=float,
     required=True,
     help="The factor by which the empirical trace is multiplied to define the blowup threshold.",
+)
+
+parser.add_argument(
+    "--empirical_var_diag",
+    type=float,
+    nargs="+",
+    required=True,
+    help="The empirical variance diagonal elements to use for blowup estimation. Supply as space-separated values.",
 )
 
 
@@ -85,6 +91,8 @@ args = parser.parse_args()
 INPUT_GLOB = args.input_glob
 OUTPUT_DIR = args.output_dir
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+EMPIRICAL_VAR_DIAG = np.array(args.empirical_var_diag, dtype="float32")
 # ---------------------------------------------------------------------
 # 1. Collect file paths
 # ---------------------------------------------------------------------
@@ -137,9 +145,9 @@ else:
 # Determine appropriate label transformations for classification
 if args.classification_label_type == "trace_blowup":
     traces = np.trace(labels, axis1=1, axis2=2)
-    y_binary = (traces > args.empirical_trace_blowup_factor * EMPIRICAL_TRACE).astype(
-        "int32"
-    )
+    y_binary = (
+        traces > args.empirical_trace_blowup_factor * np.sum(EMPIRICAL_VAR_DIAG)
+    ).astype("int32")
 elif args.classification_label_type.startswith("index_"):
     index = int(args.classification_label_type.split("_")[1])
     if index < 0 or index >= labels.shape[1]:
@@ -147,7 +155,8 @@ elif args.classification_label_type.startswith("index_"):
             f"Index {index} out of bounds for label array with shape {labels.shape}"
         )
     y_binary = (
-        labels[:, index, index] > args.empirical_trace_blowup_factor * EMPIRICAL_TRACE
+        labels[:, index, index]
+        > args.empirical_trace_blowup_factor * EMPIRICAL_VAR_DIAG[index]
     ).astype("int32")
 else:
     raise ValueError("Invalid classification_label_type")
@@ -194,7 +203,7 @@ for max_update_num in (2, 3, 4):
 # Now play a similar game with premature predictors based only on the RL portion
 # of the inverse bread matrix.
 X_RL_only_premature_adaptive_sandwich_features_up_to_max_update = {}
-for max_update_num in (1, 2, 3, 4, 5):
+for max_update_num in range(2, 25):
     X_RL_only_premature_adaptive_sandwich_features_up_to_max_update[max_update_num] = (
         df.copy()
     )

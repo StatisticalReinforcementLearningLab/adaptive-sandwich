@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.special as special
 
-RANDOM_VARS = jax.random.normal(jax.random.PRNGKey(0), (10000,))
+RANDOM_VARS = jax.random.normal(jax.random.PRNGKey(0), (50,))
 L_max = 0.8
 L_min = 0.2
 C_logistic = 3
@@ -69,13 +69,20 @@ def oralytics_act_prob_function(
         .set(utvar_inv_terms)
     )
     var_inv = utvar_inv + utvar_inv.T - jnp.diag(jnp.diag(utvar_inv))
-    var = jnp.linalg.inv(var_inv)
 
     mu_adv = mu[-n_params:]
-    var_adv = var[-n_params:, -n_params:]
-
     adv_beta_mean = advantage.T.dot(mu_adv)
-    adv_beta_var = advantage.T @ var_adv @ advantage
+
+    # OPTIMIZATION: Compute advantage.T @ var_adv @ advantage using solve
+    # Pad advantage with zeros for non-advantage dimensions
+    advantage_padded = jnp.zeros(TOTAL_FEATURE_DIM)
+    advantage_padded = advantage_padded.at[-n_params:].set(advantage)
+
+    # Solve var_inv @ x = advantage_padded to get x = var @ advantage_padded
+    x = jnp.linalg.solve(var_inv, advantage_padded)
+
+    # advantage_padded.T @ var @ advantage_padded = advantage_padded.T @ x
+    adv_beta_var = jnp.dot(advantage_padded, x)
 
     act_prob = allocation_function_monte_carlo(mean=adv_beta_mean, var=adv_beta_var)
 

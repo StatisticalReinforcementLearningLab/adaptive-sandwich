@@ -25,7 +25,7 @@ set -eu
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Parsing options.
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
-needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+      needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that affect RL study simulation side and then inference through
 # that.
@@ -48,6 +48,7 @@ lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
+monitor_bread_inverse_conditioning_and_intervene=0
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -78,7 +79,7 @@ stabilize_joint_adaptive_bread_inverse=0
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:m:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:m:N:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -86,48 +87,49 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
   fi
   case "$OPT" in
-    T  | max_time )                                     needs_arg; T="$OPTARG" ;;
-    t  | recruit_t )                                    needs_arg; recruit_t="$OPTARG" ;;
-    n  | num_users )                                    needs_arg; n="$OPTARG" ;;
-    u  | recruit_n )                                    needs_arg; recruit_n="$OPTARG" ;;
-    d  | decisions_between_updates )                    needs_arg; decisions_between_updates="$OPTARG" ;;
-    o  | update_cadence_offset )                        needs_arg; update_cadence_offset="$OPTARG" ;;
-    r  | RL_alg )                                       needs_arg; RL_alg="$OPTARG" ;;
-    e  | err_corr )                                     needs_arg; err_corr="$OPTARG" ;;
-    f  | alg_state_feats )                              needs_arg; alg_state_feats="$OPTARG" ;;
-    a  | action_centering_RL )                          needs_arg; action_centering_RL="$OPTARG" ;;
-    s  | steepness )                                    needs_arg; steepness="$OPTARG" ;;
-    y  | synthetic_mode )                               needs_arg; synthetic_mode="$OPTARG" ;;
-    Y  | min_update_time )                              needs_arg; min_update_time="$OPTARG" ;;
-    A  | uclip )                                        needs_arg; uclip="$OPTARG" ;;
-    G  | lclip )                                        needs_arg; lclip="$OPTARG" ;;
-    J  | lambda_ )                                      needs_arg; lambda_="$OPTARG" ;;
-    i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
-    c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
-    p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
-    C  | calendar_t_col_name )                          needs_arg; calendar_t_col_name="$OPTARG" ;;
-    U  | user_id_col_name )                             needs_arg; user_id_col_name="$OPTARG" ;;
-    E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
-    X  | reward_col_name )                              needs_arg; reward_col_name="$OPTARG" ;;
-    P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
-    b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
-    l  | alg_update_func_filename )                     needs_arg; alg_update_func_filename="$OPTARG" ;;
-    Z  | alg_update_func_type )                         needs_arg; alg_update_func_type="$OPTARG" ;;
-    B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
-    D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
-    j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
-    I  | inference_func_filename )                      needs_arg; inference_func_filename="$OPTARG" ;;
-    h  | inference_func_args_theta_index )              needs_arg; inference_func_args_theta_index="$OPTARG" ;;
-    g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
-    H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
-    F  | dynamic_seeds )                                needs_arg; dynamic_seeds="$OPTARG" ;;
-    L  | env_seed_override )                            needs_arg; env_seed_override="$OPTARG" ;;
-    M  | alg_seed_override )                            needs_arg; alg_seed_override="$OPTARG" ;;
-    Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
-    q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
-    z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
-    m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
+    T  | max_time )                                           needs_arg; T="$OPTARG" ;;
+    t  | recruit_t )                                          needs_arg; recruit_t="$OPTARG" ;;
+    n  | num_users )                                          needs_arg; n="$OPTARG" ;;
+    u  | recruit_n )                                          needs_arg; recruit_n="$OPTARG" ;;
+    d  | decisions_between_updates )                          needs_arg; decisions_between_updates="$OPTARG" ;;
+    o  | update_cadence_offset )                              needs_arg; update_cadence_offset="$OPTARG" ;;
+    r  | RL_alg )                                             needs_arg; RL_alg="$OPTARG" ;;
+    e  | err_corr )                                           needs_arg; err_corr="$OPTARG" ;;
+    f  | alg_state_feats )                                    needs_arg; alg_state_feats="$OPTARG" ;;
+    a  | action_centering_RL )                                needs_arg; action_centering_RL="$OPTARG" ;;
+    s  | steepness )                                          needs_arg; steepness="$OPTARG" ;;
+    y  | synthetic_mode )                                     needs_arg; synthetic_mode="$OPTARG" ;;
+    Y  | min_update_time )                                    needs_arg; min_update_time="$OPTARG" ;;
+    A  | uclip )                                              needs_arg; uclip="$OPTARG" ;;
+    G  | lclip )                                              needs_arg; lclip="$OPTARG" ;;
+    J  | lambda_ )                                            needs_arg; lambda_="$OPTARG" ;;
+    i  | in_study_col_name )                                  needs_arg; in_study_col_name="$OPTARG" ;;
+    c  | action_col_name )                                    needs_arg; action_col_name="$OPTARG" ;;
+    p  | policy_num_col_name )                                needs_arg; policy_num_col_name="$OPTARG" ;;
+    C  | calendar_t_col_name )                                needs_arg; calendar_t_col_name="$OPTARG" ;;
+    U  | user_id_col_name )                                   needs_arg; user_id_col_name="$OPTARG" ;;
+    E  | action_prob_col_name )                               needs_arg; action_prob_col_name="$OPTARG" ;;
+    X  | reward_col_name )                                    needs_arg; reward_col_name="$OPTARG" ;;
+    P  | action_prob_func_filename )                          needs_arg; action_prob_func_filename="$OPTARG" ;;
+    b  | action_prob_func_args_beta_index )                   needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
+    l  | alg_update_func_filename )                           needs_arg; alg_update_func_filename="$OPTARG" ;;
+    Z  | alg_update_func_type )                               needs_arg; alg_update_func_type="$OPTARG" ;;
+    B  | alg_update_func_args_beta_index )                    needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
+    D  | alg_update_func_args_action_prob_index )             needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
+    j  | alg_update_func_args_action_prob_times_index )       needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
+    I  | inference_func_filename )                            needs_arg; inference_func_filename="$OPTARG" ;;
+    h  | inference_func_args_theta_index )                    needs_arg; inference_func_args_theta_index="$OPTARG" ;;
+    g  | inference_func_type )                                needs_arg; inference_func_type="$OPTARG" ;;
+    H  | theta_calculation_func_filename )                    needs_arg; theta_calculation_func_filename="$OPTARG" ;;
+    F  | dynamic_seeds )                                      needs_arg; dynamic_seeds="$OPTARG" ;;
+    L  | env_seed_override )                                  needs_arg; env_seed_override="$OPTARG" ;;
+    M  | alg_seed_override )                                  needs_arg; alg_seed_override="$OPTARG" ;;
+    Q  | suppress_interactive_data_checks )                   needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
+    q  | suppress_all_data_checks )                           needs_arg; suppress_all_data_checks="$OPTARG" ;;
+    z  | small_sample_correction )                            needs_arg; small_sample_correction="$OPTARG" ;;
+    k  | collect_data_for_blowup_supervised_learning )        needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
+    m  | stabilize_joint_adaptive_bread_inverse )             needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
+    N  | monitor_bread_inverse_conditioning_and_intervene )   needs_arg; monitor_bread_inverse_conditioning_and_intervene="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -201,7 +203,8 @@ python rl_study_simulation.py \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
-  --lambda_=$lambda_
+  --lambda_=$lambda_ \
+  --monitor_bread_inverse_conditioning_and_intervene=$monitor_bread_inverse_conditioning_and_intervene
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
@@ -211,7 +214,7 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Beginning after-study analysis.
-python after_study_analysis.py analyze-dataset \
+python after_study_analysis.py analyze-dataset-wrapper \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \

@@ -336,7 +336,9 @@ def execute_decision_time(
         (data_df["policy_idx"] < policy_idx) & (data_df["in_study"] == 1)
     ]["user_idx"].nunique()
     if not ignore_variance_for_rl_parameter_definition:
-        # This is the normal, "correct" behavior.  The other option
+        # This is the normal, "correct" behavior.  The other option pretends that only
+        # the posterior mean constitutes the RL parameters, and the variance elements are just
+        # covariates.
         action_prob_function_args[calendar_decision_time][user_idx] = (
             form_beta_from_posterior(
                 algorithm.posterior_mean,

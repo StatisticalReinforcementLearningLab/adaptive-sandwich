@@ -11,8 +11,9 @@ import pandas as pd
 import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env_params, SyntheticEnv
-from basic_RL_algorithms import FixedRandomization, SigmoidLS, SmoothPosteriorSampling
+from basic_RL_algorithms import SigmoidLS, SmoothPosteriorSampling
 from constants import RLStudyArgs
+from trial_conditioning_monitor import TrialConditioningMonitor
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -41,19 +42,20 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
     max_calendar_t = study_df["calendar_t"].max()
 
+    # Initialize Trial Conditioning Monitor if desired ##########################
+    trial_conditioning_monitor = None
+    alternative_lambda_index = 0
+    if args.monitor_bread_inverse_conditioning_and_intervene:
+        trial_conditioning_monitor = TrialConditioningMonitor()
+
     # Loop over all decision times ###############################################
     logger.info("Maximum decision time: %s.", max_calendar_t)
     for t in range(1, max_calendar_t + 1):
         logger.info("Processing decision time %s.", t)
 
         curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1)
-
         # Update study_df with info on latest policy used to select actions
-        study_df.loc[curr_time_bool, "policy_num"] = (
-            1
-            if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION
-            else len(study_RLalg.all_policies)
-        )
+        study_df.loc[curr_time_bool, "policy_num"] = len(study_RLalg.all_policies)
 
         curr_timestep_data = study_df[curr_time_bool]
 
@@ -112,7 +114,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         if (
             t < study_env.calendar_T
             and t % args.decisions_between_updates == args.update_cadence_offset
-            and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
             and t >= args.min_update_time
         ):
             last_policy_num = len(study_RLalg.all_policies) - 1
@@ -140,6 +141,67 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             # rest of the data already produced, whereas for the pis the beta
             # is used to produce the probability at that decision time.
             study_RLalg.collect_rl_update_args(all_prev_data, t)
+
+            if trial_conditioning_monitor:
+                alternative_lambdas_to_try = [
+                    0.1,
+                    1,
+                    5,
+                    10,
+                    50,
+                    100,
+                    500,
+                    1000,
+                    2000,
+                    10000,
+                ]
+
+                while trial_conditioning_monitor.assess_update(
+                    len(study_RLalg.all_policies),
+                    all_prev_data,
+                    study_RLalg.action_prob_func,
+                    study_RLalg.pi_args,
+                    study_RLalg.action_prob_func_args_beta_index,
+                    study_RLalg.alg_update_func,
+                    study_RLalg.alg_update_func_type,
+                    study_RLalg.rl_update_args,
+                    study_RLalg.alg_update_func_args_beta_index,
+                    study_RLalg.alg_update_func_args_action_prob_index,
+                    study_RLalg.alg_update_func_args_action_prob_times_index,
+                    "in_study",
+                    "action",
+                    "policy_num",
+                    "calendar_t",
+                    "user_id",
+                    "action1prob",
+                    True,
+                    False,
+                )["update_rejected"]:
+                    logger.info(
+                        "Intervening to improve bread inverse conditioning by trying new lambda: %s.",
+                        alternative_lambdas_to_try[alternative_lambda_index],
+                    )
+
+                    # Undo previous update
+                    study_RLalg.all_policies.pop()
+
+                    # Try again with new lambda
+                    study_RLalg.lambda_ = alternative_lambdas_to_try[
+                        alternative_lambda_index
+                    ]
+                    study_RLalg.update_alg(update_data)
+
+                    # Overwrite the update function args recorded previously
+                    study_RLalg.collect_rl_update_args(all_prev_data, t)
+
+                    if alternative_lambda_index < len(alternative_lambdas_to_try) - 1:
+                        alternative_lambda_index += 1
+                    else:
+                        logger.info(
+                            "No more alternative lambdas to try. Simply proceeding with the last one."
+                        )
+                        break
+
     return study_df, study_RLalg
 
 
@@ -257,11 +319,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             raise ValueError("Invalid Dataset Type")
 
         # Initialize RL algorithm ###################################################
-        if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION:
-            study_RLalg = FixedRandomization(
-                args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed
-            )
-        elif args.RL_alg == RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP:
+        if args.RL_alg == RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP:
             study_RLalg = SigmoidLS(
                 state_feats=alg_state_feats,
                 treat_feats=alg_treat_feats,
@@ -373,7 +431,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         args.N,
         time.perf_counter() - toc2,
     )
-    print(f"All simulations ran in {time.perf_counter() - tic:0.4f} seconds")
+    logger.info("All simulations ran in %.4f seconds", time.perf_counter() - tic)
 
     if args.profile:
         pr.disable()
@@ -412,12 +470,11 @@ def main():
         "--RL_alg",
         default=RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
         choices=[
-            RLStudyArgs.FIXED_RANDOMIZATION,
             RLStudyArgs.SIGMOID_LS_HARD_CLIP,
             RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
             RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING,
         ],
-        help="RL algorithm used to select actions",
+        help="RL algorithm used to select actions. Note that fixed randomization can be achieved with any algorithm by making the upper and lower clip equal. Setting steepness to 0 will also achieve a certain fixed action probability.",
     )
     parser.add_argument(
         "--N", type=int, default=10, help="Number of Monte Carlo repetitions"
@@ -446,12 +503,6 @@ def main():
         type=float,
         default=1,
         help="L2 Regularization for sigmoid LS algorithm linear regression updates",
-    )
-    parser.add_argument(
-        "--fixed_action_prob",
-        type=float,
-        default=0.5,
-        help="Used if not using learning alg to select actions",
     )
     parser.add_argument(
         "--err_corr",
@@ -580,9 +631,15 @@ def main():
         help="Number of updates between recruitment times (minimum 1)",
     )
 
+    parser.add_argument(
+        "--monitor_bread_inverse_conditioning_and_intervene",
+        type=int,
+        default=0,
+        help="Whether to monitor bread inverse conditioning and intervene if necessary. This is to facilitate after-study analysis.",
+    )
+
     args = parser.parse_args()
-    print("Args provided to RL_Study_Simulation.py:")
-    print(args)
+    logger.info("Args provided to rl_study_simulation.py:\n%s", args)
 
     assert args.T >= args.decisions_between_updates
 

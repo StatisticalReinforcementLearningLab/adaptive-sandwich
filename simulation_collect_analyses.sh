@@ -50,29 +50,29 @@ fi
 
 # Load Python 3.10, among other things
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Loading mamba module.
-module load Mambaforge/22.11.1-fasrc01
+# module load Mambaforge/22.11.1-fasrc01
 
 # Make virtualenv if necessary, and then activate it
-cd ~
-if ! test -d venv; then
-  echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Creating venv, as it did not exist.
-  python3 -m venv venv
-fi
-source venv/bin/activate
+# cd ~
+# if ! test -d venv; then
+#   echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Creating venv, as it did not exist.
+#   python3 -m venv venv
+# fi
+# source venv/bin/activate
 
 # Now install all Python requirements.  This is incremental, so it's ok to do every time.
-cd ~/adaptive-sandwich
+cd ~/2Longitudinal/adaptive-sandwich
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Making sure Python requirements are installed.
-pip install -r requirements.txt
+# pip install -r requirements.txt
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requirements installed.
 
 # Loop through each dataset created in the referenced simulation and do
 # after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
 if [ -z "$index_to_check_ci_coverage" ]; then
-  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}"
+  python after_study_analysis_partial.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}"
 else
-  python after_study_analysis.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
+  python after_study_analysis_partial.py collect-existing-analyses --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
 fi
 
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.

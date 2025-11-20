@@ -12,3 +12,6 @@ def estimate_theta_avg_reward_sum(study_df):
     return np.array(
         [study_df.loc[in_study_bool].reward.sum() / num_decision_times / num_users]
     )
+
+
+

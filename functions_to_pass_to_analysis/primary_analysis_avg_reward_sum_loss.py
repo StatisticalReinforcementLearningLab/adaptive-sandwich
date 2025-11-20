@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 
+# 
 
 def primary_analysis_avg_reward_sum_loss(
     theta_est,
@@ -14,3 +15,4 @@ def primary_analysis_avg_reward_sum_loss(
     num_decision_times = jnp.unique(calendar_t).size
 
     return 0.5 * (jnp.sum(reward) / num_users / num_decision_times - theta_est[0]) ** 2
+

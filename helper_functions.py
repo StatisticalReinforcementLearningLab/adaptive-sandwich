@@ -100,7 +100,9 @@ def invert_matrix_and_check_conditioning(
                         lambd,
                     )
     if inverse is None:
-        inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
+        inverse = np.linalg.inv(matrix + 1e-6 * np.eye(matrix.shape[0])) # if the code below has error
+        # inverse = np.linalg.solve(matrix, np.eye(matrix.shape[0]))
+
     return inverse, condition_number
 
 

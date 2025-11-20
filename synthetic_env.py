@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-
 def get_entry_last_times(args):
     """Compute entry / last decision times compared to calendar for each user"""
 
@@ -37,7 +36,7 @@ def get_entry_last_times(args):
     return entry_times, last_times, in_study_indicators
 
 
-def make_base_study_df(args, all_cols=None):
+def make_base_study_df(args, rng_seed=None, all_cols=None):
     """Create the pandas dataframe that will hold the study results"""
 
     # This avoids the classic Python gotcha involving mutable default args
@@ -70,6 +69,14 @@ def make_base_study_df(args, all_cols=None):
     study_df["entry_t"] = np.repeat(entry_times, max_calendar_t)
 
     study_df = study_df.reset_index().drop(columns="index")
+
+    ### pre-treatment features for partial linear regression: pretreat_features1, pretreat_features2
+    indices = np.arange(2)
+    cov_matrix = 0.5 ** (np.abs(indices[:, None] - indices[None, :]))  # [2,2]
+    mean = np.zeros(2)
+    pre_treat_features = rng_seed.multivariate_normal(mean=mean, cov=cov_matrix, size=args.n)
+    study_df['pretreat_feature1'] = np.repeat(pre_treat_features[:,0], max_calendar_t) # [1, 2, 3] -> [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    study_df['pretreat_feature2'] = np.repeat(pre_treat_features[:,1], max_calendar_t)
     return study_df
 
 
@@ -164,13 +171,13 @@ class SyntheticEnv:
         new_dosage = new_dosage.reshape(-1, 1)
 
         # Make state features for next decision time
-        gen_feats_action_names = [
+        gen_feats_action_names = [ # past_action_1
             x
-            for x in self.gen_feats
+            for x in self.gen_feats #['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage']
             if "reward" not in x and "dosage" not in x and "action" in x
         ]
         # slice gets rid of intercept
-        get_past_actions_names = gen_feats_action_names[1:] + ["action"]
+        get_past_actions_names = gen_feats_action_names[1:] + ["action"] # ['action]
         past_actions = study_df[cont_user_current_bool][
             get_past_actions_names
         ].to_numpy()
@@ -185,7 +192,7 @@ class SyntheticEnv:
             gen_feats_action_names
             + ["dosage", "past_reward"]
             + gen_feats_reward_action_names
-        )
+        ) #  ['past_action_1', 'dosage', 'past_reward', 'past_action_1_reward']
 
         study_df.loc[cont_user_next_bool, state_names] = state_vals
 
@@ -202,7 +209,7 @@ class SyntheticEnv:
             params = self.env_params[t - 1]
         else:
             params = self.env_params
-
+        # 0,0,0,0,0,0,0,0,0,1 * [['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'], ['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'] * action] = k1 * A1 * dosage
         reward_means = np.matmul(gen_covariates, params)
         rewards = (
             reward_means
@@ -210,6 +217,27 @@ class SyntheticEnv:
         )
 
         return rewards
+
+    def sample_rewards_prefeatures(self, curr_timestep_data, actions, t, alpha1, alpha2):
+        """Generate "random" rewards from saved noise"""
+        main_covariates = curr_timestep_data[self.gen_feats]
+        TE_covariates = main_covariates.to_numpy() * actions.reshape(-1, 1)
+        gen_covariates = np.hstack([main_covariates, TE_covariates])
+
+        if len(self.env_params.shape) == 2:
+            params = self.env_params[t - 1]
+        else:
+            params = self.env_params
+        # 0,0,0,0,0,0,0,0,0,1 * [['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'], ['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'] * action] = k1 * A1 * dosage
+        reward_means = np.matmul(gen_covariates, params)
+        rewards = (
+            reward_means
+            + alpha1 * curr_timestep_data['pretreat_feature1'].to_numpy()
+            + alpha2 * curr_timestep_data['pretreat_feature2'].to_numpy()
+            + self.reward_noise[curr_timestep_data["in_study_row_index"].to_numpy()]
+        )
+        return rewards
+
 
     def make_empty_study_df(self, args, user_df):
         base_cols = [
@@ -224,7 +252,7 @@ class SyntheticEnv:
             "reward",
         ]
         study_df = make_base_study_df(
-            args, all_cols=base_cols + [x for x in self.gen_feats if x not in base_cols]
+            args, self.rng,all_cols=base_cols + [x for x in self.gen_feats if x not in base_cols]
         )
         _, last_times, _ = get_entry_last_times(args)
         self.calendar_T = max(last_times)

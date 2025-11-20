@@ -37,8 +37,8 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
     logger.info("Beginning single simulation, in Python code.")
     # study_df is a data frame with a record of all data collected in study
-    study_df = study_env.make_empty_study_df(args, user_env_data)
-
+    study_df = study_env.make_empty_study_df(args, user_env_data) # need to be changed for the partial linear regression
+    study_df['Z_id'] = 1 # for average rewards, set all Z_id to 1
     max_calendar_t = study_df["calendar_t"].max()
 
     # Loop over all decision times ###############################################
@@ -46,20 +46,43 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     for t in range(1, max_calendar_t + 1):
         logger.info("Processing decision time %s.", t)
 
-        curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1)
+        curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1) # find all available users at time t
 
+        """
+              user_id  policy_num  last_t  entry_t  calendar_t  action1prob  intercept  action    reward  past_action_1  past_reward  past_action_1_reward  dosage  in_study  in_study_row_index
+        0         1         1.0       5        1           1     0.504119          1     0.0 -1.722441            0.0     0.408789                   0.0     0.0         1                   0
+        1         1         NaN       5        1           2          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   1
+        2         1         NaN       5        1           3          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   2
+        3         1         NaN       5        1           4          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   3
+        4         1         NaN       5        1           5          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   4
+        5         2         1.0       5        1           1     0.504119          1     1.0  2.372049            0.0    -0.769350                   0.0     0.0         1                   5
+        6         2         NaN       5        1           2          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   6
+        7         2         NaN       5        1           3          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   7
+        8         2         NaN       5        1           4          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   8
+        9         2         NaN       5        1           5          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                   9
+        10        3         1.0       5        1           1     0.504119          1     0.0 -0.549367            0.0    -0.027180                   0.0     0.0         1                  10
+        11        3         NaN       5        1           2          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                  11
+        12        3         NaN       5        1           3          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                  12
+        13        3         NaN       5        1           4          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                  13
+        14        3         NaN       5        1           5          NaN          1     NaN       NaN            NaN          NaN                   NaN     NaN         1                  14
+        """
         # Update study_df with info on latest policy used to select actions
         study_df.loc[curr_time_bool, "policy_num"] = (
             1
             if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION
-            else len(study_RLalg.all_policies)
+            else len(study_RLalg.all_policies) # study_RLalg.all_policies: {'beta_est': Array([0.e+00, 0.e+00, 1.e-06, 0.e+00, 1.e-06], dtype=float32), 'inc_data': {}, 'num_users_entered_before_last_update': 0}
         )
 
         curr_timestep_data = study_df[curr_time_bool]
-
+        """
+           user_id  policy_num  last_t  entry_t  calendar_t  action1prob  intercept  action  reward  past_action_1  past_reward  past_action_1_reward  dosage  in_study  in_study_row_index
+    0         1         1.0       5        1           1          NaN          1     NaN     NaN            0.0     0.408789                   0.0     0.0         1                   0
+    5         2         1.0       5        1           1          NaN          1     NaN     NaN            0.0    -0.769350                   0.0     0.0         1                   5
+    10        3         1.0       5        1           1          NaN          1     NaN     NaN            0.0    -0.027180                   0.0     0.0         1                  10
+        """
         # Sample Actions #####################################################
         logger.info("Sampling actions for time %s.", t)
-        action_probs = study_RLalg.get_action_probs(curr_timestep_data)
+        action_probs = study_RLalg.get_action_probs(curr_timestep_data) # initial state: treat_state
 
         actions = study_RLalg.rng.binomial(1, action_probs)
 
@@ -70,7 +93,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                 curr_timestep_data, actions, t
             )
         else:
-            rewards = study_env.sample_rewards(curr_timestep_data, actions, t)
+            rewards = study_env.sample_rewards(curr_timestep_data, actions, t)  # from the environment
 
         # Record all collected data #######################################
         if args.dataset_type == RLStudyArgs.ORALYTICS:
@@ -133,7 +156,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                 # Otherwise use all data so far
                 update_data = all_prev_data
 
-            study_RLalg.update_alg(update_data)
+            study_RLalg.update_alg(update_data) ######### important 
 
             # NOTE: Very important that this is called AFTER the above update.
             # It is a little confusing that the beta here is the beta that the
@@ -148,6 +171,12 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     # Load Data and Models ########################################
     ###############################################################
 
+    """
+    gen_feats = ['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage']
+    alg_state_feats = ['intercept', 'past_reward']
+    alg_treat_feats = ['intercept', 'past_reward']
+    """
+
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
@@ -157,7 +186,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
 
     logging.info("Loading environment...")
     if args.dataset_type == RLStudyArgs.SYNTHETIC:
-        mode = args.synthetic_mode
+        mode = args.synthetic_mode # environmental mode, e.g., "delayed_1_action_dosage"
         user_env_data = None
         paramf_path = f"./synthetic_env_params/{mode}.txt"
         env_params = load_synthetic_env_params(paramf_path)
@@ -199,6 +228,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     if not os.path.isdir(all_folder_path):
         os.mkdir(all_folder_path)
 
+    # path: ./simulated_data/SYNTHETIC_mode=delayed_1_action_dosage_alg=SMOOTH_POSTERIOR_SAMPLING_T=50_n=100_recruitN=100_decisionsBtwnUpdates=1_algfeats=intercept_errcorr=time_corr_actionC=0
     logger.info("Dumping arguments to json file...")
     with open(os.path.join(all_folder_path, "args.json"), "w", encoding="utf-8") as f:
         json.dump(vars(args), f)
@@ -222,12 +252,12 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # fixed seeds should be used. Dynamic seeds are also never really useful
         # in large simulations anyway.
         time_bump = 0 if not args.dynamic_seeds else int(time.time())
-        env_seed = (
+        env_seed = ( # 5000
             time_bump + args.parallel_task_index * i * 5000 + 1
             if (args.env_seed_override is None or args.env_seed_override < 0)
             else args.env_seed_override
         )
-        alg_seed = (
+        alg_seed = ( # 10000
             time_bump + args.parallel_task_index * (args.N + i) * 5000
             if (args.alg_seed_override is None or args.alg_seed_override < 0)
             else args.alg_seed_override
@@ -241,7 +271,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             )
         toc1 = toc2
 
-        # Initialize study environment ############################################
+        ############################################################ Step 1: Initialize study environment ############################################
         if args.dataset_type == RLStudyArgs.SYNTHETIC:
             study_env = SyntheticEnv(
                 args,
@@ -253,7 +283,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         else:
             raise ValueError("Invalid Dataset Type")
 
-        # Initialize RL algorithm ###################################################
+        ########################################################### Step 2: Initialize RL algorithm ###################################################
         if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION:
             study_RLalg = FixedRandomization(
                 args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed
@@ -301,16 +331,17 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 prior_mu=prior_mean,
                 prior_sigma=prior_var,
                 noise_var=args.noise_var,
+                twoarmed=False,
             )
         else:
             raise ValueError("Invalid RL Algorithm Type")
 
-        # Run Study Simulation #######################################################
+        ############################################################ Step 3: Run Study Simulation #######################################################
         study_df, study_RLalg = run_study_simulation(
             args, study_env, study_RLalg, user_env_data
         )
 
-        # Save Data #################################################################
+        ############################################################ Step 4: Save Data #################################################################
         logging.info("Saving data...")
 
         folder_path = os.path.join(all_folder_path, f"exp={i}")
@@ -322,9 +353,11 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         with open(f"{folder_path}/study_df.pkl", "wb") as f:
             pickle.dump(study_df, f)
 
+        # save all information of RL's algorithm
         with open(f"{folder_path}/study_RLalg.pkl", "wb") as f:
             pickle.dump(study_RLalg, f)
 
+        # save the policy's parameters
         with open(f"{folder_path}/pi_args.pkl", "wb") as f:
             pickle.dump(study_RLalg.pi_args, f)
 
@@ -393,7 +426,7 @@ def main():
     )
     parser.add_argument(
         "--RL_alg",
-        default=RLStudyArgs.SIGMOID_LS,
+        default=RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING,
         choices=[
             RLStudyArgs.FIXED_RANDOMIZATION,
             RLStudyArgs.SIGMOID_LS,
@@ -402,7 +435,7 @@ def main():
         help="RL algorithm used to select actions",
     )
     parser.add_argument(
-        "--N", type=int, default=10, help="Number of Monte Carlo repetitions"
+        "--N", type=int, default=1, help="Number of Monte Carlo repetitions"
     )
     parser.add_argument(
         "--parallel_task_index",
@@ -410,7 +443,7 @@ def main():
         default=1,
         help="Identifier of task in parallel setting, needed to set different seeds",
     )
-    parser.add_argument("--n", type=int, default=90, help="Total number of users")
+    parser.add_argument("--n", type=int, default=3, help="Total number of users")
     parser.add_argument(
         "--upper_clip",
         type=float,
@@ -451,12 +484,13 @@ def main():
         "--save_dir", type=str, default=".", help="Directory to save all results in"
     )
     parser.add_argument(
-        "--steepness", type=float, default=10, help="Allocation steepness"
+        "--steepness", type=float, default=5.0, help="Allocation steepness"
     )
     parser.add_argument(
         "--alg_state_feats",
         type=str,
-        default=RLStudyArgs.INTERCEPT,
+        # default=RLStudyArgs.INTERCEPT,
+        default="intercept,past_reward",
         help="Comma-separated list of algorithm state features",
     )
     parser.add_argument(
@@ -516,14 +550,14 @@ def main():
         raise NotImplementedError()
     elif tmp_args.dataset_type == RLStudyArgs.SYNTHETIC:
         default_arg_dict = {
-            RLStudyArgs.T: 2,
+            RLStudyArgs.T: 5,
             RLStudyArgs.RECRUIT_N: tmp_args.n,
             RLStudyArgs.RECRUIT_T: 1,
         }
 
         # Algorithm state features
-        alg_state_feats = tmp_args.alg_state_feats.split(",")
-        alg_treat_feats = alg_state_feats
+        alg_state_feats = tmp_args.alg_state_feats.split(",") # ['intercept', 'past_reward'] 
+        alg_treat_feats = alg_state_feats # ['intercept', 'past_reward'] 
 
         # Generation features
         past_action_len = 1
@@ -533,7 +567,7 @@ def main():
         past_reward_action_cols = ["past_reward"] + [
             f"past_action_{i}_reward" for i in range(1, past_action_len + 1)
         ]
-        gen_feats = past_action_cols + past_reward_action_cols + ["dosage"]
+        gen_feats = past_action_cols + past_reward_action_cols + ["dosage"] # ['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage']
     else:
         raise ValueError("Invalid Dataset Type")
 
@@ -556,11 +590,23 @@ def main():
         help="Number of updates between recruitment times (minimum 1)",
     )
 
+    #### two-armed trails
+    # parser.add_argument(
+    #     "--Z_id",
+    #     type=int,
+    #     default=1,
+    #     help="1: pooling algorithm, 0: MRT with 0.5 probability",
+    # )
+
+
     args = parser.parse_args()
     print("Args provided to RL_Study_Simulation.py:")
     print(args)
 
     assert args.T >= args.decisions_between_updates
+
+
+
 
     load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_feats)
 

@@ -46,6 +46,9 @@ def perform_first_wave_input_checks(
     small_sample_correction,
 ):
     ### Validate algorithm loss/estimating function and args
+    # print(study_df)
+    # print('alg_update_func_args.keys()',alg_update_func_args.keys()) # [2, 3, 4, ..., 50]
+
     require_alg_update_args_given_for_all_users_at_each_update(
         study_df, user_id_col_name, alg_update_func_args
     )
@@ -69,6 +72,7 @@ def perform_first_wave_input_checks(
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
     )
+    # for the control group, allow the same beta
     require_betas_match_in_alg_update_args_each_update(
         alg_update_func_args, alg_update_func_args_beta_index
     )
@@ -116,6 +120,8 @@ def perform_first_wave_input_checks(
     require_beta_is_1D_array_in_action_prob_args(
         action_prob_func_args, action_prob_func_args_beta_index
     )
+
+    # allow beta to be the same
     require_betas_match_in_action_prob_func_args_each_decision(
         action_prob_func_args, action_prob_func_args_beta_index
     )
@@ -178,7 +184,11 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
     suppress_interactive_data_checks,
 ):
     logger.info("Reconstructing action probabilities from function and arguments.")
+    
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
+
+    # print(type(action_prob_func_args))
+    # print("action_prob_func_args", action_prob_func_args.keys()) # dict_keys([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50])
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
     reconstructed_action_probs = in_study_df.apply(
@@ -227,7 +237,11 @@ def require_alg_update_args_given_for_all_users_at_each_update(
         "Checking that algorithm update function args are given for all users at each update."
     )
     all_user_ids = set(study_df[user_id_col_name].unique())
+    # print('all_user_ids', all_user_ids) # [1, 200]
+    # print(alg_update_func_args[0], set(alg_update_func_args[0].keys()))
     for policy_num in alg_update_func_args:
+        # print('policy_num', policy_num)
+        # print('alg_update_func_args[policy_num].keys()', alg_update_func_args[policy_num].keys())
         assert (
             set(alg_update_func_args[policy_num].keys()) == all_user_ids
         ), f"Not all users present in algorithm update function args for policy number {policy_num}. Please see the contract for details."
@@ -688,6 +702,7 @@ def require_betas_match_in_alg_update_args_each_update(
         "Checking that betas match across users for each update in the algorithm update function args."
     )
     for policy_num in alg_update_func_args:
+        # print('policy_num', policy_num, "alg_update_func_args_beta_index", alg_update_func_args_beta_index)
         first_beta = None
         for user_id in alg_update_func_args[policy_num]:
             if not alg_update_func_args[policy_num][user_id]:
@@ -695,6 +710,8 @@ def require_betas_match_in_alg_update_args_each_update(
             beta = alg_update_func_args[policy_num][user_id][
                 alg_update_func_args_beta_index
             ]
+            # print('user_id', user_id, 'beta', beta)
+
             if first_beta is None:
                 first_beta = beta
             else:

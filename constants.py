@@ -24,6 +24,7 @@ class RLStudyArgs:
     FIXED_RANDOMIZATION = "fixed_randomization"
     SIGMOID_LS = "sigmoid_LS"
     SMOOTH_POSTERIOR_SAMPLING = "smooth_posterior_sampling"
+    SOFT_ACTOR_CRITIC = "sac"
 
     # Noise error correlation
     TIME_CORR = "time_corr"

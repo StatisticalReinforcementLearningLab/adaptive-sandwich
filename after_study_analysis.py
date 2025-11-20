@@ -118,10 +118,11 @@ def cli():
     default=-1000,
     help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of algorithm update func args, if applicable.",
 )
-@click.option(
+@click.option( ######## important
     "--inference_func_filename",
     type=click.Path(exists=True),
     help="File that contains the per-user loss/estimating function used to determine the inference estimate and relevant imports.  The filename without its extension will be assumed to match the function name.",
+    default="functions_to_pass_to_analysis/partial_linear_regression.py", # for testing!
     required=True,
 )
 @click.option(
@@ -136,7 +137,7 @@ def cli():
     required=True,
     help="Index of the algorithm parameter vector beta in the tuple of inference loss/estimating func args.",
 )
-@click.option(
+@click.option( ######## important
     "--theta_calculation_func_filename",
     type=click.Path(exists=True),
     help="Path to file that allows one to actually calculate a theta estimate given the study dataframe only. One must supply either this or a precomputed theta estimate. The filename without its extension will be assumed to match the function name.",
@@ -296,11 +297,14 @@ def analyze_dataset(
         level=logging.INFO,
     )
 
+    ############################ Step 1: read the online collected dataset
     study_df = pickle.load(study_df_pickle)
     action_prob_func_args = pickle.load(action_prob_func_args_pickle)
     alg_update_func_args = pickle.load(alg_update_func_args_pickle)
 
-    theta_est = jnp.array(estimate_theta(study_df, theta_calculation_func_filename))
+    # mean estimate
+    theta_est = jnp.array(estimate_theta(study_df, theta_calculation_func_filename)) # theta_calculation_func(study_df), estimate_theta_avg_reward_sum -> mean of rewards
+
 
     beta_dim = calculate_beta_dim(
         action_prob_func_args, action_prob_func_args_beta_index
@@ -350,12 +354,13 @@ def analyze_dataset(
         )
     )
 
+    ############################ Step 2: process the inference data
     (
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = process_inference_func_args(
-        inference_func_filename,
+        inference_func_filename, # primary_analysis_avg_reward_sum_loss
         inference_func_args_theta_index,
         study_df,
         theta_est,
@@ -368,6 +373,9 @@ def analyze_dataset(
     # Use a per-user weighted estimating function stacking functino to derive classical and joint
     # adaptive meat and inverse bread matrices.  This is facilitated because the *value* of the
     # weighted and unweighted stacks are the same, as the weights evaluate to 1 pre-differentiation.
+    
+    
+    ############################ Step 3: conduct the inference
     logger.info(
         "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
     )
@@ -415,6 +423,8 @@ def analyze_dataset(
             suppress_interactive_data_checks,
         )
 
+    
+    ############################ Step 4: evaluate the standard and adaptive/joint variance estimates
     logger.info("Forming classical sandwich variance estimate...")
     classical_bread_matrix = invert_matrix_and_check_conditioning(
         classical_bread_inverse_matrix
@@ -457,6 +467,7 @@ def analyze_dataset(
     # This bottom right corner of the joint variance matrix is the portion
     # corresponding to just theta.  This distinguishes this matrix from the
     # *joint* adaptive variance matrix above, which covers both beta and theta.
+    ############### select from the joint variance matrix
     adaptive_sandwich_var_estimate = joint_adaptive_var_estimate[
         -theta_dim:, -theta_dim:
     ]
@@ -469,6 +480,7 @@ def analyze_dataset(
     logger.info("Writing results to file...")
     # Write analysis results to same directory that input files are in
     folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
+    print(f"Writing results to folder {folder_path}")
     with open(f"{folder_path}/analysis.pkl", "wb") as f:
         pickle.dump(
             {
@@ -479,32 +491,32 @@ def analyze_dataset(
             f,
         )
 
-    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
-        pickle.dump(
-            {
-                "theta_est": theta_est,
-                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-                "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
-                "joint_bread_matrix": joint_adaptive_bread_matrix,
-                "joint_meat_matrix": joint_adaptive_meat_matrix,
-                "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
-                "classical_bread_matrix": classical_bread_matrix,
-                "classical_meat_matrix": classical_meat_matrix,
-                "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
-                "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
-                "joint_bread_inverse_first_block_eigvals": jnp.linalg.eigvals(
-                    joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
-                ),
-                "joint_bread_inverse_first_block_condition_number": jnp.linalg.cond(
-                    joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
-                ).item(),
-                "all_post_update_betas": all_post_update_betas,
-                "identity_diff_abs_max": identity_diff_abs_max,
-                "identity_diff_frobenius_norm": identity_diff_frobenius_norm,
-            },
-            f,
-        )
+    # with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+    #     pickle.dump(
+    #         {
+    #             "theta_est": theta_est,
+    #             "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+    #             "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+    #             "joint_bread_inverse_matrix": joint_adaptive_bread_inverse_matrix,
+    #             "joint_bread_matrix": joint_adaptive_bread_matrix,
+    #             "joint_meat_matrix": joint_adaptive_meat_matrix,
+    #             "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
+    #             "classical_bread_matrix": classical_bread_matrix,
+    #             "classical_meat_matrix": classical_meat_matrix,
+    #             "all_estimating_function_stacks": all_per_user_estimating_function_stacks,
+    #             "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
+    #             "joint_bread_inverse_first_block_eigvals": jnp.linalg.eigvals(
+    #                 joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
+    #             ),
+    #             "joint_bread_inverse_first_block_condition_number": jnp.linalg.cond(
+    #                 joint_adaptive_bread_inverse_matrix[:beta_dim, :beta_dim]
+    #             ).item(),
+    #             "all_post_update_betas": all_post_update_betas,
+    #             "identity_diff_abs_max": identity_diff_abs_max,
+    #             "identity_diff_frobenius_norm": identity_diff_frobenius_norm,
+    #         },
+    #         f,
+    #     )
 
     print(f"\nParameter estimate:\n {theta_est}")
     print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
@@ -663,15 +675,15 @@ def process_inference_func_args(
                 - a dictionary mapping user IDs to the decision times to which action probabilities correspond
     """
 
-    inference_func = load_function_from_same_named_file(inference_func_filename)
-    num_args = inference_func.__code__.co_argcount
-    inference_func_arg_names = inference_func.__code__.co_varnames[:num_args]
+    inference_func = load_function_from_same_named_file(inference_func_filename) # important
+    num_args = inference_func.__code__.co_argcount # the number of arguments the function takes
+    inference_func_arg_names = inference_func.__code__.co_varnames[:num_args] # the names of arguments the function takes:  theta_est, reward, calendar_t, user_id,
     inference_func_args_by_user_id = {}
 
     inference_func_args_action_prob_index = -1
     inference_action_prob_decision_times_by_user_id = {}
 
-    using_action_probs = action_prob_col_name in inference_func_arg_names
+    using_action_probs = action_prob_col_name in inference_func_arg_names # false
     if using_action_probs:
         inference_func_args_action_prob_index = inference_func_arg_names.index(
             action_prob_col_name
@@ -681,8 +693,8 @@ def process_inference_func_args(
         user_args_list = []
         filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
         for idx, col_name in enumerate(inference_func_arg_names):
-            if idx == inference_func_args_theta_index:
-                user_args_list.append(theta_est)
+            if idx == inference_func_args_theta_index: # 0
+                user_args_list.append(theta_est) # here we add theta_est in the processed inference data
                 continue
             user_args_list.append(
                 get_in_study_df_column(filtered_user_data, col_name, in_study_col_name)
@@ -696,9 +708,9 @@ def process_inference_func_args(
             )
 
     return (
-        inference_func_args_by_user_id,
-        inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_user_id,
+        inference_func_args_by_user_id, # dict: [user_id]: user_args_list
+        inference_func_args_action_prob_index, # -1
+        inference_action_prob_decision_times_by_user_id, # dict: [user_id]: 
     )
 
 
@@ -952,6 +964,8 @@ def single_user_weighted_estimating_function_stacker(
     # Just grab the original beta from the update function arguments. This is the same
     # value, but impervious to differentiation with respect to all_post_update_betas. The
     # args, on the other hand, are a function of all_post_update_betas.
+    
+    
     in_study_weights = jax.vmap(
         fun=get_radon_nikodym_weight,
         in_axes=[0, None, None, 0] + batch_axes,
@@ -1064,8 +1078,9 @@ def single_user_weighted_estimating_function_stacker(
     # matrix.
     return (
         weighted_stack,
-        jnp.outer(weighted_stack, weighted_stack),
+        jnp.outer(weighted_stack, weighted_stack), # [p,] * [p,] -> [p, p]
         jnp.outer(inference_component, inference_component),
+        # take the Jacobian of the inference component wrt theta on the index place
         jax.jacrev(inference_estimating_func, argnums=inference_func_args_theta_index)(
             *threaded_inference_func_args
         ),
@@ -1363,7 +1378,7 @@ def thread_inference_func_args(
     """
 
     threaded_inference_func_args_by_user_id = {}
-    for user_id, args in inference_func_args_by_user_id.items():
+    for user_id, args in inference_func_args_by_user_id.items(): # get all data from the study_df's columns and theta_est
         threaded_inference_func_args_by_user_id[user_id] = replace_tuple_index(
             args,
             inference_func_args_theta_index,
@@ -1527,8 +1542,9 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     # 1. Collect the necessary function objects
     action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
     alg_update_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_func = load_function_from_same_named_file(inference_func_filename)
+    inference_func = load_function_from_same_named_file(inference_func_filename)        # only need to change here
 
+    # define the gradient function
     algorithm_estimating_func = (
         jax.grad(alg_update_func, argnums=alg_update_func_args_beta_index)
         if (alg_update_func_type == FunctionTypes.LOSS)
@@ -1786,8 +1802,11 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
-    # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
-    # slow.
+
+    ##################### Step 1: Joint Jacobian computation on the bread and meat #####################
+    # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very slow.
+    
+    # jacobian, auxillary_values = jax.jacrev(f, has_aux=True)(x)
     joint_adaptive_bread_inverse_pieces, (
         avg_estimating_function_stack,
         joint_adaptive_meat,
@@ -1800,7 +1819,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         # While JAX can technically differentiate with respect to a list of JAX arrays,
         # it is more efficient to flatten them into a single array. This is done
         # here to improve performance. We can simply unflatten them inside the function.
-        flatten_params(all_post_update_betas, theta),
+        flatten_params(all_post_update_betas, theta), ############ a joint jacobian over the beta and theta
         all_post_update_betas.shape[1],
         theta.shape[0],
         user_ids,

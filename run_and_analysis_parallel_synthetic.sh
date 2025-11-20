@@ -174,6 +174,9 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Beginning RL simulations.
+
+
+
 python rl_study_simulation.py \
   --T=$T \
   --N=1 \

@@ -5,7 +5,7 @@ import pathlib
 import pickle
 import logging
 import math
-from typing import Any
+from typing import Any, Callable
 
 import click
 import jax
@@ -241,21 +241,72 @@ cli.add_command(collect_existing_analyses)
     default=True,
     help="If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning thresholds.",
 )
+def analyze_dataset_wrapper(**kwargs):
+    """
+    This function is a wrapper around analyze_dataset to facilitate command line use.
+
+    From the command line, we will take pickles and filenames for Python objects.
+    Unpickle/load files here for passing to the implementation function, which
+    may also be called in its own right with in-memory objects.
+
+    See analyze_dataset for the underlying details.
+
+    Returns: None
+    """
+
+    # Pass along the folder the study dataframe is in as the output folder.
+    # Do it now because we will be removing the study dataframe pickle from kwargs.
+    kwargs["output_dir"] = pathlib.Path(kwargs["study_df_pickle"].name).parent.resolve()
+
+    # Unpickle pickles and replace those args in kwargs
+    kwargs["study_df"] = pickle.load(kwargs["study_df_pickle"])
+    kwargs["action_prob_func_args"] = pickle.load(
+        kwargs["action_prob_func_args_pickle"]
+    )
+    kwargs["alg_update_func_args"] = pickle.load(kwargs["alg_update_func_args_pickle"])
+
+    kwargs.pop("study_df_pickle")
+    kwargs.pop("action_prob_func_args_pickle")
+    kwargs.pop("alg_update_func_args_pickle")
+
+    # Load functions from filenames and replace those args in kwargs
+    kwargs["action_prob_func"] = load_function_from_same_named_file(
+        kwargs["action_prob_func_filename"]
+    )
+    kwargs["alg_update_func"] = load_function_from_same_named_file(
+        kwargs["alg_update_func_filename"]
+    )
+    kwargs["inference_func"] = load_function_from_same_named_file(
+        kwargs["inference_func_filename"]
+    )
+    kwargs["theta_calculation_func"] = load_function_from_same_named_file(
+        kwargs["theta_calculation_func_filename"]
+    )
+
+    kwargs.pop("action_prob_func_filename")
+    kwargs.pop("alg_update_func_filename")
+    kwargs.pop("inference_func_filename")
+    kwargs.pop("theta_calculation_func_filename")
+
+    analyze_dataset(**kwargs)
+
+
 def analyze_dataset(
-    study_df_pickle: click.File,
-    action_prob_func_filename: str,
-    action_prob_func_args_pickle: click.File,
+    output_dir: pathlib.Path | str,
+    study_df: pd.DataFrame,
+    action_prob_func: Callable,
+    action_prob_func_args: dict[int, Any],
     action_prob_func_args_beta_index: int,
-    alg_update_func_filename: str,
+    alg_update_func: Callable,
     alg_update_func_type: str,
-    alg_update_func_args_pickle: click.File,
+    alg_update_func_args: dict[int, Any],
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
-    inference_func_filename: str,
+    inference_func: Callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
-    theta_calculation_func_filename: str,
+    theta_calculation_func: Callable[[pd.DataFrame], jnp.ndarray],
     in_study_col_name: str,
     action_col_name: str,
     policy_num_col_name: str,
@@ -271,37 +322,46 @@ def analyze_dataset(
     stabilize_joint_adaptive_bread_inverse: bool,
 ) -> None:
     """
-    Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
+    Analyzes a dataset to provide a parameter estimate and an estimate of its variance using adaptive and classical sandwich estimators.
+
+    There are two modes of use for this function.
+
+    First, it may be called indirectly from the command line by passing through
+    analyze_dataset.
+
+    Second, it may be called directly from Python code with in-memory objects.
 
     Parameters:
-    study_df_pickle (click.File):
-        Pickle file containing the study DataFrame.
-    action_prob_func_filename (str):
-        Filename of the action probability function.
-    action_prob_func_args_pickle (click.File):
-        Pickle file containing arguments for the action probability function.
+    output_dir (pathlib.Path | str):
+        Directory in which to save output files.
+    study_df (pd.DataFrame):
+        DataFrame containing the study data.
+    action_prob_func (callable):
+        Action probability function.
+    action_prob_func_args (dict[int, Any]):
+        Arguments for the action probability function.
     action_prob_func_args_beta_index (int):
         Index for beta in action probability function arguments.
-    alg_update_func_filename (str):
-        Filename of the algorithm update function.
+    alg_update_func (callable):
+        Algorithm update function.
     alg_update_func_type (str):
         Type of the algorithm update function.
-    alg_update_func_args_pickle (click.File):
-        Pickle file containing arguments for the algorithm update function.
+    alg_update_func_args (dict[int, Any]):
+        Arguments for the algorithm update function.
     alg_update_func_args_beta_index (int):
         Index for beta in algorithm update function arguments.
     alg_update_func_args_action_prob_index (int):
         Index for action probability in algorithm update function arguments.
     alg_update_func_args_action_prob_times_index (int):
         Index for action probability times in algorithm update function arguments.
-    inference_func_filename (str):
-        Filename of the inference function.
+    inference_func (callable):
+        Inference loss or estimating function.
     inference_func_type (str):
         Type of the inference function.
     inference_func_args_theta_index (int):
         Index for theta in inference function arguments.
-    theta_calculation_func_filename (str):
-        Filename of the theta calculation function.
+    theta_calculation_func (callable):
+        Function to estimate theta from the study DataFrame.
     in_study_col_name (str):
         Column name indicating if a user is in the study in the study dataframe.
     action_col_name (str):
@@ -333,8 +393,8 @@ def analyze_dataset(
         thresholds.
 
     Returns:
-    None: The function writes analysis results and debug pieces to files in the same directory as
-    the input files.
+    dict: A dictionary containing the theta estimate, adaptive sandwich variance estimate, and
+    classical sandwich variance estimate.
     """
 
     logging.basicConfig(
@@ -343,11 +403,7 @@ def analyze_dataset(
         level=logging.INFO,
     )
 
-    study_df = pickle.load(study_df_pickle)
-    action_prob_func_args = pickle.load(action_prob_func_args_pickle)
-    alg_update_func_args = pickle.load(alg_update_func_args_pickle)
-
-    theta_est = jnp.array(estimate_theta(study_df, theta_calculation_func_filename))
+    theta_est = jnp.array(theta_calculation_func(study_df))
 
     beta_dim = calculate_beta_dim(
         action_prob_func_args, action_prob_func_args_beta_index
@@ -362,7 +418,7 @@ def analyze_dataset(
             user_id_col_name,
             action_prob_col_name,
             reward_col_name,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args,
             action_prob_func_args_beta_index,
             alg_update_func_args,
@@ -403,7 +459,7 @@ def analyze_dataset(
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = process_inference_func_args(
-        inference_func_filename,
+        inference_func,
         inference_func_args_theta_index,
         study_df,
         theta_est,
@@ -438,14 +494,14 @@ def analyze_dataset(
         theta_est,
         all_post_update_betas,
         user_ids,
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -468,8 +524,6 @@ def analyze_dataset(
         calendar_t_col_name,
         user_id_col_name,
         action_prob_func_args,
-        inference_func_filename,
-        inference_func_args_theta_index,
         action_prob_col_name,
     )
 
@@ -504,35 +558,38 @@ def analyze_dataset(
 
     logger.info("Writing results to file...")
     # Write analysis results to same directory that input files are in
-    folder_path = pathlib.Path(study_df_pickle.name).parent.resolve()
-    with open(f"{folder_path}/analysis.pkl", "wb") as f:
+    output_folder_abs_path = pathlib.Path(output_dir).resolve()
+
+    analysis_dict = {
+        "theta_est": theta_est,
+        "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+        "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+    }
+    with open(output_folder_abs_path / "analysis.pkl", "wb") as f:
         pickle.dump(
-            {
-                "theta_est": theta_est,
-                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-            },
+            analysis_dict,
             f,
         )
 
-    with open(f"{folder_path}/debug_pieces.pkl", "wb") as f:
+    debug_pieces_dict = {
+        "theta_est": theta_est,
+        "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+        "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
+        "raw_joint_bread_inverse_matrix": raw_joint_adaptive_bread_inverse_matrix,
+        "stabilized_joint_bread_inverse_matrix": stabilized_joint_adaptive_bread_inverse_matrix,
+        "joint_meat_matrix": joint_adaptive_meat_matrix,
+        "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
+        "classical_meat_matrix": classical_meat_matrix,
+        "all_estimating_function_stacks": per_user_estimating_function_stacks,
+        "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
+        "all_post_update_betas": all_post_update_betas,
+        "per_user_adaptive_corrections": per_user_adaptive_corrections,
+        "per_user_classical_corrections": per_user_classical_corrections,
+        "per_user_adaptive_meat_adjustments": per_user_adaptive_meat_adjustments,
+    }
+    with open(output_folder_abs_path / "debug_pieces.pkl", "wb") as f:
         pickle.dump(
-            {
-                "theta_est": theta_est,
-                "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
-                "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-                "raw_joint_bread_inverse_matrix": raw_joint_adaptive_bread_inverse_matrix,
-                "stabilized_joint_bread_inverse_matrix": stabilized_joint_adaptive_bread_inverse_matrix,
-                "joint_meat_matrix": joint_adaptive_meat_matrix,
-                "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
-                "classical_meat_matrix": classical_meat_matrix,
-                "all_estimating_function_stacks": per_user_estimating_function_stacks,
-                "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
-                "all_post_update_betas": all_post_update_betas,
-                "per_user_adaptive_corrections": per_user_adaptive_corrections,
-                "per_user_classical_corrections": per_user_classical_corrections,
-                "per_user_adaptive_meat_adjustments": per_user_adaptive_meat_adjustments,
-            },
+            debug_pieces_dict,
             f,
         )
 
@@ -557,10 +614,10 @@ def analyze_dataset(
             initial_policy_num,
             beta_index_by_policy_num,
             policy_num_by_decision_time_by_user_id,
-            theta_calculation_func_filename,
-            action_prob_func_filename,
+            theta_calculation_func,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -569,7 +626,7 @@ def analyze_dataset(
             action_by_decision_time_by_user_id,
         )
 
-        with open(f"{folder_path}/supervised_learning_datum.pkl", "wb") as f:
+        with open(output_folder_abs_path / "supervised_learning_datum.pkl", "wb") as f:
             pickle.dump(datum_and_label_dict, f)
 
     print(f"\nParameter estimate:\n {theta_est}")
@@ -578,9 +635,11 @@ def analyze_dataset(
         f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
     )
 
+    return analysis_dict
+
 
 def process_inference_func_args(
-    inference_func_filename: str,
+    inference_func: callable,
     inference_func_args_theta_index: int,
     study_df: pd.DataFrame,
     theta_est: jnp.ndarray,
@@ -597,8 +656,8 @@ def process_inference_func_args(
     of them.
 
     Args:
-        inference_func_filename (str):
-            The filename of the inference function to be loaded.
+        inference_func (callable):
+            The inference function to be used.
         inference_func_args_theta_index (int):
             The index of the theta parameter in the inference function's arguments.
         study_df (pandas.DataFrame):
@@ -621,7 +680,6 @@ def process_inference_func_args(
                 - a dictionary mapping user IDs to the decision times to which action probabilities correspond
     """
 
-    inference_func = load_function_from_same_named_file(inference_func_filename)
     num_args = inference_func.__code__.co_argcount
     inference_func_arg_names = inference_func.__code__.co_varnames[:num_args]
     inference_func_args_by_user_id = {}
@@ -760,7 +818,7 @@ def single_user_weighted_estimating_function_stacker(
 
     logger.info("Computing weighted estimating function stack for user %s.", user_id)
 
-    # First, reformat the supplied data into more convienent structures.
+    # First, reformat the supplied data into more convenient structures.
 
     # 1. Form a dictionary mapping policy numbers to the first time they were
     # applicable (for this user). Note that this includes ALL policies, initial
@@ -859,7 +917,6 @@ def single_user_weighted_estimating_function_stacker(
         in_study_index += 1
     all_weights = jnp.array(all_weights_raw)
 
-    # TODO: May need to use dynamic slicing when this whole function is vmapped
     algorithm_component = jnp.concatenate(
         [
             # Here we compute a product of Radon-Nikodym weights
@@ -959,14 +1016,14 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     beta_dim: int,
     theta_dim: int,
     user_ids: jnp.ndarray,
-    action_prob_func_filename: str,
+    action_prob_func: callable,
     action_prob_func_args_beta_index: int,
-    alg_update_func_filename: str,
+    alg_update_func: callable,
     alg_update_func_type: str,
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
-    inference_func_filename: str,
+    inference_func: callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
@@ -1006,12 +1063,12 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             The dimension of the theta parameter.
         user_ids (jnp.ndarray):
             A 1D JAX NumPy array of user IDs.
-        action_prob_func_filename (str):
-            The name of the file containing the action probability function.
+        action_prob_func (callable):
+            The action probability function.
         action_prob_func_args_beta_index (int):
             The index of beta in the action probability function arguments tuples.
-        alg_update_func_filename (str):
-            The name of the file containing the algorithm update function.
+        alg_update_func (callable):
+            The algorithm update estimating or loss function.
         alg_update_func_type (str):
             The type of the algorithm update function (loss or estimating).
         alg_update_func_args_beta_index (int):
@@ -1022,8 +1079,8 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         alg_update_func_args_action_prob_times_index (int):
             The index in the update function arguments tuple where an array of times for which the
             given action probabilities apply is provided, if applicable. -1 otherwise.
-        inference_func_filename (str):
-            The name of the file containing the inference function.
+        inference_func (callable):
+            The inference loss or estimating function.
         inference_func_type (str):
             The type of the inference function (loss or estimating).
         inference_func_args_theta_index (int):
@@ -1074,11 +1131,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             stacks.
     """
 
-    # 1. Collect the necessary function objects
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_update_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_func = load_function_from_same_named_file(inference_func_filename)
-
+    # 1. Collect estimating functions by differentiating the loss functions if needed.
     algorithm_estimating_func = (
         jax.grad(alg_update_func, argnums=alg_update_func_args_beta_index)
         if (alg_update_func_type == FunctionTypes.LOSS)
@@ -1219,17 +1272,17 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
 
 
 def construct_classical_and_adaptive_sandwiches(
-    theta: jnp.ndarray,
+    theta_est: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
-    action_prob_func_filename: str,
+    action_prob_func: callable,
     action_prob_func_args_beta_index: int,
-    alg_update_func_filename: str,
+    alg_update_func: callable,
     alg_update_func_type: str,
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
-    inference_func_filename: str,
+    inference_func: callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
@@ -1260,8 +1313,6 @@ def construct_classical_and_adaptive_sandwiches(
     calendar_t_col_name: str | None,
     user_id_col_name: str | None,
     action_prob_func_args: tuple | None,
-    inference_loss_func_filename: str | None,
-    inference_loss_func_args_theta_index: int | None,
     action_prob_col_name: str | None,
 ) -> tuple[
     jnp.ndarray[jnp.float32],
@@ -1285,18 +1336,18 @@ def construct_classical_and_adaptive_sandwiches(
     and meat matrices, and then stably computing sandwiches.
 
     Args:
-        theta (jnp.ndarray):
+        theta_est (jnp.ndarray):
             A 1-D JAX NumPy array representing the parameter estimate for inference.
         all_post_update_betas (jnp.ndarray):
             A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
         user_ids (jnp.ndarray):
             A 1-D JAX NumPy array holding all user IDs in the study.
-        action_prob_func_filename (str):
-            The name of the file containing the action probability function.
+        action_prob_func (callable):
+            The action probability function.
         action_prob_func_args_beta_index (int):
             The index of beta in the action probability function arguments tuples.
-        alg_update_func_filename (str):
-            The name of the file containing the algorithm update function.
+        alg_update_func (callable):
+            The algorithm update loss/estimating function.
         alg_update_func_type (str):
             The type of the algorithm update function (loss or estimating).
         alg_update_func_args_beta_index (int):
@@ -1307,8 +1358,8 @@ def construct_classical_and_adaptive_sandwiches(
         alg_update_func_args_action_prob_times_index (int):
             The index in the update function arguments tuple where an array of times for which the
             given action probabilities apply is provided, if applicable. -1 otherwise.
-        inference_func_filename (str):
-            The name of the file containing the inference function.
+        inference_func (callable):
+            The inference loss or estimating function.
         inference_func_type (str):
             The type of the inference function (loss or estimating).
         inference_func_args_theta_index (int):
@@ -1367,12 +1418,6 @@ def construct_classical_and_adaptive_sandwiches(
         action_prob_func_args (tuple):
             The arguments to be passed to the action probability function, needed if forming the
             adaptive meat adjustments explicitly.
-        inference_loss_func_filename (str):
-            The name of the file containing the inference loss function, needed if forming the
-            adaptive meat adjustments explicitly.
-        inference_loss_func_args_theta_index (int):
-            The index of theta in the inference loss function arguments tuples, needed if forming the
-            adaptive meat adjustments explicitly.
         action_prob_col_name (str):
             The name of the column in study_df indicating the action probability of the action taken,
             needed if forming the adaptive meat adjustments explicitly.
@@ -1396,7 +1441,7 @@ def construct_classical_and_adaptive_sandwiches(
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
     )
-    theta_dim = theta.shape[0]
+    theta_dim = theta_est.shape[0]
     beta_dim = all_post_update_betas.shape[1]
     # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
     raw_joint_adaptive_bread_inverse_matrix, (
@@ -1411,18 +1456,18 @@ def construct_classical_and_adaptive_sandwiches(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
         # it is apparently more efficient to flatten them into a single array. This is done
         # here to improve performance. We can simply unflatten them inside the function.
-        flatten_params(all_post_update_betas, theta),
+        flatten_params(all_post_update_betas, theta_est),
         beta_dim,
         theta_dim,
         user_ids,
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -1500,12 +1545,12 @@ def construct_classical_and_adaptive_sandwiches(
                 action_col_name,
                 calendar_t_col_name,
                 user_id_col_name,
-                action_prob_func_filename,
+                action_prob_func,
                 action_prob_func_args,
                 action_prob_func_args_beta_index,
-                theta,
-                inference_loss_func_filename,
-                inference_loss_func_args_theta_index,
+                theta_est,
+                inference_func,
+                inference_func_args_theta_index,
                 user_ids,
                 action_prob_col_name,
             )
@@ -1798,27 +1843,6 @@ def form_sandwich_from_bread_inverse_and_meat(
         raise ValueError(
             f"Unknown sandwich method: {method}. Please use 'bread_inverse_t_qr' or 'meat_decomposition_solve'."
         )
-
-
-def estimate_theta(
-    study_df: pd.DataFrame, theta_calculation_func_filename: str
-) -> jnp.ndarray[jnp.float32]:
-    """
-    Estimates theta using the provided study DataFrame and the specified theta calculation
-    function.
-    Args:
-        study_df (pandas.DataFrame): The DataFrame containing the study data.
-        theta_calculation_func_filename (str): The filename of the theta calculation function.
-    Returns:
-        jnp.ndarray[jnp.float32]: The estimated theta (1-D).
-    """
-
-    logger.info("Forming theta estimate.")
-    theta_calculation_func = load_function_from_same_named_file(
-        theta_calculation_func_filename
-    )
-
-    return theta_calculation_func(study_df)
 
 
 if __name__ == "__main__":

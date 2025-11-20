@@ -481,6 +481,96 @@ def collect_existing_analyses(
         )
         plt.show()
 
+        # Plot the adaptive sandwich standard error estimates to look for blowup
+        plt.clear_figure()
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Adaptive SE Estimates vs Empirical"
+        )
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Adaptive SE Estimate")
+        plt.scatter(
+            np.sqrt(
+                adaptive_sandwich_var_estimates[
+                    :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                ]
+            ),
+            color="green+",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(
+                    adaptive_sandwich_var_estimates[
+                        :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                    ]
+                ),
+                max(
+                    1,
+                    len(
+                        adaptive_sandwich_var_estimates[
+                            :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                        ]
+                    )
+                    // 10,
+                ),
+            )
+        )
+        plt.horizontal_line(
+            np.sqrt(
+                empirical_var_normalized[
+                    index_to_check_ci_coverage, index_to_check_ci_coverage
+                ]
+            ),
+            color="red+",
+        )
+        plt.show()
+
+        # Plot the classical sandwich standard error estimates to look for blowup
+        plt.clear_figure()
+        plt.title(
+            f"Index {index_to_check_ci_coverage} of Classical SE Estimates vs Empirical"
+        )
+        plt.xlabel("Simulation Index")
+        plt.ylabel("Classical SE Estimate")
+        plt.scatter(
+            np.sqrt(
+                classical_sandwich_var_estimates[
+                    :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                ]
+            ),
+            color="green+",
+        )
+        plt.grid(True)
+        plt.xticks(
+            range(
+                0,
+                len(
+                    classical_sandwich_var_estimates[
+                        :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                    ]
+                ),
+                max(
+                    1,
+                    len(
+                        classical_sandwich_var_estimates[
+                            :, index_to_check_ci_coverage, index_to_check_ci_coverage
+                        ]
+                    )
+                    // 10,
+                ),
+            )
+        )
+        plt.horizontal_line(
+            np.sqrt(
+                empirical_var_normalized[
+                    index_to_check_ci_coverage, index_to_check_ci_coverage
+                ]
+            ),
+            color="red+",
+        )
+        plt.show()
+
         # Plot histogram of adaptive sandwich variance estimates
         plt.clear_figure()
         plt.title(
@@ -728,6 +818,8 @@ def collect_existing_analyses(
 
         if condition_numbers:
 
+            condition_numbers = np.array(condition_numbers).astype(np.float64)
+
             # Plot histogram of joint bread inverse condition numbers
             plt.clear_figure()
             plt.title("Histogram of Joint Bread Inverse Condition Numbers")
@@ -743,7 +835,7 @@ def collect_existing_analyses(
 
             min_condition_number_for_large_estimates = (
                 np.min(condition_numbers[estimate_blowup_split_idx:])
-                if condition_numbers[estimate_blowup_split_idx:]
+                if len(condition_numbers[estimate_blowup_split_idx:]) > 0
                 else None
             )
             print(
@@ -830,7 +922,7 @@ def collect_existing_analyses(
 
         if condition_numbers_first_block:
 
-            log_condition_numbers_first_block = np.array(
+            condition_numbers_first_block = np.array(
                 condition_numbers_first_block
             ).astype(np.float64)
 
@@ -839,7 +931,7 @@ def collect_existing_analyses(
             plt.title("Histogram of Joint Bread Inverse First Block Condition Numbers")
             plt.xlabel("Condition Number")
             plt.ylabel("Frequency")
-            plt.hist(log_condition_numbers_first_block, bins=20, color="purple")
+            plt.hist(condition_numbers_first_block, bins=20, color="purple")
             plt.grid(True)
             plt.show()
 
@@ -850,7 +942,7 @@ def collect_existing_analyses(
 
             min_condition_number_first_block_for_large_estimates = (
                 np.min(condition_numbers_first_block[estimate_blowup_split_idx:])
-                if condition_numbers_first_block[estimate_blowup_split_idx:]
+                if len(condition_numbers_first_block[estimate_blowup_split_idx:]) > 0
                 else None
             )
             print(
@@ -880,8 +972,8 @@ def collect_existing_analyses(
             plt.xticks(
                 range(
                     0,
-                    len(log_condition_numbers_first_block),
-                    max(1, len(log_condition_numbers_first_block) // 10),
+                    len(condition_numbers_first_block),
+                    max(1, len(condition_numbers_first_block) // 10),
                 )
             )
             plt.grid(True)
@@ -901,7 +993,7 @@ def collect_existing_analyses(
                 color="green+",
             )
             plt.scatter(
-                log_condition_numbers_first_block,
+                condition_numbers_first_block,
                 color="blue+",
                 yside="right",
             )

@@ -25,12 +25,6 @@ def conditional_x_or_one_minus_x(x, condition):
     return (1 - condition) + (2 * condition - 1) * x
 
 
-def clip(lower_clip, upper_clip, vals):
-    lower_clipped = np.maximum(vals, lower_clip)
-    clipped = np.minimum(lower_clipped, upper_clip)
-    return clipped
-
-
 def invert_matrix_and_check_conditioning(
     matrix: np.ndarray,
     inverse_stabilization_method: str = InverseStabilizationMethods.NONE,

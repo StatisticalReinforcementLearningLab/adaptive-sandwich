@@ -45,10 +45,10 @@ def get_datum_for_blowup_supervised_learning(
     initial_policy_num,
     beta_index_by_policy_num,
     policy_num_by_decision_time_by_user_id,
-    theta_calculation_func_filename,
-    action_prob_func_filename,
+    theta_calculation_func,
+    action_prob_func,
     action_prob_func_args_beta_index,
-    inference_func_filename,
+    inference_func,
     inference_func_type,
     inference_func_args_theta_index,
     inference_func_args_action_prob_index,
@@ -236,16 +236,16 @@ def get_datum_for_blowup_supervised_learning(
         initial_policy_num,
         beta_index_by_policy_num,
         policy_num_by_decision_time_by_user_id,
-        theta_calculation_func_filename,
+        theta_calculation_func,
         calendar_t_col_name,
         action_prob_col_name,
         user_id_col_name,
         in_study_col_name,
         all_post_update_betas,
         user_ids,
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -506,16 +506,16 @@ def calculate_sequence_of_premature_adaptive_estimates(
     policy_num_by_decision_time_by_user_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
-    theta_calculation_func_filename: str,
+    theta_calculation_func: str,
     calendar_t_col_name: str,
     action_prob_col_name: str,
     user_id_col_name: str,
     in_study_col_name: str,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
-    action_prob_func_filename: str,
+    action_prob_func: str,
     action_prob_func_args_beta_index: int,
-    inference_func_filename: str,
+    inference_func: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
@@ -547,7 +547,7 @@ def calculate_sequence_of_premature_adaptive_estimates(
         policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
             A map of user ids to dictionaries mapping decision times to the policy number in use.
             Only applies to in-study decision times!
-        theta_calculation_func_filename (str):
+        theta_calculation_func (callable):
             The filename for the theta calculation function.
         calendar_t_col_name (str):
             The name of the column in study_df representing calendar time.
@@ -561,12 +561,12 @@ def calculate_sequence_of_premature_adaptive_estimates(
             A NumPy array containing all post-update beta values.
         user_ids (jnp.ndarray):
             A NumPy array containing all user IDs in the study.
-        action_prob_func_filename (str):
-            The name of the file containing the action probability function.
+        action_prob_func (callable):
+            The action probability function.
         action_prob_func_args_beta_index (int):
             The index of beta in the action probability function arguments tuples.
-        inference_func_filename (str):
-            The name of the file containing the inference function.
+        inference_func (callable):
+            The inference function.
         inference_func_type (str):
             The type of the inference function (loss or estimating).
         inference_func_args_theta_index (int):
@@ -634,9 +634,7 @@ def calculate_sequence_of_premature_adaptive_estimates(
 
         truncated_all_post_update_betas = all_post_update_betas[: max_beta_index + 1, :]
 
-        premature_theta = after_study_analysis.estimate_theta(
-            truncated_study_df, theta_calculation_func_filename
-        )
+        premature_theta = jnp.array(theta_calculation_func(truncated_study_df))
 
         truncated_action_prob_func_args_by_user_id_by_decision_time = {
             decision_time: args_by_user_id
@@ -646,7 +644,7 @@ def calculate_sequence_of_premature_adaptive_estimates(
 
         truncated_inference_func_args_by_user_id, _, _ = (
             after_study_analysis.process_inference_func_args(
-                inference_func_filename,
+                inference_func,
                 inference_func_args_theta_index,
                 truncated_study_df,
                 premature_theta,
@@ -697,9 +695,9 @@ def calculate_sequence_of_premature_adaptive_estimates(
             premature_theta,
             truncated_all_post_update_betas,
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -1201,7 +1199,7 @@ def single_user_weighted_inference_estimating_function(
         user_id,
     )
 
-    # First, reformat the supplied data into more convienent structures.
+    # First, reformat the supplied data into more convenient structures.
 
     # 1. Get the first time after the first update for convenience.
     # This is used to form the Radon-Nikodym weights for the right times.

@@ -1,3 +1,4 @@
+import collections
 import logging
 
 import pandas as pd
@@ -27,14 +28,14 @@ def form_adaptive_meat_adjustments_directly(
     action_col_name: str,
     calendar_t_col_name: str,
     user_id_col_name: str,
-    action_prob_func_filename: str,
+    action_prob_func: callable,
     action_prob_func_args: dict,
     action_prob_func_args_beta_index: int,
-    theta_est,
-    inference_loss_func_filename,
-    inference_loss_func_args_theta_index,
-    user_ids,
-    action_prob_col_name,
+    theta_est: jnp.ndarray,
+    inference_func: callable,
+    inference_func_args_theta_index: int,
+    user_ids: list[collections.abc.Hashable],
+    action_prob_col_name: str,
 ) -> jnp.ndarray:
     logger.info(
         "Explicitly forming the per-user meat adjustments that differentiate the adaptive sandwich from the classical sandwich."
@@ -208,7 +209,7 @@ def form_adaptive_meat_adjustments_directly(
         action_col_name,
         calendar_t_col_name,
         user_id_col_name,
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args,
         action_prob_func_args_beta_index,
     )
@@ -216,8 +217,8 @@ def form_adaptive_meat_adjustments_directly(
     _, _, loss_gradient_pi_derivatives = calculate_inference_loss_derivatives(
         study_df,
         theta_est,
-        inference_loss_func_filename,
-        inference_loss_func_args_theta_index,
+        inference_func,
+        inference_func_args_theta_index,
         user_ids,
         user_id_col_name,
         action_prob_col_name,

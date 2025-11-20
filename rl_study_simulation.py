@@ -11,7 +11,7 @@ import pandas as pd
 import cloudpickle as pickle
 
 from synthetic_env import load_synthetic_env_params, SyntheticEnv
-from basic_RL_algorithms import FixedRandomization, SigmoidLS, SmoothPosteriorSampling
+from basic_RL_algorithms import SigmoidLS, SmoothPosteriorSampling
 from constants import RLStudyArgs
 from trial_conditioning_monitor import TrialConditioningMonitor
 
@@ -55,11 +55,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
         curr_time_bool = (study_df["calendar_t"] == t) & (study_df["in_study"] == 1)
         # Update study_df with info on latest policy used to select actions
-        study_df.loc[curr_time_bool, "policy_num"] = (
-            1
-            if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION
-            else len(study_RLalg.all_policies)
-        )
+        study_df.loc[curr_time_bool, "policy_num"] = len(study_RLalg.all_policies)
 
         curr_timestep_data = study_df[curr_time_bool]
 
@@ -118,7 +114,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         if (
             t < study_env.calendar_T
             and t % args.decisions_between_updates == args.update_cadence_offset
-            and args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION
             and t >= args.min_update_time
         ):
             last_policy_num = len(study_RLalg.all_policies) - 1
@@ -324,11 +319,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             raise ValueError("Invalid Dataset Type")
 
         # Initialize RL algorithm ###################################################
-        if args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION:
-            study_RLalg = FixedRandomization(
-                args, alg_state_feats, alg_treat_feats, alg_seed=alg_seed
-            )
-        elif args.RL_alg == RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP:
+        if args.RL_alg == RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP:
             study_RLalg = SigmoidLS(
                 state_feats=alg_state_feats,
                 treat_feats=alg_treat_feats,
@@ -479,12 +470,11 @@ def main():
         "--RL_alg",
         default=RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
         choices=[
-            RLStudyArgs.FIXED_RANDOMIZATION,
             RLStudyArgs.SIGMOID_LS_HARD_CLIP,
             RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP,
             RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING,
         ],
-        help="RL algorithm used to select actions",
+        help="RL algorithm used to select actions. Note that fixed randomization can be achieved with any algorithm by making the upper and lower clip equal. Setting steepness to 0 will also achieve a certain fixed action probability.",
     )
     parser.add_argument(
         "--N", type=int, default=10, help="Number of Monte Carlo repetitions"
@@ -513,12 +503,6 @@ def main():
         type=float,
         default=1,
         help="L2 Regularization for sigmoid LS algorithm linear regression updates",
-    )
-    parser.add_argument(
-        "--fixed_action_prob",
-        type=float,
-        default=0.5,
-        help="Used if not using learning alg to select actions",
     )
     parser.add_argument(
         "--err_corr",

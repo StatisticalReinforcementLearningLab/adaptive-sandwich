@@ -11,7 +11,6 @@ import plotext as plt
 from constants import InverseStabilizationMethods, SmallSampleCorrections
 from helper_functions import (
     confirm_input_check_result,
-    load_function_from_same_named_file,
 )
 
 # When we print out objects for debugging, show the whole thing.
@@ -35,7 +34,7 @@ def perform_first_wave_input_checks(
     user_id_col_name,
     action_prob_col_name,
     reward_col_name,
-    action_prob_func_filename,
+    action_prob_func,
     action_prob_func_args,
     action_prob_func_args_beta_index,
     alg_update_func_args,
@@ -108,7 +107,7 @@ def perform_first_wave_input_checks(
         user_id_col_name,
         in_study_col_name,
         action_prob_func_args,
-        action_prob_func_filename=action_prob_func_filename,
+        action_prob_func,
     )
 
     require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
@@ -269,8 +268,7 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
     user_id_col_name,
     in_study_col_name,
     action_prob_func_args,
-    action_prob_func_filename=None,
-    action_prob_func=None,
+    action_prob_func,
 ):
     """
     Check that the action probabilities in the study dataframe can be reconstructed from the supplied
@@ -279,14 +277,6 @@ def require_action_probabilities_in_study_df_can_be_reconstructed(
     NOTE THAT THIS IS A HARD FAILURE IF THE RECONSTRUCTION DOESN'T PASS.
     """
     logger.info("Reconstructing action probabilities from function and arguments.")
-    if not action_prob_func and not action_prob_func_filename:
-        raise ValueError(
-            "Either action_prob_func or action_prob_func_filename must be provided."
-        )
-
-    action_prob_func = action_prob_func or load_function_from_same_named_file(
-        action_prob_func_filename
-    )
 
     in_study_df = study_df[study_df[in_study_col_name] == 1]
     reconstructed_action_probs = in_study_df.apply(
@@ -1104,36 +1094,29 @@ def require_threaded_algorithm_estimating_function_args_equivalent(
     when called with the original arguments and when called with the
     reconstructed action probabilities substituted in.
     """
-    try:
+    for (
+        policy_num,
+        update_func_args_by_user_id,
+    ) in update_func_args_by_by_user_id_by_policy_num.items():
         for (
-            policy_num,
-            update_func_args_by_user_id,
-        ) in update_func_args_by_by_user_id_by_policy_num.items():
-            for (
-                user_id,
-                unthreaded_args,
-            ) in update_func_args_by_user_id.items():
-                if not unthreaded_args:
-                    continue
-                np.testing.assert_allclose(
-                    algorithm_estimating_func(*unthreaded_args),
-                    # Need to stop gradient here because we can't convert a traced value to np array
-                    jax.lax.stop_gradient(
-                        algorithm_estimating_func(
-                            *threaded_update_func_args_by_policy_num_by_user_id[
-                                user_id
-                            ][policy_num]
-                        )
-                    ),
-                    atol=1e-7,
-                    rtol=1e-3,
-                )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nAt least one algorithm estimating function value is not approximately equal with the original arguments and with reconstructed action probabilities substituted in. The following occurred for user {user_id} and policy {policy_num}:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
-        )
+            user_id,
+            unthreaded_args,
+        ) in update_func_args_by_user_id.items():
+            if not unthreaded_args:
+                continue
+            np.testing.assert_allclose(
+                algorithm_estimating_func(*unthreaded_args),
+                # Need to stop gradient here because we can't convert a traced value to np array
+                jax.lax.stop_gradient(
+                    algorithm_estimating_func(
+                        *threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                            policy_num
+                        ]
+                    )
+                ),
+                atol=1e-7,
+                rtol=1e-3,
+            )
 
 
 def require_threaded_inference_estimating_function_args_equivalent(
@@ -1147,23 +1130,16 @@ def require_threaded_inference_estimating_function_args_equivalent(
     when called with the original arguments and when called with the
     reconstructed action probabilities substituted in.
     """
-    try:
-        for user_id, unthreaded_args in inference_func_args_by_user_id.items():
-            if not unthreaded_args:
-                continue
-            np.testing.assert_allclose(
-                inference_estimating_func(*unthreaded_args),
-                # Need to stop gradient here because we can't convert a traced value to np array
-                jax.lax.stop_gradient(
-                    inference_estimating_func(
-                        *threaded_inference_func_args_by_user_id[user_id]
-                    )
-                ),
-                rtol=1e-2,
-            )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nAt least one inference estimating function value is not approximately equal with the original arguments and with reconstructed action probabilities substituted in. The following occurred for user {user_id}:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
+    for user_id, unthreaded_args in inference_func_args_by_user_id.items():
+        if not unthreaded_args:
+            continue
+        np.testing.assert_allclose(
+            inference_estimating_func(*unthreaded_args),
+            # Need to stop gradient here because we can't convert a traced value to np array
+            jax.lax.stop_gradient(
+                inference_estimating_func(
+                    *threaded_inference_func_args_by_user_id[user_id]
+                )
+            ),
+            rtol=1e-2,
         )

@@ -158,7 +158,7 @@ output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=$
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Beginning after-study analysis."
-python after_study_analysis.py analyze-dataset \
+python after_study_analysis.py analyze-dataset-wrapper \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \

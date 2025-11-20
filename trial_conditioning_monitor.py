@@ -34,7 +34,6 @@ logging.basicConfig(
 )
 
 
-# TODO: Add a single block row at a time? Cache previous ones, shouldn't be too bad to just form smaller stacks.
 class TrialConditioningMonitor:
     whole_RL_block_conditioning_threshold = None
     diagonal_RL_block_conditioning_threshold = None
@@ -50,6 +49,7 @@ class TrialConditioningMonitor:
         self.diagonal_RL_block_conditioning_threshold = (
             diagonal_RL_block_conditioning_threshold
         )
+        self.latest_phi_dot_bar = None
 
     def assess_update(
         self,
@@ -72,6 +72,7 @@ class TrialConditioningMonitor:
         action_prob_col_name: str,
         suppress_interactive_data_checks: bool,
         suppress_all_data_checks: bool,
+        incremental: bool = True,
     ) -> None:
         """
         Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
@@ -186,26 +187,25 @@ class TrialConditioningMonitor:
 
         user_ids = jnp.array(study_df[user_id_col_name].unique())
 
-        upper_left_bread_inverse, avg_estimating_function_stack = (
-            self.construct_upper_left_bread_inverse(
-                all_post_update_betas,
-                user_ids,
-                action_prob_func,
-                action_prob_func_args_beta_index,
-                alg_update_func,
-                alg_update_func_type,
-                alg_update_func_args_beta_index,
-                alg_update_func_args_action_prob_index,
-                alg_update_func_args_action_prob_times_index,
-                action_prob_func_args,
-                policy_num_by_decision_time_by_user_id,
-                initial_policy_num,
-                beta_index_by_policy_num,
-                alg_update_func_args,
-                action_by_decision_time_by_user_id,
-                suppress_all_data_checks,
-                suppress_interactive_data_checks,
-            )
+        phi_dot_bar, avg_estimating_function_stack = self.construct_phi_dot_bar_so_far(
+            all_post_update_betas,
+            user_ids,
+            action_prob_func,
+            action_prob_func_args_beta_index,
+            alg_update_func,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            action_prob_func_args,
+            policy_num_by_decision_time_by_user_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            alg_update_func_args,
+            action_by_decision_time_by_user_id,
+            suppress_all_data_checks,
+            suppress_interactive_data_checks,
+            incremental=incremental,
         )
 
         if not suppress_all_data_checks:
@@ -218,9 +218,9 @@ class TrialConditioningMonitor:
         # Decide whether to accept or reject the update based on conditioning
         update_rejected = False
         rejection_reason = ""
-        whole_RL_block_condition_number = np.linalg.cond(upper_left_bread_inverse)
+        whole_RL_block_condition_number = np.linalg.cond(phi_dot_bar)
         new_diagonal_RL_block_condition_number = np.linalg.cond(
-            upper_left_bread_inverse[-beta_dim:, -beta_dim:]
+            phi_dot_bar[-beta_dim:, -beta_dim:]
         )
 
         if whole_RL_block_condition_number > self.whole_RL_block_conditioning_threshold:
@@ -245,7 +245,7 @@ class TrialConditioningMonitor:
 
         # TODO: Regression -> prediction over going over threshold? Take in estimated num updates if so.
 
-        return {
+        ans = {
             "update_rejected": update_rejected,
             "rejection_reason": rejection_reason,
             "whole_RL_block_condition_number": whole_RL_block_condition_number,
@@ -253,8 +253,10 @@ class TrialConditioningMonitor:
             "new_diagonal_RL_block_condition_number": new_diagonal_RL_block_condition_number,
             "diagonal_RL_block_conditioning_threshold": self.diagonal_RL_block_conditioning_threshold,
         }
+        logger.info("Update assessment results: %s", ans)
+        return ans
 
-    def construct_upper_left_bread_inverse(
+    def construct_phi_dot_bar_so_far(
         self,
         all_post_update_betas: jnp.ndarray,
         user_ids: jnp.ndarray,
@@ -281,6 +283,7 @@ class TrialConditioningMonitor:
         ],
         suppress_all_data_checks: bool,
         suppress_interactive_data_checks: bool,
+        incremental: bool,
     ) -> tuple[
         jnp.ndarray[jnp.float32],
         jnp.ndarray[jnp.float32],
@@ -337,43 +340,90 @@ class TrialConditioningMonitor:
                 If True, suppresses interactive data checks that would otherwise be performed to ensure
                 the correctness of the threaded arguments. The checks are still performed, but
                 any interactive prompts are suppressed.
+            incremental (bool): Whether to form the whole phi-dot-bar so far, or just form the latest
+                block row and add to the cached previous phi-dot-bar.
         """
         logger.info(
             "Differentiating average weighted estimating function stack and collecting auxiliary values."
         )
         beta_dim = all_post_update_betas.shape[1]
-        # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
-        (
-            raw_joint_adaptive_bread_inverse_matrix,
-            avg_estimating_function_stack,
-        ) = jax.jacrev(
-            self.get_avg_weighted_RL_estimating_function_stacks_and_aux_values,
-            has_aux=True,
-        )(
-            # While JAX can technically differentiate with respect to a list of JAX arrays,
-            # it is apparently more efficient to flatten them into a single array. This is done
-            # here to improve performance. We can simply unflatten them inside the function.
-            flatten_params(all_post_update_betas, jnp.array([])),
-            beta_dim,
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            suppress_all_data_checks,
-            suppress_interactive_data_checks,
-        )
 
-        return raw_joint_adaptive_bread_inverse_matrix, avg_estimating_function_stack
+        if incremental and self.latest_phi_dot_bar is not None:
+            # We only need to compute the latest block row of the Jacobian.
+            (
+                phi_dot_bar_latest_block,
+                avg_RL_estimating_function_stack,
+            ) = jax.jacrev(
+                self.get_avg_weighted_RL_estimating_function_stacks_and_aux_values,
+                has_aux=True,
+            )(
+                # While JAX can technically differentiate with respect to a list of JAX arrays,
+                # it is apparently more efficient to flatten them into a single array. This is done
+                # here to improve performance. We can simply unflatten them inside the function.
+                flatten_params(all_post_update_betas, jnp.array([])),
+                beta_dim,
+                user_ids,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                alg_update_func,
+                alg_update_func_type,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                action_prob_func_args_by_user_id_by_decision_time,
+                policy_num_by_decision_time_by_user_id,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                update_func_args_by_by_user_id_by_policy_num,
+                action_by_decision_time_by_user_id,
+                suppress_all_data_checks,
+                suppress_interactive_data_checks,
+                only_latest_block=True,
+            )
+
+            # Now we can just augment the cached previous phi-dot-bar with zeros
+            # and the latest block row.
+            phi_dot_bar = jnp.block(
+                [
+                    self.latest_phi_dot_bar,
+                    jnp.zeros((beta_dim, beta_dim)),
+                    phi_dot_bar_latest_block[-beta_dim:, :],
+                ]
+            )
+        else:
+
+            (
+                phi_dot_bar,
+                avg_RL_estimating_function_stack,
+            ) = jax.jacrev(
+                self.get_avg_weighted_RL_estimating_function_stacks_and_aux_values,
+                has_aux=True,
+            )(
+                # While JAX can technically differentiate with respect to a list of JAX arrays,
+                # it is apparently more efficient to flatten them into a single array. This is done
+                # here to improve performance. We can simply unflatten them inside the function.
+                flatten_params(all_post_update_betas, jnp.array([])),
+                beta_dim,
+                user_ids,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                alg_update_func,
+                alg_update_func_type,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                action_prob_func_args_by_user_id_by_decision_time,
+                policy_num_by_decision_time_by_user_id,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                update_func_args_by_by_user_id_by_policy_num,
+                action_by_decision_time_by_user_id,
+                suppress_all_data_checks,
+                suppress_interactive_data_checks,
+            )
+
+        self.latest_phi_dot_bar = phi_dot_bar
+        return phi_dot_bar, avg_RL_estimating_function_stack
 
     def get_avg_weighted_RL_estimating_function_stacks_and_aux_values(
         self,
@@ -403,6 +453,7 @@ class TrialConditioningMonitor:
         ],
         suppress_all_data_checks: bool,
         suppress_interactive_data_checks: bool,
+        only_latest_block: bool = False,
     ) -> tuple[
         jnp.ndarray,
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
@@ -410,6 +461,8 @@ class TrialConditioningMonitor:
         """
         Computes the average weighted estimating function stack across all users, along with
         auxiliary values used to construct the adaptive and classical sandwich variances.
+
+        If only_latest_block is True, only uses data from the most recent update.
 
         Args:
             flattened_betas_and_theta (jnp.ndarray):
@@ -459,6 +512,8 @@ class TrialConditioningMonitor:
                 If True, suppresses interactive data checks that would otherwise be performed to ensure
                 the correctness of the threaded arguments. The checks are still performed, but
                 any interactive prompts are suppressed.
+            only_latest_block (bool):
+                If True, only uses data from the most recent update.
 
         Returns:
             jnp.ndarray:
@@ -478,6 +533,21 @@ class TrialConditioningMonitor:
             beta_dim,
             0,
         )
+        # 1. If only_latest_block is True, we need to filter all the arguments to only
+        # include those relevant to the latest update. We still need action probabilities
+        # from the beginning for the weights, but the update function args can be trimmed
+        # to the max policy so that the loop single_user_weighted_RL_estimating_function_stacker
+        # is only over one policy.
+        if only_latest_block:
+            logger.info(
+                "Filtering algorithm update function arguments to only include those relevant to the latest update."
+            )
+            max_policy_num = max(beta_index_by_policy_num)
+            update_func_args_by_by_user_id_by_policy_num = {
+                max_policy_num: update_func_args_by_by_user_id_by_policy_num[
+                    max_policy_num
+                ]
+            }
 
         # 2. Thread in the betas and theta in all_post_update_betas_and_theta into the arguments
         # supplied for the above functions, so that differentiation works correctly.  The existing
@@ -516,7 +586,7 @@ class TrialConditioningMonitor:
             action_prob_func,
         )
 
-        # If action probabilites are used in the algorithm estimating function, make
+        # If action probabilities are used in the algorithm estimating function, make
         # sure that substituting in the reconstructed action probabilities is approximately
         # equivalent to using the original action probabilities.
         if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
@@ -643,7 +713,7 @@ class TrialConditioningMonitor:
             "Computing weighted estimating function stack for user %s.", user_id
         )
 
-        # First, reformat the supplied data into more convienent structures.
+        # First, reformat the supplied data into more convenient structures.
 
         # 1. Form a dictionary mapping policy numbers to the first time they were
         # applicable (for this user). Note that this includes ALL policies, initial
@@ -746,7 +816,6 @@ class TrialConditioningMonitor:
             in_study_index += 1
         all_weights = jnp.array(all_weights_raw)
 
-        # TODO: May need to use dynamic slicing when this whole function is vmapped
         algorithm_component = jnp.concatenate(
             [
                 # Here we compute a product of Radon-Nikodym weights

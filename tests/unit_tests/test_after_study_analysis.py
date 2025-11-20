@@ -6,32 +6,41 @@ import pytest
 
 import after_study_analysis
 from constants import FunctionTypes
-from helper_functions import load_function_from_same_named_file
+from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering import (
+    synthetic_get_least_squares_loss_inference_action_centering,
+)
 from arg_threading_helpers import replace_tuple_index
-from tests.utils import get_abs_path
+
+from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
+    synthetic_get_action_1_prob_pure,
+)
+from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl import (
+    synthetic_get_least_squares_loss_rl,
+)
+from functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_rl import (
+    synthetic_get_least_squares_estimating_function_rl,
+)
+from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_no_action_centering import (
+    synthetic_get_least_squares_loss_inference_no_action_centering,
+)
+from functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_inference_no_action_centering import (
+    synthetic_get_least_squares_estimating_function_inference_no_action_centering,
+)
+
 
 # TODO: Add checking of all aux values.
 
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs():
-    action_prob_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
-    )
+
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
-    )
+
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
-    )
+
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -113,7 +122,7 @@ def setup_data_two_loss_functions_no_action_probs():
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = after_study_analysis.process_inference_func_args(
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
         jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -125,14 +134,14 @@ def setup_data_two_loss_functions_no_action_probs():
     inference_action_prob_decision_times_by_user_id = {}
 
     return (
-        action_prob_func_filename,
+        synthetic_get_action_1_prob_pure,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        synthetic_get_least_squares_loss_rl,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -178,14 +187,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     losses in the test to form expected values.
     """
     (
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -213,22 +222,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         ]
     )
 
-    alg_estimating_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
-    )
-    inference_estimating_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py",
-    )
-
-    alg_estimating_func = load_function_from_same_named_file(
-        alg_estimating_func_filename
-    )
-    inference_estimating_func = load_function_from_same_named_file(
-        inference_estimating_func_filename
-    )
-
     user_ids = jnp.array([1, 2])
 
     result = (
@@ -237,14 +230,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
             all_post_update_betas.shape[1],
             theta.shape[0],
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            alg_update_func_filename,
+            alg_update_func,
             alg_update_func_type,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -259,6 +252,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
             True,
             True,
         )
+    )
+
+    alg_estimating_func = synthetic_get_least_squares_estimating_function_rl
+    inference_estimating_func = (
+        synthetic_get_least_squares_estimating_function_inference_no_action_centering
     )
 
     # Note that we don't multiply by the weights! Therefore we test that they
@@ -377,23 +375,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
 
 @pytest.fixture
 def setup_data_two_estimating_functions_no_action_probs():
-    action_prob_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
-    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
-    )
     alg_update_func_type = FunctionTypes.ESTIMATING
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py",
-    )
     inference_func_type = FunctionTypes.ESTIMATING
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -475,7 +461,7 @@ def setup_data_two_estimating_functions_no_action_probs():
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = after_study_analysis.process_inference_func_args(
-        inference_func_filename,
+        synthetic_get_least_squares_estimating_function_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
         jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -487,14 +473,14 @@ def setup_data_two_estimating_functions_no_action_probs():
     inference_action_prob_decision_times_by_user_id = {}
 
     return (
-        action_prob_func_filename,
+        synthetic_get_action_1_prob_pure,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        synthetic_get_least_squares_estimating_function_rl,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        synthetic_get_least_squares_estimating_function_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -517,14 +503,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     loss functions to verify that use case works too (it should be simpler, no differentiation.)
     """
     (
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -552,22 +538,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
         ]
     )
 
-    alg_estimating_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_rl.py",
-    )
-    inference_estimating_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_estimating_function_inference_no_action_centering.py",
-    )
-
-    alg_estimating_func = load_function_from_same_named_file(
-        alg_estimating_func_filename
-    )
-    inference_estimating_func = load_function_from_same_named_file(
-        inference_estimating_func_filename
-    )
-
     user_ids = jnp.array([1, 2])
 
     result = (
@@ -576,14 +546,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
             all_post_update_betas.shape[1],
             theta.shape[0],
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            alg_update_func_filename,
+            alg_update_func,
             alg_update_func_type,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -598,6 +568,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
             True,
             True,
         )
+    )
+
+    alg_estimating_func = synthetic_get_least_squares_estimating_function_rl
+    inference_estimating_func = (
+        synthetic_get_least_squares_estimating_function_inference_no_action_centering
     )
 
     # Note that we don't multiply by the weights! Therefore we test that they
@@ -716,23 +691,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_different_betas():
-    action_prob_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
-    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
-    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
-    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -811,7 +774,7 @@ def setup_data_two_loss_functions_no_action_probs_different_betas():
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = after_study_analysis.process_inference_func_args(
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
         jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -823,14 +786,14 @@ def setup_data_two_loss_functions_no_action_probs_different_betas():
     inference_action_prob_decision_times_by_user_id = {}
 
     return (
-        action_prob_func_filename,
+        synthetic_get_action_1_prob_pure,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        synthetic_get_least_squares_loss_rl,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -869,14 +832,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     would be different were they not.
     """
     (
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -901,14 +864,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         ]
     )
 
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
-
     user_ids = jnp.array([1, 2])
 
     result = (
@@ -917,14 +872,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
             all_post_update_betas.shape[1],
             theta.shape[0],
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            alg_update_func_filename,
+            alg_update_func,
             alg_update_func_type,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -940,6 +895,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
             True,
         )
     )
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_update_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_func, allow_int=True)
 
     expected_weighted_stack_1 = jnp.concatenate(
         [
@@ -1315,23 +1274,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
-    action_prob_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
-    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
-    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
-    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -1428,7 +1375,7 @@ def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = after_study_analysis.process_inference_func_args(
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
         jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -1440,14 +1387,14 @@ def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
     inference_action_prob_decision_times_by_user_id = {}
 
     return (
-        action_prob_func_filename,
+        synthetic_get_action_1_prob_pure,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        synthetic_get_least_squares_loss_rl,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -1484,14 +1431,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
     would be different were they not.
     """
     (
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -1516,14 +1463,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
         ]
     )
 
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
-
     user_ids = jnp.array([1, 2])
 
     result = (
@@ -1532,14 +1471,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             all_post_update_betas.shape[1],
             theta.shape[0],
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            alg_update_func_filename,
+            alg_update_func,
             alg_update_func_type,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -1555,6 +1494,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             True,
         )
     )
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_update_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_func, allow_int=True)
 
     expected_weighted_stack_1 = jnp.concatenate(
         [
@@ -1858,23 +1801,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates():
-    action_prob_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
-    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
-    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
     alg_update_func_args_action_prob_times_index = -1
-    inference_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py",
-    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1}
@@ -1958,7 +1889,7 @@ def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_upd
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = after_study_analysis.process_inference_func_args(
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
         jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -1970,14 +1901,14 @@ def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_upd
     inference_action_prob_decision_times_by_user_id = {}
 
     return (
-        action_prob_func_filename,
+        synthetic_get_action_1_prob_pure,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        synthetic_get_least_squares_loss_rl,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -2018,14 +1949,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     arose in Oralytics due to the app-opening issue.
     """
     (
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -2048,14 +1979,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
         ]
     )
 
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
-
     user_ids = jnp.array([1, 2])
 
     result = (
@@ -2064,14 +1987,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
             all_post_update_betas.shape[1],
             theta.shape[0],
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            alg_update_func_filename,
+            alg_update_func,
             alg_update_func_type,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -2087,6 +2010,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
             True,
         )
     )
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_update_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_func, allow_int=True)
 
     expected_weighted_stack_1 = jnp.concatenate(
         [
@@ -2304,23 +2231,11 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
 
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
-    action_prob_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_action_1_prob_pure.py",
-    )
     action_prob_func_args_beta_index = 0
-    alg_update_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_rl.py",
-    )
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = 5
     alg_update_func_args_action_prob_times_index = 6
-    inference_func_filename = get_abs_path(
-        __file__,
-        "../../functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_action_centering.py",
-    )
     inference_func_type = FunctionTypes.LOSS
     inference_func_args_theta_index = 0
     beta_index_by_policy_num = {2: 0, 3: 1, 4: 2, 5: 3}
@@ -2425,7 +2340,7 @@ def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
     ) = after_study_analysis.process_inference_func_args(
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_action_centering,
         inference_func_args_theta_index,
         study_df,
         jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32"),
@@ -2436,14 +2351,14 @@ def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
     )
 
     return (
-        action_prob_func_filename,
+        synthetic_get_action_1_prob_pure,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        synthetic_get_least_squares_loss_rl,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        synthetic_get_least_squares_loss_inference_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -2481,14 +2396,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     would be different were they not.
     """
     (
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        alg_update_func_filename,
+        alg_update_func,
         alg_update_func_type,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -2513,14 +2428,6 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
         ]
     )
 
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    alg_loss_func = load_function_from_same_named_file(alg_update_func_filename)
-    inference_loss_func = load_function_from_same_named_file(inference_func_filename)
-
-    # Quite odd that it complains about ints here and not in the real function... but alas.
-    alg_estimating_func = jax.grad(alg_loss_func, allow_int=True)
-    inference_estimating_func = jax.grad(inference_loss_func, allow_int=True)
-
     user_ids = jnp.array([1, 2])
 
     result = (
@@ -2529,14 +2436,14 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             all_post_update_betas.shape[1],
             theta.shape[0],
             user_ids,
-            action_prob_func_filename,
+            action_prob_func,
             action_prob_func_args_beta_index,
-            alg_update_func_filename,
+            alg_update_func,
             alg_update_func_type,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            inference_func_filename,
+            inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
@@ -2552,6 +2459,10 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             True,
         )
     )
+
+    # Quite odd that it complains about ints here and not in the real function... but alas.
+    alg_estimating_func = jax.grad(alg_update_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_func, allow_int=True)
 
     reconstructed_action_probs = {
         1: [

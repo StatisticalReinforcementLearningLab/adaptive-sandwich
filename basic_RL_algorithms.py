@@ -20,7 +20,6 @@ from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
     synthetic_get_action_1_prob_generalized_logistic,
 )
-from helper_functions import clip
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -28,25 +27,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
-
-
-class FixedRandomization:
-    """
-    Fixed randomization algorithm; no learning
-    """
-
-    def __init__(self, args, state_feats, treat_feats, alg_seed):
-        self.args = args
-        self.rng = np.random.default_rng(alg_seed)
-        self.state_feats = state_feats
-        self.treat_feats = treat_feats
-
-    def update_alg(self, new_data):
-        raise NotImplementedError("Fixed randomization never updates")
-
-    def get_action_probs(self, curr_timestep_data):
-        raw_probs = jnp.ones(curr_timestep_data.shape[0]) * self.args.fixed_action_prob
-        return clip(self.args.lower_clip, self.args.upper_clip, raw_probs)
 
 
 def get_pis_batched_sigmoid(
@@ -499,7 +479,7 @@ class SmoothPosteriorSampling:
         """
         Form the beta vector from the posterior mean and variance.
         This is for after-study analysis, concisely collecting all the information
-        in the posterior in a convenint form. Explicitly, we concatenate the posterior
+        in the posterior in a convenient form. Explicitly, we concatenate the posterior
         mean with the upper triangular elements of the inverse posterior variance matrix.
 
         Parameters:

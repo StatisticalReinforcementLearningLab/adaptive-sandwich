@@ -30,7 +30,8 @@ dev = [
 [project.scripts]
 lifejacket = "after_study_analysis:cli"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["*"]
-exclude = ["tests*"]
+[tool.setuptools.py-modules]
+py-modules = [
+  "after_study_analysis",
+  "trial_conditioning_monitor",
+]

@@ -19,7 +19,6 @@ from .arg_threading_helpers import (
     thread_inference_func_args,
     thread_update_func_args,
 )
-from .collect_existing_analyses import collect_existing_analyses
 from .constants import (
     FunctionTypes,
     SandwichFormationMethods,
@@ -58,9 +57,6 @@ logging.basicConfig(
 @click.group()
 def cli():
     pass
-
-
-cli.add_command(collect_existing_analyses)
 
 
 # TODO: Check all help strings for accuracy.

@@ -3,8 +3,8 @@ import logging
 import numpy as np
 from jax import numpy as jnp
 
-from constants import SmallSampleCorrections
-from helper_functions import invert_matrix_and_check_conditioning
+from .constants import SmallSampleCorrections
+from .helper_functions import invert_matrix_and_check_conditioning
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

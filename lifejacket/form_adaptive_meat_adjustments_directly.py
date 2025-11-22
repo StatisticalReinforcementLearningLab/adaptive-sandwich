@@ -5,7 +5,7 @@ import pandas as pd
 import jax.numpy as jnp
 import numpy as np
 
-from calculate_derivatives import (
+from .calculate_derivatives import (
     calculate_inference_loss_derivatives,
     calculate_pi_and_weight_gradients,
 )

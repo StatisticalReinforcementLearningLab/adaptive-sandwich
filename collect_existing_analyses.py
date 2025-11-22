@@ -12,8 +12,6 @@ import plotext as plt
 import seaborn as sns
 import matplotlib.pyplot as pyplt
 
-from helper_functions import get_action_1_fraction, get_action_prob_variance
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
@@ -22,7 +20,35 @@ logging.basicConfig(
 )
 
 
-@click.command()
+@click.group()
+def cli():
+    pass
+
+
+def get_action_1_fraction(study_df, in_study_col_name, action_col_name):
+    """
+    Get the fraction of action 1 in the study_df.
+    """
+    action_1_count = np.sum(
+        (study_df[in_study_col_name] == 1) & (study_df[action_col_name] == 1)
+    )
+    total_count = len(study_df)
+    if total_count == 0:
+        return 0.0
+    return action_1_count / total_count
+
+
+def get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name):
+    """
+    Get the variance of the action probabilities in the study_df.
+    """
+    action_probs = study_df.loc[study_df[in_study_col_name] == 1, action_prob_col_name]
+    return np.var(action_probs)
+
+
+@click.command(
+    "collect",
+)
 @click.option(
     "--input_glob",
     help="A glob that captures all of the analyses to be collected.  Leaf folders will be searched for analyses",
@@ -1341,3 +1367,7 @@ def collect_existing_analyses(
         )
         plt.grid(True)
         plt.show()
+
+
+if __name__ == "__main__":
+    cli()

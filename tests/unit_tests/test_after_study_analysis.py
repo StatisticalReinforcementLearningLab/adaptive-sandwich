@@ -4,12 +4,12 @@ import pandas as pd
 import numpy as np
 import pytest
 
-import after_study_analysis
-from constants import FunctionTypes
+from lifejacket import after_study_analysis
+from lifejacket.constants import FunctionTypes
 from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering import (
     synthetic_get_least_squares_loss_inference_action_centering,
 )
-from arg_threading_helpers import replace_tuple_index
+from lifejacket.arg_threading_helpers import replace_tuple_index
 
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
     synthetic_get_action_1_prob_pure,

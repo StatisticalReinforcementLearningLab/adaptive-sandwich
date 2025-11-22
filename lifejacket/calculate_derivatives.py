@@ -5,8 +5,8 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 
-from constants import FunctionTypes
-from helper_functions import (
+from .constants import FunctionTypes
+from .helper_functions import (
     conditional_x_or_one_minus_x,
     load_function_from_same_named_file,
 )

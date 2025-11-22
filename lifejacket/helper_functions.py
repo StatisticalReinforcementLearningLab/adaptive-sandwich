@@ -11,7 +11,7 @@ import numpy as np
 import jax.numpy as jnp
 import pandas as pd
 
-from constants import InverseStabilizationMethods
+from .constants import InverseStabilizationMethods
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -384,27 +384,6 @@ def get_in_study_df_column(study_df, col_name, in_study_col_name):
         .to_numpy()
         .reshape(-1, 1)
     )
-
-
-def get_action_1_fraction(study_df, in_study_col_name, action_col_name):
-    """
-    Get the fraction of action 1 in the study_df.
-    """
-    action_1_count = np.sum(
-        (study_df[in_study_col_name] == 1) & (study_df[action_col_name] == 1)
-    )
-    total_count = len(study_df)
-    if total_count == 0:
-        return 0.0
-    return action_1_count / total_count
-
-
-def get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name):
-    """
-    Get the variance of the action probabilities in the study_df.
-    """
-    action_probs = study_df.loc[study_df[in_study_col_name] == 1, action_prob_col_name]
-    return np.var(action_probs)
 
 
 def flatten_params(betas: jnp.ndarray, theta: jnp.ndarray) -> jnp.ndarray:

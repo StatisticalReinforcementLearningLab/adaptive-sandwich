@@ -12,10 +12,9 @@ import jax
 from jax import numpy as jnp
 import pandas as pd
 
-import after_study_analysis
-from constants import FunctionTypes
-from helper_functions import load_function_from_same_named_file
-from vmap_helpers import stack_batched_arg_lists_into_tensors
+from . import after_study_analysis
+from .constants import FunctionTypes
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -102,15 +101,14 @@ def get_datum_for_blowup_supervised_learning(
             Mapping from policy numbers to indices in all_post_update_betas.
         policy_num_by_decision_time_by_user_id (dict):
             Mapping from user IDs to their policy numbers by decision time.
-        theta_calculation_func_filename (str):
-            Filename of the theta calculation function.
-        action_prob_func_filename (str):
-            Filename of the action probability function.
+        theta_calculation_func (callable):
+            The theta calculation function.
+        action_prob_func (callable):
+            The action probability function.
         action_prob_func_args_beta_index (int):
             Index for beta in action probability function arguments.
-        inference_func_filename (str):
-            Filename of the inference function.
-
+        inference_func (callable):
+            The inference function.
         inference_func_type (str):
             Type of the inference function.
         inference_func_args_theta_index (int):
@@ -731,9 +729,9 @@ def construct_premature_classical_and_adaptive_sandwiches(
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
-    action_prob_func_filename: str,
+    action_prob_func: str,
     action_prob_func_args_beta_index: int,
-    inference_func_filename: str,
+    inference_func: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
@@ -788,12 +786,12 @@ def construct_premature_classical_and_adaptive_sandwiches(
             A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
         user_ids (jnp.ndarray):
             A 1-D JAX NumPy array holding all user IDs in the study.
-        action_prob_func_filename (str):
-            The name of the file containing the action probability function.
+        action_prob_func (callable):
+            The action probability function.
         action_prob_func_args_beta_index (int):
             The index of beta in the action probability function arguments tuples.
-        inference_func_filename (str):
-            The name of the file containing the inference function.
+        inference_func (callable):
+            The inference loss or estimating function.
         inference_func_type (str):
             The type of the inference function (loss or estimating).
         inference_func_args_theta_index (int):
@@ -854,9 +852,9 @@ def construct_premature_classical_and_adaptive_sandwiches(
         all_post_update_betas.shape[1],
         theta.shape[0],
         user_ids,
-        action_prob_func_filename,
+        action_prob_func,
         action_prob_func_args_beta_index,
-        inference_func_filename,
+        inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
@@ -938,9 +936,9 @@ def get_weighted_inference_estimating_functions_only(
     beta_dim: int,
     theta_dim: int,
     user_ids: jnp.ndarray,
-    action_prob_func_filename: str,
+    action_prob_func: callable,
     action_prob_func_args_beta_index: int,
-    inference_func_filename: str,
+    inference_func: callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
@@ -978,12 +976,12 @@ def get_weighted_inference_estimating_functions_only(
             The dimension of the theta parameter.
         user_ids (jnp.ndarray):
             A 1D JAX NumPy array of user IDs.
-        action_prob_func_filename (str):
-            The name of the file containing the action probability function.
+        action_prob_func (str):
+            The action probability function.
         action_prob_func_args_beta_index (int):
             The index of beta in the action probability function arguments tuples.
-        inference_func_filename (str):
-            The name of the file containing the inference function.
+        inference_func (str):
+            The inference loss or estimating function.
         inference_func_type (str):
             The type of the inference function (loss or estimating).
         inference_func_args_theta_index (int):
@@ -1023,10 +1021,6 @@ def get_weighted_inference_estimating_functions_only(
             4. the user-level inverse classical bread matrix contributions
             stacks.
     """
-
-    # 1. Collect the necessary function objects
-    action_prob_func = load_function_from_same_named_file(action_prob_func_filename)
-    inference_func = load_function_from_same_named_file(inference_func_filename)
 
     inference_estimating_func = (
         jax.grad(inference_func, argnums=inference_func_args_theta_index)

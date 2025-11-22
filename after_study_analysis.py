@@ -71,7 +71,7 @@ cli.add_command(collect_existing_analyses)
 # otherwise need to add a check here to verify required format.
 # TODO: Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
 # Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
-@cli.command()
+@cli.command(name="analyze")
 @click.option(
     "--study_df_pickle",
     type=click.File("rb"),

@@ -80,3 +80,6 @@ tzdata==2023.3
 wcwidth==0.2.6
 wrapt==1.15.0
 zipp==3.15.0
+-e git+ssh://git@github.com/StatisticalReinforcementLearningLab/adaptive-sandwich.git@add_general_beta_differentiation_to_RL_side#egg=lifejacket
+-e git+ssh://git@github.com/StatisticalReinforcementLearningLab/adaptive-sandwich.git@add_general_beta_differentiation_to_RL_side#egg=lifejacket
+

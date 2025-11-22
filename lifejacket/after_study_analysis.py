@@ -129,6 +129,12 @@ def cli():
     help="Index of the argument holding the decision times the action probabilities correspond to in the tuple of algorithm update func args, if applicable.",
 )
 @click.option(
+    "--alg_update_func_args_previous_betas_index",
+    type=int,
+    default=-1000,
+    help="Index of the previous betas array in the tuple of algorithm update func args, if applicable.",
+)
+@click.option(
     "--inference_func_filename",
     type=click.Path(exists=True),
     help="File that contains the per-user loss/estimating function used to determine the inference estimate and relevant imports.  The filename without its extension will be assumed to match the function name.",
@@ -299,6 +305,7 @@ def analyze_dataset(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     inference_func: Callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
@@ -421,6 +428,7 @@ def analyze_dataset(
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             theta_est,
             beta_dim,
             suppress_interactive_data_checks,
@@ -497,6 +505,7 @@ def analyze_dataset(
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -1019,6 +1028,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     inference_func: callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
@@ -1075,6 +1085,8 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         alg_update_func_args_action_prob_times_index (int):
             The index in the update function arguments tuple where an array of times for which the
             given action probabilities apply is provided, if applicable. -1 otherwise.
+        alg_update_func_args_previous_betas_index (int):
+            The index in the update function arguments tuple where previous betas are provided.
         inference_func (callable):
             The inference loss or estimating function.
         inference_func_type (str):
@@ -1163,6 +1175,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         betas,
         beta_index_by_policy_num,
         action_prob_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
     )
 
     # 3. Thread the central betas into the algorithm update function arguments
@@ -1278,6 +1291,7 @@ def construct_classical_and_adaptive_sandwiches(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     inference_func: callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
@@ -1354,6 +1368,8 @@ def construct_classical_and_adaptive_sandwiches(
         alg_update_func_args_action_prob_times_index (int):
             The index in the update function arguments tuple where an array of times for which the
             given action probabilities apply is provided, if applicable. -1 otherwise.
+        alg_update_func_args_previous_betas_index (int):
+            The index in the update function arguments tuple where the previous betas are provided. 
         inference_func (callable):
             The inference loss or estimating function.
         inference_func_type (str):
@@ -1463,6 +1479,7 @@ def construct_classical_and_adaptive_sandwiches(
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,

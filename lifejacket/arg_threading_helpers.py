@@ -63,6 +63,7 @@ def thread_action_prob_func_args(
         action_prob_func_args_beta_index (int):
             The index in the action probability function arguments tuple
             where the beta value should be inserted.
+
     Returns:
         dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]:
             A map from user ids to maps of decision times to action probability function
@@ -125,6 +126,7 @@ def thread_update_func_args(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     threaded_action_prob_func_args_by_decision_time_by_user_id: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
@@ -165,6 +167,9 @@ def thread_update_func_args(
             to the update function, this is the index in the arguments where an array of times for
             which the given action probabilities apply is provided.
 
+        alg_update_func_args_previous_betas_index (int):
+            The index in the update function with previous beta parameters
+
         threaded_action_prob_func_args_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
             A dictionary mapping decision times to the function arguments required to compute action
             probabilities for this user, and with the shared betas thread in.
@@ -196,6 +201,7 @@ def thread_update_func_args(
                 policy_num,
             )
 
+            
             beta_to_introduce = all_post_update_betas[
                 beta_index_by_policy_num[policy_num]
             ]
@@ -206,6 +212,19 @@ def thread_update_func_args(
                     beta_to_introduce,
                 )
             )
+
+            if alg_update_func_args_previous_betas_index > 0:
+               previous_betas_to_introduce = all_post_update_betas[
+                   beta_index_by_policy_num[:policy_num - 1]
+               ]
+               threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
+                   replace_tuple_index(
+                       update_func_args_by_user_id[user_id],
+                       alg_update_func_args_previous_betas_index,
+                       previous_betas_to_introduce,
+                   )
+               )
+
 
             if alg_update_func_args_action_prob_index >= 0:
                 logger.debug(

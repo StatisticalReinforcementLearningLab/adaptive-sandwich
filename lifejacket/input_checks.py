@@ -41,6 +41,7 @@ def perform_first_wave_input_checks(
     alg_update_func_args_beta_index,
     alg_update_func_args_action_prob_index,
     alg_update_func_args_action_prob_times_index,
+    alg_update_func_args_previous_betas_index,
     theta_est,
     beta_dim,
     suppress_interactive_data_checks,
@@ -55,6 +56,9 @@ def perform_first_wave_input_checks(
     )
     require_beta_is_1D_array_in_alg_update_args(
         alg_update_func_args, alg_update_func_args_beta_index
+    )
+    require_previous_betas_is_2D_array_in_alg_update_args(
+        alg_update_func_args, alg_update_func_args_previous_betas_index
     )
     require_all_policy_numbers_in_study_df_except_possibly_initial_and_fallback_present_in_alg_update_args(
         study_df, in_study_col_name, policy_num_col_name, alg_update_func_args
@@ -72,6 +76,9 @@ def perform_first_wave_input_checks(
     )
     require_betas_match_in_alg_update_args_each_update(
         alg_update_func_args, alg_update_func_args_beta_index
+    )
+    require_previous_betas_match_in_alg_update_args_each_update(
+        alg_update_func_args, alg_update_func_args_previous_betas_index
     )
     require_action_prob_args_in_alg_update_func_correspond_to_study_df(
         study_df,
@@ -675,6 +682,23 @@ def require_beta_is_1D_array_in_alg_update_args(
                 == 1
             ), "Beta is not a 1D array in the algorithm update function args."
 
+def require_previous_betas_is_2D_array_in_alg_update_args(
+    alg_update_func_args, alg_update_func_args_previous_betas_index
+):
+    if alg_update_func_args_previous_betas_index < 0:
+        return
+    
+    for policy_num in alg_update_func_args:
+        for user_id in alg_update_func_args[policy_num]:
+            if not alg_update_func_args[policy_num][user_id]:
+                continue
+            assert (
+                alg_update_func_args[policy_num][user_id][
+                    alg_update_func_args_previous_betas_index
+                ].ndim
+                == 2
+            ), "Previous betas is not a 2D array in the algorithm update function args."
+
 
 def require_beta_is_1D_array_in_action_prob_args(
     action_prob_func_args, action_prob_func_args_beta_index
@@ -826,6 +850,30 @@ def require_betas_match_in_alg_update_args_each_update(
                 assert np.array_equal(
                     beta, first_beta
                 ), f"Betas do not match across users in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
+
+def require_previous_betas_match_in_alg_update_args_each_update(
+    alg_update_func_args, alg_update_func_args_previous_betas_index
+):
+    logger.info(
+        "Checking that previous betas match across users for each update in the algorithm update function args."
+    )
+    if alg_update_func_args_previous_betas_index < 0:
+        return 
+    
+    for policy_num in alg_update_func_args:
+        first_previous_betas = None
+        for user_id in alg_update_func_args[policy_num]:
+            if not alg_update_func_args[policy_num][user_id]:
+                continue
+            previous_betas = alg_update_func_args[policy_num][user_id][
+                alg_update_func_args_previous_betas_index
+            ]
+            if first_previous_betas is None:
+                first_previous_betas = previous_betas
+            else:
+                assert np.array_equal(
+                    previous_betas, first_previous_betas
+                ), f"Previous betas do not match across users in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
 
 
 def require_betas_match_in_action_prob_func_args_each_decision(

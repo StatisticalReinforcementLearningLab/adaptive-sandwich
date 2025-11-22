@@ -30,8 +30,5 @@ dev = [
 [project.scripts]
 lifejacket = "after_study_analysis:cli"
 
-[tool.setuptools.py-modules]
-py-modules = [
-  "after_study_analysis",
-  "trial_conditioning_monitor",
-]
+[tool.setuptools]
+py-modules = ["after_study_analysis", "trial_conditioning_monitor"]

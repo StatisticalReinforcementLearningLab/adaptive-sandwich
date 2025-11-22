@@ -14,27 +14,27 @@ from jax import numpy as jnp
 import scipy
 import pandas as pd
 
-from arg_threading_helpers import (
+from .arg_threading_helpers import (
     thread_action_prob_func_args,
     thread_inference_func_args,
     thread_update_func_args,
 )
-from collect_existing_analyses import collect_existing_analyses
-from constants import (
+from .collect_existing_analyses import collect_existing_analyses
+from .constants import (
     FunctionTypes,
     SandwichFormationMethods,
     SmallSampleCorrections,
 )
-from form_adaptive_meat_adjustments_directly import (
+from .form_adaptive_meat_adjustments_directly import (
     form_adaptive_meat_adjustments_directly,
 )
-import input_checks
-import get_datum_for_blowup_supervised_learning
-from small_sample_corrections import perform_desired_small_sample_correction
-from vmap_helpers import stack_batched_arg_lists_into_tensors
+from . import input_checks
+from . import get_datum_for_blowup_supervised_learning
+from .small_sample_corrections import perform_desired_small_sample_correction
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 
-from helper_functions import (
+from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
     construct_beta_index_by_policy_num_map,

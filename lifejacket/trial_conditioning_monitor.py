@@ -10,9 +10,9 @@ import jax
 import numpy as np
 import pandas as pd
 
-from arg_threading_helpers import thread_action_prob_func_args, thread_update_func_args
-from constants import FunctionTypes
-from helper_functions import (
+from .arg_threading_helpers import thread_action_prob_func_args, thread_update_func_args
+from .constants import FunctionTypes
+from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
     construct_beta_index_by_policy_num_map,
@@ -22,8 +22,8 @@ from helper_functions import (
     get_radon_nikodym_weight,
     unflatten_params,
 )
-import input_checks
-from vmap_helpers import stack_batched_arg_lists_into_tensors
+from . import input_checks
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 
 logger = logging.getLogger(__name__)

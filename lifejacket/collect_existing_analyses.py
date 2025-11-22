@@ -12,7 +12,7 @@ import plotext as plt
 import seaborn as sns
 import matplotlib.pyplot as pyplt
 
-from helper_functions import get_action_1_fraction, get_action_prob_variance
+from .helper_functions import get_action_1_fraction, get_action_prob_variance
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

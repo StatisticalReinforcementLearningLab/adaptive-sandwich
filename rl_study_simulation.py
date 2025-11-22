@@ -13,7 +13,7 @@ import cloudpickle as pickle
 from synthetic_env import load_synthetic_env_params, SyntheticEnv
 from basic_RL_algorithms import SigmoidLS, SmoothPosteriorSampling
 from constants import RLStudyArgs
-from trial_conditioning_monitor import TrialConditioningMonitor
+from lifejacket.trial_conditioning_monitor import TrialConditioningMonitor
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

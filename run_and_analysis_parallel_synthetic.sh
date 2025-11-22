@@ -214,7 +214,7 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Beginning after-study analysis.
-python after_study_analysis.py analyze-dataset-wrapper \
+python -m lifejacket.after_study_analysis analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \

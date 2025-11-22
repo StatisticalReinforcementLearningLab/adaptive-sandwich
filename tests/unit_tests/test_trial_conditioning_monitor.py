@@ -5,8 +5,8 @@ import jax.numpy as jnp
 import pandas as pd
 import pytest
 
-from trial_conditioning_monitor import TrialConditioningMonitor
-from after_study_analysis import analyze_dataset
+from lifejacket.trial_conditioning_monitor import TrialConditioningMonitor
+from lifejacket.after_study_analysis import analyze_dataset
 
 
 # Mock functions and arguments

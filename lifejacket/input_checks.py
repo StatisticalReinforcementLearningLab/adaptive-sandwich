@@ -8,8 +8,8 @@ from jax import numpy as jnp
 import pandas as pd
 import plotext as plt
 
-from constants import InverseStabilizationMethods, SmallSampleCorrections
-from helper_functions import (
+from .constants import InverseStabilizationMethods, SmallSampleCorrections
+from .helper_functions import (
     confirm_input_check_result,
 )
 

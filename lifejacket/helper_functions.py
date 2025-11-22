@@ -11,7 +11,7 @@ import numpy as np
 import jax.numpy as jnp
 import pandas as pd
 
-from constants import InverseStabilizationMethods
+from .constants import InverseStabilizationMethods
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

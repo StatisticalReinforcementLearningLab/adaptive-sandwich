@@ -1,6 +1,6 @@
 import numpy as np
 
-import helper_functions
+from lifejacket import helper_functions
 
 
 def test_invert_inverse_bread_matrix_2x2_block_diagonal():

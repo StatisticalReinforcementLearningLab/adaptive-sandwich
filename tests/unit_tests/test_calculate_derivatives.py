@@ -3,15 +3,14 @@ import numpy as np
 import pytest
 from jax import numpy as jnp
 
-import calculate_derivatives
-from constants import FunctionTypes
+from lifejacket import calculate_derivatives
+from lifejacket.constants import FunctionTypes
 import functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure
 import functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering
 import functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl
 import functions_to_pass_to_analysis.oralytics_RL_estimating_function
 
 import functions_to_pass_to_analysis.oralytics_act_prob_function
-import functions_to_pass_to_analysis.oralytics_primary_analysis_estimating_function
 import functions_to_pass_to_analysis.oralytics_primary_analysis_loss
 from tests import utils as test_utils
 

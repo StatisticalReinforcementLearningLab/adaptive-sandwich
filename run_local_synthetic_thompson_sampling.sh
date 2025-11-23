@@ -44,6 +44,7 @@ policy_num_col_name="policy_num"
 calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
+reward_col_name="reward"
 action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering.py"
 action_prob_func_args_beta_index=0
 alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering.py"
@@ -51,6 +52,7 @@ alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
+alg_update_func_args_previous_betas_index=-1 # for recursive algorithms; -1 if not used
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
 inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
 inference_func_args_theta_index=0
@@ -103,6 +105,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
     D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
     j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
+    R  | alg_update_func_args_previous_betas_index )    needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     I  | inference_func_filename )                      needs_arg; inference_func_filename="$OPTARG" ;;
     h  | inference_func_args_theta_index )              needs_arg; inference_func_args_theta_index="$OPTARG" ;;
     g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
@@ -183,27 +186,23 @@ python -m lifejacket.after_study_analysis analyze \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
   --inference_func_filename=$inference_func_filename \
   --inference_func_args_theta_index=$inference_func_args_theta_index \
   --inference_func_type=$inference_func_type \
   --theta_calculation_func_filename=$theta_calculation_func_filename \
   --in_study_col_name=$in_study_col_name \
   --action_col_name=$action_col_name \
+  --policy_num_col_name=$policy_num_col_name \
+  --calendar_t_col_name=$calendar_t_col_name \
+  --user_id_col_name=$user_id_col_name \
+  --action_prob_col_name=$action_prob_col_name \
   --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-
-  # --policy_num_col_name=$policy_num_col_name \
-  # --calendar_t_col_name=$calendar_t_col_name \
-  # --user_id_col_name=$user_id_col_name \
-  # --action_prob_col_name=$action_prob_col_name \
-  # --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-  # --suppress_all_data_checks=$suppress_all_data_checks \
-  # --small_sample_correction=$small_sample_correction \
-  # --trim_small_singular_values=$trim_small_singular_values
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Ending after-study analysis."
 

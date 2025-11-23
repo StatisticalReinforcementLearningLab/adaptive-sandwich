@@ -1175,7 +1175,6 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         betas,
         beta_index_by_policy_num,
         action_prob_func_args_beta_index,
-        alg_update_func_args_previous_betas_index,
     )
 
     # 3. Thread the central betas into the algorithm update function arguments
@@ -1192,6 +1191,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         threaded_action_prob_func_args_by_decision_time_by_user_id,
         action_prob_func,
     )

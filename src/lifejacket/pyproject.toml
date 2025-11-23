@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lifejacket"
+version = "0.1.0"
+description = "A package for after-study analysis of adaptive experiments in which data is pooled across users."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Nowell Closser", email = "nowellclosser@gmail.com"}
+]
+dependencies = [
+    "click>=8.0",
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "scipy>=1.7.0",
+    "plotext>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "flake8>=4.0",
+]
+
+[project.scripts]
+lifejacket = "lifejacket.after_study_analysis:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lifejacket*"]
+exclude = ["tests*"]

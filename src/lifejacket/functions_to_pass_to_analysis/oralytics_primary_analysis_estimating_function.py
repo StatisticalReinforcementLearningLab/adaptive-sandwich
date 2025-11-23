@@ -1,0 +1,42 @@
+import jax.numpy as jnp
+
+
+def oralytics_primary_analysis_estimating_function(
+    theta_est,
+    tod,
+    bbar,
+    abar,
+    appengage,
+    bias,
+    action,
+    oscb,
+    act_prob,
+):
+
+    nu_1 = theta_est[:5].reshape(-1, 1)
+    nu_2 = theta_est[5]
+    delta = theta_est[6]
+
+    state = jnp.hstack(
+        (
+            tod,
+            bbar,
+            abar,
+            appengage,
+            bias,
+        )
+    )
+
+    weight = 1 / (act_prob * (1 - act_prob))
+
+    return -jnp.sum(
+        weight
+        * (
+            oscb
+            - jnp.matmul(state, nu_1)
+            - act_prob * nu_2
+            - (action - act_prob) * delta
+        )
+        * jnp.hstack((state, act_prob, action - act_prob)),
+        axis=0,
+    )

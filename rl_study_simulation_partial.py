@@ -267,10 +267,11 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     ###############################################################
     simulation_data_path = os.path.join(args.save_dir, "simulated_data")
     if not os.path.isdir(simulation_data_path):
-        os.mkdir(simulation_data_path)
+        os.makedirs(simulation_data_path, exist_ok=True)
     all_folder_path = os.path.join(simulation_data_path, exp_str)
     if not os.path.isdir(all_folder_path):
-        os.mkdir(all_folder_path)
+        os.makedirs(all_folder_path, exist_ok=True)
+        # os.mkdir(all_folder_path)
 
     # path: ./simulated_data/SYNTHETIC_mode=delayed_1_action_dosage_alg=SMOOTH_POSTERIOR_SAMPLING_T=50_n=100_recruitN=100_decisionsBtwnUpdates=1_algfeats=intercept_errcorr=time_corr_actionC=0
     logger.info("Dumping arguments to json file...")

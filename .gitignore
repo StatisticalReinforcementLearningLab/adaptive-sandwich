@@ -13,4 +13,10 @@ deploy_paper_code.sh
 oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
 *.pyc
-
+src/lifejacket/*
+n30_T50/*
+n50_T50/*
+n100_T50/*
+n300_T50/*
+n500_T50/*
+n1000_T50/*

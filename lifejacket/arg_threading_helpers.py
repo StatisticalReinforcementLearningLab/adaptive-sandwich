@@ -214,9 +214,14 @@ def thread_update_func_args(
             )
 
             if alg_update_func_args_previous_betas_index > 0:
-               previous_betas_to_introduce = all_post_update_betas[
-                   beta_index_by_policy_num[:policy_num - 1]
-               ]
+               print('beta_index_by_policy_num',beta_index_by_policy_num)
+               sub_dict = {k: v for k, v in beta_index_by_policy_num.items() if k < policy_num}
+               previous_betas_to_introduce = all_post_update_betas[sub_dict.values()]
+               print('sub_dict',sub_dict.values())
+               print('previous_betas_to_introduce',previous_betas_to_introduce)
+            #    previous_betas_to_introduce = all_post_update_betas[
+            #        beta_index_by_policy_num[:policy_num - 1]
+            #    ]
                threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
                    replace_tuple_index(
                        update_func_args_by_user_id[user_id],

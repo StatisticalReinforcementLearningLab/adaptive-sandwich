@@ -14,6 +14,7 @@ oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
 *.pyc
 src/lifejacket/*
+n6_T5/*
 n30_T50/*
 n50_T50/*
 n100_T50/*

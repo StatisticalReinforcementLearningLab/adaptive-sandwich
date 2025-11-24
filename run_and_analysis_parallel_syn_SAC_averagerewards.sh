@@ -194,7 +194,8 @@ cd 2Longitudinal/adaptive-sandwich
 # pip install -r requirements.txt
 # echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
-filename="_averagerewards_history${SAChistory}" # add C in both environment and inference
+# filename="_averagerewards_history${SAChistory}" # add C in both environment and inference
+filename="_averagerewards" # add C in both environment and inference
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n${n}_T${T}"
 

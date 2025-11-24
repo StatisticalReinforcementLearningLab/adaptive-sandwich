@@ -140,9 +140,12 @@ if [ -z "${recruit_n:-}" ]; then
   recruit_n=$n
 fi
 
+filename="_averagerewards"
+
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning RL study simulation."
-python rl_study_simulation.py \
+# python rl_study_simulation.py \
+python rl_study_simulation_partial.py \
   --T=$T \
   --N=1 \
   --n=$n \
@@ -164,13 +167,18 @@ python rl_study_simulation.py \
   --lower_clip=$lclip \
   --prior_mean=$prior_mean \
   --prior_var_upper_triangle=$prior_var_upper_triangle \
-  --noise_var=$noise_var
+  --noise_var=$noise_var \
+  --save_dir="n${n}_T${T}/0" \
+  --Twoarmed=0 \
+  --filename=$filename 
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
+# output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
+# output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_averagerewards" # we set 0 because we focus on the first repetition
+output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}"
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning after-study analysis."

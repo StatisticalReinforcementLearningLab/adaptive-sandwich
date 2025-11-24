@@ -147,7 +147,8 @@ if [ -z "${recruit_n:-}" ]; then
 fi
 
 
-filename="_averagerewards_history${SAChistory}" # add C in both environment and inference
+# filename="_averagerewards_history${SAChistory}" # historical
+filename="_averagerewards" # add C in both environment and inference
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Beginning RL study simulation."

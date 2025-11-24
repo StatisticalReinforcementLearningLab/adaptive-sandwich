@@ -6,8 +6,9 @@ from jax import debug
 
 def synthetic_SAC_alg_update_function(
     beta: jnp.array, # beta_t: t>=2
-    betaQ_target: jnp.array, # added
-    beta_pi_target: jnp.array, # added
+    beta_previous: jnp.array, # beta_{:t-1}: t>=2
+    # betaQ_target: jnp.array, # added
+    # beta_pi_target: jnp.array, # added
     n_users: int,  # Note this is the number of users that have entered the study *so far*
     state: jnp.array,
     next_state: jnp.array, # added
@@ -39,13 +40,16 @@ def synthetic_SAC_alg_update_function(
         lambda_entropy = 1.0
         beta_Q = beta[:dim]
         beta_pi = beta[dim:]
+        beta_target = beta_previous[:,-1] # only the last beta
+        betaQ_target = beta_target[:dim] # previous Q
+        betapi_target = beta_target[dim:] # previous pi
         # print('----------------------------------------------------------')
         # debug.print("beta = {}", beta)
         # debug.print("states = {}", state)
         # debug.print("betaQ_target = {}", betaQ_target)
         ##### estimation function for Q
         # print('state shape:', state.shape, state)
-        p_next = policy(next_state, beta_pi_target)  # we need to use the target policy to evaluate p_next in the last step
+        p_next = policy(next_state, betapi_target)  # we need to use the target policy to evaluate p_next in the last step
         # next_action
         Q_states_next = jnp.hstack([next_state, next_state * next_action])
         Q_values_next = jnp.dot(Q_states_next, betaQ_target) 

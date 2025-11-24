@@ -145,7 +145,7 @@ if [ -z "${recruit_n:-}" ]; then
 fi
 
 
-filename="_01envinference_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+filename="_treatmenteffect_01envinference_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning RL study simulation."
@@ -183,8 +183,8 @@ echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Finished 
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_partial${filename}" # we set 0 because we focus on the first repetition
-# output_folder_random="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg2}_T=${T}_n=${n}_partial"
+
+output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}" 
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning after-study analysis."

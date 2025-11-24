@@ -217,8 +217,9 @@ def thread_update_func_args(
                print('beta_index_by_policy_num',beta_index_by_policy_num)
             #    sub_dict = {k: v for k, v in beta_index_by_policy_num.items() if k < policy_num}
                indices = [v for k, v in beta_index_by_policy_num.items() if k < policy_num]
-               previous_betas_to_introduce = all_post_update_betas[indices]
-               print('indices',indices)
+               idx = jnp.array(indices, dtype=jnp.int32)
+               previous_betas_to_introduce = all_post_update_betas[idx,:] # 2D
+               print('idx',idx)
                print('previous_betas_to_introduce',previous_betas_to_introduce)
             #    previous_betas_to_introduce = all_post_update_betas[
             #        beta_index_by_policy_num[:policy_num - 1]

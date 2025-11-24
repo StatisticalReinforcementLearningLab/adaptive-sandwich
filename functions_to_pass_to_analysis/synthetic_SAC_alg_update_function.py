@@ -41,6 +41,8 @@ def synthetic_SAC_alg_update_function(
         beta_Q = beta[:dim]
         beta_pi = beta[dim:]
         beta_target = beta_previous[:,-1] # only the last beta
+        print('beta_target shape:', beta_target.shape, beta_target)
+        print('beta_previous shape:', beta_previous.shape, beta_previous)
         betaQ_target = beta_target[:dim] # previous Q
         betapi_target = beta_target[dim:] # previous pi
         # print('----------------------------------------------------------')

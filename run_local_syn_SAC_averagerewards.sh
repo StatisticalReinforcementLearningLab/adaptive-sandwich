@@ -8,12 +8,12 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 
 # Arguments that affect RL study simulation side
-T=50
+T=5
 decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
-n=30
+n=6
 # recruit_n=$n is done below unless the user specifies recruit_n
 synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'

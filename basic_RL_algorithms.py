@@ -1229,13 +1229,12 @@ class SoftActorCritic:
             # if calendar_t > 1:
             self.previous_beta = jnp.concatenate([self.get_current_betaQ_target(), self.get_current_betapi_target()])
             self.previous_betas_over_time = jnp.zeros((self.previous_beta.shape[0], calendar_t)) # e.g., when t=2, there is only one previous beta; when t=1, one column as well with the same value
-            self.previous_betas_over_time.at[:, -1].set(self.previous_beta)
+            self.previous_betas_over_time = self.previous_betas_over_time.at[:, -1].set(self.previous_beta) # pure functional, not replace
+            print('self.previous_betas_over_time',self.previous_betas_over_time)
             self.rl_update_args[next_policy_num][user_id] = (
                 (
                     self.get_current_beta_estimate(), # save the model's parameters
-                    # self.get_current_betaQ_target(), # save the target critic parameters (last step's critic)
-                    # self.get_current_betapi_target(), # save the target actor parameters (last step's policy)
-                    self.previous_betas_over_time, 
+                    self.previous_betas_over_time,
                     self.get_num_users_entered_before_last_update(),
                     self.get_treat_states(in_study_user_data),
                     self.get_next_states(in_study_user_data),
@@ -1249,6 +1248,7 @@ class SoftActorCritic:
                     self.ridge_penalty,
                     self.gamma,
                     in_study_user_data.loc[in_study_user_data['Z_id']==1,'Z_id'].to_numpy() if self.twoarmed else in_study_user_data['Z_id'].to_numpy(), # new
+                    self.previous_betas_over_time,
                 )
                 # We only care about the data overall, however, if there is any
                 # in-study data for this user so far

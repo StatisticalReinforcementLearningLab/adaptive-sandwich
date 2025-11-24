@@ -623,7 +623,7 @@ def main():
         raise NotImplementedError()
     elif tmp_args.dataset_type == RLStudyArgs.SYNTHETIC:
         default_arg_dict = {
-            RLStudyArgs.T: 3, ##################### important ######################
+            RLStudyArgs.T: 5, ##################### important ######################
             RLStudyArgs.RECRUIT_N: tmp_args.n,
             RLStudyArgs.RECRUIT_T: 1,
         }
@@ -668,7 +668,7 @@ def main():
     parser.add_argument(
         "--Twoarmed",
         type=int,
-        default=1,
+        default=0,
         help="1: we consider the two armed bandit, 0: one-armed bandit",
     )
 
@@ -697,7 +697,7 @@ def main():
     parser.add_argument(
         "--SAChistory",
         type=int,
-        default=1,
+        default=0,
         help="0: original SAC without history, 1: historical version of SAC",
     )
 

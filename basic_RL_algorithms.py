@@ -1032,14 +1032,14 @@ class SoftActorCritic:
 
         # close-form solution 
         # print('self.betapi_tar', self.betapi_tar)
-        p_next = self.policy(next_states, self.betapi) # very important: use the target policy from the last step to evaluate p_next
+        p_next = self.policy(next_states, self.betapi_tar) # very important: use the target policy from the last step to evaluate p_next
         # print('next state', next_states)
         # print('p_next', p_next)
         next_action = self.rng.binomial(1, p_next)
-        # print("self.betaQ_tar:", self.betaQ_tar)
+        print("self.betaQ_tar:", self.betaQ_tar)
         Q_states_next = jnp.hstack([next_states, next_states * next_action[:, None]]) 
-        Q_values_next = self.Q_value(Q_states_next, self.betaQ) # target network
-        # print('Q_values_next', Q_values_next)
+        Q_values_next = self.Q_value(Q_states_next, self.betaQ_tar) # target network
+        print('Q_values_next', Q_values_next)
         # print("betapi_tar:", self.betapi_tar)
         # print("next_action:", next_action)
         # print('next_states:', next_states)
@@ -1074,7 +1074,7 @@ class SoftActorCritic:
         # print("TD target mean:", jnp.mean(TD_target), "Q value mean:", jnp.mean(self.Q_value(current_Q_states, self.betaQ)), 'betaQ_tar/pre', self.betaQ_tar, 'betaQ', self.betaQ)
         # print("States", base_states)
         residuals = TD_target - current_Q_states @ self.betaQ
-        # debug.print('betaQ: {}', self.betaQ)
+        debug.print('updated betaQ: {}', self.betaQ)
         # debug.print('TD_target: {}', TD_target)
         # debug.print('Current_Q_values: {}', current_Q_states @ self.betaQ)
         # debug.print('current_Q_states: {}', current_Q_states)
@@ -1089,12 +1089,10 @@ class SoftActorCritic:
             vector_Q = vector_Q / n_realunits + 2*self.ridge_penalty * self.betaQ.reshape(-1, 1)
             each_unit_Q = -2*residuals.reshape(-1,1) * current_Q_states + 2*self.ridge_penalty * self.betaQ.reshape(1, -1) # [n, beta_dim_Q]
          # [beta_dim_Q, 1] + [beta_dim_Q, 1]
-        # debug.print('t {}', t)
+        debug.print('t {}', t)
         debug.print("averaged vector_Q {}", vector_Q.reshape(1, -1))
-        # debug.print("each unit_q {}", each_unit_Q)
+        debug.print("each unit_q {}", each_unit_Q)
        
-        
-        
         # this manual gradient is used to check the correctness of jax automatic differentiation (which is very close)
         def gradient_pi(beta_pi, beta_Q):
             def single_grad(treat_state):
@@ -1104,7 +1102,7 @@ class SoftActorCritic:
                 grad = (1-2*self.lower_clip) * p0 * (1 - p0) * self.steepness * temp * treat_state
                 return grad
             # return -jnp.mean(jax.vmap(single_grad, in_axes=(0))(treat_states), axis=0) # [2,1] averaged over n
-            return jax.vmap(single_grad, in_axes=(0))(treat_states) 
+            return -jax.vmap(single_grad, in_axes=(0))(treat_states) 
         
         ################### [Incremental] Update Actor based on the last step's critic self.betaQ_tar
         self.lr_pi_use = self.lr_pi
@@ -1112,6 +1110,8 @@ class SoftActorCritic:
         
         #################### in each time step, we randomly intialize the betapi to perform update to mirror TS, where posterior mean and variance are directly computed based on the data and prior mean and varaince
         # betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi))
+        # debug.print('self.betapi target{}', self.betapi_tar)
+        # debug.print('beta_init{}', self.betapi_init)
         for i in range(self.epoch_actor):
             loss_pre = neg_obj(self.betapi)
             grad_beta_pi = jax.grad(neg_obj)(self.betapi)
@@ -1126,9 +1126,17 @@ class SoftActorCritic:
             if i % 200 == 0 and i >0:
                 self.lr_pi_use = self.lr_pi_use * self.decay # decay the learning rate for the actor
         vector_pi = gradient_pi(self.betapi, self.betaQ_tar) # [n/2 * t, beta_dim_pi]
-        # temp = vector_pi.reshape(-1, t, betapi.shape[0]) # [n/2, t, beta_dim_pi]
-        # debug.print("vector_pi for each unit {}", jnp.mean(temp, axis=1)) # for each unit
+        # debug.print('t {}', t)
+        # debug.print('vector_pi shape {}', vector_pi.shape)
+        # try:
+        # temp = vector_pi.reshape(-1, t, self.betapi.shape[0]) # [n/2, t, beta_dim_pi] historical
+        # temp = vector_pi.reshape(-1, t, self.betapi.shape[0]) # [n/2, t, beta_dim_pi] historical
+        # except:
+        #     print(1)
+        # debug.print('self.betapi {}', self.betapi)
         debug.print("averaged vector_pi {}", jnp.mean(vector_pi, axis=0))
+        # debug.print("vector_pi for each unit {}", jnp.mean(temp, axis=1)) # for each unit
+        debug.print("vector_pi for each unit {}", vector_pi) # for each unit
         debug.print("grad_beta_pi {}", -grad_beta_pi)
         
 
@@ -1252,7 +1260,8 @@ class SoftActorCritic:
                     self.ridge_penalty,
                     self.gamma,
                     in_study_user_data.loc[in_study_user_data['Z_id']==1,'Z_id'].to_numpy() if self.twoarmed else in_study_user_data['Z_id'].to_numpy(), # new
-                    self.beta_init
+                    self.beta_init,
+                    self.lambda_entropy, # 1.0
                 )
                 # We only care about the data overall, however, if there is any
                 # in-study data for this user so far

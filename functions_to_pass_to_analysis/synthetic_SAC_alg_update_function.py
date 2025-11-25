@@ -20,6 +20,7 @@ def synthetic_SAC_alg_update_function(
     gamma: float,
     Z_id: jnp.array,
     beta_initial: jnp.array, # not allow the gradient trace
+    lambda_entropy: float,
 ) -> float:
     """
     Estimating function for SAC. this function is used only in the inference phase
@@ -38,7 +39,6 @@ def synthetic_SAC_alg_update_function(
     
     def active_branch(_):
         dim = 4
-        lambda_entropy = 1.0
         beta_Q = beta[:dim]
         beta_pi = beta[dim:]
         
@@ -49,10 +49,10 @@ def synthetic_SAC_alg_update_function(
         betaQ_target = beta_target[:dim] # previous Q
         betapi_target = beta_target[dim:] # previous pi
         # print('----------------------------------------------------------')
-        debug.print("beta = {}", beta)
+        # debug.print("beta = {}", beta)
         # debug.print("states = {}", state)
-        debug.print("beta_previous = {}", beta_previous)
-        debug.print("beta_target = {}", beta_target)
+        # debug.print("beta_previous = {}", beta_previous)
+        # debug.print("beta_target = {}", beta_target)
         ##### estimation function for Q
         # print('state shape:', state.shape, state)
         p_next = policy(next_state, betapi_target)  # we need to use the target policy to evaluate p_next in the last step
@@ -73,9 +73,9 @@ def synthetic_SAC_alg_update_function(
        
         # debug.print("Current_Q_values shape: {}", Current_Q_values)
         # debug.print("beta: {}", beta)
-        # debug.print('TD_target : {}', TD_target)
+        debug.print('TD_target : {}', TD_target)
         residuals = jax.lax.stop_gradient(TD_target) - Current_Q_values
-        # debug.print('residuals : {}', residuals)
+        debug.print('residuals : {}', residuals)
         # debug.print("current_Q_states: {}", current_Q_states)
         vector_Q = -2*jnp.dot(current_Q_states.T, residuals.reshape(-1,1)) # [4, 1] * [1, 1] -> [4, 1]  
         vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # [4, 1]  

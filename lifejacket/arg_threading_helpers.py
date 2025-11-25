@@ -212,37 +212,17 @@ def thread_update_func_args(
                     beta_to_introduce,
                 )
             )
-            jax.debug.print("policy num: {}", policy_num)
-            jax.debug.print("beta to introduce: {}", beta_to_introduce)
-            jax.debug.print("all_post_update_betas: {}", all_post_update_betas)
-            jax.debug.print("beta_index_by_policy_num: {}", beta_index_by_policy_num)
-            jax.debug.print('threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
-            """
-            beta to introduce: [-0.8259129   7.1571584   0.          0.         -0.54211736  1.7517936 ]
-            all_post_update_betas: [[-8.2591289e-01  7.1571584e+00  0.0000000e+00  0.0000000e+00
-            -5.4211736e-01  1.7517936e+00]
-            [ 2.4422351e-01  1.0364486e+01  1.5348116e+01 -1.9082781e+01
-            -8.9406967e-08 -8.3946134e-08]
-            [-5.9787102e+00 -1.7327471e+01  1.3559653e+01  2.2093704e+01
-            4.8184959e+01 -9.5739044e+01]
-            [ 3.3879929e+00  3.0319800e+00 -1.6527340e+01 -9.9999228e+00
-            4.8184963e+01 -9.5739044e+01]]
-            beta_index_by_policy_num: {2.0: Array(0, dtype=int32, weak_type=True), 3.0: Array(1, dtype=int32, weak_type=True), 4.0: Array(2, dtype=int32, weak_type=True), 5.0: Array(3, dtype=int32, weak_type=True)}
-            threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: (Array([-0.8259129 ,  7.1571584 ,  0.        ,  0.        , -0.54211736,
-                1.7517936 ], dtype=float32), Array([[-0.13280813],
-            [ 1.9021167 ],
-            [-0.4201407 ],
-            [ 1.3475314 ],
-            [-2.8300133 ],
-            [ 0.3741305 ]], dtype=float32), Array(6, dtype=int32, weak_type=True), Array([[ 1.        , -0.19378673]], dtype=float32), Array([[ 1.       , -1.2958088]], dtype=float32), Array([[0.]], dtype=float32), Array(0, dtype=int32), Array([[-1.2958088]], dtype=float32), Array(0.1, dtype=float32, weak_type=True), Array(0.9, dtype=float32, weak_type=True), Array(1., dtype=float32, weak_type=True), Array(0.001, dtype=float32, weak_type=True), Array(0.99, dtype=float32, weak_type=True), Array([1], dtype=int32), Array([[-0.13280813],
-            [ 1.9021167 ],
-            [-0.4201407 ],
-            [ 1.3475314 ],
-            [-2.8300133 ],
-            [ 0.3741305 ]], dtype=float32))
-            """
-            if alg_update_func_args_previous_betas_index > 0: # replace the previous threaded_update_func_args_by_policy_num_by_user_id, but previous_betas_to_introduce is based on all_post_update_betas to allow gradient propagation
-               # index all previous policy and select the corresonding beta index => beta parameters
+            # jax.debug.print("policy num: {}", policy_num)
+            # jax.debug.print("beta to introduce: {}", beta_to_introduce)
+            # jax.debug.print("all_post_update_betas: {}", all_post_update_betas)
+            # jax.debug.print("beta_index_by_policy_num: {}", beta_index_by_policy_num)
+            # jax.debug.print('threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
+            if alg_update_func_args_previous_betas_index > 0: 
+               """
+               Function: insert previous betas at the designated index: beta + previous beta (second argument) + other args 
+               Key: replace_tuple_index; previous_betas_to_introduce is based on all_post_update_betas to allow gradient propagation
+               Note: policy_num starts from 2 (calendar t =1, i.e., after the 1st update); all_post_update_betas are all UPDATED beta without the initial beta
+               """
                indices = [v for k, v in beta_index_by_policy_num.items() if k <= policy_num] # index the current policy as well to avoid null
                idx = jnp.array(indices, dtype=jnp.int32)
                previous_betas_to_introduce = all_post_update_betas[idx,:] # 2D
@@ -253,10 +233,10 @@ def thread_update_func_args(
                        previous_betas_to_introduce,
                    )
                )
-               jax.debug.print('indices: {}', indices)
-               jax.debug.print('idx: {}', idx)
-               jax.debug.print("previous_betas_to_introduce: {}", previous_betas_to_introduce)
-               jax.debug.print('[after] threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
+            #    jax.debug.print('indices: {}', indices)
+            #    jax.debug.print('idx: {}', idx)
+            #    jax.debug.print("previous_betas_to_introduce: {}", previous_betas_to_introduce)
+            #    jax.debug.print('[after] threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
                 
 
 

@@ -216,9 +216,22 @@ def thread_update_func_args(
             jax.debug.print("beta to introduce: {}", beta_to_introduce)
             jax.debug.print("all_post_update_betas: {}", all_post_update_betas)
             jax.debug.print("beta_index_by_policy_num: {}", beta_index_by_policy_num)
+            jax.debug.print('threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
+            """
+            beta to introduce: [-0.8259129   7.1571584   0.          0.         -0.54211736  1.7517936 ]
+            all_post_update_betas: [[-8.2591289e-01  7.1571584e+00  0.0000000e+00  0.0000000e+00
+            -5.4211736e-01  1.7517936e+00]
+            [ 2.4422351e-01  1.0364486e+01  1.5348116e+01 -1.9082781e+01
+            -8.9406967e-08 -8.3946134e-08]
+            [-5.9787102e+00 -1.7327471e+01  1.3559653e+01  2.2093704e+01
+            4.8184959e+01 -9.5739044e+01]
+            [ 3.3879929e+00  3.0319800e+00 -1.6527340e+01 -9.9999228e+00
+            4.8184963e+01 -9.5739044e+01]]
+            beta_index_by_policy_num: {2.0: Array(0, dtype=int32, weak_type=True), 3.0: Array(1, dtype=int32, weak_type=True), 4.0: Array(2, dtype=int32, weak_type=True), 5.0: Array(3, dtype=int32, weak_type=True)}
+            """
             if alg_update_func_args_previous_betas_index > 0:
                # index all previous policy and select the corresonding beta index => beta parameters
-               indices = [v for k, v in beta_index_by_policy_num.items() if k < policy_num]
+               indices = [v for k, v in beta_index_by_policy_num.items() if k <= policy_num] # index the current policy as well
                idx = jnp.array(indices, dtype=jnp.int32)
                previous_betas_to_introduce = all_post_update_betas[idx,:] # 2D
                threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
@@ -231,6 +244,7 @@ def thread_update_func_args(
                jax.debug.print('indices: {}', indices)
                jax.debug.print('idx: {}', idx)
                jax.debug.print("previous_betas_to_introduce:", previous_betas_to_introduce)
+               jax.debug.print('[after] threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
                 
 
 

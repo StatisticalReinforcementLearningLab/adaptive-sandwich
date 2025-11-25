@@ -212,8 +212,10 @@ def thread_update_func_args(
                     beta_to_introduce,
                 )
             )
-            print("policy num:", policy_num)
-            print("beta to introduce:", beta_to_introduce)
+            jax.debug.print("policy num: {}", policy_num)
+            jax.debug.print("beta to introduce: {}", beta_to_introduce)
+            jax.debug.print("all_post_update_betas: {}", all_post_update_betas)
+            jax.debug.print("beta_index_by_policy_num: {}", beta_index_by_policy_num)
             if alg_update_func_args_previous_betas_index > 0:
                # index all previous policy and select the corresonding beta index => beta parameters
                indices = [v for k, v in beta_index_by_policy_num.items() if k < policy_num]
@@ -226,8 +228,10 @@ def thread_update_func_args(
                        previous_betas_to_introduce,
                    )
                )
-            print('idx: ', idx)
-            print("previous_betas_to_introduce:", beta_to_introduce)
+               jax.debug.print('indices: {}', indices)
+               jax.debug.print('idx: {}', idx)
+               jax.debug.print("previous_betas_to_introduce:", previous_betas_to_introduce)
+                
 
 
             if alg_update_func_args_action_prob_index >= 0:

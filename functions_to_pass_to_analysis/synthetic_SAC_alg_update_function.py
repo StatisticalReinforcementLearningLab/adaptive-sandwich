@@ -50,7 +50,7 @@ def synthetic_SAC_alg_update_function(
         betapi_target = beta_target[dim:] # previous pi
         # print('----------------------------------------------------------')
         debug.print("beta = {}", beta)
-        debug.print("states = {}", state)
+        # debug.print("states = {}", state)
         debug.print("beta_previous = {}", beta_previous)
         debug.print("beta_target = {}", beta_target)
         ##### estimation function for Q

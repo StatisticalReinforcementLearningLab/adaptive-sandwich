@@ -1238,7 +1238,7 @@ class SoftActorCritic:
             self.rl_update_args[next_policy_num][user_id] = (
                 (
                     self.get_current_beta_estimate(), # save the model's parameters
-                    self.previous_betas_over_time,
+                    self.previous_betas_over_time, ### we insert the previous betas based on all beta to allow gradient propagation|||| but we have a fake input check to pass the check function [TO BE DELEDTED LATER]
                     self.get_num_users_entered_before_last_update(),
                     self.get_treat_states(in_study_user_data),
                     self.get_next_states(in_study_user_data),

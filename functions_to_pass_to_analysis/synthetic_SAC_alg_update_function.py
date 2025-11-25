@@ -6,7 +6,7 @@ from jax import debug
 
 def synthetic_SAC_alg_update_function(
     beta: jnp.array, # beta_t: t>=2
-    beta_previous: jnp.array, # beta_{:t-1}: t>=2
+    beta_previous: jnp.array, # beta_{:t}: t>=2
     n_users: int,  # Note this is the number of users that have entered the study *so far*
     state: jnp.array,
     next_state: jnp.array, # added
@@ -19,14 +19,13 @@ def synthetic_SAC_alg_update_function(
     ridge_penalty: float,
     gamma: float,
     Z_id: jnp.array,
-    beta_previous_copy: jnp.array, # beta_{:t-1}: t>=2
+    beta_initial: jnp.array, # not allow the gradient trace
 ) -> float:
     """
     Estimating function for SAC. this function is used only in the inference phase
     """
-    print("beta = ", beta)
-    print("beta_previous = ", beta_previous)
-    print('beta_previous_copy = ', beta_previous_copy)
+
+
     def zero_branch(_):
         # zero beta estiamte and 0 gradient
         return jnp.zeros_like(beta)
@@ -42,17 +41,18 @@ def synthetic_SAC_alg_update_function(
         lambda_entropy = 1.0
         beta_Q = beta[:dim]
         beta_pi = beta[dim:]
-        beta_target = beta_previous[:,-1] # only the last beta
-        print("beta = ", beta)
-        print("state = ", state)
-        print("beta_previous = ", beta_previous)
-        print("beta_target = ", beta_target)
+        
+        if beta_previous.shape[0] == 1:
+            beta_target = beta_initial # the target should the intial beta to evaluate the estimating function
+        else:
+            beta_target = beta_previous[-2,:] # -1: the current beta, -2: the previous beta
         betaQ_target = beta_target[:dim] # previous Q
         betapi_target = beta_target[dim:] # previous pi
         # print('----------------------------------------------------------')
-        # debug.print("beta = {}", beta)
-        # debug.print("states = {}", state)
-        # debug.print("betaQ_target = {}", betaQ_target)
+        debug.print("beta = {}", beta)
+        debug.print("states = {}", state)
+        debug.print("beta_previous = {}", beta_previous)
+        debug.print("beta_target = {}", beta_target)
         ##### estimation function for Q
         # print('state shape:', state.shape, state)
         p_next = policy(next_state, betapi_target)  # we need to use the target policy to evaluate p_next in the last step

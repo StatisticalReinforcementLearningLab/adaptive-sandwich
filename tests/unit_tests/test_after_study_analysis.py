@@ -35,6 +35,7 @@ from functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_functi
 def setup_data_two_loss_functions_no_action_probs():
 
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
 
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
@@ -141,6 +142,7 @@ def setup_data_two_loss_functions_no_action_probs():
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
@@ -194,6 +196,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -237,6 +240,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
@@ -376,6 +380,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
 @pytest.fixture
 def setup_data_two_estimating_functions_no_action_probs():
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     alg_update_func_type = FunctionTypes.ESTIMATING
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
@@ -480,6 +485,7 @@ def setup_data_two_estimating_functions_no_action_probs():
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         synthetic_get_least_squares_estimating_function_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
@@ -510,6 +516,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -553,6 +560,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
@@ -692,6 +700,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_different_betas():
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
@@ -793,6 +802,7 @@ def setup_data_two_loss_functions_no_action_probs_different_betas():
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
@@ -839,6 +849,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -879,6 +890,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
@@ -1275,6 +1287,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
@@ -1394,6 +1407,7 @@ def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
@@ -1438,6 +1452,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -1478,6 +1493,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
@@ -1802,6 +1818,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates():
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = -1
@@ -1908,6 +1925,7 @@ def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_upd
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
@@ -1956,6 +1974,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -1994,6 +2013,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
@@ -2232,6 +2252,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
 @pytest.fixture
 def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     alg_update_func_type = FunctionTypes.LOSS
     alg_update_func_args_beta_index = 0
     alg_update_func_args_action_prob_index = 5
@@ -2358,6 +2379,7 @@ def setup_data_two_loss_functions_no_action_probs_use_action_probs_both_sides():
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         synthetic_get_least_squares_loss_inference_action_centering,
         inference_func_type,
         inference_func_args_theta_index,
@@ -2403,6 +2425,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
@@ -2443,6 +2466,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
@@ -2948,6 +2972,7 @@ def test_get_radon_nikodym_weight():
     beta_target = jnp.array([0.5, 0.2, 0.3])
     action_prob_func_args_single_user = (jnp.array([0.1, 0.2, 0.3]), 0.01, 0.02)
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     action = 1
 
     expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
@@ -2979,6 +3004,7 @@ def test_get_radon_nikodym_weight_action_0():
     beta_target = jnp.array([0.5, 0.2, 0.3])
     action_prob_func_args_single_user = (jnp.array([0.1, 0.2, 0.3]), 0.01, 0.02)
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     action = 0
 
     expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
@@ -3009,6 +3035,7 @@ def test_get_radon_nikodym_weight_same_beta():
     beta_target = jnp.array([0.1, 0.2, 0.3])
     action_prob_func_args_single_user = (jnp.array([0.1, 0.2, 0.3]), 0.01, 0.02)
     action_prob_func_args_beta_index = 0
+    alg_update_func_args_previous_betas_index = -1
     action = 1
 
     expected_result = 1

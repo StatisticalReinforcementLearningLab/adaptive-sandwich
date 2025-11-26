@@ -1,2 +1,0 @@
-[console_scripts]
-lifejacket = lifejacket.after_study_analysis:cli

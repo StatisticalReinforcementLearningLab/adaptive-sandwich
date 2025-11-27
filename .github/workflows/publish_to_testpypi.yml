@@ -38,7 +38,7 @@ jobs:
 
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/lifejacket_test
+      url: https://test.pypi.org/p/lifejacket
 
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing

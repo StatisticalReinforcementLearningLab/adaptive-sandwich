@@ -1,6 +1,6 @@
-name: Publish Python 🐍 distribution 📦 toTestPyPI
+name: Publish Python 🐍 distribution 📦 to TestPyPI
 
-on: push
+# Does not run automatically; trigger manually
 
 jobs:
   build:

@@ -743,7 +743,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     *batched_arg_tensors,
 ):
     if update_func_type == FunctionTypes.LOSS:
-        return jax.jit(
+        return jax.jit(  # pylint: disable=not-callable
             jax.vmap(
                 fun=jax.jacrev(
                     jax.grad(update_func, update_func_args_beta_index),
@@ -754,7 +754,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
             )
         )(*batched_arg_tensors)
     if update_func_type == FunctionTypes.ESTIMATING:
-        return jax.jit(
+        return jax.jit(  # pylint: disable=not-callable
             jax.vmap(
                 fun=jax.jacrev(
                     update_func,

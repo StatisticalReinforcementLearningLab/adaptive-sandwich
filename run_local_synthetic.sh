@@ -20,6 +20,7 @@ RL_alg="sigmoid_LS_smooth_clip"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
+collect_args_to_reconstruct_action_probs=0
 lclip=0.1
 uclip=0.9
 lambda_=0.0
@@ -43,6 +44,7 @@ alg_update_func_type="loss"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=5
 alg_update_func_args_action_prob_times_index=6
+alg_update_func_args_previous_betas_index=-1
 inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
@@ -56,7 +58,7 @@ stabilize_joint_adaptive_bread_inverse=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:K:m:N:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:K:m:N:w:W-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -108,6 +110,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     K  | form_adaptive_meat_adjustments_explicitly )        needs_arg; form_adaptive_meat_adjustments_explicitly="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )           needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
     N  | monitor_bread_inverse_conditioning_and_intervene ) needs_arg; monitor_bread_inverse_conditioning_and_intervene="$OPTARG" ;;
+    w  | collect_args_to_reconstruct_action_probs )         needs_arg; collect_args_to_reconstruct_action_probs="$OPTARG" ;;
+    W  | alg_update_func_args_previous_betas_index )        needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -149,6 +153,7 @@ python rl_study_simulation.py \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
   --lambda_=$lambda_ \
+  --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs \
   --monitor_bread_inverse_conditioning_and_intervene=$monitor_bread_inverse_conditioning_and_intervene
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
@@ -169,6 +174,7 @@ python -m lifejacket.after_study_analysis analyze \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
   --inference_func_filename=$inference_func_filename \
   --inference_func_args_theta_index=$inference_func_args_theta_index \
   --inference_func_type=$inference_func_type \

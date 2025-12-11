@@ -201,7 +201,6 @@ def thread_update_func_args(
                 policy_num,
             )
 
-            
             beta_to_introduce = all_post_update_betas[
                 beta_index_by_policy_num[policy_num]
             ]
@@ -212,33 +211,24 @@ def thread_update_func_args(
                     beta_to_introduce,
                 )
             )
-            # jax.debug.print("policy num: {}", policy_num)
-            # jax.debug.print("beta to introduce: {}", beta_to_introduce)
-            # jax.debug.print("all_post_update_betas: {}", all_post_update_betas)
-            # jax.debug.print("beta_index_by_policy_num: {}", beta_index_by_policy_num)
-            # jax.debug.print('threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
-            if alg_update_func_args_previous_betas_index > 0: 
-               """
-               Function: insert previous betas at the designated index: beta + previous beta (second argument) + other args 
-               Key: replace_tuple_index; previous_betas_to_introduce is based on all_post_update_betas to allow gradient propagation
-               Note: policy_num starts from 2 (calendar t =1, i.e., after the 1st update); all_post_update_betas are all UPDATED beta without the initial beta
-               """
-               indices = [v for k, v in beta_index_by_policy_num.items() if k <= policy_num] # index the current policy as well to avoid null
-               idx = jnp.array(indices, dtype=jnp.int32)
-               previous_betas_to_introduce = all_post_update_betas[idx,:] # 2D
-               threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
-                   replace_tuple_index(
-                       update_func_args_by_user_id[user_id],
-                       alg_update_func_args_previous_betas_index,
-                       previous_betas_to_introduce,
-                   )
-               )
-            #    jax.debug.print('indices: {}', indices)
-            #    jax.debug.print('idx: {}', idx)
-            #    jax.debug.print("previous_betas_to_introduce: {}", previous_betas_to_introduce)
-            #    jax.debug.print('[after] threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num]: {}', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
-                
-
+            if alg_update_func_args_previous_betas_index >= 0:
+                previous_betas_to_introduce = all_post_update_betas[
+                    : len(
+                        update_func_args_by_user_id[user_id][
+                            alg_update_func_args_previous_betas_index
+                        ]
+                    )
+                ]
+                if previous_betas_to_introduce.size > 0:
+                    threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                        policy_num
+                    ] = replace_tuple_index(
+                        threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                            policy_num
+                        ],
+                        alg_update_func_args_previous_betas_index,
+                        previous_betas_to_introduce,
+                    )
 
             if alg_update_func_args_action_prob_index >= 0:
                 logger.debug(

@@ -132,7 +132,7 @@ def cli():
     "--alg_update_func_args_previous_betas_index",
     type=int,
     default=-1000,
-    help="Index of the previous betas array in the tuple of algorithm update func args, if applicable.",
+    help="Index of the previous betas array in the tuple of algorithm update func args, if applicable. Note that these are only post-update betas. Sometimes a beta_0 may be defined pre-update; this should not be in here.",
 )
 @click.option(
     "--inference_func_filename",
@@ -1369,7 +1369,7 @@ def construct_classical_and_adaptive_sandwiches(
             The index in the update function arguments tuple where an array of times for which the
             given action probabilities apply is provided, if applicable. -1 otherwise.
         alg_update_func_args_previous_betas_index (int):
-            The index in the update function arguments tuple where the previous betas are provided. 
+            The index in the update function arguments tuple where the previous betas are provided.
         inference_func (callable):
             The inference loss or estimating function.
         inference_func_type (str):

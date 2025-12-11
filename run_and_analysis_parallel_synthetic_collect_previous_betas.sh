@@ -1,0 +1,1 @@
+bash run_and_analysis_parallel_synthetic.sh --alg_update_func_filename="functions_to_pass_to_analysis/RL_least_squares_loss_regularized_previous_betas_as_args.py" --collect_args_to_reconstruct_action_probs=1 --alg_update_func_args_previous_betas_index=6 --alg_update_func_args_action_prob_index=-1 --alg_update_func_args_action_prob_times_index=-1

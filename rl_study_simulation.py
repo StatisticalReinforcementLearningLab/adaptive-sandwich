@@ -328,6 +328,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 lower_clip=args.lower_clip,
                 upper_clip=args.upper_clip,
                 action_centering=args.action_centering,
+                collect_args_to_reconstruct_action_probs=args.collect_args_to_reconstruct_action_probs,
                 smooth_clip=True,
                 lambda_=args.lambda_,
             )
@@ -340,6 +341,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 lower_clip=args.lower_clip,
                 upper_clip=args.upper_clip,
                 action_centering=args.action_centering,
+                collect_args_to_reconstruct_action_probs=args.collect_args_to_reconstruct_action_probs,
                 smooth_clip=False,
                 lambda_=args.lambda_,
             )
@@ -539,6 +541,12 @@ def main():
         type=int,
         default=0,
         help="Whether RL algorithm uses action centering (if applicable)",
+    )
+    parser.add_argument(
+        "--collect_args_to_reconstruct_action_probs",
+        type=int,
+        default=0,
+        help="Whether RL algorithm uses action centering via betas directly (if applicable)",
     )
     parser.add_argument(
         "--min_update_time",

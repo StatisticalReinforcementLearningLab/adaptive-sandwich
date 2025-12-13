@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lifejacket"
-version = "0.1.0"
+version = "0.2.0"
 description = "A package for after-study analysis of adaptive experiments in which data is pooled across users."
 readme = "README.md"
 requires-python = ">=3.10"

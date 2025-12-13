@@ -52,6 +52,7 @@ class TestSigmoidLS_T3_n2:
             upper_clip=args_2.upper_clip,
             action_centering=args_2.action_centering,
             smooth_clip=(args_2.RL_alg == constants.RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP),
+            collect_args_to_reconstruct_action_probs=False,
         )
 
         self.sigmoid_3.all_policies.append(

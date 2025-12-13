@@ -91,6 +91,7 @@ class TestRunStudySimulation:
                 self.args_incremental_1.RL_alg
                 == constants.RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP
             ),
+            collect_args_to_reconstruct_action_probs=False,
         )
         self.sigmoid_1.rng = MagicMock(autospec=True)
         self.sigmoid_1.get_action_probs = MagicMock(autospec=True)
@@ -144,6 +145,7 @@ class TestRunStudySimulation:
                 self.args_no_incremental_1.RL_alg
                 == constants.RLStudyArgs.SIGMOID_LS_SMOOTH_CLIP
             ),
+            collect_args_to_reconstruct_action_probs=False,
         )
         self.sigmoid_2.rng = MagicMock(autospec=True)
         self.sigmoid_2.get_action_probs = MagicMock(autospec=True)

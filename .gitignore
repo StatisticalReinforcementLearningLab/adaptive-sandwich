@@ -13,4 +13,3 @@ deploy_paper_code.sh
 oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
 *.pyc
-

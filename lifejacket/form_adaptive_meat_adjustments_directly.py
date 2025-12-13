@@ -62,7 +62,7 @@ def form_adaptive_meat_adjustments_directly(
     # 3. Split the effective M blocks into (theta_dim, beta_dim) blocks and the
     # estimating function stacks into (num_updates, beta_dim) stacks.
 
-    # effective_M_blocks is shape (theta_dim, num_updates * beta_dim)
+    # effective_M_blocks_together is shape (theta_dim, num_updates * beta_dim)
     # We want to split it into a list of (theta_dim, beta_dim) arrays
     M_blocks = np.split(
         effective_M_blocks_together,

@@ -48,6 +48,7 @@ lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
+collect_args_to_reconstruct_action_probs=0
 monitor_bread_inverse_conditioning_and_intervene=0
 
 # Arguments that only affect inference side.
@@ -65,6 +66,7 @@ alg_update_func_type="loss"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=5
 alg_update_func_args_action_prob_times_index=6
+alg_update_func_args_previous_betas_index=-1
 inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
@@ -79,7 +81,7 @@ stabilize_joint_adaptive_bread_inverse=0
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:m:N:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:k:m:N:w:W-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -130,6 +132,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     k  | collect_data_for_blowup_supervised_learning )        needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )             needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
     N  | monitor_bread_inverse_conditioning_and_intervene )   needs_arg; monitor_bread_inverse_conditioning_and_intervene="$OPTARG" ;;
+    w  | collect_args_to_reconstruct_action_probs )           needs_arg; collect_args_to_reconstruct_action_probs="$OPTARG" ;;
+    W  | alg_update_func_args_previous_betas_index )          needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -204,6 +208,7 @@ python rl_study_simulation.py \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
   --lambda_=$lambda_ \
+  --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs \
   --monitor_bread_inverse_conditioning_and_intervene=$monitor_bread_inverse_conditioning_and_intervene
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic.sh: Finished RL simulations.
 
@@ -225,6 +230,7 @@ python -m lifejacket.after_study_analysis analyze \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
   --inference_func_filename=$inference_func_filename \
   --inference_func_args_theta_index=$inference_func_args_theta_index \
   --inference_func_type=$inference_func_type \

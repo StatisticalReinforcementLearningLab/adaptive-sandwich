@@ -90,6 +90,7 @@ class SigmoidLS:
         lower_clip,
         upper_clip,
         action_centering,
+        collect_args_to_reconstruct_action_probs,
         lambda_,
         smooth_clip,
     ):
@@ -126,6 +127,9 @@ class SigmoidLS:
             }
         ]
         self.action_centering = action_centering
+        self.collect_args_to_reconstruct_action_probs = (
+            collect_args_to_reconstruct_action_probs
+        )
         self.incremental_updates = True
         self.smooth_clip = smooth_clip
 
@@ -151,37 +155,84 @@ class SigmoidLS:
     # a copy, but it seems to work perfectly.
 
     # TODO: Docstring
-    def get_base_states(self, df):
-        base_states = df[self.state_feats].to_numpy()
+    def get_base_states(self, in_study_df):
+        base_states = in_study_df[self.state_feats].to_numpy()
         return jnp.array(base_states)
 
-    def get_treat_states(self, df):
-        treat_states = df[self.treat_feats].to_numpy()
+    def get_treat_states(self, in_study_df):
+        treat_states = in_study_df[self.treat_feats].to_numpy()
         return jnp.array(treat_states)
 
-    def get_rewards(self, df, reward_col="reward"):
-        rewards = df[reward_col].to_numpy().reshape(-1, 1)
+    def get_rewards(self, in_study_df, reward_col="reward"):
+        rewards = in_study_df[reward_col].to_numpy().reshape(-1, 1)
         return jnp.array(rewards)
 
-    def get_actions(self, df, action_col="action"):
-        actions = df[action_col].to_numpy().reshape(-1, 1)
+    def get_actions(self, in_study_df, action_col="action"):
+        actions = in_study_df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
     def get_action1probs(
         self,
-        df,
+        in_study_df,
         actionprob_col="action1prob",
     ):
-        action1probs = df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        action1probs = (
+            in_study_df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        )
         return jnp.array(action1probs)
 
     def get_action1probstimes(
         self,
-        df,
+        in_study_df,
         calendar_t_col="calendar_t",
     ):
-        action1probstimes = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        action1probstimes = (
+            in_study_df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        )
         return jnp.array(action1probstimes)
+
+    def get_initial_policy_num(self, full_df, policy_num_col="policy_num"):
+        policy_nums = full_df[policy_num_col]
+        nonnegative_policy_nums = policy_nums[policy_nums >= 0]
+        return nonnegative_policy_nums.min() if len(nonnegative_policy_nums) > 0 else 0
+
+    def get_post_update_policy_nums(
+        self,
+        in_study_df,
+        initial_policy_num,
+        policy_num_col="policy_num",
+    ):
+        """
+        Get the policy numbers for all decision times for this user after the
+        first update. Note that this only includes decision times where the user is in-study,
+        so this may include ALL of a user's decision times if the user entered
+        after the first update.
+        """
+        df_post_update = in_study_df[in_study_df[policy_num_col] > initial_policy_num]
+        post_update_policy_nums = (
+            df_post_update[policy_num_col].to_numpy(dtype="int32").reshape(-1, 1)
+        )
+        return jnp.array(post_update_policy_nums)
+
+    def get_pre_update_action1probs(
+        self,
+        in_study_df,
+        initial_policy_num,
+        actionprob_col="action1prob",
+        policy_num_col="policy_num",
+    ):
+        """
+        Note that this is the pre-update action1probs that are IN-STUDY for the given
+        user. So there may be none if the user only entered after the first update.
+        """
+
+        df_policy_initial = in_study_df[
+            in_study_df[policy_num_col] == initial_policy_num
+        ]
+        action1probs = (
+            df_policy_initial[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        )
+        return jnp.array(action1probs)
 
     # TODO: Docstring
     def get_states(self, df):
@@ -267,6 +318,14 @@ class SigmoidLS:
     def get_current_beta_estimate(self):
         return self.all_policies[-1]["beta_est"]
 
+    def get_previous_post_update_betas(self):
+        # Exclude initial policy and current policy
+        # The reshape is so that the empty output is 2D, with shape representing
+        # 0 rows of size beta_dim
+        return jnp.array(
+            [policy["beta_est"] for policy in self.all_policies[1:-1]]
+        ).reshape(-1, self.beta_dim)
+
     def collect_rl_update_args(self, all_prev_data, calendar_t):
         """
         NOTE: Must be called AFTER the update it concerns happens, so that the
@@ -277,32 +336,67 @@ class SigmoidLS:
             calendar_t,
         )
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
+        initial_policy_num = self.get_initial_policy_num(all_prev_data)
         self.rl_update_args[next_policy_num] = {}
-        for user_id in self.get_all_users(all_prev_data):
-            in_study_user_data = all_prev_data.loc[
-                (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
-            ]
-            self.rl_update_args[next_policy_num][user_id] = (
-                (
-                    self.get_current_beta_estimate(),
-                    self.get_base_states(in_study_user_data),
-                    self.get_treat_states(in_study_user_data),
-                    self.get_actions(in_study_user_data),
-                    self.get_rewards(in_study_user_data),
-                    # NOTE important: we require an entry for all times before the update
-                    # regardless of in-study or not. This is necessary because these probabilities
-                    # have special meaning and must correspond to particular times if used.
-                    self.get_action1probs(in_study_user_data),
-                    self.get_action1probstimes(in_study_user_data),
-                    self.action_centering,
-                    self.lambda_,
-                    len(all_prev_data["user_id"].unique()),
+
+        if not self.collect_args_to_reconstruct_action_probs:
+            for user_id in self.get_all_users(all_prev_data):
+                in_study_user_data = all_prev_data.loc[
+                    (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
+                ]
+                self.rl_update_args[next_policy_num][user_id] = (
+                    (
+                        self.get_current_beta_estimate(),
+                        self.get_base_states(in_study_user_data),
+                        self.get_treat_states(in_study_user_data),
+                        self.get_actions(in_study_user_data),
+                        self.get_rewards(in_study_user_data),
+                        # NOTE important: we require an entry for all times before the update
+                        # regardless of in-study or not. This is necessary because these probabilities
+                        # have special meaning and must correspond to particular times if used.
+                        self.get_action1probs(in_study_user_data),
+                        self.get_action1probstimes(in_study_user_data),
+                        self.action_centering,
+                        self.lambda_,
+                        len(all_prev_data["user_id"].unique()),
+                    )
+                    # We only care about the data overall, however, if there is any
+                    # in-study data for this user so far
+                    if not in_study_user_data.empty
+                    else ()
                 )
-                # We only care about the data overall, however, if there is any
-                # in-study data for this user so far
-                if not in_study_user_data.empty
-                else ()
-            )
+        else:
+            for user_id in self.get_all_users(all_prev_data):
+                in_study_user_data = all_prev_data.loc[
+                    (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
+                ]
+                self.rl_update_args[next_policy_num][user_id] = (
+                    (
+                        self.get_current_beta_estimate(),
+                        self.get_base_states(in_study_user_data),
+                        self.get_treat_states(in_study_user_data),
+                        self.get_actions(in_study_user_data),
+                        self.get_rewards(in_study_user_data),
+                        self.get_action1probs(in_study_user_data),
+                        self.get_pre_update_action1probs(
+                            in_study_user_data, initial_policy_num
+                        ),
+                        self.get_previous_post_update_betas(),
+                        self.get_post_update_policy_nums(
+                            in_study_user_data, initial_policy_num
+                        ),
+                        self.lower_clip,
+                        self.steepness,
+                        self.upper_clip,
+                        self.action_centering,
+                        self.lambda_,
+                        len(all_prev_data["user_id"].unique()),
+                    )
+                    # We only care about the data overall, however, if there is any
+                    # in-study data for this user so far
+                    if not in_study_user_data.empty
+                    else ()
+                )
 
     def collect_pi_args(self, all_prev_data, calendar_t):
         logger.info(

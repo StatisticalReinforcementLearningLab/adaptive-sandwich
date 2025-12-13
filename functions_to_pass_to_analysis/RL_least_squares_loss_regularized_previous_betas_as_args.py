@@ -13,6 +13,7 @@ def RL_least_squares_loss_regularized_previous_betas_as_args(
     treat_states,
     actions,
     rewards,
+    real_action1probs,
     pre_update_action1probs,
     previous_post_update_betas,
     # gives policy nums for each post-update decision time for which
@@ -36,22 +37,24 @@ def RL_least_squares_loss_regularized_previous_betas_as_args(
             jnp.array(
                 [
                     synthetic_get_action_1_prob_generalized_logistic(
-                        # note the policy_num - 1 since post update betas
-                        # correspond to the policies starting from policy 1
-                        previous_post_update_betas[policy_num - 1].flatten(),
+                        # note the policy_num - ... since post update betas
+                        # correspond to the policies starting from the first
+                        # post-update policy
+                        previous_post_update_betas[
+                            policy_num - post_update_policy_nums[0]
+                        ].flatten(),
                         lower_clip,
                         steepness,
                         upper_clip,
-                        treat_states[i],
+                        # treat states start from the first decision time,
+                        # limit to post update to align
+                        treat_states[i + pre_update_action1probs.shape[0]],
                     )
                     for i, policy_num in enumerate(post_update_policy_nums)
                 ]
             ).reshape(-1, 1),
         ]
     )
-
-    if action1probs.size > 0:
-        breakpoint()
 
     actions = jnp.where(
         action_centering, actions.astype(jnp.float32) - action1probs, actions

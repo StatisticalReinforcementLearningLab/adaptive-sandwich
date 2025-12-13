@@ -155,50 +155,60 @@ class SigmoidLS:
     # a copy, but it seems to work perfectly.
 
     # TODO: Docstring
-    def get_base_states(self, df):
-        base_states = df[self.state_feats].to_numpy()
+    def get_base_states(self, in_study_df):
+        base_states = in_study_df[self.state_feats].to_numpy()
         return jnp.array(base_states)
 
-    def get_treat_states(self, df):
-        treat_states = df[self.treat_feats].to_numpy()
+    def get_treat_states(self, in_study_df):
+        treat_states = in_study_df[self.treat_feats].to_numpy()
         return jnp.array(treat_states)
 
-    def get_rewards(self, df, reward_col="reward"):
-        rewards = df[reward_col].to_numpy().reshape(-1, 1)
+    def get_rewards(self, in_study_df, reward_col="reward"):
+        rewards = in_study_df[reward_col].to_numpy().reshape(-1, 1)
         return jnp.array(rewards)
 
-    def get_actions(self, df, action_col="action"):
-        actions = df[action_col].to_numpy().reshape(-1, 1)
+    def get_actions(self, in_study_df, action_col="action"):
+        actions = in_study_df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
     def get_action1probs(
         self,
-        df,
+        in_study_df,
         actionprob_col="action1prob",
     ):
-        action1probs = df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        action1probs = (
+            in_study_df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
+        )
         return jnp.array(action1probs)
 
     def get_action1probstimes(
         self,
-        df,
+        in_study_df,
         calendar_t_col="calendar_t",
     ):
-        action1probstimes = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        action1probstimes = (
+            in_study_df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
+        )
         return jnp.array(action1probstimes)
 
-    def get_initial_policy_num(self, df, policy_num_col="policy_num"):
-        policy_nums = df[policy_num_col]
+    def get_initial_policy_num(self, full_df, policy_num_col="policy_num"):
+        policy_nums = full_df[policy_num_col]
         nonnegative_policy_nums = policy_nums[policy_nums >= 0]
         return nonnegative_policy_nums.min() if len(nonnegative_policy_nums) > 0 else 0
 
     def get_post_update_policy_nums(
         self,
-        df,
+        in_study_df,
+        initial_policy_num,
         policy_num_col="policy_num",
     ):
-        initial_policy_num = self.get_initial_policy_num(df, policy_num_col)
-        df_post_update = df[df[policy_num_col] > initial_policy_num]
+        """
+        Get the policy numbers for all decision times for this user after the
+        first update. Note that this only includes decision times where the user is in-study,
+        so this may include ALL of a user's decision times if the user entered
+        after the first update.
+        """
+        df_post_update = in_study_df[in_study_df[policy_num_col] > initial_policy_num]
         post_update_policy_nums = (
             df_post_update[policy_num_col].to_numpy(dtype="int32").reshape(-1, 1)
         )
@@ -206,12 +216,19 @@ class SigmoidLS:
 
     def get_pre_update_action1probs(
         self,
-        df,
+        in_study_df,
+        initial_policy_num,
         actionprob_col="action1prob",
         policy_num_col="policy_num",
     ):
-        initial_policy_num = self.get_initial_policy_num(df, policy_num_col)
-        df_policy_initial = df[df[policy_num_col] == initial_policy_num]
+        """
+        Note that this is the pre-update action1probs that are IN-STUDY for the given
+        user. So there may be none if the user only entered after the first update.
+        """
+
+        df_policy_initial = in_study_df[
+            in_study_df[policy_num_col] == initial_policy_num
+        ]
         action1probs = (
             df_policy_initial[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
         )
@@ -319,6 +336,7 @@ class SigmoidLS:
             calendar_t,
         )
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
+        initial_policy_num = self.get_initial_policy_num(all_prev_data)
         self.rl_update_args[next_policy_num] = {}
 
         if not self.collect_args_to_reconstruct_action_probs:
@@ -359,9 +377,14 @@ class SigmoidLS:
                         self.get_treat_states(in_study_user_data),
                         self.get_actions(in_study_user_data),
                         self.get_rewards(in_study_user_data),
-                        self.get_pre_update_action1probs(in_study_user_data),
+                        self.get_action1probs(in_study_user_data),
+                        self.get_pre_update_action1probs(
+                            in_study_user_data, initial_policy_num
+                        ),
                         self.get_previous_post_update_betas(),
-                        self.get_post_update_policy_nums(in_study_user_data),
+                        self.get_post_update_policy_nums(
+                            in_study_user_data, initial_policy_num
+                        ),
                         self.lower_clip,
                         self.steepness,
                         self.upper_clip,

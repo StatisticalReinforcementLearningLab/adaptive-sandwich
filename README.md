@@ -9,7 +9,7 @@
            |__/
 ```
 
-Save your standard errors from pooling in adaptive experiments.
+Save your standard errors from pooling in online decision-making algorithms.
 
 ## Setup (if not using conda)
 ### Create and activate a virtual environment

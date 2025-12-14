@@ -532,10 +532,6 @@ def analyze_dataset(
         action_prob_col_name,
     )
 
-    joint_adaptive_bread_inverse_cond = jnp.linalg.cond(
-        stabilized_joint_adaptive_bread_inverse_matrix
-    )
-
     theta_dim = len(theta_est)
     if not suppress_all_data_checks:
         input_checks.require_estimating_functions_sum_to_zero(
@@ -575,6 +571,14 @@ def analyze_dataset(
             analysis_dict,
             f,
         )
+
+    joint_adaptive_bread_inverse_cond = jnp.linalg.cond(
+        raw_joint_adaptive_bread_inverse_matrix
+    )
+    logger.info(
+        "Joint adaptive bread inverse condition number: %f",
+        joint_adaptive_bread_inverse_cond,
+    )
 
     debug_pieces_dict = {
         "theta_est": theta_est,

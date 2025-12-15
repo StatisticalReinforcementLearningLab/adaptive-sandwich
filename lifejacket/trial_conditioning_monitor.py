@@ -64,6 +64,7 @@ class TrialConditioningMonitor:
         alg_update_func_args_beta_index: int,
         alg_update_func_args_action_prob_index: int,
         alg_update_func_args_action_prob_times_index: int,
+        alg_update_func_args_action_previous_betas_index: int,
         in_study_col_name: str,
         action_col_name: str,
         policy_num_col_name: str,
@@ -100,6 +101,8 @@ class TrialConditioningMonitor:
             Index for action probability in algorithm update function arguments.
         alg_update_func_args_action_prob_times_index (int):
             Index for action probability times in algorithm update function arguments.
+        alg_update_func_args_action_previous_betas_index (int):
+            Index for previous betas in algorithm update function arguments.
         in_study_col_name (str):
             Column name indicating if a user is in the study in the study dataframe.
         action_col_name (str):
@@ -197,6 +200,7 @@ class TrialConditioningMonitor:
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_action_previous_betas_index,
             action_prob_func_args,
             policy_num_by_decision_time_by_user_id,
             initial_policy_num,
@@ -267,6 +271,7 @@ class TrialConditioningMonitor:
         alg_update_func_args_beta_index: int,
         alg_update_func_args_action_prob_index: int,
         alg_update_func_args_action_prob_times_index: int,
+        alg_update_func_args_action_previous_betas_index: int,
         action_prob_func_args_by_user_id_by_decision_time: dict[
             collections.abc.Hashable, dict[int, tuple[Any, ...]]
         ],
@@ -317,6 +322,8 @@ class TrialConditioningMonitor:
             alg_update_func_args_action_prob_times_index (int):
                 The index in the update function arguments tuple where an array of times for which the
                 given action probabilities apply is provided, if applicable. -1 otherwise.
+            alg_update_func_args_action_previous_betas_index (int):
+                The index of previous betas in the update function arguments tuples. Negative if not applicable.
             action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
                 A dictionary mapping decision times to maps of user ids to the function arguments
                 required to compute action probabilities for this user.
@@ -370,6 +377,7 @@ class TrialConditioningMonitor:
                 alg_update_func_args_beta_index,
                 alg_update_func_args_action_prob_index,
                 alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_action_previous_betas_index,
                 action_prob_func_args_by_user_id_by_decision_time,
                 policy_num_by_decision_time_by_user_id,
                 initial_policy_num,
@@ -437,6 +445,7 @@ class TrialConditioningMonitor:
         alg_update_func_args_beta_index: int,
         alg_update_func_args_action_prob_index: int,
         alg_update_func_args_action_prob_times_index: int,
+        alg_update_func_args_action_previous_betas_index: int,
         action_prob_func_args_by_user_id_by_decision_time: dict[
             collections.abc.Hashable, dict[int, tuple[Any, ...]]
         ],
@@ -489,6 +498,8 @@ class TrialConditioningMonitor:
             alg_update_func_args_action_prob_times_index (int):
                 The index in the update function arguments tuple where an array of times for which the
                 given action probabilities apply is provided, if applicable. -1 otherwise.
+            alg_update_func_args_action_previous_betas_index (int):
+                The index of previous betas in the update function arguments tuples. Negative if not applicable.
             action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
                 A dictionary mapping decision times to maps of user ids to the function arguments
                 required to compute action probabilities for this user.
@@ -582,6 +593,7 @@ class TrialConditioningMonitor:
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_action_previous_betas_index,
             threaded_action_prob_func_args_by_decision_time_by_user_id,
             action_prob_func,
         )

@@ -1,5 +1,5 @@
 __pycache__/*
-simulated_data/*
+simulated_data
 synthetic_env_params/.DS_Store
 .DS_Store
 *.lprof

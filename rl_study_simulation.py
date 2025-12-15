@@ -168,6 +168,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                     study_RLalg.alg_update_func_args_beta_index,
                     study_RLalg.alg_update_func_args_action_prob_index,
                     study_RLalg.alg_update_func_args_action_prob_times_index,
+                    study_RLalg.alg_update_func_args_action_previous_betas_index,
                     "in_study",
                     "action",
                     "policy_num",

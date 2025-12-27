@@ -13,7 +13,7 @@ import cloudpickle as pickle
 from synthetic_env import load_synthetic_env_params, SyntheticEnv
 from basic_RL_algorithms import SigmoidLS, SmoothPosteriorSampling
 from constants import RLStudyArgs
-from lifejacket.trial_conditioning_monitor import TrialConditioningMonitor
+from lifejacket.deployment_conditioning_monitor import DeploymentConditioningMonitor
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -43,10 +43,10 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     max_calendar_t = study_df["calendar_t"].max()
 
     # Initialize Trial Conditioning Monitor if desired ##########################
-    trial_conditioning_monitor = None
+    deployment_conditioning_monitor = None
     alternative_lambda_index = 0
     if args.monitor_bread_inverse_conditioning_and_intervene:
-        trial_conditioning_monitor = TrialConditioningMonitor()
+        deployment_conditioning_monitor = DeploymentConditioningMonitor()
 
     # Loop over all decision times ###############################################
     logger.info("Maximum decision time: %s.", max_calendar_t)
@@ -142,7 +142,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             # is used to produce the probability at that decision time.
             study_RLalg.collect_rl_update_args(all_prev_data, t)
 
-            if trial_conditioning_monitor:
+            if deployment_conditioning_monitor:
                 alternative_lambdas_to_try = [
                     0.1,
                     1,
@@ -156,7 +156,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                     10000,
                 ]
 
-                while trial_conditioning_monitor.assess_update(
+                while deployment_conditioning_monitor.assess_update(
                     len(study_RLalg.all_policies),
                     all_prev_data,
                     study_RLalg.action_prob_func,
@@ -168,6 +168,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                     study_RLalg.alg_update_func_args_beta_index,
                     study_RLalg.alg_update_func_args_action_prob_index,
                     study_RLalg.alg_update_func_args_action_prob_times_index,
+                    study_RLalg.alg_update_func_args_previous_betas_index,
                     "in_study",
                     "action",
                     "policy_num",

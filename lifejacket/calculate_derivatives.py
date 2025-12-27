@@ -198,10 +198,10 @@ def pad_in_study_derivatives_with_zeros(
 
 def calculate_pi_and_weight_gradients(
     study_df,
-    in_study_col_name,
+    active_col_name,
     action_col_name,
     calendar_t_col_name,
-    user_id_col_name,
+    subject_id_col_name,
     action_prob_func,
     action_prob_func_args,
     action_prob_func_args_beta_index,
@@ -226,10 +226,10 @@ def calculate_pi_and_weight_gradients(
 
         pi_gradients, weight_gradients = calculate_pi_and_weight_gradients_specific_t(
             study_df,
-            in_study_col_name,
+            active_col_name,
             action_col_name,
             calendar_t_col_name,
-            user_id_col_name,
+            subject_id_col_name,
             action_prob_func,
             action_prob_func_args_beta_index,
             calendar_t,
@@ -252,10 +252,10 @@ def calculate_pi_and_weight_gradients(
 
 def calculate_pi_and_weight_gradients_specific_t(
     study_df,
-    in_study_col_name,
+    active_col_name,
     action_col_name,
     calendar_t_col_name,
-    user_id_col_name,
+    subject_id_col_name,
     action_prob_func,
     action_prob_func_args_beta_index,
     calendar_t,
@@ -320,10 +320,10 @@ def calculate_pi_and_weight_gradients_specific_t(
             study_df,
             calendar_t,
             sorted_user_ids,
-            in_study_col_name,
+            active_col_name,
             action_col_name,
             calendar_t_col_name,
-            user_id_col_name,
+            subject_id_col_name,
         )
         # Note the first argument here: we extract the betas to pass in
         # again as the "target" denominator betas, whereas we differentiate with
@@ -382,10 +382,10 @@ def collect_batched_in_study_actions(
     study_df,
     calendar_t,
     sorted_user_ids,
-    in_study_col_name,
+    active_col_name,
     action_col_name,
     calendar_t_col_name,
-    user_id_col_name,
+    subject_id_col_name,
 ):
 
     # TODO: This for loop can be removed, just grabbing the actions col after
@@ -394,9 +394,9 @@ def collect_batched_in_study_actions(
     batched_actions_list = []
     for user_id in sorted_user_ids:
         filtered_user_data = study_df.loc[
-            (study_df[user_id_col_name] == user_id)
+            (study_df[subject_id_col_name] == user_id)
             & (study_df[calendar_t_col_name] == calendar_t)
-            & (study_df[in_study_col_name] == 1)
+            & (study_df[active_col_name] == 1)
         ]
         if not filtered_user_data.empty:
             batched_actions_list.append(filtered_user_data[action_col_name].values[0])
@@ -785,9 +785,9 @@ def calculate_inference_loss_derivatives(
     inference_func,
     inference_func_args_theta_index,
     user_ids,
-    user_id_col_name,
+    subject_id_col_name,
     action_prob_col_name,
-    in_study_col_name,
+    active_col_name,
     calendar_t_col_name,
     inference_func_type=FunctionTypes.LOSS,
 ):
@@ -819,18 +819,18 @@ def calculate_inference_loss_derivatives(
         max_calendar_time = study_df[calendar_t_col_name].max()
     for user_id in user_ids:
         user_args_list = []
-        filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
+        filtered_user_data = study_df.loc[study_df[subject_id_col_name] == user_id]
         for idx, col_name in enumerate(inference_func_arg_names):
             if idx == inference_func_args_theta_index:
                 user_args_list.append(theta_est)
             else:
                 user_args_list.append(
-                    get_study_df_column(filtered_user_data, col_name, in_study_col_name)
+                    get_study_df_column(filtered_user_data, col_name, active_col_name)
                 )
         args_by_user_id[user_id] = tuple(user_args_list)
         if using_action_probs:
             action_prob_decision_times_by_user_id[user_id] = get_study_df_column(
-                filtered_user_data, calendar_t_col_name, in_study_col_name
+                filtered_user_data, calendar_t_col_name, active_col_name
             )
 
     # Get a list of subdicts of the user args dict, with each united by having
@@ -957,9 +957,7 @@ def calculate_inference_loss_derivatives(
     return loss_gradients, loss_hessians, loss_gradient_pi_derivatives
 
 
-def get_study_df_column(study_df, col_name, in_study_col_name):
+def get_study_df_column(study_df, col_name, active_col_name):
     return jnp.array(
-        study_df.loc[study_df[in_study_col_name] == 1, col_name]
-        .to_numpy()
-        .reshape(-1, 1)
+        study_df.loc[study_df[active_col_name] == 1, col_name].to_numpy().reshape(-1, 1)
     )

@@ -16,7 +16,7 @@ from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
     construct_beta_index_by_policy_num_map,
-    extract_action_and_policy_by_decision_time_by_user_id,
+    extract_action_and_policy_by_decision_time_by_subject_id,
     flatten_params,
     get_min_time_by_policy_num,
     get_radon_nikodym_weight,
@@ -34,7 +34,7 @@ logging.basicConfig(
 )
 
 
-class TrialConditioningMonitor:
+class DeploymentConditioningMonitor:
     whole_RL_block_conditioning_threshold = None
     diagonal_RL_block_conditioning_threshold = None
 
@@ -54,7 +54,7 @@ class TrialConditioningMonitor:
     def assess_update(
         self,
         proposed_policy_num: int | float,
-        study_df: pd.DataFrame,
+        analysis_df: pd.DataFrame,
         action_prob_func: callable,
         action_prob_func_args: dict,
         action_prob_func_args_beta_index: int,
@@ -64,11 +64,12 @@ class TrialConditioningMonitor:
         alg_update_func_args_beta_index: int,
         alg_update_func_args_action_prob_index: int,
         alg_update_func_args_action_prob_times_index: int,
-        in_study_col_name: str,
+        alg_update_func_args_previous_betas_index: int,
+        active_col_name: str,
         action_col_name: str,
         policy_num_col_name: str,
         calendar_t_col_name: str,
-        user_id_col_name: str,
+        subject_id_col_name: str,
         action_prob_col_name: str,
         suppress_interactive_data_checks: bool,
         suppress_all_data_checks: bool,
@@ -80,7 +81,7 @@ class TrialConditioningMonitor:
         Parameters:
         proposed_policy_num (int | float):
             The policy number of the proposed update.
-        study_df (pd.DataFrame):
+        analysis_df (pd.DataFrame):
             DataFrame containing the study data.
         action_prob_func (str):
             Action probability function.
@@ -100,16 +101,18 @@ class TrialConditioningMonitor:
             Index for action probability in algorithm update function arguments.
         alg_update_func_args_action_prob_times_index (int):
             Index for action probability times in algorithm update function arguments.
-        in_study_col_name (str):
-            Column name indicating if a user is in the study in the study dataframe.
+        alg_update_func_args_previous_betas_index (int):
+            Index for previous betas in algorithm update function arguments.
+        active_col_name (str):
+            Column name indicating if a subject is in the study in the study dataframe.
         action_col_name (str):
             Column name for actions in the study dataframe.
         policy_num_col_name (str):
             Column name for policy numbers in the study dataframe.
         calendar_t_col_name (str):
             Column name for calendar time in the study dataframe.
-        user_id_col_name (str):
-            Column name for user IDs in the study dataframe.
+        subject_id_col_name (str):
+            Column name for subject IDs in the study dataframe.
         action_prob_col_name (str):
             Column name for action probabilities in the study dataframe.
         reward_col_name (str):
@@ -122,11 +125,11 @@ class TrialConditioningMonitor:
             Type of small sample correction to apply.
         collect_data_for_blowup_supervised_learning (bool):
             Whether to collect data for doing supervised learning about adaptive sandwich blowup.
-        form_adaptive_meat_adjustments_explicitly (bool):
-            If True, explicitly forms the per-user meat adjustments that differentiate the adaptive
+        form_adjusted_meat_adjustments_explicitly (bool):
+            If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
             adaptive sandwich is formed without doing this.
-        stabilize_joint_adaptive_bread_inverse (bool):
+        stabilize_joint_adjusted_bread_inverse (bool):
             If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning
             thresholds.
 
@@ -141,11 +144,11 @@ class TrialConditioningMonitor:
 
         if not suppress_all_data_checks:
             input_checks.perform_alg_only_input_checks(
-                study_df,
-                in_study_col_name,
+                analysis_df,
+                active_col_name,
                 policy_num_col_name,
                 calendar_t_col_name,
-                user_id_col_name,
+                subject_id_col_name,
                 action_prob_col_name,
                 action_prob_func,
                 action_prob_func_args,
@@ -159,7 +162,7 @@ class TrialConditioningMonitor:
 
         beta_index_by_policy_num, initial_policy_num = (
             construct_beta_index_by_policy_num_map(
-                study_df, policy_num_col_name, in_study_col_name
+                analysis_df, policy_num_col_name, active_col_name
             )
         )
         # We augment the produced map to include the proposed policy num.
@@ -174,22 +177,23 @@ class TrialConditioningMonitor:
             alg_update_func_args_beta_index,
         )
 
-        action_by_decision_time_by_user_id, policy_num_by_decision_time_by_user_id = (
-            extract_action_and_policy_by_decision_time_by_user_id(
-                study_df,
-                user_id_col_name,
-                in_study_col_name,
-                calendar_t_col_name,
-                action_col_name,
-                policy_num_col_name,
-            )
+        (
+            action_by_decision_time_by_subject_id,
+            policy_num_by_decision_time_by_subject_id,
+        ) = extract_action_and_policy_by_decision_time_by_subject_id(
+            analysis_df,
+            subject_id_col_name,
+            active_col_name,
+            calendar_t_col_name,
+            action_col_name,
+            policy_num_col_name,
         )
 
-        user_ids = jnp.array(study_df[user_id_col_name].unique())
+        subject_ids = jnp.array(analysis_df[subject_id_col_name].unique())
 
         phi_dot_bar, avg_estimating_function_stack = self.construct_phi_dot_bar_so_far(
             all_post_update_betas,
-            user_ids,
+            subject_ids,
             action_prob_func,
             action_prob_func_args_beta_index,
             alg_update_func,
@@ -197,12 +201,13 @@ class TrialConditioningMonitor:
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             action_prob_func_args,
-            policy_num_by_decision_time_by_user_id,
+            policy_num_by_decision_time_by_subject_id,
             initial_policy_num,
             beta_index_by_policy_num,
             alg_update_func_args,
-            action_by_decision_time_by_user_id,
+            action_by_decision_time_by_subject_id,
             suppress_all_data_checks,
             suppress_interactive_data_checks,
             incremental=incremental,
@@ -259,7 +264,7 @@ class TrialConditioningMonitor:
     def construct_phi_dot_bar_so_far(
         self,
         all_post_update_betas: jnp.ndarray,
-        user_ids: jnp.ndarray,
+        subject_ids: jnp.ndarray,
         action_prob_func: callable,
         action_prob_func_args_beta_index: int,
         alg_update_func: callable,
@@ -267,18 +272,19 @@ class TrialConditioningMonitor:
         alg_update_func_args_beta_index: int,
         alg_update_func_args_action_prob_index: int,
         alg_update_func_args_action_prob_times_index: int,
-        action_prob_func_args_by_user_id_by_decision_time: dict[
+        alg_update_func_args_previous_betas_index: int,
+        action_prob_func_args_by_subject_id_by_decision_time: dict[
             collections.abc.Hashable, dict[int, tuple[Any, ...]]
         ],
-        policy_num_by_decision_time_by_user_id: dict[
+        policy_num_by_decision_time_by_subject_id: dict[
             collections.abc.Hashable, dict[int, int | float]
         ],
         initial_policy_num: int | float,
         beta_index_by_policy_num: dict[int | float, int],
-        update_func_args_by_by_user_id_by_policy_num: dict[
+        update_func_args_by_by_subject_id_by_policy_num: dict[
             collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
         ],
-        action_by_decision_time_by_user_id: dict[
+        action_by_decision_time_by_subject_id: dict[
             collections.abc.Hashable, dict[int, int]
         ],
         suppress_all_data_checks: bool,
@@ -299,8 +305,8 @@ class TrialConditioningMonitor:
         Args:
             all_post_update_betas (jnp.ndarray):
                 A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
-            user_ids (jnp.ndarray):
-                A 1-D JAX NumPy array holding all user IDs in the study.
+            subject_ids (jnp.ndarray):
+                A 1-D JAX NumPy array holding all subject IDs in the study.
             action_prob_func (callable):
                 The action probability function.
             action_prob_func_args_beta_index (int):
@@ -317,22 +323,24 @@ class TrialConditioningMonitor:
             alg_update_func_args_action_prob_times_index (int):
                 The index in the update function arguments tuple where an array of times for which the
                 given action probabilities apply is provided, if applicable. -1 otherwise.
-            action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
-                A dictionary mapping decision times to maps of user ids to the function arguments
-                required to compute action probabilities for this user.
-            policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-                A map of user ids to dictionaries mapping decision times to the policy number in use.
+            alg_update_func_args_previous_betas_index (int):
+                The index in the update function arguments tuple where the previous betas are provided, if applicable. -1 otherwise.
+            action_prob_func_args_by_subject_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+                A dictionary mapping decision times to maps of subject ids to the function arguments
+                required to compute action probabilities for this subject.
+            policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+                A map of subject ids to dictionaries mapping decision times to the policy number in use.
                 Only applies to in-study decision times!
             initial_policy_num (int | float):
                 The policy number of the initial policy before any updates.
             beta_index_by_policy_num (dict[int | float, int]):
                 A dictionary mapping policy numbers to the index of the corresponding beta in
                 all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-            update_func_args_by_by_user_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
-                A dictionary where keys are policy numbers and values are dictionaries mapping user IDs
+            update_func_args_by_by_subject_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
+                A dictionary where keys are policy numbers and values are dictionaries mapping subject IDs
                 to their respective update function arguments.
-            action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-                A dictionary mapping user IDs to their respective actions taken at each decision time.
+            action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+                A dictionary mapping subject IDs to their respective actions taken at each decision time.
                 Only applies to in-study decision times!
             suppress_all_data_checks (bool):
                 If True, suppresses carrying out any data checks at all.
@@ -362,7 +370,7 @@ class TrialConditioningMonitor:
                 # here to improve performance. We can simply unflatten them inside the function.
                 flatten_params(all_post_update_betas, jnp.array([])),
                 beta_dim,
-                user_ids,
+                subject_ids,
                 action_prob_func,
                 action_prob_func_args_beta_index,
                 alg_update_func,
@@ -370,12 +378,13 @@ class TrialConditioningMonitor:
                 alg_update_func_args_beta_index,
                 alg_update_func_args_action_prob_index,
                 alg_update_func_args_action_prob_times_index,
-                action_prob_func_args_by_user_id_by_decision_time,
-                policy_num_by_decision_time_by_user_id,
+                alg_update_func_args_previous_betas_index,
+                action_prob_func_args_by_subject_id_by_decision_time,
+                policy_num_by_decision_time_by_subject_id,
                 initial_policy_num,
                 beta_index_by_policy_num,
-                update_func_args_by_by_user_id_by_policy_num,
-                action_by_decision_time_by_user_id,
+                update_func_args_by_by_subject_id_by_policy_num,
+                action_by_decision_time_by_subject_id,
                 suppress_all_data_checks,
                 suppress_interactive_data_checks,
                 only_latest_block=True,
@@ -404,7 +413,7 @@ class TrialConditioningMonitor:
                 # here to improve performance. We can simply unflatten them inside the function.
                 flatten_params(all_post_update_betas, jnp.array([])),
                 beta_dim,
-                user_ids,
+                subject_ids,
                 action_prob_func,
                 action_prob_func_args_beta_index,
                 alg_update_func,
@@ -412,12 +421,13 @@ class TrialConditioningMonitor:
                 alg_update_func_args_beta_index,
                 alg_update_func_args_action_prob_index,
                 alg_update_func_args_action_prob_times_index,
-                action_prob_func_args_by_user_id_by_decision_time,
-                policy_num_by_decision_time_by_user_id,
+                alg_update_func_args_previous_betas_index,
+                action_prob_func_args_by_subject_id_by_decision_time,
+                policy_num_by_decision_time_by_subject_id,
                 initial_policy_num,
                 beta_index_by_policy_num,
-                update_func_args_by_by_user_id_by_policy_num,
-                action_by_decision_time_by_user_id,
+                update_func_args_by_by_subject_id_by_policy_num,
+                action_by_decision_time_by_subject_id,
                 suppress_all_data_checks,
                 suppress_interactive_data_checks,
             )
@@ -429,7 +439,7 @@ class TrialConditioningMonitor:
         self,
         flattened_betas_and_theta: jnp.ndarray,
         beta_dim: int,
-        user_ids: jnp.ndarray,
+        subject_ids: jnp.ndarray,
         action_prob_func: callable,
         action_prob_func_args_beta_index: int,
         alg_update_func: callable,
@@ -437,18 +447,19 @@ class TrialConditioningMonitor:
         alg_update_func_args_beta_index: int,
         alg_update_func_args_action_prob_index: int,
         alg_update_func_args_action_prob_times_index: int,
-        action_prob_func_args_by_user_id_by_decision_time: dict[
+        alg_update_func_args_previous_betas_index: int,
+        action_prob_func_args_by_subject_id_by_decision_time: dict[
             collections.abc.Hashable, dict[int, tuple[Any, ...]]
         ],
-        policy_num_by_decision_time_by_user_id: dict[
+        policy_num_by_decision_time_by_subject_id: dict[
             collections.abc.Hashable, dict[int, int | float]
         ],
         initial_policy_num: int | float,
         beta_index_by_policy_num: dict[int | float, int],
-        update_func_args_by_by_user_id_by_policy_num: dict[
+        update_func_args_by_by_subject_id_by_policy_num: dict[
             collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
         ],
-        action_by_decision_time_by_user_id: dict[
+        action_by_decision_time_by_subject_id: dict[
             collections.abc.Hashable, dict[int, int]
         ],
         suppress_all_data_checks: bool,
@@ -459,7 +470,7 @@ class TrialConditioningMonitor:
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray],
     ]:
         """
-        Computes the average weighted estimating function stack across all users, along with
+        Computes the average weighted estimating function stack across all subjects, along with
         auxiliary values used to construct the adaptive and classical sandwich variances.
 
         If only_latest_block is True, only uses data from the most recent update.
@@ -471,8 +482,8 @@ class TrialConditioningMonitor:
                 We simply extract the betas and theta from this array below.
             beta_dim (int):
                 The dimension of each of the beta parameters.
-            user_ids (jnp.ndarray):
-                A 1D JAX NumPy array of user IDs.
+            subject_ids (jnp.ndarray):
+                A 1D JAX NumPy array of subject IDs.
             action_prob_func (callable):
                 The action probability function.
             action_prob_func_args_beta_index (int):
@@ -489,22 +500,24 @@ class TrialConditioningMonitor:
             alg_update_func_args_action_prob_times_index (int):
                 The index in the update function arguments tuple where an array of times for which the
                 given action probabilities apply is provided, if applicable. -1 otherwise.
-            action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
-                A dictionary mapping decision times to maps of user ids to the function arguments
-                required to compute action probabilities for this user.
-            policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-                A map of user ids to dictionaries mapping decision times to the policy number in use.
+            alg_update_func_args_previous_betas_index (int):
+                The index in the update function arguments tuple where the previous betas are provided, if applicable. -1 otherwise.
+            action_prob_func_args_by_subject_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+                A dictionary mapping decision times to maps of subject ids to the function arguments
+                required to compute action probabilities for this subject.
+            policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+                A map of subject ids to dictionaries mapping decision times to the policy number in use.
                 Only applies to in-study decision times!
             initial_policy_num (int | float):
                 The policy number of the initial policy before any updates.
             beta_index_by_policy_num (dict[int | float, int]):
                 A dictionary mapping policy numbers to the index of the corresponding beta in
                 all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-            update_func_args_by_by_user_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
-                A dictionary where keys are policy numbers and values are dictionaries mapping user IDs
+            update_func_args_by_by_subject_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
+                A dictionary where keys are policy numbers and values are dictionaries mapping subject IDs
                 to their respective update function arguments.
-            action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-                A dictionary mapping user IDs to their respective actions taken at each decision time.
+            action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+                A dictionary mapping subject IDs to their respective actions taken at each decision time.
                 Only applies to in-study decision times!
             suppress_all_data_checks (bool):
                 If True, suppresses carrying out any data checks at all.
@@ -536,15 +549,15 @@ class TrialConditioningMonitor:
         # 1. If only_latest_block is True, we need to filter all the arguments to only
         # include those relevant to the latest update. We still need action probabilities
         # from the beginning for the weights, but the update function args can be trimmed
-        # to the max policy so that the loop single_user_weighted_RL_estimating_function_stacker
+        # to the max policy so that the loop single_subject_weighted_RL_estimating_function_stacker
         # is only over one policy.
         if only_latest_block:
             logger.info(
                 "Filtering algorithm update function arguments to only include those relevant to the latest update."
             )
             max_policy_num = max(beta_index_by_policy_num)
-            update_func_args_by_by_user_id_by_policy_num = {
-                max_policy_num: update_func_args_by_by_user_id_by_policy_num[
+            update_func_args_by_by_subject_id_by_policy_num = {
+                max_policy_num: update_func_args_by_by_subject_id_by_policy_num[
                     max_policy_num
                 ]
             }
@@ -553,15 +566,17 @@ class TrialConditioningMonitor:
         # supplied for the above functions, so that differentiation works correctly.  The existing
         # values should be the same, but not connected to the parameter we are differentiating
         # with respect to. Note we will also find it useful below to have the action probability args
-        # nested dict structure flipped to be user_id -> decision_time -> args, so we do that here too.
+        # nested dict structure flipped to be subject_id -> decision_time -> args, so we do that here too.
 
-        logger.info("Threading in betas to action probability arguments for all users.")
+        logger.info(
+            "Threading in betas to action probability arguments for all subjects."
+        )
         (
-            threaded_action_prob_func_args_by_decision_time_by_user_id,
-            action_prob_func_args_by_decision_time_by_user_id,
+            threaded_action_prob_func_args_by_decision_time_by_subject_id,
+            action_prob_func_args_by_decision_time_by_subject_id,
         ) = thread_action_prob_func_args(
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            policy_num_by_decision_time_by_subject_id,
             initial_policy_num,
             betas,
             beta_index_by_policy_num,
@@ -573,16 +588,17 @@ class TrialConditioningMonitor:
         # arguments with the central betas introduced.
         logger.info(
             "Threading in betas and beta-dependent action probabilities to algorithm update "
-            "function args for all users"
+            "function args for all subjects"
         )
-        threaded_update_func_args_by_policy_num_by_user_id = thread_update_func_args(
-            update_func_args_by_by_user_id_by_policy_num,
+        threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
+            update_func_args_by_by_subject_id_by_policy_num,
             betas,
             beta_index_by_policy_num,
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
-            threaded_action_prob_func_args_by_decision_time_by_user_id,
+            alg_update_func_args_previous_betas_index,
+            threaded_action_prob_func_args_by_decision_time_by_subject_id,
             action_prob_func,
         )
 
@@ -592,42 +608,44 @@ class TrialConditioningMonitor:
         if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
             input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
                 algorithm_estimating_func,
-                update_func_args_by_by_user_id_by_policy_num,
-                threaded_update_func_args_by_policy_num_by_user_id,
+                update_func_args_by_by_subject_id_by_policy_num,
+                threaded_update_func_args_by_policy_num_by_subject_id,
                 suppress_interactive_data_checks,
             )
 
-        # 5. Now we can compute the weighted estimating function stacks for all users
+        # 5. Now we can compute the weighted estimating function stacks for all subjects
         # as well as collect related values used to construct the adaptive and classical
         # sandwich variances.
         RL_stacks = jnp.array(
             [
-                self.single_user_weighted_RL_estimating_function_stacker(
+                self.single_subject_weighted_RL_estimating_function_stacker(
                     beta_dim,
-                    user_id,
+                    subject_id,
                     action_prob_func,
                     algorithm_estimating_func,
                     action_prob_func_args_beta_index,
-                    action_prob_func_args_by_decision_time_by_user_id[user_id],
-                    threaded_action_prob_func_args_by_decision_time_by_user_id[user_id],
-                    threaded_update_func_args_by_policy_num_by_user_id[user_id],
-                    policy_num_by_decision_time_by_user_id[user_id],
-                    action_by_decision_time_by_user_id[user_id],
+                    action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+                    threaded_action_prob_func_args_by_decision_time_by_subject_id[
+                        subject_id
+                    ],
+                    threaded_update_func_args_by_policy_num_by_subject_id[subject_id],
+                    policy_num_by_decision_time_by_subject_id[subject_id],
+                    action_by_decision_time_by_subject_id[subject_id],
                     beta_index_by_policy_num,
                 )
-                for user_id in user_ids.tolist()
+                for subject_id in subject_ids.tolist()
             ]
         )
 
         # 6. We will differentiate the first output, while the second will be used
         # for an estimating function sum check.
-        mean_stack_across_users = jnp.mean(RL_stacks, axis=0)
-        return mean_stack_across_users, mean_stack_across_users
+        mean_stack_across_subjects = jnp.mean(RL_stacks, axis=0)
+        return mean_stack_across_subjects, mean_stack_across_subjects
 
-    def single_user_weighted_RL_estimating_function_stacker(
+    def single_subject_weighted_RL_estimating_function_stacker(
         self,
         beta_dim: int,
-        user_id: collections.abc.Hashable,
+        subject_id: collections.abc.Hashable,
         action_prob_func: callable,
         algorithm_estimating_func: callable,
         action_prob_func_args_beta_index: int,
@@ -660,12 +678,12 @@ class TrialConditioningMonitor:
             beta_dim (list[jnp.ndarray]):
                 A list of 1D JAX NumPy arrays corresponding to the betas produced by all updates.
 
-            user_id (collections.abc.Hashable):
-                The user ID for which to compute the weighted estimating function stack.
+            subject_id (collections.abc.Hashable):
+                The subject ID for which to compute the weighted estimating function stack.
 
             action_prob_func (callable):
                 The function used to compute the probability of action 1 at a given decision time for
-                a particular user given their state and the algorithm parameters.
+                a particular subject given their state and the algorithm parameters.
 
             algorithm_estimating_func (callable):
                 The estimating function that corresponds to algorithm updates.
@@ -674,7 +692,7 @@ class TrialConditioningMonitor:
                 The index of the beta argument in the action probability function's arguments.
 
             action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-                A map from decision times to tuples of arguments for this user for the action
+                A map from decision times to tuples of arguments for this subject for the action
                 probability function. This is for all decision times (args are an empty
                 tuple if they are not in the study). Should be sorted by decision time. NOTE THAT THESE
                 ARGS DO NOT CONTAIN THE SHARED BETAS, making them impervious to the differentiation that
@@ -687,13 +705,13 @@ class TrialConditioningMonitor:
 
             threaded_update_func_args_by_policy_num (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
                 A map from policy numbers to tuples containing the arguments for
-                the corresponding estimating functions for this user, with the shared betas threaded in
+                the corresponding estimating functions for this subject, with the shared betas threaded in
                 for differentiation.  This is for all non-initial, non-fallback policies. Policy numbers
                 should be sorted.
 
             policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
                 A dictionary mapping decision times to the policy number in use. This may be
-                user-specific. Should be sorted by decision time. Only applies to in-study decision
+                subject-specific. Should be sorted by decision time. Only applies to in-study decision
                 times!
 
             action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
@@ -705,18 +723,18 @@ class TrialConditioningMonitor:
                 all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
 
         Returns:
-            jnp.ndarray: A 1-D JAX NumPy array representing the RL portion of the user's weighted
+            jnp.ndarray: A 1-D JAX NumPy array representing the RL portion of the subject's weighted
             estimating function stack.
         """
 
         logger.info(
-            "Computing weighted estimating function stack for user %s.", user_id
+            "Computing weighted estimating function stack for subject %s.", subject_id
         )
 
         # First, reformat the supplied data into more convenient structures.
 
         # 1. Form a dictionary mapping policy numbers to the first time they were
-        # applicable (for this user). Note that this includes ALL policies, initial
+        # applicable (for this subject). Note that this includes ALL policies, initial
         # fallbacks included.
         # Collect the first time after the first update separately for convenience.
         # These are both used to form the Radon-Nikodym weights for the right times.
@@ -727,17 +745,17 @@ class TrialConditioningMonitor:
             )
         )
 
-        # 2. Get the start and end times for this user.
-        user_start_time = math.inf
-        user_end_time = -math.inf
+        # 2. Get the start and end times for this subject.
+        subject_start_time = math.inf
+        subject_end_time = -math.inf
         for decision_time in action_by_decision_time:
-            user_start_time = min(user_start_time, decision_time)
-            user_end_time = max(user_end_time, decision_time)
+            subject_start_time = min(subject_start_time, decision_time)
+            subject_end_time = max(subject_end_time, decision_time)
 
         # 3. Form a stack of weighted estimating equations, one for each update of the algorithm.
         logger.info(
-            "Computing the algorithm component of the weighted estimating function stack for user %s.",
-            user_id,
+            "Computing the algorithm component of the weighted estimating function stack for subject %s.",
+            subject_id,
         )
 
         in_study_action_prob_func_args = [
@@ -754,13 +772,13 @@ class TrialConditioningMonitor:
         )
 
         # Sort the threaded args by decision time to be cautious. We check if the
-        # user id is present in the user args dict because we may call this on a
-        # subset of the user arg dict when we are batching arguments by shape
+        # subject id is present in the subject args dict because we may call this on a
+        # subset of the subject arg dict when we are batching arguments by shape
         sorted_threaded_action_prob_args_by_decision_time = {
             decision_time: threaded_action_prob_func_args_by_decision_time[
                 decision_time
             ]
-            for decision_time in range(user_start_time, user_end_time + 1)
+            for decision_time in range(subject_start_time, subject_end_time + 1)
             if decision_time in threaded_action_prob_func_args_by_decision_time
         }
 
@@ -820,27 +838,27 @@ class TrialConditioningMonitor:
             [
                 # Here we compute a product of Radon-Nikodym weights
                 # for all decision times after the first update and before the update
-                # update under consideration took effect, for which the user was in the study.
+                # update under consideration took effect, for which the subject was in the study.
                 (
                     jnp.prod(
                         all_weights[
-                            # The earliest time after the first update where the user was in
+                            # The earliest time after the first update where the subject was in
                             # the study
                             max(
                                 first_time_after_first_update,
-                                user_start_time,
+                                subject_start_time,
                             )
                             - decision_time_to_all_weights_index_offset :
-                            # One more than the latest time the user was in the study before the time
+                            # One more than the latest time the subject was in the study before the time
                             # the update under consideration first applied. Note the + 1 because range
                             # does not include the right endpoint.
                             min(
                                 min_time_by_policy_num.get(policy_num, math.inf),
-                                user_end_time + 1,
+                                subject_end_time + 1,
                             )
                             - decision_time_to_all_weights_index_offset,
                         ]
-                        # If the user exited the study before there were any updates,
+                        # If the subject exited the study before there were any updates,
                         # this variable will be None and the above code to grab a weight would
                         # throw an error. Just use 1 to include the unweighted estimating function
                         # if they have data to contribute to the update.
@@ -848,8 +866,8 @@ class TrialConditioningMonitor:
                         else 1
                     )  # Now use the above to weight the alg estimating function for this update
                     * algorithm_estimating_func(*update_args)
-                    # If there are no arguments for the update function, the user is not yet in the
-                    # study, so we just add a zero vector contribution to the sum across users.
+                    # If there are no arguments for the update function, the subject is not yet in the
+                    # study, so we just add a zero vector contribution to the sum across subjects.
                     # Note that after they exit, they still contribute all their data to later
                     # updates.
                     if update_args

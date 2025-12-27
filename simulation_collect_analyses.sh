@@ -24,7 +24,7 @@ while getopts i:n:c:s:a:p:-: OPT; do
     i  | input_glob )                   needs_arg; input_glob="$OPTARG" ;;
     n  | num_users )                    needs_arg; num_users="$OPTARG" ;;
     c  | index_to_check_ci_coverage )   needs_arg; index_to_check_ci_coverage="$OPTARG" ;;
-    s  | in_study_col_name )            needs_arg; in_study_col_name="$OPTARG" ;;
+    s  | active_col_name )            needs_arg; active_col_name="$OPTARG" ;;
     a  | action_col_name )              needs_arg; action_col_name="$OPTARG" ;;
     p  | action_prob_col_name )         needs_arg; action_prob_col_name="$OPTARG" ;;
     f  | study_df_filename )            needs_arg; study_df_filename="$OPTARG" ;;
@@ -70,9 +70,9 @@ echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: All Python requireme
 # after-study analysis
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Collecting pre-existing after-study analyses.
 if [ -z "$index_to_check_ci_coverage" ]; then
-  python -m lifejacket.collect-existing-analyses collect --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
+  python -m lifejacket.collect-existing-analyses collect --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --active_col_name=$active_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
 else
-  python -m lifejacket.collect-existing-analyses collect --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
+  python -m lifejacket.collect-existing-analyses collect --input_glob="${input_glob}" --num_users="${num_users}" --study_df_filename="${study_df_filename}" --index_to_check_ci_coverage="${index_to_check_ci_coverage}" --active_col_name=$active_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name
 fi
 
 echo $(date +"%Y-%m-%d %T") simulation_collect_analyses.sh: Finished combining after-study analyses.

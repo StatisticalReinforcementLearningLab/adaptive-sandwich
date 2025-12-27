@@ -18,16 +18,16 @@ logging.basicConfig(
 )
 
 
-def form_adaptive_meat_adjustments_directly(
+def form_adjusted_meat_adjustments_directly(
     theta_dim: int,
     beta_dim: int,
     joint_adaptive_bread_inverse_matrix: jnp.ndarray,
     per_user_estimating_function_stacks: jnp.ndarray,
     study_df: pd.DataFrame,
-    in_study_col_name: str,
+    active_col_name: str,
     action_col_name: str,
     calendar_t_col_name: str,
-    user_id_col_name: str,
+    subject_id_col_name: str,
     action_prob_func: callable,
     action_prob_func_args: dict,
     action_prob_func_args_beta_index: int,
@@ -205,10 +205,10 @@ def form_adaptive_meat_adjustments_directly(
 
     pi_and_weight_gradients_by_calendar_t = calculate_pi_and_weight_gradients(
         study_df,
-        in_study_col_name,
+        active_col_name,
         action_col_name,
         calendar_t_col_name,
-        user_id_col_name,
+        subject_id_col_name,
         action_prob_func,
         action_prob_func_args,
         action_prob_func_args_beta_index,
@@ -220,9 +220,9 @@ def form_adaptive_meat_adjustments_directly(
         inference_func,
         inference_func_args_theta_index,
         user_ids,
-        user_id_col_name,
+        subject_id_col_name,
         action_prob_col_name,
-        in_study_col_name,
+        active_col_name,
         calendar_t_col_name,
     )
     # Take the outer product of each row of (per_user_meat_adjustments_stacked + per_user_inference_estimating_functions_stacked)

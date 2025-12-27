@@ -308,6 +308,8 @@ def main(
         not use_numerical_expectation,
     )
 
+    breakpoint()
+
     # Write the pickled results to file.
     pd.to_pickle(data_df, exp_path + "/data_df.pkl")
     pd.to_pickle(update_df, exp_path + "/update_df.pkl")

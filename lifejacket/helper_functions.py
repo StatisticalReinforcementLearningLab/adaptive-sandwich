@@ -378,11 +378,9 @@ def confirm_input_check_result(message, suppress_interaction, error=None):
             print("\nPlease enter 'y' or 'n'.\n")
 
 
-def get_in_study_df_column(study_df, col_name, in_study_col_name):
+def get_active_df_column(study_df, col_name, active_col_name):
     return jnp.array(
-        study_df.loc[study_df[in_study_col_name] == 1, col_name]
-        .to_numpy()
-        .reshape(-1, 1)
+        study_df.loc[study_df[active_col_name] == 1, col_name].to_numpy().reshape(-1, 1)
     )
 
 
@@ -408,7 +406,7 @@ def get_radon_nikodym_weight(
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     action: int,
-    *action_prob_func_args_single_user: tuple[Any, ...],
+    *action_prob_func_args_single_subject: tuple[Any, ...],
 ):
     """
     Computes a ratio of action probabilities under two sets of algorithm parameters:
@@ -426,13 +424,13 @@ def get_radon_nikodym_weight(
             The beta value to use in the denominator. NOT involved in differentation!
         action_prob_func (callable):
             The function used to compute the probability of action 1 at a given decision time for
-            a particular user given their state and the algorithm parameters.
+            a particular subject given their state and the algorithm parameters.
         action_prob_func_args_beta_index (int):
             The index of the beta argument in the action probability function's arguments.
         action (int):
             The actual taken action at the relevant decision time.
-        *action_prob_func_args_single_user (tuple[Any, ...]):
-            The arguments to the action probability function for the relevant user at this time.
+        *action_prob_func_args_single_subject (tuple[Any, ...]):
+            The arguments to the action probability function for the relevant subject at this time.
 
     Returns:
         jnp.float32: The Radon-Nikodym weight.
@@ -440,15 +438,17 @@ def get_radon_nikodym_weight(
     """
 
     # numerator
-    pi_beta = action_prob_func(*action_prob_func_args_single_user)
+    pi_beta = action_prob_func(*action_prob_func_args_single_subject)
 
     # denominator, where we thread in beta_target so that differentiation with respect to the
     # original beta in the arguments leaves this alone.
-    beta_target_action_prob_func_args_single_user = [*action_prob_func_args_single_user]
-    beta_target_action_prob_func_args_single_user[action_prob_func_args_beta_index] = (
-        beta_target
-    )
-    pi_beta_target = action_prob_func(*beta_target_action_prob_func_args_single_user)
+    beta_target_action_prob_func_args_single_subject = [
+        *action_prob_func_args_single_subject
+    ]
+    beta_target_action_prob_func_args_single_subject[
+        action_prob_func_args_beta_index
+    ] = beta_target
+    pi_beta_target = action_prob_func(*beta_target_action_prob_func_args_single_subject)
 
     return conditional_x_or_one_minus_x(pi_beta, action) / conditional_x_or_one_minus_x(
         pi_beta_target, action
@@ -456,7 +456,7 @@ def get_radon_nikodym_weight(
 
 
 def get_min_time_by_policy_num(
-    single_user_policy_num_by_decision_time, beta_index_by_policy_num
+    single_subject_policy_num_by_decision_time, beta_index_by_policy_num
 ):
     """
     Returns a dictionary mapping each policy number to the first time it was applicable,
@@ -464,12 +464,12 @@ def get_min_time_by_policy_num(
     """
     min_time_by_policy_num = {}
     first_time_after_first_update = None
-    for decision_time, policy_num in single_user_policy_num_by_decision_time.items():
+    for decision_time, policy_num in single_subject_policy_num_by_decision_time.items():
         if policy_num not in min_time_by_policy_num:
             min_time_by_policy_num[policy_num] = decision_time
 
         # Grab the first time where a non-initial, non-fallback policy is used.
-        # Assumes single_user_policy_num_by_decision_time is sorted.
+        # Assumes single_subject_policy_num_by_decision_time is sorted.
         if (
             policy_num in beta_index_by_policy_num
             and first_time_after_first_update is None
@@ -494,10 +494,10 @@ def calculate_beta_dim(
         int: The dimension of the beta vector.
     """
     for decision_time in action_prob_func_args:
-        for user_id in action_prob_func_args[decision_time]:
-            if action_prob_func_args[decision_time][user_id]:
+        for subject_id in action_prob_func_args[decision_time]:
+            if action_prob_func_args[decision_time][subject_id]:
                 return len(
-                    action_prob_func_args[decision_time][user_id][
+                    action_prob_func_args[decision_time][subject_id][
                         action_prob_func_args_beta_index
                     ]
                 )
@@ -507,7 +507,7 @@ def calculate_beta_dim(
 
 
 def construct_beta_index_by_policy_num_map(
-    study_df: pd.DataFrame, policy_num_col_name: str, in_study_col_name: str
+    study_df: pd.DataFrame, policy_num_col_name: str, active_col_name: str
 ) -> tuple[dict[int | float, int], int | float]:
     """
     Constructs a mapping from non-initial, non-fallback policy numbers to the index of the
@@ -525,7 +525,7 @@ def construct_beta_index_by_policy_num_map(
 
     unique_sorted_non_fallback_policy_nums = sorted(
         study_df[
-            (study_df[policy_num_col_name] >= 0) & (study_df[in_study_col_name] == 1)
+            (study_df[policy_num_col_name] >= 0) & (study_df[active_col_name] == 1)
         ][policy_num_col_name]
         .unique()
         .tolist()
@@ -550,10 +550,10 @@ def collect_all_post_update_betas(
     """
     all_post_update_betas = []
     for policy_num in sorted(beta_index_by_policy_num.keys()):
-        for user_id in alg_update_func_args[policy_num]:
-            if alg_update_func_args[policy_num][user_id]:
+        for subject_id in alg_update_func_args[policy_num]:
+            if alg_update_func_args[policy_num][subject_id]:
                 all_post_update_betas.append(
-                    alg_update_func_args[policy_num][user_id][
+                    alg_update_func_args[policy_num][subject_id][
                         alg_update_func_args_beta_index
                     ]
                 )
@@ -561,27 +561,31 @@ def collect_all_post_update_betas(
     return jnp.array(all_post_update_betas)
 
 
-def extract_action_and_policy_by_decision_time_by_user_id(
+def extract_action_and_policy_by_decision_time_by_subject_id(
     study_df,
-    user_id_col_name,
-    in_study_col_name,
+    subject_id_col_name,
+    active_col_name,
     calendar_t_col_name,
     action_col_name,
     policy_num_col_name,
 ):
-    action_by_decision_time_by_user_id = {}
-    policy_num_by_decision_time_by_user_id = {}
-    for user_id, user_df in study_df.groupby(user_id_col_name):
-        in_study_user_df = user_df[user_df[in_study_col_name] == 1]
-        action_by_decision_time_by_user_id[user_id] = dict(
+    action_by_decision_time_by_subject_id = {}
+    policy_num_by_decision_time_by_subject_id = {}
+    for subject_id, subject_df in study_df.groupby(subject_id_col_name):
+        active_subject_df = subject_df[subject_df[active_col_name] == 1]
+        action_by_decision_time_by_subject_id[subject_id] = dict(
             zip(
-                in_study_user_df[calendar_t_col_name], in_study_user_df[action_col_name]
+                active_subject_df[calendar_t_col_name],
+                active_subject_df[action_col_name],
             )
         )
-        policy_num_by_decision_time_by_user_id[user_id] = dict(
+        policy_num_by_decision_time_by_subject_id[subject_id] = dict(
             zip(
-                in_study_user_df[calendar_t_col_name],
-                in_study_user_df[policy_num_col_name],
+                active_subject_df[calendar_t_col_name],
+                active_subject_df[policy_num_col_name],
             )
         )
-    return action_by_decision_time_by_user_id, policy_num_by_decision_time_by_user_id
+    return (
+        action_by_decision_time_by_subject_id,
+        policy_num_by_decision_time_by_subject_id,
+    )

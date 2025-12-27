@@ -36,11 +36,11 @@ only_analysis=0
 ignore_variance_for_rl_parameter_definition=0
 
 # Arguments that only affect inference side.
-in_study_col_name="in_study_indicator"
+active_col_name="in_study_indicator"
 action_col_name="action"
 policy_num_col_name="policy_idx"
 calendar_t_col_name="calendar_decision_t"
-user_id_col_name="user_idx"
+subject_id_col_name="user_idx"
 action_prob_col_name="act_prob"
 reward_col_name="reward"
 action_prob_func_filename="functions_to_pass_to_analysis/oralytics_act_prob_function.py"
@@ -58,7 +58,7 @@ suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none"
 collect_data_for_blowup_supervised_learning=0
-stabilize_joint_adaptive_bread_inverse=0
+stabilize_joint_adjusted_bread_inverse=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -71,11 +71,11 @@ while getopts o:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:u:v:k:w:m:-: OPT; 
   fi
   case "$OPT" in
     o  | only_analysis )                                needs_arg; only_analysis="$OPTARG" ;;
-    i  | in_study_col_name )                            needs_arg; in_study_col_name="$OPTARG" ;;
+    i  | active_col_name )                              needs_arg; active_col_name="$OPTARG" ;;
     c  | action_col_name )                              needs_arg; action_col_name="$OPTARG" ;;
     p  | policy_num_col_name )                          needs_arg; policy_num_col_name="$OPTARG" ;;
     C  | calendar_t_col_name )                          needs_arg; calendar_t_col_name="$OPTARG" ;;
-    U  | user_id_col_name )                             needs_arg; user_id_col_name="$OPTARG" ;;
+    U  | subject_id_col_name )                             needs_arg; subject_id_col_name="$OPTARG" ;;
     E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
     X  | reward_col_name )                              needs_arg; reward_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
@@ -98,7 +98,7 @@ while getopts o:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:Q:q:z:n:r:u:v:k:w:m:-: OPT; 
     v  | ignore_variance_for_rl_parameter_definition )  needs_arg; ignore_variance_for_rl_parameter_definition="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     w  | per_user_weeks_in_study )                      needs_arg; per_user_weeks_in_study="$OPTARG" ;;
-    m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
+    m  | stabilize_joint_adjusted_bread_inverse )       needs_arg; stabilize_joint_adjusted_bread_inverse="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -163,7 +163,7 @@ output_folder_glob="${save_dir_prefix}/NON_STAT_LOW_R_None_0.515_14_full_pooling
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics: Beginning after-study analysis."
 python -m lifejacket.after_study_analysis analyze \
-  --study_df_pickle="${output_folder}/study_df.pkl" \
+  --analysis_df_pickle="${output_folder}/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/action_data.pkl" \
   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
@@ -177,19 +177,19 @@ python -m lifejacket.after_study_analysis analyze \
   --inference_func_args_theta_index=$inference_func_args_theta_index \
   --inference_func_type=$inference_func_type \
   --theta_calculation_func_filename=$theta_calculation_func_filename \
-  --in_study_col_name=$in_study_col_name \
+  --active_col_name=$active_col_name \
   --action_col_name=$action_col_name \
   --policy_num_col_name=$policy_num_col_name \
   --calendar_t_col_name=$calendar_t_col_name \
-  --user_id_col_name=$user_id_col_name \
+  --subject_id_col_name=$subject_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
   --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
-  --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
+  --stabilize_joint_adjusted_bread_inverse=$stabilize_joint_adjusted_bread_inverse
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --num_users=$num_users --index_to_check_ci_coverage=6  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_oralytics.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/analysis.pkl --num_users=$num_users --index_to_check_ci_coverage=6  --active_col_name=$active_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"

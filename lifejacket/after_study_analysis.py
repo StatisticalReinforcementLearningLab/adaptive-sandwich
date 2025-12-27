@@ -24,8 +24,8 @@ from .constants import (
     SandwichFormationMethods,
     SmallSampleCorrections,
 )
-from .form_adaptive_meat_adjustments_directly import (
-    form_adaptive_meat_adjustments_directly,
+from .form_adjusted_meat_adjustments_directly import (
+    form_adjusted_meat_adjustments_directly,
 )
 from . import input_checks
 from . import get_datum_for_blowup_supervised_learning
@@ -37,9 +37,9 @@ from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
     construct_beta_index_by_policy_num_map,
-    extract_action_and_policy_by_decision_time_by_user_id,
+    extract_action_and_policy_by_decision_time_by_subject_id,
     flatten_params,
-    get_in_study_df_column,
+    get_active_df_column,
     get_min_time_by_policy_num,
     get_radon_nikodym_weight,
     load_function_from_same_named_file,
@@ -61,7 +61,7 @@ def cli():
 
 # TODO: Check all help strings for accuracy.
 # TODO: Deal with NA, -1, etc policy numbers
-# TODO: Make sure in study is never on for more than one stretch EDIT: unclear if
+# TODO: Make sure in deployment is never on for more than one stretch EDIT: unclear if
 # this will remain an invariant as we deal with more complicated data missingness
 # TODO: I think I'm agnostic to indexing of calendar times but should check because
 # otherwise need to add a check here to verify required format.
@@ -69,7 +69,7 @@ def cli():
 # Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 @cli.command(name="analyze")
 @click.option(
-    "--study_df_pickle",
+    "--analysis_df_pickle",
     type=click.File("rb"),
     help="Pickled pandas dataframe in correct format (see contract/readme).",
     required=True,
@@ -83,7 +83,7 @@ def cli():
 @click.option(
     "--action_prob_func_args_pickle",
     type=click.File("rb"),
-    help="Pickled dictionary that contains the action probability function arguments for all decision times for all users.",
+    help="Pickled dictionary that contains the action probability function arguments for all decision times for all subjects.",
     required=True,
 )
 @click.option(
@@ -95,7 +95,7 @@ def cli():
 @click.option(
     "--alg_update_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the per-user update function used to determine the algorithm parameters at each update and relevant imports. May be a loss or estimating function, specified in a separate argument.  The filename without its extension will be assumed to match the function name.",
+    help="File that contains the per-subject update function used to determine the algorithm parameters at each update and relevant imports. May be a loss or estimating function, specified in a separate argument.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -107,7 +107,7 @@ def cli():
 @click.option(
     "--alg_update_func_args_pickle",
     type=click.File("rb"),
-    help="Pickled dictionary that contains the algorithm update function arguments for all update times for all users.",
+    help="Pickled dictionary that contains the algorithm update function arguments for all update times for all subjects.",
     required=True,
 )
 @click.option(
@@ -137,7 +137,7 @@ def cli():
 @click.option(
     "--inference_func_filename",
     type=click.Path(exists=True),
-    help="File that contains the per-user loss/estimating function used to determine the inference estimate and relevant imports.  The filename without its extension will be assumed to match the function name.",
+    help="File that contains the per-subject loss/estimating function used to determine the inference estimate and relevant imports.  The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
@@ -155,56 +155,56 @@ def cli():
 @click.option(
     "--theta_calculation_func_filename",
     type=click.Path(exists=True),
-    help="Path to file that allows one to actually calculate a theta estimate given the study dataframe only. One must supply either this or a precomputed theta estimate. The filename without its extension will be assumed to match the function name.",
+    help="Path to file that allows one to actually calculate a theta estimate given the analysis dataframe only. One must supply either this or a precomputed theta estimate. The filename without its extension will be assumed to match the function name.",
     required=True,
 )
 @click.option(
-    "--in_study_col_name",
+    "--active_col_name",
     type=str,
     required=True,
-    help="Name of the binary column in the study dataframe that indicates whether a user is in the study.",
+    help="Name of the binary column in the analysis dataframe that indicates whether a subject is in the deployment.",
 )
 @click.option(
     "--action_col_name",
     type=str,
     required=True,
-    help="Name of the binary column in the study dataframe that indicates which action was taken.",
+    help="Name of the binary column in the analysis dataframe that indicates which action was taken.",
 )
 @click.option(
     "--policy_num_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that indicates the policy number in use.",
+    help="Name of the column in the analysis dataframe that indicates the policy number in use.",
 )
 @click.option(
     "--calendar_t_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that indicates calendar time (shared integer index across users).",
+    help="Name of the column in the analysis dataframe that indicates calendar time (shared integer index across subjects).",
 )
 @click.option(
-    "--user_id_col_name",
+    "--subject_id_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that indicates user id.",
+    help="Name of the column in the analysis dataframe that indicates subject id.",
 )
 @click.option(
     "--action_prob_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that gives action one probabilities.",
+    help="Name of the column in the analysis dataframe that gives action one probabilities.",
 )
 @click.option(
     "--reward_col_name",
     type=str,
     required=True,
-    help="Name of the column in the study dataframe that gives rewards.",
+    help="Name of the column in the analysis dataframe that gives rewards.",
 )
 @click.option(
     "--suppress_interactive_data_checks",
     type=bool,
     default=False,
-    help="Flag to suppress any data checks that require user input. This is suitable for tests and large simulations",
+    help="Flag to suppress any data checks that require subject input. This is suitable for tests and large simulations",
 )
 @click.option(
     "--suppress_all_data_checks",
@@ -232,13 +232,13 @@ def cli():
     help="Flag to collect data for supervised learning blowup detection. This will write a single datum and label to a file in the same directory as the input files.",
 )
 @click.option(
-    "--form_adaptive_meat_adjustments_explicitly",
+    "--form_adjusted_meat_adjustments_explicitly",
     type=bool,
     default=False,
-    help="If True, explicitly forms the per-user meat adjustments that differentiate the adaptive sandwich from the classical sandwich. This is for diagnostic purposes, as the adaptive sandwich is formed without doing this.",
+    help="If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive sandwich from the classical sandwich. This is for diagnostic purposes, as the adaptive sandwich is formed without doing this.",
 )
 @click.option(
-    "--stabilize_joint_adaptive_bread_inverse",
+    "--stabilize_joint_adjusted_bread_inverse",
     type=bool,
     default=True,
     help="If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning thresholds.",
@@ -248,7 +248,7 @@ def analyze_dataset_wrapper(**kwargs):
     This function is a wrapper around analyze_dataset to facilitate command line use.
 
     From the command line, we will take pickles and filenames for Python objects.
-    Unpickle/load files here for passing to the implementation function, which
+    We unpickle/load files here for passing to the implementation function, which
     may also be called in its own right with in-memory objects.
 
     See analyze_dataset for the underlying details.
@@ -256,18 +256,20 @@ def analyze_dataset_wrapper(**kwargs):
     Returns: None
     """
 
-    # Pass along the folder the study dataframe is in as the output folder.
-    # Do it now because we will be removing the study dataframe pickle from kwargs.
-    kwargs["output_dir"] = pathlib.Path(kwargs["study_df_pickle"].name).parent.resolve()
+    # Pass along the folder the analysis dataframe is in as the output folder.
+    # Do it now because we will be removing the analysis dataframe pickle from kwargs.
+    kwargs["output_dir"] = pathlib.Path(
+        kwargs["analysis_df_pickle"].name
+    ).parent.resolve()
 
     # Unpickle pickles and replace those args in kwargs
-    kwargs["study_df"] = pickle.load(kwargs["study_df_pickle"])
+    kwargs["analysis_df"] = pickle.load(kwargs["analysis_df_pickle"])
     kwargs["action_prob_func_args"] = pickle.load(
         kwargs["action_prob_func_args_pickle"]
     )
     kwargs["alg_update_func_args"] = pickle.load(kwargs["alg_update_func_args_pickle"])
 
-    kwargs.pop("study_df_pickle")
+    kwargs.pop("analysis_df_pickle")
     kwargs.pop("action_prob_func_args_pickle")
     kwargs.pop("alg_update_func_args_pickle")
 
@@ -295,7 +297,7 @@ def analyze_dataset_wrapper(**kwargs):
 
 def analyze_dataset(
     output_dir: pathlib.Path | str,
-    study_df: pd.DataFrame,
+    analysis_df: pd.DataFrame,
     action_prob_func: Callable,
     action_prob_func_args: dict[int, Any],
     action_prob_func_args_beta_index: int,
@@ -310,19 +312,19 @@ def analyze_dataset(
     inference_func_type: str,
     inference_func_args_theta_index: int,
     theta_calculation_func: Callable[[pd.DataFrame], jnp.ndarray],
-    in_study_col_name: str,
+    active_col_name: str,
     action_col_name: str,
     policy_num_col_name: str,
     calendar_t_col_name: str,
-    user_id_col_name: str,
+    subject_id_col_name: str,
     action_prob_col_name: str,
     reward_col_name: str,
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
     small_sample_correction: str,
     collect_data_for_blowup_supervised_learning: bool,
-    form_adaptive_meat_adjustments_explicitly: bool,
-    stabilize_joint_adaptive_bread_inverse: bool,
+    form_adjusted_meat_adjustments_explicitly: bool,
+    stabilize_joint_adjusted_bread_inverse: bool,
 ) -> None:
     """
     Analyzes a dataset to provide a parameter estimate and an estimate of its variance using adaptive and classical sandwich estimators.
@@ -337,8 +339,8 @@ def analyze_dataset(
     Parameters:
     output_dir (pathlib.Path | str):
         Directory in which to save output files.
-    study_df (pd.DataFrame):
-        DataFrame containing the study data.
+    analysis_df (pd.DataFrame):
+        DataFrame containing the deployment data.
     action_prob_func (callable):
         Action probability function.
     action_prob_func_args (dict[int, Any]):
@@ -364,21 +366,21 @@ def analyze_dataset(
     inference_func_args_theta_index (int):
         Index for theta in inference function arguments.
     theta_calculation_func (callable):
-        Function to estimate theta from the study DataFrame.
-    in_study_col_name (str):
-        Column name indicating if a user is in the study in the study dataframe.
+        Function to estimate theta from the analysis dataframe.
+    active_col_name (str):
+        Column name indicating if a subject is active in the analysis dataframe.
     action_col_name (str):
-        Column name for actions in the study dataframe.
+        Column name for actions in the analysis dataframe.
     policy_num_col_name (str):
-        Column name for policy numbers in the study dataframe.
+        Column name for policy numbers in the analysis dataframe.
     calendar_t_col_name (str):
-        Column name for calendar time in the study dataframe.
-    user_id_col_name (str):
-        Column name for user IDs in the study dataframe.
+        Column name for calendar time in the analysis dataframe.
+    subject_id_col_name (str):
+        Column name for subject IDs in the analysis dataframe.
     action_prob_col_name (str):
-        Column name for action probabilities in the study dataframe.
+        Column name for action probabilities in the analysis dataframe.
     reward_col_name (str):
-        Column name for rewards in the study dataframe.
+        Column name for rewards in the analysis dataframe.
     suppress_interactive_data_checks (bool):
         Whether to suppress interactive data checks. This should be used in simulations, for example.
     suppress_all_data_checks (bool):
@@ -387,11 +389,11 @@ def analyze_dataset(
         Type of small sample correction to apply.
     collect_data_for_blowup_supervised_learning (bool):
         Whether to collect data for doing supervised learning about adaptive sandwich blowup.
-    form_adaptive_meat_adjustments_explicitly (bool):
-        If True, explicitly forms the per-user meat adjustments that differentiate the adaptive
+    form_adjusted_meat_adjustments_explicitly (bool):
+        If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive
         sandwich from the classical sandwich. This is for diagnostic purposes, as the
         adaptive sandwich is formed without doing this.
-    stabilize_joint_adaptive_bread_inverse (bool):
+    stabilize_joint_adjusted_bread_inverse (bool):
         If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning
         thresholds.
 
@@ -406,19 +408,19 @@ def analyze_dataset(
         level=logging.INFO,
     )
 
-    theta_est = jnp.array(theta_calculation_func(study_df))
+    theta_est = jnp.array(theta_calculation_func(analysis_df))
 
     beta_dim = calculate_beta_dim(
         action_prob_func_args, action_prob_func_args_beta_index
     )
     if not suppress_all_data_checks:
         input_checks.perform_first_wave_input_checks(
-            study_df,
-            in_study_col_name,
+            analysis_df,
+            active_col_name,
             action_col_name,
             policy_num_col_name,
             calendar_t_col_name,
-            user_id_col_name,
+            subject_id_col_name,
             action_prob_col_name,
             reward_col_name,
             action_prob_func,
@@ -439,7 +441,7 @@ def analyze_dataset(
 
     beta_index_by_policy_num, initial_policy_num = (
         construct_beta_index_by_policy_num_map(
-            study_df, policy_num_col_name, in_study_col_name
+            analysis_df, policy_num_col_name, active_col_name
         )
     )
 
@@ -447,11 +449,11 @@ def analyze_dataset(
         beta_index_by_policy_num, alg_update_func_args, alg_update_func_args_beta_index
     )
 
-    action_by_decision_time_by_user_id, policy_num_by_decision_time_by_user_id = (
-        extract_action_and_policy_by_decision_time_by_user_id(
-            study_df,
-            user_id_col_name,
-            in_study_col_name,
+    action_by_decision_time_by_subject_id, policy_num_by_decision_time_by_subject_id = (
+        extract_action_and_policy_by_decision_time_by_subject_id(
+            analysis_df,
+            subject_id_col_name,
+            active_col_name,
             calendar_t_col_name,
             action_col_name,
             policy_num_col_name,
@@ -459,45 +461,45 @@ def analyze_dataset(
     )
 
     (
-        inference_func_args_by_user_id,
+        inference_func_args_by_subject_id,
         inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_user_id,
+        inference_action_prob_decision_times_by_subject_id,
     ) = process_inference_func_args(
         inference_func,
         inference_func_args_theta_index,
-        study_df,
+        analysis_df,
         theta_est,
         action_prob_col_name,
         calendar_t_col_name,
-        user_id_col_name,
-        in_study_col_name,
+        subject_id_col_name,
+        active_col_name,
     )
 
-    # Use a per-user weighted estimating function stacking functino to derive classical and joint
+    # Use a per-subject weighted estimating function stacking functino to derive classical and joint
     # adaptive meat and inverse bread matrices.  This is facilitated because the *value* of the
     # weighted and unweighted stacks are the same, as the weights evaluate to 1 pre-differentiation.
     logger.info(
-        "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across users."
+        "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across subjects."
     )
 
-    user_ids = jnp.array(study_df[user_id_col_name].unique())
+    subject_ids = jnp.array(analysis_df[subject_id_col_name].unique())
     (
-        stabilized_joint_adaptive_bread_inverse_matrix,
-        raw_joint_adaptive_bread_inverse_matrix,
-        joint_adaptive_meat_matrix,
-        joint_adaptive_sandwich_matrix,
+        stabilized_joint_adjusted_bread_inverse_matrix,
+        raw_joint_adjusted_bread_inverse_matrix,
+        joint_adjusted_meat_matrix,
+        joint_adjusted_sandwich_matrix,
         classical_bread_inverse_matrix,
         classical_meat_matrix,
         classical_sandwich_var_estimate,
         avg_estimating_function_stack,
-        per_user_estimating_function_stacks,
-        per_user_adaptive_corrections,
-        per_user_classical_corrections,
-        per_user_adaptive_meat_adjustments,
-    ) = construct_classical_and_adaptive_sandwiches(
+        per_subject_estimating_function_stacks,
+        per_subject_adjusted_corrections,
+        per_subject_classical_corrections,
+        per_subject_adjusted_meat_adjustments,
+    ) = construct_classical_and_adjusted_sandwiches(
         theta_est,
         all_post_update_betas,
-        user_ids,
+        subject_ids,
         action_prob_func,
         action_prob_func_args_beta_index,
         alg_update_func,
@@ -511,23 +513,23 @@ def analyze_dataset(
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
         action_prob_func_args,
-        policy_num_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_subject_id,
         initial_policy_num,
         beta_index_by_policy_num,
-        inference_func_args_by_user_id,
-        inference_action_prob_decision_times_by_user_id,
+        inference_func_args_by_subject_id,
+        inference_action_prob_decision_times_by_subject_id,
         alg_update_func_args,
-        action_by_decision_time_by_user_id,
+        action_by_decision_time_by_subject_id,
         suppress_all_data_checks,
         suppress_interactive_data_checks,
         small_sample_correction,
-        form_adaptive_meat_adjustments_explicitly,
-        stabilize_joint_adaptive_bread_inverse,
-        study_df,
-        in_study_col_name,
+        form_adjusted_meat_adjustments_explicitly,
+        stabilize_joint_adjusted_bread_inverse,
+        analysis_df,
+        active_col_name,
         action_col_name,
         calendar_t_col_name,
-        user_id_col_name,
+        subject_id_col_name,
         action_prob_func_args,
         action_prob_col_name,
     )
@@ -543,18 +545,18 @@ def analyze_dataset(
 
     # This bottom right corner of the joint (betas and theta) variance matrix is the portion
     # corresponding to just theta.
-    adaptive_sandwich_var_estimate = joint_adaptive_sandwich_matrix[
+    adjusted_sandwich_var_estimate = joint_adjusted_sandwich_matrix[
         -theta_dim:, -theta_dim:
     ]
 
     # Check for negative diagonal elements and set them to zero if found
-    adaptive_diagonal = np.diag(adaptive_sandwich_var_estimate)
+    adaptive_diagonal = np.diag(adjusted_sandwich_var_estimate)
     if np.any(adaptive_diagonal < 0):
         logger.warning(
             "Found negative diagonal elements in adaptive sandwich variance estimate. Setting them to zero."
         )
         np.fill_diagonal(
-            adaptive_sandwich_var_estimate, np.maximum(adaptive_diagonal, 0)
+            adjusted_sandwich_var_estimate, np.maximum(adaptive_diagonal, 0)
         )
 
     logger.info("Writing results to file...")
@@ -563,7 +565,7 @@ def analyze_dataset(
 
     analysis_dict = {
         "theta_est": theta_est,
-        "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+        "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
     }
     with open(output_folder_abs_path / "analysis.pkl", "wb") as f:
@@ -572,29 +574,29 @@ def analyze_dataset(
             f,
         )
 
-    joint_adaptive_bread_inverse_cond = jnp.linalg.cond(
-        raw_joint_adaptive_bread_inverse_matrix
+    joint_adjusted_bread_inverse_cond = jnp.linalg.cond(
+        raw_joint_adjusted_bread_inverse_matrix
     )
     logger.info(
-        "Joint adaptive bread inverse condition number: %f",
-        joint_adaptive_bread_inverse_cond,
+        "Joint adjusted bread inverse condition number: %f",
+        joint_adjusted_bread_inverse_cond,
     )
 
     debug_pieces_dict = {
         "theta_est": theta_est,
-        "adaptive_sandwich_var_estimate": adaptive_sandwich_var_estimate,
+        "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-        "raw_joint_bread_inverse_matrix": raw_joint_adaptive_bread_inverse_matrix,
-        "stabilized_joint_bread_inverse_matrix": stabilized_joint_adaptive_bread_inverse_matrix,
-        "joint_meat_matrix": joint_adaptive_meat_matrix,
+        "raw_joint_bread_inverse_matrix": raw_joint_adjusted_bread_inverse_matrix,
+        "stabilized_joint_bread_inverse_matrix": stabilized_joint_adjusted_bread_inverse_matrix,
+        "joint_meat_matrix": joint_adjusted_meat_matrix,
         "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
         "classical_meat_matrix": classical_meat_matrix,
-        "all_estimating_function_stacks": per_user_estimating_function_stacks,
-        "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
+        "all_estimating_function_stacks": per_subject_estimating_function_stacks,
+        "joint_bread_inverse_condition_number": joint_adjusted_bread_inverse_cond,
         "all_post_update_betas": all_post_update_betas,
-        "per_user_adaptive_corrections": per_user_adaptive_corrections,
-        "per_user_classical_corrections": per_user_classical_corrections,
-        "per_user_adaptive_meat_adjustments": per_user_adaptive_meat_adjustments,
+        "per_subject_adjusted_corrections": per_subject_adjusted_corrections,
+        "per_subject_classical_corrections": per_subject_classical_corrections,
+        "per_subject_adjusted_meat_adjustments": per_subject_adjusted_meat_adjustments,
     }
     with open(output_folder_abs_path / "debug_pieces.pkl", "wb") as f:
         pickle.dump(
@@ -604,25 +606,25 @@ def analyze_dataset(
 
     if collect_data_for_blowup_supervised_learning:
         datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
-            raw_joint_adaptive_bread_inverse_matrix,
-            joint_adaptive_bread_inverse_cond,
+            raw_joint_adjusted_bread_inverse_matrix,
+            joint_adjusted_bread_inverse_cond,
             avg_estimating_function_stack,
-            per_user_estimating_function_stacks,
+            per_subject_estimating_function_stacks,
             all_post_update_betas,
-            study_df,
-            in_study_col_name,
+            analysis_df,
+            active_col_name,
             calendar_t_col_name,
             action_prob_col_name,
-            user_id_col_name,
+            subject_id_col_name,
             reward_col_name,
             theta_est,
-            adaptive_sandwich_var_estimate,
-            user_ids,
+            adjusted_sandwich_var_estimate,
+            subject_ids,
             beta_dim,
             theta_dim,
             initial_policy_num,
             beta_index_by_policy_num,
-            policy_num_by_decision_time_by_user_id,
+            policy_num_by_decision_time_by_subject_id,
             theta_calculation_func,
             action_prob_func,
             action_prob_func_args_beta_index,
@@ -630,16 +632,16 @@ def analyze_dataset(
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
-            inference_action_prob_decision_times_by_user_id,
+            inference_action_prob_decision_times_by_subject_id,
             action_prob_func_args,
-            action_by_decision_time_by_user_id,
+            action_by_decision_time_by_subject_id,
         )
 
         with open(output_folder_abs_path / "supervised_learning_datum.pkl", "wb") as f:
             pickle.dump(datum_and_label_dict, f)
 
     print(f"\nParameter estimate:\n {theta_est}")
-    print(f"\nAdaptive sandwich variance estimate:\n {adaptive_sandwich_var_estimate}")
+    print(f"\nAdjusted sandwich variance estimate:\n {adjusted_sandwich_var_estimate}")
     print(
         f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
     )
@@ -650,15 +652,15 @@ def analyze_dataset(
 def process_inference_func_args(
     inference_func: callable,
     inference_func_args_theta_index: int,
-    study_df: pd.DataFrame,
+    analysis_df: pd.DataFrame,
     theta_est: jnp.ndarray,
     action_prob_col_name: str,
     calendar_t_col_name: str,
-    user_id_col_name: str,
-    in_study_col_name: str,
+    subject_id_col_name: str,
+    active_col_name: str,
 ) -> tuple[dict[collections.abc.Hashable, tuple[Any, ...]], int]:
     """
-    Collects the inference function arguments for each user from the study DataFrame.
+    Collects the inference function arguments for each subject from the analysis DataFrame.
 
     Note that theta and action probabilities, if present, will be replaced later
     so that the function can be differentiated with respect to shared versions
@@ -669,32 +671,32 @@ def process_inference_func_args(
             The inference function to be used.
         inference_func_args_theta_index (int):
             The index of the theta parameter in the inference function's arguments.
-        study_df (pandas.DataFrame):
-            The study DataFrame.
+        analysis_df (pandas.DataFrame):
+            The analysis DataFrame.
         theta_est (jnp.ndarray):
             The estimate of the parameter vector.
         action_prob_col_name (str):
-            The name of the column in the study DataFrame that gives action probabilities.
+            The name of the column in the analysis DataFrame that gives action probabilities.
         calendar_t_col_name (str):
-            The name of the column in the study DataFrame that indicates calendar time.
-        user_id_col_name (str):
-            The name of the column in the study DataFrame that indicates user ID.
-        in_study_col_name (str):
-            The name of the binary column in the study DataFrame that indicates whether a user is in the study.
+            The name of the column in the analysis DataFrame that indicates calendar time.
+        subject_id_col_name (str):
+            The name of the column in the analysis DataFrame that indicates subject ID.
+        active_col_name (str):
+            The name of the binary column in the analysis DataFrame that indicates whether a subject is in the deployment.
     Returns:
         tuple[dict[collections.abc.Hashable, tuple[Any, ...]], int, dict[collections.abc.Hashable, jnp.ndarray[int]]]:
             A tuple containing
-                - the inference function arguments dictionary for each user
+                - the inference function arguments dictionary for each subject
                 - the index of the action probabilities argument
-                - a dictionary mapping user IDs to the decision times to which action probabilities correspond
+                - a dictionary mapping subject IDs to the decision times to which action probabilities correspond
     """
 
     num_args = inference_func.__code__.co_argcount
     inference_func_arg_names = inference_func.__code__.co_varnames[:num_args]
-    inference_func_args_by_user_id = {}
+    inference_func_args_by_subject_id = {}
 
     inference_func_args_action_prob_index = -1
-    inference_action_prob_decision_times_by_user_id = {}
+    inference_action_prob_decision_times_by_subject_id = {}
 
     using_action_probs = action_prob_col_name in inference_func_arg_names
     if using_action_probs:
@@ -702,34 +704,36 @@ def process_inference_func_args(
             action_prob_col_name
         )
 
-    for user_id in study_df[user_id_col_name].unique():
-        user_args_list = []
-        filtered_user_data = study_df.loc[study_df[user_id_col_name] == user_id]
+    for subject_id in analysis_df[subject_id_col_name].unique():
+        subject_args_list = []
+        filtered_subject_data = analysis_df.loc[
+            analysis_df[subject_id_col_name] == subject_id
+        ]
         for idx, col_name in enumerate(inference_func_arg_names):
             if idx == inference_func_args_theta_index:
-                user_args_list.append(theta_est)
+                subject_args_list.append(theta_est)
                 continue
-            user_args_list.append(
-                get_in_study_df_column(filtered_user_data, col_name, in_study_col_name)
+            subject_args_list.append(
+                get_active_df_column(filtered_subject_data, col_name, active_col_name)
             )
-        inference_func_args_by_user_id[user_id] = tuple(user_args_list)
+        inference_func_args_by_subject_id[subject_id] = tuple(subject_args_list)
         if using_action_probs:
-            inference_action_prob_decision_times_by_user_id[user_id] = (
-                get_in_study_df_column(
-                    filtered_user_data, calendar_t_col_name, in_study_col_name
+            inference_action_prob_decision_times_by_subject_id[subject_id] = (
+                get_active_df_column(
+                    filtered_subject_data, calendar_t_col_name, active_col_name
                 )
             )
 
     return (
-        inference_func_args_by_user_id,
+        inference_func_args_by_subject_id,
         inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_user_id,
+        inference_action_prob_decision_times_by_subject_id,
     )
 
 
-def single_user_weighted_estimating_function_stacker(
+def single_subject_weighted_estimating_function_stacker(
     beta_dim: int,
-    user_id: collections.abc.Hashable,
+    subject_id: collections.abc.Hashable,
     action_prob_func: callable,
     algorithm_estimating_func: callable,
     inference_estimating_func: callable,
@@ -763,12 +767,12 @@ def single_user_weighted_estimating_function_stacker(
         beta_dim (list[jnp.ndarray]):
             A list of 1D JAX NumPy arrays corresponding to the betas produced by all updates.
 
-        user_id (collections.abc.Hashable):
-            The user ID for which to compute the weighted estimating function stack.
+        subject_id (collections.abc.Hashable):
+            The subject ID for which to compute the weighted estimating function stack.
 
         action_prob_func (callable):
             The function used to compute the probability of action 1 at a given decision time for
-            a particular user given their state and the algorithm parameters.
+            a particular subject given their state and the algorithm parameters.
 
         algorithm_estimating_func (callable):
             The estimating function that corresponds to algorithm updates.
@@ -783,9 +787,9 @@ def single_user_weighted_estimating_function_stacker(
             The index of the theta parameter in the inference loss or estimating function arguments.
 
         action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for this user for the action
+            A map from decision times to tuples of arguments for this subject for the action
             probability function. This is for all decision times (args are an empty
-            tuple if they are not in the study). Should be sorted by decision time. NOTE THAT THESE
+            tuple if they are not in the deployment). Should be sorted by decision time. NOTE THAT THESE
             ARGS DO NOT CONTAIN THE SHARED BETAS, making them impervious to the differentiation that
             will occur.
 
@@ -796,21 +800,21 @@ def single_user_weighted_estimating_function_stacker(
 
         threaded_update_func_args_by_policy_num (dict[int | float, dict[collections.abc.Hashable, tuple[Any, ...]]]):
             A map from policy numbers to tuples containing the arguments for
-            the corresponding estimating functions for this user, with the shared betas threaded in
+            the corresponding estimating functions for this subject, with the shared betas threaded in
             for differentiation.  This is for all non-initial, non-fallback policies. Policy numbers
             should be sorted.
 
         threaded_inference_func_args (dict[collections.abc.Hashable, tuple[Any, ...]]):
             A tuple containing the arguments for the inference
-            estimating function for this user, with the shared betas threaded in for differentiation.
+            estimating function for this subject, with the shared betas threaded in for differentiation.
 
         policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
             A dictionary mapping decision times to the policy number in use. This may be
-            user-specific. Should be sorted by decision time. Only applies to in-study decision
+            subject-specific. Should be sorted by decision time. Only applies to active decision
             times!
 
         action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping decision times to actions taken. Only applies to in-study decision
+            A dictionary mapping decision times to actions taken. Only applies to active decision
             times!
 
         beta_index_by_policy_num (dict[int | float, int]):
@@ -818,19 +822,21 @@ def single_user_weighted_estimating_function_stacker(
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
 
     Returns:
-        jnp.ndarray: A 1-D JAX NumPy array representing the user's weighted estimating function
+        jnp.ndarray: A 1-D JAX NumPy array representing the subject's weighted estimating function
             stack.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's adaptive meat contribution.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical meat contribution.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical bread contribution.
+        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's adaptive meat contribution.
+        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical meat contribution.
+        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical bread contribution.
     """
 
-    logger.info("Computing weighted estimating function stack for user %s.", user_id)
+    logger.info(
+        "Computing weighted estimating function stack for subject %s.", subject_id
+    )
 
     # First, reformat the supplied data into more convenient structures.
 
     # 1. Form a dictionary mapping policy numbers to the first time they were
-    # applicable (for this user). Note that this includes ALL policies, initial
+    # applicable (for this subject). Note that this includes ALL policies, initial
     # fallbacks included.
     # Collect the first time after the first update separately for convenience.
     # These are both used to form the Radon-Nikodym weights for the right times.
@@ -839,38 +845,38 @@ def single_user_weighted_estimating_function_stacker(
         beta_index_by_policy_num,
     )
 
-    # 2. Get the start and end times for this user.
-    user_start_time = math.inf
-    user_end_time = -math.inf
+    # 2. Get the start and end times for this subject.
+    subject_start_time = math.inf
+    subject_end_time = -math.inf
     for decision_time in action_by_decision_time:
-        user_start_time = min(user_start_time, decision_time)
-        user_end_time = max(user_end_time, decision_time)
+        subject_start_time = min(subject_start_time, decision_time)
+        subject_end_time = max(subject_end_time, decision_time)
 
     # 3. Form a stack of weighted estimating equations, one for each update of the algorithm.
     logger.info(
-        "Computing the algorithm component of the weighted estimating function stack for user %s.",
-        user_id,
+        "Computing the algorithm component of the weighted estimating function stack for subject %s.",
+        subject_id,
     )
 
-    in_study_action_prob_func_args = [
+    active_action_prob_func_args = [
         args for args in action_prob_func_args_by_decision_time.values() if args
     ]
-    in_study_betas_list_by_decision_time_index = jnp.array(
+    active_betas_list_by_decision_time_index = jnp.array(
         [
             action_prob_func_args[action_prob_func_args_beta_index]
-            for action_prob_func_args in in_study_action_prob_func_args
+            for action_prob_func_args in active_action_prob_func_args
         ]
     )
-    in_study_actions_list_by_decision_time_index = jnp.array(
+    active_actions_list_by_decision_time_index = jnp.array(
         list(action_by_decision_time.values())
     )
 
     # Sort the threaded args by decision time to be cautious. We check if the
-    # user id is present in the user args dict because we may call this on a
-    # subset of the user arg dict when we are batching arguments by shape
+    # subject id is present in the subject args dict because we may call this on a
+    # subset of the subject arg dict when we are batching arguments by shape
     sorted_threaded_action_prob_args_by_decision_time = {
         decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
-        for decision_time in range(user_start_time, user_end_time + 1)
+        for decision_time in range(subject_start_time, subject_end_time + 1)
         if decision_time in threaded_action_prob_func_args_by_decision_time
     }
 
@@ -901,19 +907,19 @@ def single_user_weighted_estimating_function_stacker(
     # Just grab the original beta from the update function arguments. This is the same
     # value, but impervious to differentiation with respect to all_post_update_betas. The
     # args, on the other hand, are a function of all_post_update_betas.
-    in_study_weights = jax.vmap(
+    active_weights = jax.vmap(
         fun=get_radon_nikodym_weight,
         in_axes=[0, None, None, 0] + batch_axes,
         out_axes=0,
     )(
-        in_study_betas_list_by_decision_time_index,
+        active_betas_list_by_decision_time_index,
         action_prob_func,
         action_prob_func_args_beta_index,
-        in_study_actions_list_by_decision_time_index,
+        active_actions_list_by_decision_time_index,
         *batched_threaded_arg_tensors,
     )
 
-    in_study_index = 0
+    active_index = 0
     decision_time_to_all_weights_index_offset = min(
         sorted_threaded_action_prob_args_by_decision_time
     )
@@ -922,35 +928,35 @@ def single_user_weighted_estimating_function_stacker(
         decision_time,
         args,
     ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        all_weights_raw.append(in_study_weights[in_study_index] if args else 1.0)
-        in_study_index += 1
+        all_weights_raw.append(active_weights[active_index] if args else 1.0)
+        active_index += 1
     all_weights = jnp.array(all_weights_raw)
 
     algorithm_component = jnp.concatenate(
         [
             # Here we compute a product of Radon-Nikodym weights
             # for all decision times after the first update and before the update
-            # update under consideration took effect, for which the user was in the study.
+            # update under consideration took effect, for which the subject was in the deployment.
             (
                 jnp.prod(
                     all_weights[
-                        # The earliest time after the first update where the user was in
-                        # the study
+                        # The earliest time after the first update where the subject was in
+                        # the deployment
                         max(
                             first_time_after_first_update,
-                            user_start_time,
+                            subject_start_time,
                         )
                         - decision_time_to_all_weights_index_offset :
-                        # One more than the latest time the user was in the study before the time
+                        # One more than the latest time the subject was in the deployment before the time
                         # the update under consideration first applied. Note the + 1 because range
                         # does not include the right endpoint.
                         min(
                             min_time_by_policy_num.get(policy_num, math.inf),
-                            user_end_time + 1,
+                            subject_end_time + 1,
                         )
                         - decision_time_to_all_weights_index_offset,
                     ]
-                    # If the user exited the study before there were any updates,
+                    # If the subject exited the deployment before there were any updates,
                     # this variable will be None and the above code to grab a weight would
                     # throw an error. Just use 1 to include the unweighted estimating function
                     # if they have data to contribute to the update.
@@ -958,8 +964,8 @@ def single_user_weighted_estimating_function_stacker(
                     else 1
                 )  # Now use the above to weight the alg estimating function for this update
                 * algorithm_estimating_func(*update_args)
-                # If there are no arguments for the update function, the user is not yet in the
-                # study, so we just add a zero vector contribution to the sum across users.
+                # If there are no arguments for the update function, the subject is not yet in the
+                # deployment, so we just add a zero vector contribution to the sum across subjects.
                 # Note that after they exit, they still contribute all their data to later
                 # updates.
                 if update_args
@@ -978,17 +984,17 @@ def single_user_weighted_estimating_function_stacker(
         )
     # 4. Form the weighted inference estimating equation.
     logger.info(
-        "Computing the inference component of the weighted estimating function stack for user %s.",
-        user_id,
+        "Computing the inference component of the weighted estimating function stack for subject %s.",
+        subject_id,
     )
     inference_component = jnp.prod(
         all_weights[
-            max(first_time_after_first_update, user_start_time)
-            - decision_time_to_all_weights_index_offset : user_end_time
+            max(first_time_after_first_update, subject_start_time)
+            - decision_time_to_all_weights_index_offset : subject_end_time
             + 1
             - decision_time_to_all_weights_index_offset,
         ]
-        # If the user exited the study before there were any updates,
+        # If the subject exited the deployment before there were any updates,
         # this variable will be None and the above code to grab a weight would
         # throw an error. Just use 1 to include the unweighted estimating function
         # if they have data to contribute here (pretty sure everyone should?)
@@ -997,18 +1003,18 @@ def single_user_weighted_estimating_function_stacker(
     ) * inference_estimating_func(*threaded_inference_func_args)
 
     # 5. Concatenate the two components to form the weighted estimating function stack for this
-    # user.
+    # subject.
     weighted_stack = jnp.concatenate([algorithm_component, inference_component])
 
     # 6. Return the following outputs:
-    # a. The first is simply the weighted estimating function stack for this user. The average
+    # a. The first is simply the weighted estimating function stack for this subject. The average
     # of these is what we differentiate with respect to theta to form the inverse adaptive joint
     # bread matrix, and we also compare that average to zero to check the estimating functions'
     # fidelity.
-    # b. The average outer product of these per-user stacks across users is the adaptive joint meat
+    # b. The average outer product of these per-subject stacks across subjects is the adaptive joint meat
     # matrix, hence the second output.
-    # c. The third output is averaged across users to obtain the classical meat matrix.
-    # d. The fourth output is averaged across users to obtain the inverse classical bread
+    # c. The third output is averaged across subjects to obtain the classical meat matrix.
+    # d. The fourth output is averaged across subjects to obtain the inverse classical bread
     # matrix.
     return (
         weighted_stack,
@@ -1024,7 +1030,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     flattened_betas_and_theta: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
-    user_ids: jnp.ndarray,
+    subject_ids: jnp.ndarray,
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     alg_update_func: callable,
@@ -1037,29 +1043,31 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    action_prob_func_args_by_user_id_by_decision_time: dict[
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
-    policy_num_by_decision_time_by_user_id: dict[
+    policy_num_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
     initial_policy_num: int | float,
     beta_index_by_policy_num: dict[int | float, int],
-    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
-    inference_action_prob_decision_times_by_user_id: dict[
+    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_subject_id: dict[
         collections.abc.Hashable, list[int]
     ],
-    update_func_args_by_by_user_id_by_policy_num: dict[
+    update_func_args_by_by_subject_id_by_policy_num: dict[
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
     """
-    Computes the average weighted estimating function stack across all users, along with
+    Computes the average weighted estimating function stack across all subjects, along with
     auxiliary values used to construct the adaptive and classical sandwich variances.
 
     Args:
@@ -1071,8 +1079,8 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             The dimension of each of the beta parameters.
         theta_dim (int):
             The dimension of the theta parameter.
-        user_ids (jnp.ndarray):
-            A 1D JAX NumPy array of user IDs.
+        subject_ids (jnp.ndarray):
+            A 1D JAX NumPy array of subject IDs.
         action_prob_func (callable):
             The action probability function.
         action_prob_func_args_beta_index (int):
@@ -1100,29 +1108,29 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_func_args_action_prob_index (int):
             The index of action probabilities in the inference function arguments tuple, if
             applicable. -1 otherwise.
-        action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
-            A dictionary mapping decision times to maps of user ids to the function arguments
-            required to compute action probabilities for this user.
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A map of user ids to dictionaries mapping decision times to the policy number in use.
-            Only applies to in-study decision times!
+        action_prob_func_args_by_subject_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of subject ids to the function arguments
+            required to compute action probabilities for this subject.
+        policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of subject ids to dictionaries mapping decision times to the policy number in use.
+            Only applies to active decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A dictionary mapping user IDs to their respective inference function arguments.
-        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times to which action probabilities correspond if
-            provided. Typically just in-study times if action probabilites are used in the inference
+        inference_func_args_by_subject_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping subject IDs to their respective inference function arguments.
+        inference_action_prob_decision_times_by_subject_id (dict[collections.abc.Hashable, list[int]]):
+            For each subject, a list of decision times to which action probabilities correspond if
+            provided. Typically just active times if action probabilites are used in the inference
             loss or estimating function.
-        update_func_args_by_by_user_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
-            A dictionary where keys are policy numbers and values are dictionaries mapping user IDs
+        update_func_args_by_by_subject_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
+            A dictionary where keys are policy numbers and values are dictionaries mapping subject IDs
             to their respective update function arguments.
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping user IDs to their respective actions taken at each decision time.
-            Only applies to in-study decision times!
+        action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping subject IDs to their respective actions taken at each decision time.
+            Only applies to active decision times!
         suppress_all_data_checks (bool):
             If True, suppresses carrying out any data checks at all.
         suppress_interactive_data_checks (bool):
@@ -1136,10 +1144,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing
             1. the average weighted estimating function stack
-            2. the user-level adaptive meat matrix contributions
-            3. the user-level classical meat matrix contributions
-            4. the user-level inverse classical bread matrix contributions
-            5. raw per-user weighted estimating function
+            2. the subject-level adaptive meat matrix contributions
+            3. the subject-level classical meat matrix contributions
+            4. the subject-level inverse classical bread matrix contributions
+            5. raw per-subject weighted estimating function
             stacks.
     """
 
@@ -1166,15 +1174,15 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     # supplied for the above functions, so that differentiation works correctly.  The existing
     # values should be the same, but not connected to the parameter we are differentiating
     # with respect to. Note we will also find it useful below to have the action probability args
-    # nested dict structure flipped to be user_id -> decision_time -> args, so we do that here too.
+    # nested dict structure flipped to be subject_id -> decision_time -> args, so we do that here too.
 
-    logger.info("Threading in betas to action probability arguments for all users.")
+    logger.info("Threading in betas to action probability arguments for all subjects.")
     (
-        threaded_action_prob_func_args_by_decision_time_by_user_id,
-        action_prob_func_args_by_decision_time_by_user_id,
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
+        action_prob_func_args_by_decision_time_by_subject_id,
     ) = thread_action_prob_func_args(
-        action_prob_func_args_by_user_id_by_decision_time,
-        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        policy_num_by_decision_time_by_subject_id,
         initial_policy_num,
         betas,
         beta_index_by_policy_num,
@@ -1186,17 +1194,17 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     # arguments with the central betas introduced.
     logger.info(
         "Threading in betas and beta-dependent action probabilities to algorithm update "
-        "function args for all users"
+        "function args for all subjects"
     )
-    threaded_update_func_args_by_policy_num_by_user_id = thread_update_func_args(
-        update_func_args_by_by_user_id_by_policy_num,
+    threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
+        update_func_args_by_by_subject_id_by_policy_num,
         betas,
         beta_index_by_policy_num,
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
         alg_update_func_args_previous_betas_index,
-        threaded_action_prob_func_args_by_decision_time_by_user_id,
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
         action_prob_func,
     )
 
@@ -1206,8 +1214,8 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
         input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
             algorithm_estimating_func,
-            update_func_args_by_by_user_id_by_policy_num,
-            threaded_update_func_args_by_policy_num_by_user_id,
+            update_func_args_by_by_subject_id_by_policy_num,
+            threaded_update_func_args_by_policy_num_by_subject_id,
             suppress_interactive_data_checks,
         )
 
@@ -1216,15 +1224,15 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     # arguments with the central betas introduced.
     logger.info(
         "Threading in theta and beta-dependent action probabilities to inference update "
-        "function args for all users"
+        "function args for all subjects"
     )
-    threaded_inference_func_args_by_user_id = thread_inference_func_args(
-        inference_func_args_by_user_id,
+    threaded_inference_func_args_by_subject_id = thread_inference_func_args(
+        inference_func_args_by_subject_id,
         inference_func_args_theta_index,
         theta,
         inference_func_args_action_prob_index,
-        threaded_action_prob_func_args_by_decision_time_by_user_id,
-        inference_action_prob_decision_times_by_user_id,
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
+        inference_action_prob_decision_times_by_subject_id,
         action_prob_func,
     )
 
@@ -1234,32 +1242,32 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     if not suppress_all_data_checks and inference_func_args_action_prob_index >= 0:
         input_checks.require_threaded_inference_estimating_function_args_equivalent(
             inference_estimating_func,
-            inference_func_args_by_user_id,
-            threaded_inference_func_args_by_user_id,
+            inference_func_args_by_subject_id,
+            threaded_inference_func_args_by_subject_id,
             suppress_interactive_data_checks,
         )
 
-    # 5. Now we can compute the weighted estimating function stacks for all users
+    # 5. Now we can compute the weighted estimating function stacks for all subjects
     # as well as collect related values used to construct the adaptive and classical
     # sandwich variances.
     results = [
-        single_user_weighted_estimating_function_stacker(
+        single_subject_weighted_estimating_function_stacker(
             beta_dim,
-            user_id,
+            subject_id,
             action_prob_func,
             algorithm_estimating_func,
             inference_estimating_func,
             action_prob_func_args_beta_index,
             inference_func_args_theta_index,
-            action_prob_func_args_by_decision_time_by_user_id[user_id],
-            threaded_action_prob_func_args_by_decision_time_by_user_id[user_id],
-            threaded_update_func_args_by_policy_num_by_user_id[user_id],
-            threaded_inference_func_args_by_user_id[user_id],
-            policy_num_by_decision_time_by_user_id[user_id],
-            action_by_decision_time_by_user_id[user_id],
+            action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+            threaded_action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+            threaded_update_func_args_by_policy_num_by_subject_id[subject_id],
+            threaded_inference_func_args_by_subject_id[subject_id],
+            policy_num_by_decision_time_by_subject_id[subject_id],
+            action_by_decision_time_by_subject_id[subject_id],
             beta_index_by_policy_num,
         )
-        for user_id in user_ids.tolist()
+        for subject_id in subject_ids.tolist()
     ]
 
     stacks = jnp.array([result[0] for result in results])
@@ -1270,10 +1278,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices. The raw per-user stacks are also returned for debugging purposes.
+    # bread matrices. The raw per-subject stacks are also returned for debugging purposes.
 
     # Note that returning the raw stacks here as the first arguments is potentially
-    # memory-intensive when combined with differentiation. Keep this in mind if the per-user bread
+    # memory-intensive when combined with differentiation. Keep this in mind if the per-subject bread
     # inverse contributions are needed for something like CR2/CR3 small-sample corrections.
     return jnp.mean(stacks, axis=0), (
         jnp.mean(stacks, axis=0),
@@ -1284,10 +1292,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     )
 
 
-def construct_classical_and_adaptive_sandwiches(
+def construct_classical_and_adjusted_sandwiches(
     theta_est: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
-    user_ids: jnp.ndarray,
+    subject_ids: jnp.ndarray,
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     alg_update_func: callable,
@@ -1300,32 +1308,34 @@ def construct_classical_and_adaptive_sandwiches(
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    action_prob_func_args_by_user_id_by_decision_time: dict[
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
-    policy_num_by_decision_time_by_user_id: dict[
+    policy_num_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
     initial_policy_num: int | float,
     beta_index_by_policy_num: dict[int | float, int],
-    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
-    inference_action_prob_decision_times_by_user_id: dict[
+    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_subject_id: dict[
         collections.abc.Hashable, list[int]
     ],
-    update_func_args_by_by_user_id_by_policy_num: dict[
+    update_func_args_by_by_subject_id_by_policy_num: dict[
         collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
     ],
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
     small_sample_correction: str,
-    form_adaptive_meat_adjustments_explicitly: bool,
-    stabilize_joint_adaptive_bread_inverse: bool,
-    study_df: pd.DataFrame | None,
-    in_study_col_name: str | None,
+    form_adjusted_meat_adjustments_explicitly: bool,
+    stabilize_joint_adjusted_bread_inverse: bool,
+    analysis_df: pd.DataFrame | None,
+    active_col_name: str | None,
     action_col_name: str | None,
     calendar_t_col_name: str | None,
-    user_id_col_name: str | None,
+    subject_id_col_name: str | None,
     action_prob_func_args: tuple | None,
     action_prob_col_name: str | None,
 ) -> tuple[
@@ -1354,8 +1364,8 @@ def construct_classical_and_adaptive_sandwiches(
             A 1-D JAX NumPy array representing the parameter estimate for inference.
         all_post_update_betas (jnp.ndarray):
             A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
-        user_ids (jnp.ndarray):
-            A 1-D JAX NumPy array holding all user IDs in the study.
+        subject_ids (jnp.ndarray):
+            A 1-D JAX NumPy array holding all subject IDs in the deployment.
         action_prob_func (callable):
             The action probability function.
         action_prob_func_args_beta_index (int):
@@ -1383,29 +1393,29 @@ def construct_classical_and_adaptive_sandwiches(
         inference_func_args_action_prob_index (int):
             The index of action probabilities in the inference function arguments tuple, if
             applicable. -1 otherwise.
-        action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
-            A dictionary mapping decision times to maps of user ids to the function arguments
-            required to compute action probabilities for this user.
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A map of user ids to dictionaries mapping decision times to the policy number in use.
-            Only applies to in-study decision times!
+        action_prob_func_args_by_subject_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of subject ids to the function arguments
+            required to compute action probabilities for this subject.
+        policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of subject ids to dictionaries mapping decision times to the policy number in use.
+            Only applies to active decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A dictionary mapping user IDs to their respective inference function arguments.
-        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times to which action probabilities correspond if
-            provided. Typically just in-study times if action probabilites are used in the inference
+        inference_func_args_by_subject_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping subject IDs to their respective inference function arguments.
+        inference_action_prob_decision_times_by_subject_id (dict[collections.abc.Hashable, list[int]]):
+            For each subject, a list of decision times to which action probabilities correspond if
+            provided. Typically just active times if action probabilites are used in the inference
             loss or estimating function.
-        update_func_args_by_by_user_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
-            A dictionary where keys are policy numbers and values are dictionaries mapping user IDs
+        update_func_args_by_by_subject_id_by_policy_num (dict[collections.abc.Hashable, dict[int | float, tuple[Any, ...]]]):
+            A dictionary where keys are policy numbers and values are dictionaries mapping subject IDs
             to their respective update function arguments.
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping user IDs to their respective actions taken at each decision time.
-            Only applies to in-study decision times!
+        action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping subject IDs to their respective actions taken at each decision time.
+            Only applies to active decision times!
         suppress_all_data_checks (bool):
             If True, suppresses carrying out any data checks at all.
         suppress_interactive_data_checks (bool):
@@ -1415,27 +1425,27 @@ def construct_classical_and_adaptive_sandwiches(
         small_sample_correction (str):
             The type of small sample correction to apply. See SmallSampleCorrections class for
             options.
-        form_adaptive_meat_adjustments_explicitly (bool):
-            If True, explicitly forms the per-user meat adjustments that differentiate the adaptive
+        form_adjusted_meat_adjustments_explicitly (bool):
+            If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
             adaptive sandwich is formed without doing this.
-        stabilize_joint_adaptive_bread_inverse (bool):
+        stabilize_joint_adjusted_bread_inverse (bool):
             If True, will apply various techniques to stabilize the joint adaptive bread inverse if necessary.
-        study_df (pd.DataFrame):
-            The full study dataframe, needed if forming the adaptive meat adjustments explicitly.
-        in_study_col_name (str):
-            The name of the column in study_df indicating whether a user is in-study at a given     decision time.
+        analysis_df (pd.DataFrame):
+            The full analysis dataframe, needed if forming the adaptive meat adjustments explicitly.
+        active_col_name (str):
+            The name of the column in analysis_df indicating whether a subject is active at a given decision time.
         action_col_name (str):
-            The name of the column in study_df indicating the action taken at a given decision time.
+            The name of the column in analysis_df indicating the action taken at a given decision time.
         calendar_t_col_name (str):
-            The name of the column in study_df indicating the calendar time of a given decision time.
-        user_id_col_name (str):
-            The name of the column in study_df indicating the user ID.
+            The name of the column in analysis_df indicating the calendar time of a given decision time.
+        subject_id_col_name (str):
+            The name of the column in analysis_df indicating the subject ID.
         action_prob_func_args (tuple):
             The arguments to be passed to the action probability function, needed if forming the
             adaptive meat adjustments explicitly.
         action_prob_col_name (str):
-            The name of the column in study_df indicating the action probability of the action taken,
+            The name of the column in analysis_df indicating the action probability of the action taken,
             needed if forming the adaptive meat adjustments explicitly.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
@@ -1448,10 +1458,10 @@ def construct_classical_and_adaptive_sandwiches(
             - The classical meat matrix.
             - The classical sandwich matrix.
             - The average weighted estimating function stack.
-            - All per-user weighted estimating function stacks.
-            - The per-user adaptive meat small-sample corrections.
-            - The per-user classical meat small-sample corrections.
-            - The per-user adaptive meat adjustments, if form_adaptive_meat_adjustments_explicitly
+            - All per-subject weighted estimating function stacks.
+            - The per-subject adaptive meat small-sample corrections.
+            - The per-subject classical meat small-sample corrections.
+            - The per-subject adaptive meat adjustments, if form_adjusted_meat_adjustments_explicitly
               is True, otherwise an array of NaNs.
     """
     logger.info(
@@ -1459,13 +1469,13 @@ def construct_classical_and_adaptive_sandwiches(
     )
     theta_dim = theta_est.shape[0]
     beta_dim = all_post_update_betas.shape[1]
-    # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
-    raw_joint_adaptive_bread_inverse_matrix, (
+    # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
+    raw_joint_adjusted_bread_inverse_matrix, (
         avg_estimating_function_stack,
-        per_user_joint_adaptive_meat_contributions,
-        per_user_classical_meat_contributions,
-        per_user_classical_bread_inverse_contributions,
-        per_user_estimating_function_stacks,
+        per_subject_joint_adjusted_meat_contributions,
+        per_subject_classical_meat_contributions,
+        per_subject_classical_bread_inverse_contributions,
+        per_subject_estimating_function_stacks,
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
     )(
@@ -1475,7 +1485,7 @@ def construct_classical_and_adaptive_sandwiches(
         flatten_params(all_post_update_betas, theta_est),
         beta_dim,
         theta_dim,
-        user_ids,
+        subject_ids,
         action_prob_func,
         action_prob_func_args_beta_index,
         alg_update_func,
@@ -1488,87 +1498,87 @@ def construct_classical_and_adaptive_sandwiches(
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
-        action_prob_func_args_by_user_id_by_decision_time,
-        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        policy_num_by_decision_time_by_subject_id,
         initial_policy_num,
         beta_index_by_policy_num,
-        inference_func_args_by_user_id,
-        inference_action_prob_decision_times_by_user_id,
-        update_func_args_by_by_user_id_by_policy_num,
-        action_by_decision_time_by_user_id,
+        inference_func_args_by_subject_id,
+        inference_action_prob_decision_times_by_subject_id,
+        update_func_args_by_by_subject_id_by_policy_num,
+        action_by_decision_time_by_subject_id,
         suppress_all_data_checks,
         suppress_interactive_data_checks,
     )
 
-    num_users = len(user_ids)
+    num_subjects = len(subject_ids)
 
     (
-        joint_adaptive_meat_matrix,
+        joint_adjusted_meat_matrix,
         classical_meat_matrix,
-        per_user_adaptive_corrections,
-        per_user_classical_corrections,
+        per_subject_adjusted_corrections,
+        per_subject_classical_corrections,
     ) = perform_desired_small_sample_correction(
         small_sample_correction,
-        per_user_joint_adaptive_meat_contributions,
-        per_user_classical_meat_contributions,
-        per_user_classical_bread_inverse_contributions,
-        num_users,
+        per_subject_joint_adjusted_meat_contributions,
+        per_subject_classical_meat_contributions,
+        per_subject_classical_bread_inverse_contributions,
+        num_subjects,
         theta_dim,
     )
 
     # Increase diagonal block dominance possibly improve conditioning of diagonal
     # blocks as necessary, to ensure mathematical stability of joint bread inverse
-    stabilized_joint_adaptive_bread_inverse_matrix = (
+    stabilized_joint_adjusted_bread_inverse_matrix = (
         (
-            stabilize_joint_adaptive_bread_inverse_if_necessary(
-                raw_joint_adaptive_bread_inverse_matrix,
+            stabilize_joint_adjusted_bread_inverse_if_necessary(
+                raw_joint_adjusted_bread_inverse_matrix,
                 beta_dim,
                 theta_dim,
             )
         )
-        if stabilize_joint_adaptive_bread_inverse
-        else raw_joint_adaptive_bread_inverse_matrix
+        if stabilize_joint_adjusted_bread_inverse
+        else raw_joint_adjusted_bread_inverse_matrix
     )
 
     # Now stably (no explicit inversion) form our sandwiches.
-    joint_adaptive_sandwich = form_sandwich_from_bread_inverse_and_meat(
-        stabilized_joint_adaptive_bread_inverse_matrix,
-        joint_adaptive_meat_matrix,
-        num_users,
+    joint_adjusted_sandwich = form_sandwich_from_bread_inverse_and_meat(
+        stabilized_joint_adjusted_bread_inverse_matrix,
+        joint_adjusted_meat_matrix,
+        num_subjects,
         method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
     )
     classical_bread_inverse_matrix = jnp.mean(
-        per_user_classical_bread_inverse_contributions, axis=0
+        per_subject_classical_bread_inverse_contributions, axis=0
     )
     classical_sandwich = form_sandwich_from_bread_inverse_and_meat(
         classical_bread_inverse_matrix,
         classical_meat_matrix,
-        num_users,
+        num_subjects,
         method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
     )
 
-    per_user_adaptive_meat_adjustments = jnp.full(
-        (len(user_ids), theta_dim, theta_dim), jnp.nan
+    per_subject_adjusted_meat_adjustments = jnp.full(
+        (len(subject_ids), theta_dim, theta_dim), jnp.nan
     )
-    if form_adaptive_meat_adjustments_explicitly:
-        per_user_adjusted_classical_meat_contributions = (
-            form_adaptive_meat_adjustments_directly(
+    if form_adjusted_meat_adjustments_explicitly:
+        per_subject_adjusted_classical_meat_contributions = (
+            form_adjusted_meat_adjustments_directly(
                 theta_dim,
                 all_post_update_betas.shape[1],
-                stabilized_joint_adaptive_bread_inverse_matrix,
-                per_user_estimating_function_stacks,
-                study_df,
-                in_study_col_name,
+                stabilized_joint_adjusted_bread_inverse_matrix,
+                per_subject_estimating_function_stacks,
+                analysis_df,
+                active_col_name,
                 action_col_name,
                 calendar_t_col_name,
-                user_id_col_name,
+                subject_id_col_name,
                 action_prob_func,
                 action_prob_func_args,
                 action_prob_func_args_beta_index,
                 theta_est,
                 inference_func,
                 inference_func_args_theta_index,
-                user_ids,
+                subject_ids,
                 action_prob_col_name,
             )
         )
@@ -1578,30 +1588,30 @@ def construct_classical_and_adaptive_sandwiches(
         # First just apply any small-sample correction for parity.
         (
             _,
-            theta_only_adaptive_meat_matrix_v2,
+            theta_only_adjusted_meat_matrix_v2,
             _,
             _,
         ) = perform_desired_small_sample_correction(
             small_sample_correction,
-            per_user_joint_adaptive_meat_contributions,
-            per_user_adjusted_classical_meat_contributions,
-            per_user_classical_bread_inverse_contributions,
-            num_users,
+            per_subject_joint_adjusted_meat_contributions,
+            per_subject_adjusted_classical_meat_contributions,
+            per_subject_classical_bread_inverse_contributions,
+            num_subjects,
             theta_dim,
         )
-        theta_only_adaptive_sandwich_from_adjustments = (
+        theta_only_adjusted_sandwich_from_adjustments = (
             form_sandwich_from_bread_inverse_and_meat(
                 classical_bread_inverse_matrix,
-                theta_only_adaptive_meat_matrix_v2,
-                num_users,
+                theta_only_adjusted_meat_matrix_v2,
+                num_subjects,
                 method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
             )
         )
-        theta_only_adaptive_sandwich = joint_adaptive_sandwich[-theta_dim:, -theta_dim:]
+        theta_only_adjusted_sandwich = joint_adjusted_sandwich[-theta_dim:, -theta_dim:]
 
         if not np.allclose(
-            theta_only_adaptive_sandwich,
-            theta_only_adaptive_sandwich_from_adjustments,
+            theta_only_adjusted_sandwich,
+            theta_only_adjusted_sandwich_from_adjustments,
             rtol=3e-2,
         ):
             logger.warning(
@@ -1611,26 +1621,26 @@ def construct_classical_and_adaptive_sandwiches(
     # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
     # values too. The joint adaptive bread inverse should always be block lower triangular.
     return (
-        raw_joint_adaptive_bread_inverse_matrix,
-        stabilized_joint_adaptive_bread_inverse_matrix,
-        joint_adaptive_meat_matrix,
-        joint_adaptive_sandwich,
+        raw_joint_adjusted_bread_inverse_matrix,
+        stabilized_joint_adjusted_bread_inverse_matrix,
+        joint_adjusted_meat_matrix,
+        joint_adjusted_sandwich,
         classical_bread_inverse_matrix,
         classical_meat_matrix,
         classical_sandwich,
         avg_estimating_function_stack,
-        per_user_estimating_function_stacks,
-        per_user_adaptive_corrections,
-        per_user_classical_corrections,
-        per_user_adaptive_meat_adjustments,
+        per_subject_estimating_function_stacks,
+        per_subject_adjusted_corrections,
+        per_subject_classical_corrections,
+        per_subject_adjusted_meat_adjustments,
     )
 
 
 # TODO: I think there should be interaction to confirm stabilization.  It is
-# important for the user to know if this is happening. Even if enabled, it is important
-# that the user know it actually kicks in.
-def stabilize_joint_adaptive_bread_inverse_if_necessary(
-    joint_adaptive_bread_inverse_matrix: jnp.ndarray,
+# important for the subject to know if this is happening. Even if enabled, it is important
+# that the subject know it actually kicks in.
+def stabilize_joint_adjusted_bread_inverse_if_necessary(
+    joint_adjusted_bread_inverse_matrix: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
 ) -> jnp.ndarray:
@@ -1639,7 +1649,7 @@ def stabilize_joint_adaptive_bread_inverse_if_necessary(
     dominance and/or adding a small ridge penalty to the diagonal blocks.
 
     Args:
-        joint_adaptive_bread_inverse_matrix (jnp.ndarray):
+        joint_adjusted_bread_inverse_matrix (jnp.ndarray):
             A 2-D JAX NumPy array representing the joint adaptive bread inverse matrix.
         beta_dim (int):
             The dimension of each beta parameter.
@@ -1660,7 +1670,7 @@ def stabilize_joint_adaptive_bread_inverse_if_necessary(
 
     # Grab just the RL block and convert numpy array for easier manipulation.
     RL_stack_beta_derivatives_block = np.array(
-        joint_adaptive_bread_inverse_matrix[:-theta_dim, :-theta_dim]
+        joint_adjusted_bread_inverse_matrix[:-theta_dim, :-theta_dim]
     )
     num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
     for i in range(1, num_updates + 1):
@@ -1688,7 +1698,7 @@ def stabilize_joint_adaptive_bread_inverse_if_necessary(
             RL_stack_beta_derivatives_block[
                 diagonal_block_slice, diagonal_block_slice
             ] = diagonal_block + ridge_penalty * np.eye(beta_dim)
-            # TODO: Require user input here in interactive settings?
+            # TODO: Require subject input here in interactive settings?
             logger.info(
                 "Added ridge penalty of %s to diagonal block for update %s to improve conditioning from %s to %s",
                 ridge_penalty,
@@ -1779,11 +1789,11 @@ def stabilize_joint_adaptive_bread_inverse_if_necessary(
         [
             [
                 RL_stack_beta_derivatives_block,
-                joint_adaptive_bread_inverse_matrix[:-theta_dim, -theta_dim:],
+                joint_adjusted_bread_inverse_matrix[:-theta_dim, -theta_dim:],
             ],
             [
-                joint_adaptive_bread_inverse_matrix[-theta_dim:, :-theta_dim],
-                joint_adaptive_bread_inverse_matrix[-theta_dim:, -theta_dim:],
+                joint_adjusted_bread_inverse_matrix[-theta_dim:, :-theta_dim],
+                joint_adjusted_bread_inverse_matrix[-theta_dim:, -theta_dim:],
             ],
         ]
     )
@@ -1792,7 +1802,7 @@ def stabilize_joint_adaptive_bread_inverse_if_necessary(
 def form_sandwich_from_bread_inverse_and_meat(
     bread_inverse: jnp.ndarray,
     meat: jnp.ndarray,
-    num_users: int,
+    num_subjects: int,
     method: str = SandwichFormationMethods.BREAD_INVERSE_T_QR,
 ) -> jnp.ndarray:
     """
@@ -1806,8 +1816,8 @@ def form_sandwich_from_bread_inverse_and_meat(
             A 2-D JAX NumPy array representing the bread inverse matrix.
         meat (jnp.ndarray):
             A 2-D JAX NumPy array representing the meat matrix.
-        num_users (int):
-            The number of users in the study, used to scale the sandwich appropriately.
+        num_subjects (int):
+            The number of subjects in the deployment, used to scale the sandwich appropriately.
         method (str):
             The method to use for forming the sandwich.
 
@@ -1833,7 +1843,7 @@ def form_sandwich_from_bread_inverse_and_meat(
             L, scipy.linalg.solve_triangular(L, meat.T, lower=True).T, lower=True
         )
 
-        return Q @ new_meat @ Q.T / num_users
+        return Q @ new_meat @ Q.T / num_subjects
     elif method == SandwichFormationMethods.MEAT_SVD_SOLVE:
         # Factor the meat via SVD without any symmetrization or truncation.
         # For general (possibly slightly nonsymmetric) M, SVD gives M = U @ diag(s) @ Vh.
@@ -1847,14 +1857,14 @@ def form_sandwich_from_bread_inverse_and_meat(
         W_left = scipy.linalg.solve(bread_inverse, C_left)
         W_right = scipy.linalg.solve(bread_inverse, C_right)
 
-        # Return the exact sandwich: V = (B^{-1} C_left) (B^{-1} C_right)^T / num_users
-        return W_left @ W_right.T / num_users
+        # Return the exact sandwich: V = (B^{-1} C_left) (B^{-1} C_right)^T / num_subjects
+        return W_left @ W_right.T / num_subjects
 
     elif method == SandwichFormationMethods.NAIVE:
         # Simply invert the bread inverse and form the sandwich directly.
         # This is NOT numerically stable and is only included for comparison purposes.
         bread = np.linalg.inv(bread_inverse)
-        return bread @ meat @ meat.T / num_users
+        return bread @ meat @ meat.T / num_subjects
 
     else:
         raise ValueError(

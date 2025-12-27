@@ -25,12 +25,12 @@ def cli():
     pass
 
 
-def get_action_1_fraction(study_df, in_study_col_name, action_col_name):
+def get_action_1_fraction(study_df, active_col_name, action_col_name):
     """
     Get the fraction of action 1 in the study_df.
     """
     action_1_count = np.sum(
-        (study_df[in_study_col_name] == 1) & (study_df[action_col_name] == 1)
+        (study_df[active_col_name] == 1) & (study_df[action_col_name] == 1)
     )
     total_count = len(study_df)
     if total_count == 0:
@@ -38,11 +38,11 @@ def get_action_1_fraction(study_df, in_study_col_name, action_col_name):
     return action_1_count / total_count
 
 
-def get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name):
+def get_action_prob_variance(study_df, active_col_name, action_prob_col_name):
     """
     Get the variance of the action probabilities in the study_df.
     """
-    action_probs = study_df.loc[study_df[in_study_col_name] == 1, action_prob_col_name]
+    action_probs = study_df.loc[study_df[active_col_name] == 1, action_prob_col_name]
     return np.var(action_probs)
 
 
@@ -61,7 +61,7 @@ def get_action_prob_variance(study_df, in_study_col_name, action_prob_col_name):
     help="The index of the parameter to check confidence interval coverage for across runs.  If not provided, coverage will not be checked.",
 )
 @click.option(
-    "--in_study_col_name",
+    "--active_col_name",
     type=str,
     required=True,
     help="Name of the binary column in the study dataframe that indicates whether a user is in the study.",
@@ -88,7 +88,7 @@ def collect_existing_analyses(
     input_glob: str,
     num_users: int,
     index_to_check_ci_coverage: int,
-    in_study_col_name: str,
+    active_col_name: str,
     action_col_name: str,
     action_prob_col_name: str,
     study_df_filename: str,
@@ -103,7 +103,7 @@ def collect_existing_analyses(
         num_users (int): The number of users in the study.
         index_to_check_ci_coverage (int, optional): The index of the parameter to check confidence
             interval coverage for. If not provided, coverage will not be checked.
-        in_study_col_name (str): The name of the column indicating whether a user is in
+        active_col_name (str): The name of the column indicating whether a user is in
             the study.
         action_col_name (str): The name of the column indicating the action taken by the
             user.
@@ -197,11 +197,11 @@ def collect_existing_analyses(
         with open(filename.replace("analysis.pkl", study_df_filename), "rb") as f:
             study_df = pd.read_pickle(f)
             action_1_fractions.append(
-                get_action_1_fraction(study_df, in_study_col_name, action_col_name)
+                get_action_1_fraction(study_df, active_col_name, action_col_name)
             )
             action_prob_variances.append(
                 get_action_prob_variance(
-                    study_df, in_study_col_name, action_prob_col_name
+                    study_df, active_col_name, action_prob_col_name
                 )
             )
             # Discard study_df to free memory

@@ -31,10 +31,10 @@ def get_datum_for_blowup_supervised_learning(
     per_user_estimating_function_stacks,
     all_post_update_betas,
     study_df,
-    in_study_col_name,
+    active_col_name,
     calendar_t_col_name,
     action_prob_col_name,
-    user_id_col_name,
+    subject_id_col_name,
     reward_col_name,
     theta_est,
     adaptive_sandwich_var_estimate,
@@ -75,13 +75,13 @@ def get_datum_for_blowup_supervised_learning(
             All post-update beta parameters.
         study_df (pd.DataFrame):
             The study DataFrame.
-        in_study_col_name (str):
+        active_col_name (str):
             Column name indicating if a user is in the study in the study dataframe.
         calendar_t_col_name (str):
             Column name for calendar time in the study dataframe.
         action_prob_col_name (str):
             Column name for action probabilities in the study dataframe.
-        user_id_col_name (str):
+        subject_id_col_name (str):
             Column name for user IDs in the study dataframe
         reward_col_name (str):
             Column name for rewards in the study dataframe.
@@ -194,7 +194,7 @@ def get_datum_for_blowup_supervised_learning(
     # Compute the average and standard deviation of the logits of the action probabilities at each decision time using study_df
     # action_prob_logit_means and action_prob_logit_stds are numpy arrays of mean and stddev at each decision time
     # Only compute logits for rows where user is in the study; set others to NaN
-    in_study_mask = study_df[in_study_col_name] == 1
+    in_study_mask = study_df[active_col_name] == 1
     study_df["action_prob_logit"] = np.where(
         in_study_mask,
         logit(study_df[action_prob_col_name]),
@@ -237,8 +237,8 @@ def get_datum_for_blowup_supervised_learning(
         theta_calculation_func,
         calendar_t_col_name,
         action_prob_col_name,
-        user_id_col_name,
-        in_study_col_name,
+        subject_id_col_name,
+        active_col_name,
         all_post_update_betas,
         user_ids,
         action_prob_func,
@@ -507,8 +507,8 @@ def calculate_sequence_of_premature_adaptive_estimates(
     theta_calculation_func: str,
     calendar_t_col_name: str,
     action_prob_col_name: str,
-    user_id_col_name: str,
-    in_study_col_name: str,
+    subject_id_col_name: str,
+    active_col_name: str,
     all_post_update_betas: jnp.ndarray,
     user_ids: jnp.ndarray,
     action_prob_func: str,
@@ -551,9 +551,9 @@ def calculate_sequence_of_premature_adaptive_estimates(
             The name of the column in study_df representing calendar time.
         action_prob_col_name (str):
             The name of the column in study_df representing action probabilities.
-        user_id_col_name (str):
+        subject_id_col_name (str):
             The name of the column in study_df representing user IDs.
-        in_study_col_name (str):
+        active_col_name (str):
             The name of the column in study_df indicating whether the user is in the study at that time.
         all_post_update_betas (jnp.ndarray):
             A NumPy array containing all post-update beta values.
@@ -648,8 +648,8 @@ def calculate_sequence_of_premature_adaptive_estimates(
                 premature_theta,
                 action_prob_col_name,
                 calendar_t_col_name,
-                user_id_col_name,
-                in_study_col_name,
+                subject_id_col_name,
+                active_col_name,
             )
         )
 

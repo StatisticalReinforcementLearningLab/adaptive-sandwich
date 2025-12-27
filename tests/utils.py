@@ -11,42 +11,49 @@ def get_abs_path(code_path, relative_path):
 
 def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_dir):
     # Load the observed and expected pickle files
-    with open(
-        get_abs_path(
-            test_file_path,
-            f"{relative_path_to_output_dir}/study_df.pkl",
-        ),
-        "rb",
-    ) as observed_study_df_pickle, open(
-        get_abs_path(
-            test_file_path,
-            f"{relative_path_to_output_dir}/analysis.pkl",
-        ),
-        "rb",
-    ) as observed_analysis_pickle, open(
-        get_abs_path(
-            test_file_path,
-            f"{relative_path_to_output_dir}/debug_pieces.pkl",
-        ),
-        "rb",
-    ) as observed_debug_pieces_pickle, open(
-        get_abs_path(test_file_path, "expected_study_df.pkl"),
-        "rb",
-    ) as expected_study_df_pickle, open(
-        get_abs_path(test_file_path, "expected_analysis.pkl"),
-        "rb",
-    ) as expected_analysis_pickle, open(
-        get_abs_path(test_file_path, "expected_debug_pieces.pkl"),
-        "rb",
-    ) as expected_debug_pieces_pickle:
-        observed_study_df = pickle.load(observed_study_df_pickle)
+    with (
+        open(
+            get_abs_path(
+                test_file_path,
+                f"{relative_path_to_output_dir}/study_df.pkl",
+            ),
+            "rb",
+        ) as observed_analysis_df_pickle,
+        open(
+            get_abs_path(
+                test_file_path,
+                f"{relative_path_to_output_dir}/analysis.pkl",
+            ),
+            "rb",
+        ) as observed_analysis_pickle,
+        open(
+            get_abs_path(
+                test_file_path,
+                f"{relative_path_to_output_dir}/debug_pieces.pkl",
+            ),
+            "rb",
+        ) as observed_debug_pieces_pickle,
+        open(
+            get_abs_path(test_file_path, "expected_study_df.pkl"),
+            "rb",
+        ) as expected_analysis_df_pickle,
+        open(
+            get_abs_path(test_file_path, "expected_analysis.pkl"),
+            "rb",
+        ) as expected_analysis_pickle,
+        open(
+            get_abs_path(test_file_path, "expected_debug_pieces.pkl"),
+            "rb",
+        ) as expected_debug_pieces_pickle,
+    ):
+        observed_study_df = pickle.load(observed_analysis_df_pickle)
         observed_analysis_dict = pickle.load(observed_analysis_pickle)
         observed_debug_pieces_dict = pickle.load(observed_debug_pieces_pickle)
 
         # The expected df is generated from a time when these were set as Int64.
         # I don't remember why we had to change to float64; I believe it was
         # necessary on the analysis side.
-        expected_study_df = pickle.load(expected_study_df_pickle).astype(
+        expected_study_df = pickle.load(expected_analysis_df_pickle).astype(
             {"policy_num": "float64", "action": "float64"}
         )
         expected_analysis_dict = pickle.load(expected_analysis_pickle)
@@ -68,7 +75,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         # and then still compare the most important ones to observed.
         expected_debug_keys = [
             "theta_est",
-            "adaptive_sandwich_var_estimate",
+            "adjusted_sandwich_var_estimate",
             "classical_sandwich_var_estimate",
             "raw_joint_bread_inverse_matrix",
             "stabilized_joint_bread_inverse_matrix",
@@ -78,9 +85,9 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "all_estimating_function_stacks",
             "joint_bread_inverse_condition_number",
             "all_post_update_betas",
-            "per_user_adaptive_corrections",
-            "per_user_classical_corrections",
-            "per_user_adaptive_meat_adjustments",
+            "per_subject_adjusted_corrections",
+            "per_subject_classical_corrections",
+            "per_subject_adjusted_meat_adjustments",
         ]
 
         observed_keys = list(observed_debug_pieces_dict.keys())
@@ -103,7 +110,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
 
         ### Check final results
         np.testing.assert_allclose(
-            observed_analysis_dict["adaptive_sandwich_var_estimate"],
+            observed_analysis_dict["adjusted_sandwich_var_estimate"],
             expected_analysis_dict["adaptive_sandwich_var_estimate"],
             atol=1e-8,
         )

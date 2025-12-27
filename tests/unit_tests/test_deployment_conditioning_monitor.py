@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import pandas as pd
 import pytest
 
-from lifejacket.trial_conditioning_monitor import TrialConditioningMonitor
+from lifejacket.deployment_conditioning_monitor import DeploymentConditioningMonitor
 from lifejacket.after_study_analysis import analyze_dataset
 
 
@@ -79,7 +79,7 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
             )
 
     # Initialize monitor
-    monitor = TrialConditioningMonitor()
+    monitor = DeploymentConditioningMonitor()
 
     # Collect phi_dot_bars from incremental assess_update calls
     incremental_phi_dot_bars = []
@@ -99,7 +99,7 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
 
         monitor.assess_update(
             proposed_policy_num=policy_num,
-            study_df=filtered_df,
+            analysis_df=filtered_df,
             action_prob_func=action_prob_func,
             action_prob_func_args=truncated_action_prob_func_args,
             action_prob_func_args_beta_index=0,
@@ -109,11 +109,12 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
             alg_update_func_args_beta_index=0,
             alg_update_func_args_action_prob_index=-1,
             alg_update_func_args_action_prob_times_index=-1,
-            in_study_col_name="in_study",
+            alg_update_func_args_previous_betas_index=-1,
+            active_col_name="in_study",
             action_col_name="action",
             policy_num_col_name="policy_num",
             calendar_t_col_name="calendar_t",
-            user_id_col_name="user_id",
+            subject_id_col_name="user_id",
             action_prob_col_name="action_prob",
             suppress_interactive_data_checks=True,
             suppress_all_data_checks=True,
@@ -126,7 +127,7 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
     # Now run the full after_study_analysis to get the final RL adaptive bread inverse
     final_analysis_results = analyze_dataset(
         output_dir=pathlib.Path("."),
-        study_df=study_df,
+        analysis_df=study_df,
         action_prob_func=action_prob_func,
         action_prob_func_args=action_prob_func_args,
         action_prob_func_args_beta_index=0,
@@ -136,23 +137,24 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
         alg_update_func_args_beta_index=0,
         alg_update_func_args_action_prob_index=-1,
         alg_update_func_args_action_prob_times_index=-1,
+        alg_update_func_args_previous_betas_index=-1,
         inference_func=None,
         inference_func_type="none",
         inference_func_args_theta_index=0,
         theta_calculation_func=None,
-        in_study_col_name="in_study",
+        active_col_name="in_study",
         action_col_name="action",
         policy_num_col_name="policy_num",
         calendar_t_col_name="calendar_t",
-        user_id_col_name="user_id",
+        subject_id_col_name="user_id",
         action_prob_col_name="action_prob",
         reward_col_name="reward",
         suppress_interactive_data_checks=True,
         suppress_all_data_checks=True,
         small_sample_correction="none",
         collect_data_for_blowup_supervised_learning=False,
-        form_adaptive_meat_adjustments_explicitly=False,
-        stabilize_joint_adaptive_bread_inverse=False,
+        form_adjusted_meat_adjustments_explicitly=False,
+        stabilize_joint_adjusted_bread_inverse=False,
     )
 
     # Extract the RL portion of the final adaptive bread inverse
@@ -225,8 +227,8 @@ def test_incremental_phi_dot_bar_consistency_with_non_incremental():
                 jnp.array([2.0 + user_id, 2.2 + user_id]),  # rewards
             )
 
-    monitor_incremental = TrialConditioningMonitor()
-    monitor_non_incremental = TrialConditioningMonitor()
+    monitor_incremental = DeploymentConditioningMonitor()
+    monitor_non_incremental = DeploymentConditioningMonitor()
 
     # Run both incremental and non-incremental versions
     for policy_num in range(1, n_policies + 1):
@@ -246,7 +248,7 @@ def test_incremental_phi_dot_bar_consistency_with_non_incremental():
         # Incremental version
         monitor_incremental.assess_update(
             proposed_policy_num=policy_num,
-            study_df=filtered_df,
+            analysis_df=filtered_df,
             action_prob_func=action_prob_func,
             action_prob_func_args=truncated_action_prob_func_args,
             action_prob_func_args_beta_index=0,
@@ -256,11 +258,12 @@ def test_incremental_phi_dot_bar_consistency_with_non_incremental():
             alg_update_func_args_beta_index=0,
             alg_update_func_args_action_prob_index=-1,
             alg_update_func_args_action_prob_times_index=-1,
-            in_study_col_name="in_study",
+            alg_update_func_args_previous_betas_index=-1,
+            active_col_name="in_study",
             action_col_name="action",
             policy_num_col_name="policy_num",
             calendar_t_col_name="calendar_t",
-            user_id_col_name="user_id",
+            subject_id_col_name="user_id",
             action_prob_col_name="action_prob",
             suppress_interactive_data_checks=True,
             suppress_all_data_checks=True,
@@ -270,7 +273,7 @@ def test_incremental_phi_dot_bar_consistency_with_non_incremental():
         # Non-incremental version
         monitor_non_incremental.assess_update(
             proposed_policy_num=policy_num,
-            study_df=filtered_df,
+            analysis_df=filtered_df,
             action_prob_func=action_prob_func,
             action_prob_func_args=truncated_action_prob_func_args,
             action_prob_func_args_beta_index=0,
@@ -280,11 +283,12 @@ def test_incremental_phi_dot_bar_consistency_with_non_incremental():
             alg_update_func_args_beta_index=0,
             alg_update_func_args_action_prob_index=-1,
             alg_update_func_args_action_prob_times_index=-1,
-            in_study_col_name="in_study",
+            alg_update_func_args_previous_betas_index=-1,
+            active_col_name="in_study",
             action_col_name="action",
             policy_num_col_name="policy_num",
             calendar_t_col_name="calendar_t",
-            user_id_col_name="user_id",
+            subject_id_col_name="user_id",
             action_prob_col_name="action_prob",
             suppress_interactive_data_checks=True,
             suppress_all_data_checks=True,

@@ -38,5 +38,5 @@ def test_RL_center_1_inf_center_1_steep_3_incremental_previous_betas_given(
 
     assert_real_run_output_as_expected(
         test_file_path=__file__,
-        relative_path_to_output_dir="../../../simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sigmoid_LS_hard_clip_T=10_n=100_recruitN=20_decisionsBtwnUpdates=2_steepness=3.0_algfeats=intercept,past_reward_errcorr=time_corr_actionC=1_lambda=0.0_lowerclip=0.1_upperclip=0.9/exp=1",
+        relative_path_to_output_dir="../../simulators_and_runners/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sigmoid_LS_hard_clip_T=10_n=100_recruitN=20_decisionsBtwnUpdates=2_steepness=3.0_algfeats=intercept,past_reward_errcorr=time_corr_actionC=1_lambda=0.0_lowerclip=0.1_upperclip=0.9/exp=1",
     )

@@ -1,7 +1,7 @@
 import jax
 from jax import numpy as jnp
 
-from functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
+from .synthetic_get_action_1_prob_generalized_logistic import (
     synthetic_get_action_1_prob_generalized_logistic,
 )
 

@@ -4,33 +4,34 @@ import pandas as pd
 import numpy as np
 import pytest
 
-from functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
     synthetic_get_action_1_prob_generalized_logistic,
 )
+from simulators_and_runners.functions_to_pass_to_analysis.RL_least_squares_loss_regularized_previous_betas_as_args import (
+    RL_least_squares_loss_regularized_previous_betas_as_args,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering import (
+    synthetic_get_least_squares_loss_inference_action_centering,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
+    synthetic_get_action_1_prob_pure,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl import (
+    synthetic_get_least_squares_loss_rl,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_rl import (
+    synthetic_get_least_squares_estimating_function_rl,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_no_action_centering import (
+    synthetic_get_least_squares_loss_inference_no_action_centering,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_inference_no_action_centering import (
+    synthetic_get_least_squares_estimating_function_inference_no_action_centering,
+)
+
 from lifejacket import after_study_analysis
 from lifejacket.constants import FunctionTypes
 from lifejacket.arg_threading_helpers import replace_tuple_index
-from functions_to_pass_to_analysis.RL_least_squares_loss_regularized_previous_betas_as_args import (
-    RL_least_squares_loss_regularized_previous_betas_as_args,
-)
-from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering import (
-    synthetic_get_least_squares_loss_inference_action_centering,
-)
-from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
-    synthetic_get_action_1_prob_pure,
-)
-from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl import (
-    synthetic_get_least_squares_loss_rl,
-)
-from functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_rl import (
-    synthetic_get_least_squares_estimating_function_rl,
-)
-from functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_no_action_centering import (
-    synthetic_get_least_squares_loss_inference_no_action_centering,
-)
-from functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_inference_no_action_centering import (
-    synthetic_get_least_squares_estimating_function_inference_no_action_centering,
-)
 
 
 # TODO: Add checking of all aux values.

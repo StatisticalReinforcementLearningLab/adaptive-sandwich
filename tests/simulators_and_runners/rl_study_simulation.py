@@ -10,10 +10,15 @@ import numpy as np
 import pandas as pd
 import cloudpickle as pickle
 
-from synthetic_env import load_synthetic_env_params, SyntheticEnv
-from basic_RL_algorithms import SigmoidLS, SmoothPosteriorSampling
+from synthetic_env import (
+    load_synthetic_env_params,
+    SyntheticEnv,
+)
+from basic_RL_algorithms import (
+    SigmoidLS,
+    SmoothPosteriorSampling,
+)
 from constants import RLStudyArgs
-from lifejacket.deployment_conditioning_monitor import DeploymentConditioningMonitor
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -41,12 +46,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
     study_df = study_env.make_empty_study_df(args, user_env_data)
 
     max_calendar_t = study_df["calendar_t"].max()
-
-    # Initialize Trial Conditioning Monitor if desired ##########################
-    deployment_conditioning_monitor = None
-    alternative_lambda_index = 0
-    if args.monitor_bread_inverse_conditioning_and_intervene:
-        deployment_conditioning_monitor = DeploymentConditioningMonitor()
 
     # Loop over all decision times ###############################################
     logger.info("Maximum decision time: %s.", max_calendar_t)
@@ -141,67 +140,6 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             # rest of the data already produced, whereas for the pis the beta
             # is used to produce the probability at that decision time.
             study_RLalg.collect_rl_update_args(all_prev_data, t)
-
-            if deployment_conditioning_monitor:
-                alternative_lambdas_to_try = [
-                    0.1,
-                    1,
-                    5,
-                    10,
-                    50,
-                    100,
-                    500,
-                    1000,
-                    2000,
-                    10000,
-                ]
-
-                while deployment_conditioning_monitor.assess_update(
-                    len(study_RLalg.all_policies),
-                    all_prev_data,
-                    study_RLalg.action_prob_func,
-                    study_RLalg.pi_args,
-                    study_RLalg.action_prob_func_args_beta_index,
-                    study_RLalg.alg_update_func,
-                    study_RLalg.alg_update_func_type,
-                    study_RLalg.rl_update_args,
-                    study_RLalg.alg_update_func_args_beta_index,
-                    study_RLalg.alg_update_func_args_action_prob_index,
-                    study_RLalg.alg_update_func_args_action_prob_times_index,
-                    study_RLalg.alg_update_func_args_previous_betas_index,
-                    "in_study",
-                    "action",
-                    "policy_num",
-                    "calendar_t",
-                    "user_id",
-                    "action1prob",
-                    True,
-                    False,
-                )["update_rejected"]:
-                    logger.info(
-                        "Intervening to improve bread inverse conditioning by trying new lambda: %s.",
-                        alternative_lambdas_to_try[alternative_lambda_index],
-                    )
-
-                    # Undo previous update
-                    study_RLalg.all_policies.pop()
-
-                    # Try again with new lambda
-                    study_RLalg.lambda_ = alternative_lambdas_to_try[
-                        alternative_lambda_index
-                    ]
-                    study_RLalg.update_alg(update_data)
-
-                    # Overwrite the update function args recorded previously
-                    study_RLalg.collect_rl_update_args(all_prev_data, t)
-
-                    if alternative_lambda_index < len(alternative_lambdas_to_try) - 1:
-                        alternative_lambda_index += 1
-                    else:
-                        logger.info(
-                            "No more alternative lambdas to try. Simply proceeding with the last one."
-                        )
-                        break
 
     return study_df, study_RLalg
 

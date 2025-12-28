@@ -76,7 +76,7 @@ def make_base_study_df(args, all_cols=None):
 def load_synthetic_env_params(paramf_path="./synthetic_env_params/delayed_effects.txt"):
     """
     Goal:
-        - Load synethetic model parameters
+        - Load synthetic model parameters
     Input:
         - `env_path`: String path to directory with environment parameters/data
     Output:

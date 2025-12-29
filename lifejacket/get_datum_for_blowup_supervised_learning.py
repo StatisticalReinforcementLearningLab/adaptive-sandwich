@@ -25,25 +25,25 @@ logging.basicConfig(
 
 
 def get_datum_for_blowup_supervised_learning(
-    joint_adaptive_bread_inverse_matrix,
-    joint_adaptive_bread_inverse_cond,
+    joint_adjusted_bread_inverse_matrix,
+    joint_adjusted_bread_inverse_cond,
     avg_estimating_function_stack,
-    per_user_estimating_function_stacks,
+    per_subject_estimating_function_stacks,
     all_post_update_betas,
-    study_df,
-    in_study_col_name,
+    analysis_df,
+    active_col_name,
     calendar_t_col_name,
     action_prob_col_name,
-    user_id_col_name,
+    subject_id_col_name,
     reward_col_name,
     theta_est,
-    adaptive_sandwich_var_estimate,
-    user_ids,
+    adjusted_sandwich_var_estimate,
+    subject_ids,
     beta_dim,
     theta_dim,
     initial_policy_num,
     beta_index_by_policy_num,
-    policy_num_by_decision_time_by_user_id,
+    policy_num_by_decision_time_by_subject_id,
     theta_calculation_func,
     action_prob_func,
     action_prob_func_args_beta_index,
@@ -51,46 +51,46 @@ def get_datum_for_blowup_supervised_learning(
     inference_func_type,
     inference_func_args_theta_index,
     inference_func_args_action_prob_index,
-    inference_action_prob_decision_times_by_user_id,
+    inference_action_prob_decision_times_by_subject_id,
     action_prob_func_args,
-    action_by_decision_time_by_user_id,
+    action_by_decision_time_by_subject_id,
 ) -> dict[str, Any]:
     """
-    Collects a datum for supervised learning about adaptive sandwich blowup.
+    Collects a datum for supervised learning about adjusted sandwich blowup.
 
-    The datum consists of features and the raw adaptive sandwich variance estimate as a label.
+    The datum consists of features and the raw adjusted sandwich variance estimate as a label.
 
     A few plots are produced along the way to help visualize the data.
 
     Args:
-        joint_adaptive_bread_inverse_matrix (jnp.ndarray):
-            The joint adaptive bread inverse matrix.
-        joint_adaptive_bread_inverse_cond (float):
-            The condition number of the joint adaptive bread inverse matrix.
+        joint_adjusted_bread_inverse_matrix (jnp.ndarray):
+            The joint adjusted bread inverse matrix.
+        joint_adjusted_bread_inverse_cond (float):
+            The condition number of the joint adjusted bread inverse matrix.
         avg_estimating_function_stack (jnp.ndarray):
-            The average estimating function stack across users.
-        per_user_estimating_function_stacks (jnp.ndarray):
-            The estimating function stacks for each user.
+            The average estimating function stack across subjects.
+        per_subject_estimating_function_stacks (jnp.ndarray):
+            The estimating function stacks for each subject.
         all_post_update_betas (jnp.ndarray):
             All post-update beta parameters.
-        study_df (pd.DataFrame):
+        analysis_df (pd.DataFrame):
             The study DataFrame.
-        in_study_col_name (str):
-            Column name indicating if a user is in the study in the study dataframe.
+        active_col_name (str):
+            Column name indicating if a subject is in the study in the study dataframe.
         calendar_t_col_name (str):
             Column name for calendar time in the study dataframe.
         action_prob_col_name (str):
             Column name for action probabilities in the study dataframe.
-        user_id_col_name (str):
-            Column name for user IDs in the study dataframe
+        subject_id_col_name (str):
+            Column name for subject IDs in the study dataframe
         reward_col_name (str):
             Column name for rewards in the study dataframe.
         theta_est (jnp.ndarray):
             The estimate of the parameter vector theta.
-        adaptive_sandwich_var_estimate (jnp.ndarray):
-            The adaptive sandwich variance estimate for theta.
-        user_ids (jnp.ndarray):
-            Array of unique user IDs.
+        adjusted_sandwich_var_estimate (jnp.ndarray):
+            The adjusted sandwich variance estimate for theta.
+        subject_ids (jnp.ndarray):
+            Array of unique subject IDs.
         beta_dim (int):
             Dimension of the beta parameter vector.
         theta_dim (int):
@@ -99,8 +99,8 @@ def get_datum_for_blowup_supervised_learning(
             The initial policy number used in the study.
         beta_index_by_policy_num (dict[int | float, int]):
             Mapping from policy numbers to indices in all_post_update_betas.
-        policy_num_by_decision_time_by_user_id (dict):
-            Mapping from user IDs to their policy numbers by decision time.
+        policy_num_by_decision_time_by_subject_id (dict):
+            Mapping from subject IDs to their policy numbers by decision time.
         theta_calculation_func (callable):
             The theta calculation function.
         action_prob_func (callable):
@@ -115,17 +115,17 @@ def get_datum_for_blowup_supervised_learning(
             Index for theta in inference function arguments.
         inference_func_args_action_prob_index (int):
             Index for action probability in inference function arguments.
-        inference_action_prob_decision_times_by_user_id (dict):
-            Mapping from user IDs to decision times for action probabilities used in inference.
+        inference_action_prob_decision_times_by_subject_id (dict):
+            Mapping from subject IDs to decision times for action probabilities used in inference.
         action_prob_func_args (dict):
             Arguments for the action probability function.
-        action_by_decision_time_by_user_id (dict):
-            Mapping from user IDs to their actions by decision time.
+        action_by_decision_time_by_subject_id (dict):
+            Mapping from subject IDs to their actions by decision time.
     Returns:
         dict[str, Any]: A dictionary containing features and the label for supervised learning.
     """
     num_diagonal_blocks = (
-        (joint_adaptive_bread_inverse_matrix.shape[0] - theta_dim) // beta_dim
+        (joint_adjusted_bread_inverse_matrix.shape[0] - theta_dim) // beta_dim
     ) + 1
     diagonal_block_sizes = ([beta_dim] * (num_diagonal_blocks - 1)) + [theta_dim]
 
@@ -144,7 +144,7 @@ def get_datum_for_blowup_supervised_learning(
                 row_slice = slice(block_bounds[i], block_bounds[i + 1])
                 col_slice = slice(block_bounds[j], block_bounds[j + 1])
                 block_norm = np.linalg.norm(
-                    joint_adaptive_bread_inverse_matrix[row_slice, col_slice],
+                    joint_adjusted_bread_inverse_matrix[row_slice, col_slice],
                     ord="fro",
                 )
                 # We will sum here and take the square root later
@@ -155,9 +155,9 @@ def get_datum_for_blowup_supervised_learning(
         # handle diagonal blocks
         sl = slice(block_bounds[i], block_bounds[i + 1])
         diag_norms.append(
-            np.linalg.norm(joint_adaptive_bread_inverse_matrix[sl, sl], ord="fro")
+            np.linalg.norm(joint_adjusted_bread_inverse_matrix[sl, sl], ord="fro")
         )
-        diag_conds.append(np.linalg.cond(joint_adaptive_bread_inverse_matrix[sl, sl]))
+        diag_conds.append(np.linalg.cond(joint_adjusted_bread_inverse_matrix[sl, sl]))
 
     # Sqrt each row/col sum to truly get row/column norms.
     # Perhaps not necessary for learning, but more natural
@@ -166,7 +166,7 @@ def get_datum_for_blowup_supervised_learning(
 
     # Get the per-person estimating function stack norms
     estimating_function_stack_norms = np.linalg.norm(
-        per_user_estimating_function_stacks, axis=1
+        per_subject_estimating_function_stacks, axis=1
     )
 
     # Get the average estimating function stack norms by update/inference
@@ -175,7 +175,7 @@ def get_datum_for_blowup_supervised_learning(
     avg_estimating_function_stack_norms_per_segment = [
         np.mean(
             np.linalg.norm(
-                per_user_estimating_function_stacks[
+                per_subject_estimating_function_stacks[
                     :, block_bounds[i] : block_bounds[i + 1]
                 ],
                 axis=1,
@@ -191,67 +191,67 @@ def get_datum_for_blowup_supervised_learning(
     std_successive_beta_diff_norm = np.std(successive_beta_diff_norms)
 
     # Add a column with logits of the action probabilities
-    # Compute the average and standard deviation of the logits of the action probabilities at each decision time using study_df
+    # Compute the average and standard deviation of the logits of the action probabilities at each decision time using analysis_df
     # action_prob_logit_means and action_prob_logit_stds are numpy arrays of mean and stddev at each decision time
-    # Only compute logits for rows where user is in the study; set others to NaN
-    in_study_mask = study_df[in_study_col_name] == 1
-    study_df["action_prob_logit"] = np.where(
+    # Only compute logits for rows where subject is in the study; set others to NaN
+    in_study_mask = analysis_df[active_col_name] == 1
+    analysis_df["action_prob_logit"] = np.where(
         in_study_mask,
-        logit(study_df[action_prob_col_name]),
+        logit(analysis_df[action_prob_col_name]),
         np.nan,
     )
-    grouped_action_prob_logit = study_df.loc[in_study_mask].groupby(
+    grouped_action_prob_logit = analysis_df.loc[in_study_mask].groupby(
         calendar_t_col_name
     )["action_prob_logit"]
     action_prob_logit_means_by_t = grouped_action_prob_logit.mean().values
     action_prob_logit_stds_by_t = grouped_action_prob_logit.std().values
 
-    # Compute the average and standard deviation of the rewards at each decision time using study_df
+    # Compute the average and standard deviation of the rewards at each decision time using analysis_df
     # reward_means and reward_stds are numpy arrays of mean and stddev at each decision time
-    grouped_reward = study_df.loc[in_study_mask].groupby(calendar_t_col_name)[
+    grouped_reward = analysis_df.loc[in_study_mask].groupby(calendar_t_col_name)[
         reward_col_name
     ]
     reward_means_by_t = grouped_reward.mean().values
     reward_stds_by_t = grouped_reward.std().values
 
     joint_bread_inverse_min_singular_value = np.linalg.svd(
-        joint_adaptive_bread_inverse_matrix, compute_uv=False
+        joint_adjusted_bread_inverse_matrix, compute_uv=False
     )[-1]
 
-    max_reward = study_df.loc[in_study_mask][reward_col_name].max()
+    max_reward = analysis_df.loc[in_study_mask][reward_col_name].max()
 
     norm_avg_estimating_function_stack = np.linalg.norm(avg_estimating_function_stack)
     max_estimating_function_stack_norm = np.max(estimating_function_stack_norms)
 
     (
         premature_thetas,
-        premature_adaptive_sandwiches,
+        premature_adjusted_sandwiches,
         premature_classical_sandwiches,
-        premature_joint_adaptive_bread_inverse_condition_numbers,
+        premature_joint_adjusted_bread_inverse_condition_numbers,
         premature_avg_inference_estimating_functions,
-    ) = calculate_sequence_of_premature_adaptive_estimates(
-        study_df,
+    ) = calculate_sequence_of_premature_adjusted_estimates(
+        analysis_df,
         initial_policy_num,
         beta_index_by_policy_num,
-        policy_num_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_subject_id,
         theta_calculation_func,
         calendar_t_col_name,
         action_prob_col_name,
-        user_id_col_name,
-        in_study_col_name,
+        subject_id_col_name,
+        active_col_name,
         all_post_update_betas,
-        user_ids,
+        subject_ids,
         action_prob_func,
         action_prob_func_args_beta_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_user_id,
+        inference_action_prob_decision_times_by_subject_id,
         action_prob_func_args,
-        action_by_decision_time_by_user_id,
-        joint_adaptive_bread_inverse_matrix,
-        per_user_estimating_function_stacks,
+        action_by_decision_time_by_subject_id,
+        joint_adjusted_bread_inverse_matrix,
+        per_subject_estimating_function_stacks,
         beta_dim,
     )
 
@@ -261,42 +261,42 @@ def get_datum_for_blowup_supervised_learning(
         atol=1e-3,
     )
 
-    # Plot premature joint adaptive bread inverse log condition numbers
+    # Plot premature joint adjusted bread inverse log condition numbers
     plt.clear_figure()
     plt.title("Premature Joint Adaptive Bread Inverse Log Condition Numbers")
     plt.xlabel("Premature Update Index")
     plt.ylabel("Log Condition Number")
     plt.scatter(
-        np.log(premature_joint_adaptive_bread_inverse_condition_numbers),
+        np.log(premature_joint_adjusted_bread_inverse_condition_numbers),
         color="blue+",
     )
     plt.grid(True)
     plt.xticks(
         range(
             0,
-            len(premature_joint_adaptive_bread_inverse_condition_numbers),
+            len(premature_joint_adjusted_bread_inverse_condition_numbers),
             max(
                 1,
-                len(premature_joint_adaptive_bread_inverse_condition_numbers) // 10,
+                len(premature_joint_adjusted_bread_inverse_condition_numbers) // 10,
             ),
         )
     )
     plt.show()
 
-    # Plot each diagonal element of premature adaptive sandwiches
-    num_diag = premature_adaptive_sandwiches.shape[-1]
+    # Plot each diagonal element of premature adjusted sandwiches
+    num_diag = premature_adjusted_sandwiches.shape[-1]
     for i in range(num_diag):
         plt.clear_figure()
         plt.title(f"Premature Adaptive Sandwich Diagonal Element {i}")
         plt.xlabel("Premature Update Index")
         plt.ylabel(f"Variance (Diagonal {i})")
-        plt.scatter(np.array(premature_adaptive_sandwiches[:, i, i]), color="blue+")
+        plt.scatter(np.array(premature_adjusted_sandwiches[:, i, i]), color="blue+")
         plt.grid(True)
         plt.xticks(
             range(
                 0,
-                int(premature_adaptive_sandwiches.shape[0]),
-                max(1, int(premature_adaptive_sandwiches.shape[0]) // 10),
+                int(premature_adjusted_sandwiches.shape[0]),
+                max(1, int(premature_adjusted_sandwiches.shape[0]) // 10),
             )
         )
         plt.show()
@@ -308,7 +308,7 @@ def get_datum_for_blowup_supervised_learning(
         plt.xlabel("Premature Update Index")
         plt.ylabel(f"Variance (Diagonal {i})")
         plt.scatter(
-            np.array(premature_adaptive_sandwiches[:, i, i])
+            np.array(premature_adjusted_sandwiches[:, i, i])
             / np.array(premature_classical_sandwiches[:, i, i]),
             color="red+",
         )
@@ -316,8 +316,8 @@ def get_datum_for_blowup_supervised_learning(
         plt.xticks(
             range(
                 0,
-                int(premature_adaptive_sandwiches.shape[0]),
-                max(1, int(premature_adaptive_sandwiches.shape[0]) // 10),
+                int(premature_adjusted_sandwiches.shape[0]),
+                max(1, int(premature_adjusted_sandwiches.shape[0]) // 10),
             )
         )
         plt.show()
@@ -331,14 +331,14 @@ def get_datum_for_blowup_supervised_learning(
         plt.xticks(
             range(
                 0,
-                int(premature_adaptive_sandwiches.shape[0]),
-                max(1, int(premature_adaptive_sandwiches.shape[0]) // 10),
+                int(premature_adjusted_sandwiches.shape[0]),
+                max(1, int(premature_adjusted_sandwiches.shape[0]) // 10),
             )
         )
         plt.show()
 
         # Grab predictors related to premature Phi-dot-bars
-        RL_stack_beta_derivatives_block = joint_adaptive_bread_inverse_matrix[
+        RL_stack_beta_derivatives_block = joint_adjusted_bread_inverse_matrix[
             :-theta_dim, :-theta_dim
         ]
         num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
@@ -397,14 +397,14 @@ def get_datum_for_blowup_supervised_learning(
             )
     return {
         **{
-            "joint_bread_inverse_condition_number": joint_adaptive_bread_inverse_cond,
+            "joint_bread_inverse_condition_number": joint_adjusted_bread_inverse_cond,
             "joint_bread_inverse_min_singular_value": joint_bread_inverse_min_singular_value,
             "max_reward": max_reward,
             "norm_avg_estimating_function_stack": norm_avg_estimating_function_stack,
             "max_estimating_function_stack_norm": max_estimating_function_stack_norm,
             "max_successive_beta_diff_norm": max_successive_beta_diff_norm,
             "std_successive_beta_diff_norm": std_successive_beta_diff_norm,
-            "label": adaptive_sandwich_var_estimate,
+            "label": adjusted_sandwich_var_estimate,
         },
         **{
             f"off_diag_block_{i}_{j}_norm": off_diag_block_norms[(i, j)]
@@ -422,10 +422,10 @@ def get_datum_for_blowup_supervised_learning(
             for i in range(num_block_rows_cols)
         },
         **{
-            f"estimating_function_stack_norm_user_{user_id}": estimating_function_stack_norms[
+            f"estimating_function_stack_norm_subject_{subject_id}": estimating_function_stack_norms[
                 i
             ]
-            for i, user_id in enumerate(user_ids)
+            for i, subject_id in enumerate(subject_ids)
         },
         **{
             f"avg_estimating_function_stack_norm_segment_{i}": avg_estimating_function_stack_norms_per_segment[
@@ -455,18 +455,18 @@ def get_datum_for_blowup_supervised_learning(
         },
         **{f"theta_est_{i}": theta_est[i].item() for i in range(len(theta_est))},
         **{
-            f"premature_joint_adaptive_bread_inverse_condition_number_{i}": premature_joint_adaptive_bread_inverse_condition_numbers[
+            f"premature_joint_adjusted_bread_inverse_condition_number_{i}": premature_joint_adjusted_bread_inverse_condition_numbers[
                 i
             ]
             for i in range(
-                len(premature_joint_adaptive_bread_inverse_condition_numbers)
+                len(premature_joint_adjusted_bread_inverse_condition_numbers)
             )
         },
         **{
-            f"premature_adaptive_sandwich_update_{i}_diag_position_{j}": premature_adaptive_sandwich[
+            f"premature_adjusted_sandwich_update_{i}_diag_position_{j}": premature_adjusted_sandwich[
                 j, j
             ]
-            for premature_adaptive_sandwich in premature_adaptive_sandwiches
+            for premature_adjusted_sandwich in premature_adjusted_sandwiches
             for j in range(theta_dim)
         },
         **{
@@ -497,44 +497,46 @@ def get_datum_for_blowup_supervised_learning(
     }
 
 
-def calculate_sequence_of_premature_adaptive_estimates(
-    study_df: pd.DataFrame,
+def calculate_sequence_of_premature_adjusted_estimates(
+    analysis_df: pd.DataFrame,
     initial_policy_num: int | float,
     beta_index_by_policy_num: dict[int | float, int],
-    policy_num_by_decision_time_by_user_id: dict[
+    policy_num_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
     theta_calculation_func: str,
     calendar_t_col_name: str,
     action_prob_col_name: str,
-    user_id_col_name: str,
-    in_study_col_name: str,
+    subject_id_col_name: str,
+    active_col_name: str,
     all_post_update_betas: jnp.ndarray,
-    user_ids: jnp.ndarray,
+    subject_ids: jnp.ndarray,
     action_prob_func: str,
     action_prob_func_args_beta_index: int,
     inference_func: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    inference_action_prob_decision_times_by_user_id: dict[
+    inference_action_prob_decision_times_by_subject_id: dict[
         collections.abc.Hashable, list[int]
     ],
-    action_prob_func_args_by_user_id_by_decision_time: dict[
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
         int, dict[collections.abc.Hashable, tuple[Any, ...]]
     ],
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
-    full_joint_adaptive_bread_inverse_matrix: jnp.ndarray,
-    per_user_estimating_function_stacks: jnp.ndarray,
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
+    full_joint_adjusted_bread_inverse_matrix: jnp.ndarray,
+    per_subject_estimating_function_stacks: jnp.ndarray,
     beta_dim: int,
 ) -> jnp.ndarray:
     """
-    Calculates a sequence of premature adaptive estimates for the given study DataFrame, where we
+    Calculates a sequence of premature adjusted estimates for the given study DataFrame, where we
     pretend the study ended after each update in sequence. The behavior of this sequence may provide
-    insight into the stability of the final adaptive estimate.
+    insight into the stability of the final adjusted estimate.
 
     Args:
-        study_df (pandas.DataFrame):
+        analysis_df (pandas.DataFrame):
             The DataFrame containing the study data.
             initial_policy_num (int | float): The policy number of the initial policy before any updates.
         initial_policy_num (int | float):
@@ -542,23 +544,23 @@ def calculate_sequence_of_premature_adaptive_estimates(
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A map of user ids to dictionaries mapping decision times to the policy number in use.
+        policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of subject ids to dictionaries mapping decision times to the policy number in use.
             Only applies to in-study decision times!
         theta_calculation_func (callable):
             The filename for the theta calculation function.
         calendar_t_col_name (str):
-            The name of the column in study_df representing calendar time.
+            The name of the column in analysis_df representing calendar time.
         action_prob_col_name (str):
-            The name of the column in study_df representing action probabilities.
-        user_id_col_name (str):
-            The name of the column in study_df representing user IDs.
-        in_study_col_name (str):
-            The name of the column in study_df indicating whether the user is in the study at that time.
+            The name of the column in analysis_df representing action probabilities.
+        subject_id_col_name (str):
+            The name of the column in analysis_df representing subject IDs.
+        active_col_name (str):
+            The name of the column in analysis_df indicating whether the subject is in the study at that time.
         all_post_update_betas (jnp.ndarray):
             A NumPy array containing all post-update beta values.
-        user_ids (jnp.ndarray):
-            A NumPy array containing all user IDs in the study.
+        subject_ids (jnp.ndarray):
+            A NumPy array containing all subject IDs in the study.
         action_prob_func (callable):
             The action probability function.
         action_prob_func_args_beta_index (int):
@@ -572,56 +574,56 @@ def calculate_sequence_of_premature_adaptive_estimates(
         inference_func_args_action_prob_index (int):
             The index of action probabilities in the inference function arguments tuple, if
             applicable. -1 otherwise.
-        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times to which action probabilities correspond if
+        inference_action_prob_decision_times_by_subject_id (dict[collections.abc.Hashable, list[int]]):
+            For each subject, a list of decision times to which action probabilities correspond if
             provided. Typically just in-study times if action probabilites are used in the inference
             loss or estimating function.
-        action_prob_func_args_by_user_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A dictionary mapping decision times to maps of user ids to the function arguments
-            required to compute action probabilities for this user.
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping user IDs to their respective actions taken at each decision time.
+        action_prob_func_args_by_subject_id_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of subject ids to the function arguments
+            required to compute action probabilities for this subject.
+        action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping subject IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
-        full_joint_adaptive_bread_inverse_matrix (jnp.ndarray):
-            The full joint adaptive bread inverse matrix as a NumPy array.
-        per_user_estimating_function_stacks (jnp.ndarray):
-            A NumPy array containing all per-user (weighted) estimating function stacks.
+        full_joint_adjusted_bread_inverse_matrix (jnp.ndarray):
+            The full joint adjusted bread inverse matrix as a NumPy array.
+        per_subject_estimating_function_stacks (jnp.ndarray):
+            A NumPy array containing all per-subject (weighted) estimating function stacks.
         beta_dim (int):
             The dimension of the beta parameters.
     Returns:
-        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]: A NumPy array containing the sequence of premature adaptive estimates.
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]: A NumPy array containing the sequence of premature adjusted estimates.
     """
 
-    # Loop through the non-initial (ie not before an update has occurred), non-final policy numbers in sorted order, forming adaptive and classical
+    # Loop through the non-initial (ie not before an update has occurred), non-final policy numbers in sorted order, forming adjusted and classical
     # variance estimates pretending that each was the final policy.
-    premature_adaptive_sandwiches = []
+    premature_adjusted_sandwiches = []
     premature_thetas = []
-    premature_joint_adaptive_bread_inverse_condition_numbers = []
+    premature_joint_adjusted_bread_inverse_condition_numbers = []
     premature_avg_inference_estimating_functions = []
     premature_classical_sandwiches = []
     logger.info(
-        "Calculating sequence of premature adaptive estimates by pretending the study ended after each update in sequence."
+        "Calculating sequence of premature adjusted estimates by pretending the study ended after each update in sequence."
     )
     for policy_num in sorted(beta_index_by_policy_num):
         logger.info(
-            "Calculating premature adaptive estimate assuming policy %s is the final one.",
+            "Calculating premature adjusted estimate assuming policy %s is the final one.",
             policy_num,
         )
         pretend_max_policy = policy_num
 
-        truncated_joint_adaptive_bread_inverse_matrix = (
-            full_joint_adaptive_bread_inverse_matrix[
+        truncated_joint_adjusted_bread_inverse_matrix = (
+            full_joint_adjusted_bread_inverse_matrix[
                 : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
                 : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
             ]
         )
 
-        max_decision_time = study_df[study_df["policy_num"] == pretend_max_policy][
-            calendar_t_col_name
-        ].max()
+        max_decision_time = analysis_df[
+            analysis_df["policy_num"] == pretend_max_policy
+        ][calendar_t_col_name].max()
 
-        truncated_study_df = study_df[
-            study_df[calendar_t_col_name] <= max_decision_time
+        truncated_analysis_df = analysis_df[
+            analysis_df[calendar_t_col_name] <= max_decision_time
         ].copy()
 
         truncated_beta_index_by_policy_num = {
@@ -632,83 +634,83 @@ def calculate_sequence_of_premature_adaptive_estimates(
 
         truncated_all_post_update_betas = all_post_update_betas[: max_beta_index + 1, :]
 
-        premature_theta = jnp.array(theta_calculation_func(truncated_study_df))
+        premature_theta = jnp.array(theta_calculation_func(truncated_analysis_df))
 
-        truncated_action_prob_func_args_by_user_id_by_decision_time = {
-            decision_time: args_by_user_id
-            for decision_time, args_by_user_id in action_prob_func_args_by_user_id_by_decision_time.items()
+        truncated_action_prob_func_args_by_subject_id_by_decision_time = {
+            decision_time: args_by_subject_id
+            for decision_time, args_by_subject_id in action_prob_func_args_by_subject_id_by_decision_time.items()
             if decision_time <= max_decision_time
         }
 
-        truncated_inference_func_args_by_user_id, _, _ = (
+        truncated_inference_func_args_by_subject_id, _, _ = (
             after_study_analysis.process_inference_func_args(
                 inference_func,
                 inference_func_args_theta_index,
-                truncated_study_df,
+                truncated_analysis_df,
                 premature_theta,
                 action_prob_col_name,
                 calendar_t_col_name,
-                user_id_col_name,
-                in_study_col_name,
+                subject_id_col_name,
+                active_col_name,
             )
         )
 
-        truncated_inference_action_prob_decision_times_by_user_id = {
-            user_id: [
+        truncated_inference_action_prob_decision_times_by_subject_id = {
+            subject_id: [
                 decision_time
-                for decision_time in inference_action_prob_decision_times_by_user_id[
-                    user_id
+                for decision_time in inference_action_prob_decision_times_by_subject_id[
+                    subject_id
                 ]
                 if decision_time <= max_decision_time
             ]
             # writing this way is important, handles empty dicts correctly
-            for user_id in inference_action_prob_decision_times_by_user_id
+            for subject_id in inference_action_prob_decision_times_by_subject_id
         }
 
-        truncated_action_by_decision_time_by_user_id = {
-            user_id: {
+        truncated_action_by_decision_time_by_subject_id = {
+            subject_id: {
                 decision_time: action
-                for decision_time, action in action_by_decision_time_by_user_id[
-                    user_id
+                for decision_time, action in action_by_decision_time_by_subject_id[
+                    subject_id
                 ].items()
                 if decision_time <= max_decision_time
             }
-            for user_id in action_by_decision_time_by_user_id
+            for subject_id in action_by_decision_time_by_subject_id
         }
 
-        truncated_per_user_estimating_function_stacks = (
-            per_user_estimating_function_stacks[
+        truncated_per_subject_estimating_function_stacks = (
+            per_subject_estimating_function_stacks[
                 :,
                 : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
             ]
         )
 
         (
-            premature_adaptive_sandwich,
+            premature_adjusted_sandwich,
             premature_classical_sandwich,
             premature_avg_inference_estimating_function,
-        ) = construct_premature_classical_and_adaptive_sandwiches(
-            truncated_joint_adaptive_bread_inverse_matrix,
-            truncated_per_user_estimating_function_stacks,
+        ) = construct_premature_classical_and_adjusted_sandwiches(
+            truncated_joint_adjusted_bread_inverse_matrix,
+            truncated_per_subject_estimating_function_stacks,
             premature_theta,
             truncated_all_post_update_betas,
-            user_ids,
+            subject_ids,
             action_prob_func,
             action_prob_func_args_beta_index,
             inference_func,
             inference_func_type,
             inference_func_args_theta_index,
             inference_func_args_action_prob_index,
-            truncated_action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
+            truncated_action_prob_func_args_by_subject_id_by_decision_time,
+            policy_num_by_decision_time_by_subject_id,
             initial_policy_num,
             truncated_beta_index_by_policy_num,
-            truncated_inference_func_args_by_user_id,
-            truncated_inference_action_prob_decision_times_by_user_id,
-            truncated_action_by_decision_time_by_user_id,
+            truncated_inference_func_args_by_subject_id,
+            truncated_inference_action_prob_decision_times_by_subject_id,
+            truncated_action_by_decision_time_by_subject_id,
         )
 
-        premature_adaptive_sandwiches.append(premature_adaptive_sandwich)
+        premature_adjusted_sandwiches.append(premature_adjusted_sandwich)
         premature_classical_sandwiches.append(premature_classical_sandwich)
         premature_thetas.append(premature_theta)
         premature_avg_inference_estimating_functions.append(
@@ -716,38 +718,40 @@ def calculate_sequence_of_premature_adaptive_estimates(
         )
     return (
         jnp.array(premature_thetas),
-        jnp.array(premature_adaptive_sandwiches),
+        jnp.array(premature_adjusted_sandwiches),
         jnp.array(premature_classical_sandwiches),
-        jnp.array(premature_joint_adaptive_bread_inverse_condition_numbers),
+        jnp.array(premature_joint_adjusted_bread_inverse_condition_numbers),
         jnp.array(premature_avg_inference_estimating_functions),
     )
 
 
-def construct_premature_classical_and_adaptive_sandwiches(
-    truncated_joint_adaptive_bread_inverse_matrix: jnp.ndarray,
-    per_user_truncated_estimating_function_stacks: jnp.ndarray,
+def construct_premature_classical_and_adjusted_sandwiches(
+    truncated_joint_adjusted_bread_inverse_matrix: jnp.ndarray,
+    per_subject_truncated_estimating_function_stacks: jnp.ndarray,
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
-    user_ids: jnp.ndarray,
+    subject_ids: jnp.ndarray,
     action_prob_func: str,
     action_prob_func_args_beta_index: int,
     inference_func: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    action_prob_func_args_by_user_id_by_decision_time: dict[
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
-    policy_num_by_decision_time_by_user_id: dict[
+    policy_num_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
     initial_policy_num: int | float,
     beta_index_by_policy_num: dict[int | float, int],
-    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
-    inference_action_prob_decision_times_by_user_id: dict[
+    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_subject_id: dict[
         collections.abc.Hashable, list[int]
     ],
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
 ) -> tuple[
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -759,33 +763,33 @@ def construct_premature_classical_and_adaptive_sandwiches(
     jnp.ndarray[jnp.float32],
 ]:
     """
-    Constructs the classical bread and meat matrices, as well as the adaptive bread matrix
+    Constructs the classical bread and meat matrices, as well as the adjusted bread matrix
     and the average weighted inference estimating function for the premature variance estimation
     procedure.
 
     This is done by computing and differentiating the new average inference estimating function
     with respect to the betas and theta, and stitching this together with the existing
-    adaptive bread inverse matrix portion (corresponding to the updates still under consideration)
-    to form the new premature joint adaptive bread inverse matrix.
+    adjusted bread inverse matrix portion (corresponding to the updates still under consideration)
+    to form the new premature joint adjusted bread inverse matrix.
 
     Args:
-        truncated_joint_adaptive_bread_inverse_matrix (jnp.ndarray):
-            A 2-D JAX NumPy array holding the existing joint adaptive bread inverse but
+        truncated_joint_adjusted_bread_inverse_matrix (jnp.ndarray):
+            A 2-D JAX NumPy array holding the existing joint adjusted bread inverse but
             with rows corresponding to updates not under consideration and inference dropped.
             We will stitch this together with the newly computed inference portion to form
-            our "premature" joint adaptive bread inverse matrix.
-        per_user_truncated_estimating_function_stacks (jnp.ndarray):
-            A 2-D JAX NumPy array holding the existing per-user weighted estimating function
+            our "premature" joint adjusted bread inverse matrix.
+        per_subject_truncated_estimating_function_stacks (jnp.ndarray):
+            A 2-D JAX NumPy array holding the existing per-subject weighted estimating function
             stacks but with rows corresponding to updates not under consideration dropped.
             We will stitch this together with the newly computed inference estimating functions
-            to form our "premature" joint adaptive estimating function stacks from which the new
-            adaptive meat matrix can be computed.
+            to form our "premature" joint adjusted estimating function stacks from which the new
+            adjusted meat matrix can be computed.
         theta (jnp.ndarray):
             A 1-D JAX NumPy array representing the parameter estimate for inference.
         all_post_update_betas (jnp.ndarray):
             A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
-        user_ids (jnp.ndarray):
-            A 1-D JAX NumPy array holding all user IDs in the study.
+        subject_ids (jnp.ndarray):
+            A 1-D JAX NumPy array holding all subject IDs in the study.
         action_prob_func (callable):
             The action probability function.
         action_prob_func_args_beta_index (int):
@@ -799,51 +803,51 @@ def construct_premature_classical_and_adaptive_sandwiches(
         inference_func_args_action_prob_index (int):
             The index of action probabilities in the inference function arguments tuple, if
             applicable. -1 otherwise.
-        action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
-            A dictionary mapping decision times to maps of user ids to the function arguments
-            required to compute action probabilities for this user.
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A map of user ids to dictionaries mapping decision times to the policy number in use.
+        action_prob_func_args_by_subject_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of subject ids to the function arguments
+            required to compute action probabilities for this subject.
+        policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of subject ids to dictionaries mapping decision times to the policy number in use.
             Only applies to in-study decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A dictionary mapping user IDs to their respective inference function arguments.
-        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times to which action probabilities correspond if
+        inference_func_args_by_subject_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping subject IDs to their respective inference function arguments.
+        inference_action_prob_decision_times_by_subject_id (dict[collections.abc.Hashable, list[int]]):
+            For each subject, a list of decision times to which action probabilities correspond if
             provided. Typically just in-study times if action probabilites are used in the inference
             loss or estimating function.
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping user IDs to their respective actions taken at each decision time.
+        action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping subject IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32],
               jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32],
               jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
-            - The joint adaptive inverse bread matrix.
-            - The joint adaptive bread matrix.
-            - The joint adaptive meat matrix.
+            - The joint adjusted inverse bread matrix.
+            - The joint adjusted bread matrix.
+            - The joint adjusted meat matrix.
             - The classical inverse bread matrix.
             - The classical bread matrix.
             - The classical meat matrix.
             - The average (weighted) inference estimating function.
-            - The joint adaptive inverse bread matrix condition number.
+            - The joint adjusted inverse bread matrix condition number.
     """
     logger.info(
         "Differentiating average weighted inference estimating function stack and collecting auxiliary values."
     )
     # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
     # slow.
-    # Note that these "contributions" are per-user Jacobians of the weighted estimating function stack.
+    # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
     new_inference_block_row, (
-        per_user_inference_estimating_functions,
+        per_subject_inference_estimating_functions,
         avg_inference_estimating_function,
-        per_user_classical_meat_contributions,
-        per_user_classical_bread_inverse_contributions,
+        per_subject_classical_meat_contributions,
+        per_subject_classical_bread_inverse_contributions,
     ) = jax.jacrev(get_weighted_inference_estimating_functions_only, has_aux=True)(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
         # it is more efficient to flatten them into a single array. This is done
@@ -851,29 +855,29 @@ def construct_premature_classical_and_adaptive_sandwiches(
         after_study_analysis.flatten_params(all_post_update_betas, theta),
         all_post_update_betas.shape[1],
         theta.shape[0],
-        user_ids,
+        subject_ids,
         action_prob_func,
         action_prob_func_args_beta_index,
         inference_func,
         inference_func_type,
         inference_func_args_theta_index,
         inference_func_args_action_prob_index,
-        action_prob_func_args_by_user_id_by_decision_time,
-        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        policy_num_by_decision_time_by_subject_id,
         initial_policy_num,
         beta_index_by_policy_num,
-        inference_func_args_by_user_id,
-        inference_action_prob_decision_times_by_user_id,
-        action_by_decision_time_by_user_id,
+        inference_func_args_by_subject_id,
+        inference_action_prob_decision_times_by_subject_id,
+        action_by_decision_time_by_subject_id,
     )
 
-    joint_adaptive_bread_inverse_matrix = jnp.block(
+    joint_adjusted_bread_inverse_matrix = jnp.block(
         [
             [
-                truncated_joint_adaptive_bread_inverse_matrix,
+                truncated_joint_adjusted_bread_inverse_matrix,
                 np.zeros(
                     (
-                        truncated_joint_adaptive_bread_inverse_matrix.shape[0],
+                        truncated_joint_adjusted_bread_inverse_matrix.shape[0],
                         new_inference_block_row.shape[0],
                     )
                 ),
@@ -881,51 +885,53 @@ def construct_premature_classical_and_adaptive_sandwiches(
             [new_inference_block_row],
         ]
     )
-    per_user_estimating_function_stacks = jnp.concatenate(
+    per_subject_estimating_function_stacks = jnp.concatenate(
         [
-            per_user_truncated_estimating_function_stacks,
-            per_user_inference_estimating_functions,
+            per_subject_truncated_estimating_function_stacks,
+            per_subject_inference_estimating_functions,
         ],
         axis=1,
     )
-    per_user_adaptive_meat_contributions = jnp.einsum(
+    per_subject_adjusted_meat_contributions = jnp.einsum(
         "ni,nj->nij",
-        per_user_estimating_function_stacks,
-        per_user_estimating_function_stacks,
+        per_subject_estimating_function_stacks,
+        per_subject_estimating_function_stacks,
     )
 
-    joint_adaptive_meat_matrix = jnp.mean(per_user_adaptive_meat_contributions, axis=0)
+    joint_adjusted_meat_matrix = jnp.mean(
+        per_subject_adjusted_meat_contributions, axis=0
+    )
 
     classical_bread_inverse_matrix = jnp.mean(
-        per_user_classical_bread_inverse_contributions, axis=0
+        per_subject_classical_bread_inverse_contributions, axis=0
     )
-    classical_meat_matrix = jnp.mean(per_user_classical_meat_contributions, axis=0)
+    classical_meat_matrix = jnp.mean(per_subject_classical_meat_contributions, axis=0)
 
-    num_users = user_ids.shape[0]
-    joint_adaptive_sandwich = (
+    num_subjects = subject_ids.shape[0]
+    joint_adjusted_sandwich = (
         after_study_analysis.form_sandwich_from_bread_inverse_and_meat(
-            joint_adaptive_bread_inverse_matrix,
-            joint_adaptive_meat_matrix,
-            num_users,
+            joint_adjusted_bread_inverse_matrix,
+            joint_adjusted_meat_matrix,
+            num_subjects,
             method="bread_inverse_T_qr",
         )
     )
-    adaptive_sandwich = joint_adaptive_sandwich[-theta.shape[0] :, -theta.shape[0] :]
+    adjusted_sandwich = joint_adjusted_sandwich[-theta.shape[0] :, -theta.shape[0] :]
 
     classical_bread_inverse_matrix = jnp.mean(
-        per_user_classical_bread_inverse_contributions, axis=0
+        per_subject_classical_bread_inverse_contributions, axis=0
     )
     classical_sandwich = after_study_analysis.form_sandwich_from_bread_inverse_and_meat(
         classical_bread_inverse_matrix,
         classical_meat_matrix,
-        num_users,
+        num_subjects,
         method="bread_inverse_T_qr",
     )
 
-    # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
-    # values too. The joint adaptive bread inverse should always be block lower triangular.
+    # Stack the joint adjusted inverse bread pieces together horizontally and return the auxiliary
+    # values too. The joint adjusted bread inverse should always be block lower triangular.
     return (
-        adaptive_sandwich,
+        adjusted_sandwich,
         classical_sandwich,
         avg_inference_estimating_function,
     )
@@ -935,32 +941,34 @@ def get_weighted_inference_estimating_functions_only(
     flattened_betas_and_theta: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
-    user_ids: jnp.ndarray,
+    subject_ids: jnp.ndarray,
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     inference_func: callable,
     inference_func_type: str,
     inference_func_args_theta_index: int,
     inference_func_args_action_prob_index: int,
-    action_prob_func_args_by_user_id_by_decision_time: dict[
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
-    policy_num_by_decision_time_by_user_id: dict[
+    policy_num_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
     initial_policy_num: int | float,
     beta_index_by_policy_num: dict[int | float, int],
-    inference_func_args_by_user_id: dict[collections.abc.Hashable, tuple[Any, ...]],
-    inference_action_prob_decision_times_by_user_id: dict[
+    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_subject_id: dict[
         collections.abc.Hashable, list[int]
     ],
-    action_by_decision_time_by_user_id: dict[collections.abc.Hashable, dict[int, int]],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
     """
-    Computes the average weighted inference estimating function across users, along with
-    auxiliary values used to construct the adaptive and classical sandwich variances.
+    Computes the average weighted inference estimating function across subjects, along with
+    auxiliary values used to construct the adjusted and classical sandwich variances.
 
     Note that input data should have been adjusted to only correspond to updates/decision times
     that are being considered for the current "premature" variance estimation procedure.
@@ -974,8 +982,8 @@ def get_weighted_inference_estimating_functions_only(
             The dimension of each of the beta parameters.
         theta_dim (int):
             The dimension of the theta parameter.
-        user_ids (jnp.ndarray):
-            A 1D JAX NumPy array of user IDs.
+        subject_ids (jnp.ndarray):
+            A 1D JAX NumPy array of subject IDs.
         action_prob_func (str):
             The action probability function.
         action_prob_func_args_beta_index (int):
@@ -989,25 +997,25 @@ def get_weighted_inference_estimating_functions_only(
         inference_func_args_action_prob_index (int):
             The index of action probabilities in the inference function arguments tuple, if
             applicable. -1 otherwise.
-        action_prob_func_args_by_user_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
-            A dictionary mapping decision times to maps of user ids to the function arguments
-            required to compute action probabilities for this user.
-        policy_num_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int | float]]):
-            A map of user ids to dictionaries mapping decision times to the policy number in use.
+        action_prob_func_args_by_subject_id_by_decision_time (dict[collections.abc.Hashable, dict[int, tuple[Any, ...]]]):
+            A dictionary mapping decision times to maps of subject ids to the function arguments
+            required to compute action probabilities for this subject.
+        policy_num_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int | float]]):
+            A map of subject ids to dictionaries mapping decision times to the policy number in use.
             Only applies to in-study decision times!
         initial_policy_num (int | float):
             The policy number of the initial policy before any updates.
         beta_index_by_policy_num (dict[int | float, int]):
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
-        inference_func_args_by_user_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
-            A dictionary mapping user IDs to their respective inference function arguments.
-        inference_action_prob_decision_times_by_user_id (dict[collections.abc.Hashable, list[int]]):
-            For each user, a list of decision times to which action probabilities correspond if
+        inference_func_args_by_subject_id (dict[collections.abc.Hashable, tuple[Any, ...]]):
+            A dictionary mapping subject IDs to their respective inference function arguments.
+        inference_action_prob_decision_times_by_subject_id (dict[collections.abc.Hashable, list[int]]):
+            For each subject, a list of decision times to which action probabilities correspond if
             provided. Typically just in-study times if action probabilites are used in the inference
             loss or estimating function.
-        action_by_decision_time_by_user_id (dict[collections.abc.Hashable, dict[int, int]]):
-            A dictionary mapping user IDs to their respective actions taken at each decision time.
+        action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
+            A dictionary mapping subject IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
 
     Returns:
@@ -1015,10 +1023,10 @@ def get_weighted_inference_estimating_functions_only(
             A 2D JAX NumPy array holding the average weighted inference estimating function.
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing
-            1. the per-user weighted inference estimating function stacks
+            1. the per-subject weighted inference estimating function stacks
             2. the average weighted inference estimating function
-            3. the user-level classical meat matrix contributions
-            4. the user-level inverse classical bread matrix contributions
+            3. the subject-level classical meat matrix contributions
+            4. the subject-level inverse classical bread matrix contributions
             stacks.
     """
 
@@ -1038,15 +1046,15 @@ def get_weighted_inference_estimating_functions_only(
     # supplied for the above functions, so that differentiation works correctly.  The existing
     # values should be the same, but not connected to the parameter we are differentiating
     # with respect to. Note we will also find it useful below to have the action probability args
-    # nested dict structure flipped to be user_id -> decision_time -> args, so we do that here too.
+    # nested dict structure flipped to be subject_id -> decision_time -> args, so we do that here too.
 
-    logger.info("Threading in betas to action probability arguments for all users.")
+    logger.info("Threading in betas to action probability arguments for all subjects.")
     (
-        threaded_action_prob_func_args_by_decision_time_by_user_id,
-        action_prob_func_args_by_decision_time_by_user_id,
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
+        action_prob_func_args_by_decision_time_by_subject_id,
     ) = after_study_analysis.thread_action_prob_func_args(
-        action_prob_func_args_by_user_id_by_decision_time,
-        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        policy_num_by_decision_time_by_subject_id,
         initial_policy_num,
         betas,
         beta_index_by_policy_num,
@@ -1058,38 +1066,38 @@ def get_weighted_inference_estimating_functions_only(
     # arguments with the central betas introduced.
     logger.info(
         "Threading in theta and beta-dependent action probabilities to inference update "
-        "function args for all users"
+        "function args for all subjects"
     )
-    threaded_inference_func_args_by_user_id = (
+    threaded_inference_func_args_by_subject_id = (
         after_study_analysis.thread_inference_func_args(
-            inference_func_args_by_user_id,
+            inference_func_args_by_subject_id,
             inference_func_args_theta_index,
             theta,
             inference_func_args_action_prob_index,
-            threaded_action_prob_func_args_by_decision_time_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
+            threaded_action_prob_func_args_by_decision_time_by_subject_id,
+            inference_action_prob_decision_times_by_subject_id,
             action_prob_func,
         )
     )
 
-    # 5. Now we can compute the the weighted inference estimating functions for all users
-    # as well as collect related values used to construct the adaptive and classical
+    # 5. Now we can compute the the weighted inference estimating functions for all subjects
+    # as well as collect related values used to construct the adjusted and classical
     # sandwich variances.
     results = [
-        single_user_weighted_inference_estimating_function(
-            user_id,
+        single_subject_weighted_inference_estimating_function(
+            subject_id,
             action_prob_func,
             inference_estimating_func,
             action_prob_func_args_beta_index,
             inference_func_args_theta_index,
-            action_prob_func_args_by_decision_time_by_user_id[user_id],
-            threaded_action_prob_func_args_by_decision_time_by_user_id[user_id],
-            threaded_inference_func_args_by_user_id[user_id],
-            policy_num_by_decision_time_by_user_id[user_id],
-            action_by_decision_time_by_user_id[user_id],
+            action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+            threaded_action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+            threaded_inference_func_args_by_subject_id[subject_id],
+            policy_num_by_decision_time_by_subject_id[subject_id],
+            action_by_decision_time_by_subject_id[subject_id],
             beta_index_by_policy_num,
         )
-        for user_id in user_ids.tolist()
+        for subject_id in subject_ids.tolist()
     ]
 
     weighted_inference_estimating_functions = jnp.array(
@@ -1100,8 +1108,8 @@ def get_weighted_inference_estimating_functions_only(
 
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
-    # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices. The raw per-user estimating functions are also returned again for debugging
+    # for the adjusted meat matrix, estimating functions sum check, and classical meat and inverse
+    # bread matrices. The raw per-subject estimating functions are also returned again for debugging
     # purposes.
     return jnp.mean(weighted_inference_estimating_functions, axis=0), (
         weighted_inference_estimating_functions,
@@ -1111,8 +1119,8 @@ def get_weighted_inference_estimating_functions_only(
     )
 
 
-def single_user_weighted_inference_estimating_function(
-    user_id: collections.abc.Hashable,
+def single_subject_weighted_inference_estimating_function(
+    subject_id: collections.abc.Hashable,
     action_prob_func: callable,
     inference_estimating_func: callable,
     action_prob_func_args_beta_index: int,
@@ -1137,12 +1145,12 @@ def single_user_weighted_inference_estimating_function(
     and action probability function and arguments if applicable.
 
     Args:
-        user_id (collections.abc.Hashable):
-            The user ID for which to compute the weighted estimating function stack.
+        subject_id (collections.abc.Hashable):
+            The subject ID for which to compute the weighted estimating function stack.
 
         action_prob_func (callable):
             The function used to compute the probability of action 1 at a given decision time for
-            a particular user given their state and the algorithm parameters.
+            a particular subject given their state and the algorithm parameters.
 
         inference_estimating_func (callable):
             The estimating function that corresponds to inference.
@@ -1154,7 +1162,7 @@ def single_user_weighted_inference_estimating_function(
             The index of the theta parameter in the inference loss or estimating function arguments.
 
         action_prob_func_args_by_decision_time (dict[int, dict[collections.abc.Hashable, tuple[Any, ...]]]):
-            A map from decision times to tuples of arguments for this user for the action
+            A map from decision times to tuples of arguments for this subject for the action
             probability function. This is for all decision times (args are an empty
             tuple if they are not in the study). Should be sorted by decision time. NOTE THAT THESE
             ARGS DO NOT CONTAIN THE SHARED BETAS, making them impervious to the differentiation that
@@ -1167,11 +1175,11 @@ def single_user_weighted_inference_estimating_function(
 
         threaded_inference_func_args (dict[collections.abc.Hashable, tuple[Any, ...]]):
             A tuple containing the arguments for the inference
-            estimating function for this user, with the shared betas threaded in for differentiation.
+            estimating function for this subject, with the shared betas threaded in for differentiation.
 
         policy_num_by_decision_time (dict[collections.abc.Hashable, dict[int, int | float]]):
             A dictionary mapping decision times to the policy number in use. This may be
-            user-specific. Should be sorted by decision time. Only applies to in-study decision
+            subject-specific. Should be sorted by decision time. Only applies to in-study decision
             times!
 
         action_by_decision_time (dict[collections.abc.Hashable, dict[int, int]]):
@@ -1183,14 +1191,14 @@ def single_user_weighted_inference_estimating_function(
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
 
     Returns:
-        jnp.ndarray: A 1-D JAX NumPy array representing the user's weighted inference estimating function.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical meat contribution.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the user's classical bread contribution.
+        jnp.ndarray: A 1-D JAX NumPy array representing the subject's weighted inference estimating function.
+        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical meat contribution.
+        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical bread contribution.
     """
 
     logger.info(
-        "Computing only weighted inference estimating function stack for user %s.",
-        user_id,
+        "Computing only weighted inference estimating function stack for subject %s.",
+        subject_id,
     )
 
     # First, reformat the supplied data into more convenient structures.
@@ -1202,12 +1210,12 @@ def single_user_weighted_inference_estimating_function(
         beta_index_by_policy_num,
     )
 
-    # 2. Get the start and end times for this user.
-    user_start_time = math.inf
-    user_end_time = -math.inf
+    # 2. Get the start and end times for this subject.
+    subject_start_time = math.inf
+    subject_end_time = -math.inf
     for decision_time in action_by_decision_time:
-        user_start_time = min(user_start_time, decision_time)
-        user_end_time = max(user_end_time, decision_time)
+        subject_start_time = min(subject_start_time, decision_time)
+        subject_end_time = max(subject_end_time, decision_time)
 
     # 3. Calculate the Radon-Nikodym weights for the inference estimating function.
     in_study_action_prob_func_args = [
@@ -1224,11 +1232,11 @@ def single_user_weighted_inference_estimating_function(
     )
 
     # Sort the threaded args by decision time to be cautious. We check if the
-    # user id is present in the user args dict because we may call this on a
-    # subset of the user arg dict when we are batching arguments by shape
+    # subject id is present in the subject args dict because we may call this on a
+    # subset of the subject arg dict when we are batching arguments by shape
     sorted_threaded_action_prob_args_by_decision_time = {
         decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
-        for decision_time in range(user_start_time, user_end_time + 1)
+        for decision_time in range(subject_start_time, subject_end_time + 1)
         if decision_time in threaded_action_prob_func_args_by_decision_time
     }
 
@@ -1287,12 +1295,12 @@ def single_user_weighted_inference_estimating_function(
     # 4. Form the weighted inference estimating equation.
     weighted_inference_estimating_function = jnp.prod(
         all_weights[
-            max(first_time_after_first_update, user_start_time)
-            - decision_time_to_all_weights_index_offset : user_end_time
+            max(first_time_after_first_update, subject_start_time)
+            - decision_time_to_all_weights_index_offset : subject_end_time
             + 1
             - decision_time_to_all_weights_index_offset,
         ]
-        # If the user exited the study before there were any updates,
+        # If the subject exited the study before there were any updates,
         # this variable will be None and the above code to grab a weight would
         # throw an error. Just use 1 to include the unweighted estimating function
         # if they have data to contribute here (pretty sure everyone should?)

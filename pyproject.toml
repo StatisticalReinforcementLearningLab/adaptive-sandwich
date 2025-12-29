@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lifejacket"
-version = "0.2.1"
-description = "A package for after-study analysis of adaptive experiments in which data is pooled across users."
+version = "1.0.0"
+description = "Consistent standard errors for longitudinal data collected under pooling online decision policies."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

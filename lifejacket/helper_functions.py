@@ -378,9 +378,11 @@ def confirm_input_check_result(message, suppress_interaction, error=None):
             print("\nPlease enter 'y' or 'n'.\n")
 
 
-def get_active_df_column(study_df, col_name, active_col_name):
+def get_active_df_column(analysis_df, col_name, active_col_name):
     return jnp.array(
-        study_df.loc[study_df[active_col_name] == 1, col_name].to_numpy().reshape(-1, 1)
+        analysis_df.loc[analysis_df[active_col_name] == 1, col_name]
+        .to_numpy()
+        .reshape(-1, 1)
     )
 
 
@@ -507,7 +509,7 @@ def calculate_beta_dim(
 
 
 def construct_beta_index_by_policy_num_map(
-    study_df: pd.DataFrame, policy_num_col_name: str, active_col_name: str
+    analysis_df: pd.DataFrame, policy_num_col_name: str, active_col_name: str
 ) -> tuple[dict[int | float, int], int | float]:
     """
     Constructs a mapping from non-initial, non-fallback policy numbers to the index of the
@@ -524,8 +526,9 @@ def construct_beta_index_by_policy_num_map(
     """
 
     unique_sorted_non_fallback_policy_nums = sorted(
-        study_df[
-            (study_df[policy_num_col_name] >= 0) & (study_df[active_col_name] == 1)
+        analysis_df[
+            (analysis_df[policy_num_col_name] >= 0)
+            & (analysis_df[active_col_name] == 1)
         ][policy_num_col_name]
         .unique()
         .tolist()
@@ -562,7 +565,7 @@ def collect_all_post_update_betas(
 
 
 def extract_action_and_policy_by_decision_time_by_subject_id(
-    study_df,
+    analysis_df,
     subject_id_col_name,
     active_col_name,
     calendar_t_col_name,
@@ -571,7 +574,7 @@ def extract_action_and_policy_by_decision_time_by_subject_id(
 ):
     action_by_decision_time_by_subject_id = {}
     policy_num_by_decision_time_by_subject_id = {}
-    for subject_id, subject_df in study_df.groupby(subject_id_col_name):
+    for subject_id, subject_df in analysis_df.groupby(subject_id_col_name):
         active_subject_df = subject_df[subject_df[active_col_name] == 1]
         action_by_decision_time_by_subject_id[subject_id] = dict(
             zip(

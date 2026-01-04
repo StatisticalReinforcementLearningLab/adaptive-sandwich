@@ -27,7 +27,7 @@ lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-monitor_bread_inverse_conditioning_and_intervene=0
+monitor_bread_conditioning_and_intervene=0
 
 # Arguments that only affect inference side.
 active_col_name="in_study"
@@ -54,7 +54,7 @@ suppress_all_data_checks=0
 small_sample_correction="none"
 collect_data_for_blowup_supervised_learning=0
 form_adjusted_meat_adjustments_explicitly=0
-stabilize_joint_adjusted_bread_inverse=0
+stabilize_joint_bread=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -108,8 +108,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     z  | small_sample_correction )                          needs_arg; small_sample_correction="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )      needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     K  | form_adjusted_meat_adjustments_explicitly )        needs_arg; form_adjusted_meat_adjustments_explicitly="$OPTARG" ;;
-    m  | stabilize_joint_adjusted_bread_inverse )           needs_arg; stabilize_joint_adjusted_bread_inverse="$OPTARG" ;;
-    N  | monitor_bread_inverse_conditioning_and_intervene ) needs_arg; monitor_bread_inverse_conditioning_and_intervene="$OPTARG" ;;
+    m  | stabilize_joint_bread )           needs_arg; stabilize_joint_bread="$OPTARG" ;;
+    N  | monitor_bread_conditioning_and_intervene ) needs_arg; monitor_bread_conditioning_and_intervene="$OPTARG" ;;
     w  | collect_args_to_reconstruct_action_probs )         needs_arg; collect_args_to_reconstruct_action_probs="$OPTARG" ;;
     W  | alg_update_func_args_previous_betas_index )        needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
@@ -154,7 +154,7 @@ python rl_study_simulation.py \
   --lower_clip=$lclip \
   --lambda_=$lambda_ \
   --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs \
-  --monitor_bread_inverse_conditioning_and_intervene=$monitor_bread_inverse_conditioning_and_intervene
+  --monitor_bread_conditioning_and_intervene=$monitor_bread_conditioning_and_intervene
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
@@ -163,7 +163,7 @@ output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=$
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Beginning after-study analysis."
-python -m lifejacket.after_study_analysis analyze \
+lifejacket analyze \
   --analysis_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
@@ -191,7 +191,7 @@ python -m lifejacket.after_study_analysis analyze \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --form_adjusted_meat_adjustments_explicitly=$form_adjusted_meat_adjustments_explicitly \
-  --stabilize_joint_adjusted_bread_inverse=$stabilize_joint_adjusted_bread_inverse
+  --stabilize_joint_bread=$stabilize_joint_bread
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Ending after-study analysis."
 

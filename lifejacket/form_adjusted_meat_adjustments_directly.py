@@ -21,7 +21,7 @@ logging.basicConfig(
 def form_adjusted_meat_adjustments_directly(
     theta_dim: int,
     beta_dim: int,
-    joint_adaptive_bread_inverse_matrix: jnp.ndarray,
+    joint_bread_matrix: jnp.ndarray,
     per_user_estimating_function_stacks: jnp.ndarray,
     study_df: pd.DataFrame,
     active_col_name: str,
@@ -38,18 +38,16 @@ def form_adjusted_meat_adjustments_directly(
     action_prob_col_name: str,
 ) -> jnp.ndarray:
     logger.info(
-        "Explicitly forming the per-user meat adjustments that differentiate the adaptive sandwich from the classical sandwich."
+        "Explicitly forming the per-user meat adjustments that differentiate the adjusted sandwich from the classical sandwich."
     )
 
     # 1. Form the M-matrices, which are shared across users.
     # This is not quite the paper definition of the M-matrices, which
     # includes multiplication by the classical bread.  We don't care about
     # that here, since in forming the adjustments there is a multiplication
-    # by the classical bread inverse that cancels it out.
-    V_blocks_together = joint_adaptive_bread_inverse_matrix[-theta_dim:, :-theta_dim]
-    RL_stack_beta_derivatives_block = joint_adaptive_bread_inverse_matrix[
-        :-theta_dim, :-theta_dim
-    ]
+    # by the classical bread that cancels it out.
+    V_blocks_together = joint_bread_matrix[-theta_dim:, :-theta_dim]
+    RL_stack_beta_derivatives_block = joint_bread_matrix[:-theta_dim, :-theta_dim]
     effective_M_blocks_together = np.linalg.solve(
         RL_stack_beta_derivatives_block.T, V_blocks_together.T
     ).T
@@ -89,17 +87,17 @@ def form_adjusted_meat_adjustments_directly(
     # be added to each users inference estimating function before an outer product is taken with
     # itself to get each users's contributioan theta-only meat matrix).
     # Result is shape (num_users, theta_dim).
-    # Form the per-user adaptive meat adjustments explicitly for diagnostic purposes.
+    # Form the per-user adjusted meat adjustments explicitly for diagnostic purposes.
     per_user_meat_adjustments_stacked = np.einsum(
         "utb,nub->nt", M_blocks_stacked, per_user_RL_only_est_fns_stacked
     )
 
-    # Log some diagnostics about the pieces going into the adaptive meat adjustments
+    # Log some diagnostics about the pieces going into the adjusted meat adjustments
     # and the adjustments themselves.
     V_blocks = np.split(
         V_blocks_together, V_blocks_together.shape[1] // beta_dim, axis=1
     )
-    logger.info("Examining adaptive meat adjustments.")
+    logger.info("Examining adjusted meat adjustments.")
     # No scientific notation
     np.set_printoptions(suppress=True)
 
@@ -118,11 +116,11 @@ def form_adjusted_meat_adjustments_directly(
     )
 
     logger.debug(
-        "Per-user adaptive meat adjustments, to be added to inference estimating functions before forming the meat. Formed from the sum of the products of the M-blocks and the corresponding RL update estimating functions for each user: %s",
+        "Per-user adjusted meat adjustments, to be added to inference estimating functions before forming the meat. Formed from the sum of the products of the M-blocks and the corresponding RL update estimating functions for each user: %s",
         per_user_meat_adjustments_stacked,
     )
     logger.debug(
-        "Norms of per-user adaptive meat adjustments: %s",
+        "Norms of per-user adjusted meat adjustments: %s",
         np.linalg.norm(per_user_meat_adjustments_stacked, axis=1),
     )
 
@@ -148,10 +146,10 @@ def form_adjusted_meat_adjustments_directly(
 
     logger.debug(
         "M_blocks, one per update, each shape theta_dim x beta_dim. The sum of the products "
-        "of each of these times a user's corresponding RL estimating function forms their adaptive "
+        "of each of these times a user's corresponding RL estimating function forms their adjusted "
         "adjustment. The M's are the blocks of the the product of the V's concatened and the inverse of "
-        "the RL-only upper-left block of the joint adaptive bread inverse. In other words, the lower "
-        "left block of the joint adaptive bread. Also note that the inference estimating function "
+        "the RL-only upper-left block of the joint bread. In other words, the lower "
+        "left block of the joint bread. Also note that the inference estimating function "
         "derivative inverse is omitted here despite the definition of the M's in the paper, because "
         "that factor simply cancels later: %s",
         M_blocks_stacked,
@@ -159,11 +157,11 @@ def form_adjusted_meat_adjustments_directly(
     logger.debug("Norms of M-blocks: %s", np.linalg.norm(M_blocks_stacked, axis=(1, 2)))
 
     logger.debug(
-        "RL block of joint adaptive bread inverse. The *inverse* of this goes into the M's: %s",
+        "RL block of joint bread. The *inverse* of this goes into the M's: %s",
         RL_stack_beta_derivatives_block,
     )
     logger.debug(
-        "Norm of RL block of joint adaptive bread inverse: %s",
+        "Norm of RL block of joint bread: %s",
         np.linalg.norm(RL_stack_beta_derivatives_block),
     )
 
@@ -171,11 +169,11 @@ def form_adjusted_meat_adjustments_directly(
         RL_stack_beta_derivatives_block
     )
     logger.debug(
-        "Inverse of RL block of joint adaptive bread inverse. This goes into the M's: %s",
+        "Inverse of RL block of joint bread. This goes into the M's: %s",
         inverse_RL_stack_beta_derivatives_block,
     )
     logger.debug(
-        "Norm of Inverse of RL block of joint adaptive bread inverse: %s",
+        "Norm of Inverse of RL block of joint bread: %s",
         np.linalg.norm(inverse_RL_stack_beta_derivatives_block),
     )
 
@@ -230,17 +228,17 @@ def form_adjusted_meat_adjustments_directly(
         per_user_meat_adjustments_stacked
         + per_user_inference_estimating_functions_stacked
     )
-    per_user_theta_only_adaptive_meat_contributions = jnp.einsum(
+    per_user_theta_only_adjusted_meat_contributions = jnp.einsum(
         "ni,nj->nij",
         per_user_adjusted_inference_estimating_functions_stacked,
         per_user_adjusted_inference_estimating_functions_stacked,
     )
-    adaptive_theta_only_meat_matrix = jnp.mean(
-        per_user_theta_only_adaptive_meat_contributions, axis=0
+    adjusted_theta_only_meat_matrix = jnp.mean(
+        per_user_theta_only_adjusted_meat_contributions, axis=0
     )
     logger.info(
-        "Theta-only adaptive meat matrix (no small sample corrections): %s",
-        adaptive_theta_only_meat_matrix,
+        "Theta-only adjusted meat matrix (no small sample corrections): %s",
+        adjusted_theta_only_meat_matrix,
     )
     classical_theta_only_meat_matrix = jnp.mean(
         jnp.einsum(
@@ -311,7 +309,7 @@ def form_adjusted_meat_adjustments_directly(
     # much or being too opinionated about what to log.
     breakpoint()
 
-    # # Visualize the inverse RL block of joint adaptive bread inverse using seaborn heatmap
+    # # Visualize the inverse RL block of joint bread using seaborn heatmap
     # pyplt.figure(figsize=(8, 6))
     # sns.heatmap(inverse_RL_stack_beta_derivatives_block, annot=False, cmap="viridis")
     # pyplt.title("Inverse RL Block of Joint Adaptive Bread Inverse")
@@ -320,7 +318,7 @@ def form_adjusted_meat_adjustments_directly(
     # pyplt.tight_layout()
     # pyplt.show()
 
-    # # # Visualize the RL block of joint adaptive bread inverse using seaborn heatmap
+    # # # Visualize the RL block of joint bread using seaborn heatmap
 
     # pyplt.figure(figsize=(8, 6))
     # sns.heatmap(RL_stack_beta_derivatives_block, annot=False, cmap="viridis")
@@ -330,4 +328,4 @@ def form_adjusted_meat_adjustments_directly(
     # pyplt.tight_layout()
     # pyplt.show()
 
-    return per_user_theta_only_adaptive_meat_contributions
+    return per_user_theta_only_adjusted_meat_contributions

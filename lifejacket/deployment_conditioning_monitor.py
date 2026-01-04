@@ -35,6 +35,12 @@ logging.basicConfig(
 
 
 class DeploymentConditioningMonitor:
+    """
+    Experimental feature.  Monitors the conditioning of the RL portion of the bread matrix.
+    Repeats more logic from post_deployment_analysis.py than is ideal, but this is for experimental use only.
+    Unit tests should be unskipped and expanded if this is to be used more broadly.
+    """
+
     whole_RL_block_conditioning_threshold = None
     diagonal_RL_block_conditioning_threshold = None
 
@@ -76,7 +82,7 @@ class DeploymentConditioningMonitor:
         incremental: bool = True,
     ) -> None:
         """
-        Analyzes a dataset to estimate parameters and variance using adaptive and classical sandwich estimators.
+        Analyzes a dataset to estimate parameters and variance using adjusted and classical sandwich estimators.
 
         Parameters:
         proposed_policy_num (int | float):
@@ -124,13 +130,13 @@ class DeploymentConditioningMonitor:
         small_sample_correction (str):
             Type of small sample correction to apply.
         collect_data_for_blowup_supervised_learning (bool):
-            Whether to collect data for doing supervised learning about adaptive sandwich blowup.
+            Whether to collect data for doing supervised learning about adjusted sandwich blowup.
         form_adjusted_meat_adjustments_explicitly (bool):
-            If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive
+            If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
-            adaptive sandwich is formed without doing this.
-        stabilize_joint_adjusted_bread_inverse (bool):
-            If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning
+            adjusted sandwich is formed without doing this.
+        stabilize_joint_bread (bool):
+            If True, stabilizes the joint bread matrix if it does not meet conditioning
             thresholds.
 
         Returns:
@@ -157,6 +163,7 @@ class DeploymentConditioningMonitor:
                 alg_update_func_args_beta_index,
                 alg_update_func_args_action_prob_index,
                 alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
                 suppress_interactive_data_checks,
             )
 
@@ -230,7 +237,7 @@ class DeploymentConditioningMonitor:
 
         if whole_RL_block_condition_number > self.whole_RL_block_conditioning_threshold:
             logger.warning(
-                "The RL portion of the bread inverse up to this point exceeds the threshold set (condition number: %s, threshold: %s). Consider an alternative update strategy which produces less dependence on previous RL parameters (via the data they produced) and/or improves the conditioning of each update itself.  Regularization may help with both of these.",
+                "The RL portion of the bread up to this point exceeds the threshold set (condition number: %s, threshold: %s). Consider an alternative update strategy which produces less dependence on previous RL parameters (via the data they produced) and/or improves the conditioning of each update itself.  Regularization may help with both of these.",
                 whole_RL_block_condition_number,
                 self.whole_RL_block_conditioning_threshold,
             )
@@ -241,7 +248,7 @@ class DeploymentConditioningMonitor:
             > self.diagonal_RL_block_conditioning_threshold
         ):
             logger.warning(
-                "The diagonal RL block of the bread inverse up to this point exceeds the threshold set (condition number: %s, threshold: %s). This may illustrate a fundamental problem with the conditioning of the RL update procedure.",
+                "The diagonal RL block of the bread up to this point exceeds the threshold set (condition number: %s, threshold: %s). This may illustrate a fundamental problem with the conditioning of the RL update procedure.",
                 new_diagonal_RL_block_condition_number,
                 self.diagonal_RL_block_conditioning_threshold,
             )
@@ -295,11 +302,11 @@ class DeploymentConditioningMonitor:
         jnp.ndarray[jnp.float32],
     ]:
         """
-        Constructs the classical and adaptive inverse bread and meat matrices, as well as the average
+        Constructs the classical and bread and meat matrices, as well as the average
         estimating function stack and some other intermediate pieces.
 
         This is done by computing and differentiating the average weighted estimating function stack
-        with respect to the betas and theta, using the resulting Jacobian to compute the inverse bread
+        with respect to the betas and theta, using the resulting Jacobian to compute the bread
         and meat matrices, and then stably computing sandwiches.
 
         Args:
@@ -471,7 +478,7 @@ class DeploymentConditioningMonitor:
     ]:
         """
         Computes the average weighted estimating function stack across all subjects, along with
-        auxiliary values used to construct the adaptive and classical sandwich variances.
+        auxiliary values used to construct the adjusted and classical sandwich variances.
 
         If only_latest_block is True, only uses data from the most recent update.
 
@@ -614,7 +621,7 @@ class DeploymentConditioningMonitor:
             )
 
         # 5. Now we can compute the weighted estimating function stacks for all subjects
-        # as well as collect related values used to construct the adaptive and classical
+        # as well as collect related values used to construct the adjusted and classical
         # sandwich variances.
         RL_stacks = jnp.array(
             [

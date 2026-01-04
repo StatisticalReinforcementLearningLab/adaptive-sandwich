@@ -133,7 +133,7 @@ class SigmoidLS:
         self.incremental_updates = True
         self.smooth_clip = smooth_clip
 
-        # These are used for passing to a after-study-analysis bread inverse conditioning
+        # These are used for passing to a after-study-analysis bread conditioning
         # monitor if desired
         self.action_prob_func = (
             synthetic_get_action_1_prob_generalized_logistic

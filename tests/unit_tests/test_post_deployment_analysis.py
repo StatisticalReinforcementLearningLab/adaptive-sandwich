@@ -29,7 +29,7 @@ from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_sq
     synthetic_get_least_squares_estimating_function_inference_no_action_centering,
 )
 
-from lifejacket import after_study_analysis
+from lifejacket import post_deployment_analysis
 from lifejacket.constants import FunctionTypes
 from lifejacket.arg_threading_helpers import replace_tuple_index
 
@@ -128,7 +128,7 @@ def setup_data_two_loss_functions_no_action_probs():
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -233,35 +233,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     alg_estimating_func = synthetic_get_least_squares_estimating_function_rl
@@ -471,7 +469,7 @@ def setup_data_two_estimating_functions_no_action_probs():
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_estimating_function_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -553,35 +551,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     alg_estimating_func = synthetic_get_least_squares_estimating_function_rl
@@ -788,7 +784,7 @@ def setup_data_two_loss_functions_no_action_probs_different_betas():
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -883,35 +879,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     # Quite odd that it complains about ints here and not in the real function... but alas.
@@ -928,7 +922,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -948,7 +942,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[1],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -961,7 +955,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -981,7 +975,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[2],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -994,7 +988,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1007,7 +1001,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1028,7 +1022,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1041,7 +1035,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1054,7 +1048,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1067,7 +1061,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1099,7 +1093,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1119,7 +1113,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[1],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1132,7 +1126,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1152,7 +1146,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[2],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1165,7 +1159,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1178,7 +1172,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1199,7 +1193,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1212,7 +1206,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1225,7 +1219,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1238,7 +1232,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1393,7 +1387,7 @@ def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -1486,35 +1480,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     # Quite odd that it complains about ints here and not in the real function... but alas.
@@ -1530,7 +1522,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             np.zeros(4),
             # Finally, a contribution to the fourth policy (index 2 in post-update policy list),
             # where the first policy the user used was the third policy (index 1)
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1550,7 +1542,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[2],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1563,7 +1555,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1584,7 +1576,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1597,7 +1589,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1610,7 +1602,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][1][
                     action_prob_func_args_beta_index
                 ],
@@ -1642,7 +1634,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1662,7 +1654,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[1],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1675,7 +1667,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1695,7 +1687,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[2],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1708,7 +1700,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1721,7 +1713,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1742,7 +1734,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1755,7 +1747,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1769,7 +1761,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
                 ),
             )
             # No weight from time 5 because out of study
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -1911,7 +1903,7 @@ def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_upd
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_loss_inference_no_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -2006,35 +1998,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     # Quite odd that it complains about ints here and not in the real function... but alas.
@@ -2051,7 +2041,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2064,7 +2054,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2085,7 +2075,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2098,7 +2088,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2111,7 +2101,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2143,7 +2133,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2156,7 +2146,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2177,7 +2167,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2190,7 +2180,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2203,7 +2193,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2366,7 +2356,7 @@ def setup_data_two_loss_functions_use_action_probs_both_sides():
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_loss_inference_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -2459,35 +2449,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     # Quite odd that it complains about ints here and not in the real function... but alas.
@@ -2573,7 +2561,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     jnp.array(reconstructed_action_probs[1][:1]).reshape(-1, 1),
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2597,7 +2585,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     jnp.array(reconstructed_action_probs[1][:2]).reshape(-1, 1),
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2610,7 +2598,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2634,7 +2622,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     jnp.array(reconstructed_action_probs[1][:3]).reshape(-1, 1),
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2647,7 +2635,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2660,7 +2648,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2685,7 +2673,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2698,7 +2686,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2711,7 +2699,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2724,7 +2712,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][1][
                     action_prob_func_args_beta_index
                 ],
@@ -2764,7 +2752,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     jnp.array(reconstructed_action_probs[2][:1]).reshape(-1, 1),
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2788,7 +2776,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     jnp.array(reconstructed_action_probs[2][:2]).reshape(-1, 1),
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2801,7 +2789,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2825,7 +2813,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     jnp.array(reconstructed_action_probs[2][:3]).reshape(-1, 1),
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2838,7 +2826,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2851,7 +2839,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2876,7 +2864,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2889,7 +2877,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2902,7 +2890,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -2915,7 +2903,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3108,7 +3096,7 @@ def setup_data_two_loss_functions_use_action_probs_from_betas_RL_action_probs_in
         inference_func_args_by_user_id,
         inference_func_args_action_prob_index,
         inference_action_prob_decision_times_by_user_id,
-    ) = after_study_analysis.process_inference_func_args(
+    ) = post_deployment_analysis.process_inference_func_args(
         synthetic_get_least_squares_loss_inference_action_centering,
         inference_func_args_theta_index,
         study_df,
@@ -3201,35 +3189,33 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
 
     user_ids = jnp.array([1, 2])
 
-    result = (
-        after_study_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
-            after_study_analysis.flatten_params(all_post_update_betas, theta),
-            all_post_update_betas.shape[1],
-            theta.shape[0],
-            user_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_user_id_by_decision_time,
-            policy_num_by_decision_time_by_user_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_user_id,
-            inference_action_prob_decision_times_by_user_id,
-            update_func_args_by_by_user_id_by_policy_num,
-            action_by_decision_time_by_user_id,
-            True,
-            True,
-        )
+    result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
     )
 
     # Quite odd that it complains about ints here and not in the real function... but alas.
@@ -3315,7 +3301,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[:0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3339,7 +3325,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[:1],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3352,7 +3338,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3376,7 +3362,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[:2],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3389,7 +3375,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3402,7 +3388,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3427,7 +3413,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3440,7 +3426,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3453,7 +3439,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3466,7 +3452,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][1][
                     action_prob_func_args_beta_index
                 ],
@@ -3506,7 +3492,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[:0],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3530,7 +3516,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[:1],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3543,7 +3529,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3567,7 +3553,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[:2],
                 )
             ),
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3580,7 +3566,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3593,7 +3579,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3618,7 +3604,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                 )
             ),
             # Weighted theta estimating function value
-            after_study_analysis.get_radon_nikodym_weight(
+            post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[2][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3631,7 +3617,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[0],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[3][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3644,7 +3630,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[1],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[4][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3657,7 +3643,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
                     all_post_update_betas[2],
                 ),
             )
-            * after_study_analysis.get_radon_nikodym_weight(
+            * post_deployment_analysis.get_radon_nikodym_weight(
                 action_prob_func_args_by_user_id_by_decision_time[5][2][
                     action_prob_func_args_beta_index
                 ],
@@ -3733,7 +3719,7 @@ def test_get_radon_nikodym_weight():
 
     expected_result = expected_numerator / expected_denominator
 
-    result = after_study_analysis.get_radon_nikodym_weight(
+    result = post_deployment_analysis.get_radon_nikodym_weight(
         beta_target,
         mock_action_prob_func,
         action_prob_func_args_beta_index,
@@ -3763,7 +3749,7 @@ def test_get_radon_nikodym_weight_action_0():
     )
 
     expected_result = (1 - expected_numerator) / (1 - expected_denominator)
-    result = after_study_analysis.get_radon_nikodym_weight(
+    result = post_deployment_analysis.get_radon_nikodym_weight(
         beta_target,
         mock_action_prob_func,
         action_prob_func_args_beta_index,
@@ -3785,7 +3771,7 @@ def test_get_radon_nikodym_weight_same_beta():
 
     expected_result = 1
 
-    result = after_study_analysis.get_radon_nikodym_weight(
+    result = post_deployment_analysis.get_radon_nikodym_weight(
         beta_target,
         mock_action_prob_func,
         action_prob_func_args_beta_index,

@@ -18,8 +18,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# TODO: Consolidate function loading logic
-
 
 def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_user_id):
     """

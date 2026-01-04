@@ -77,13 +77,13 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "theta_est",
             "adjusted_sandwich_var_estimate",
             "classical_sandwich_var_estimate",
-            "raw_joint_bread_inverse_matrix",
-            "stabilized_joint_bread_inverse_matrix",
+            "raw_joint_bread_matrix",
+            "stabilized_joint_bread_matrix",
             "joint_meat_matrix",
-            "classical_bread_inverse_matrix",
+            "classical_bread_matrix",
             "classical_meat_matrix",
             "all_estimating_function_stacks",
-            "joint_bread_inverse_condition_number",
+            "joint_bread_condition_number",
             "all_post_update_betas",
             "per_subject_adjusted_corrections",
             "per_subject_classical_corrections",
@@ -95,15 +95,16 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             observed_keys == expected_debug_keys
         ), f"The observed debug pieces dict does not have the expected keys: {observed_keys} vs. {expected_debug_keys}"
 
-        ### Check joint meat and bread inverse, uniting RL and inference
+        ### Check joint meat and bread, uniting RL and inference
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_meat_matrix"],
             expected_debug_pieces_dict["joint_meat_matrix"],
             rtol=6e-4,
         )
-
         np.testing.assert_allclose(
-            observed_debug_pieces_dict["raw_joint_bread_inverse_matrix"],
+            observed_debug_pieces_dict["raw_joint_bread_matrix"],
+            # This is confusing, but we flipped terminology on bread vs
+            # bread inverse at some point.
             expected_debug_pieces_dict["joint_bread_inverse_matrix"],
             atol=1e-5,
         )
@@ -111,6 +112,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         ### Check final results
         np.testing.assert_allclose(
             observed_analysis_dict["adjusted_sandwich_var_estimate"],
+            # Note we removed the adaptive sandwich terminology at some point
             expected_analysis_dict["adaptive_sandwich_var_estimate"],
             atol=1e-8,
         )

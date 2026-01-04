@@ -579,10 +579,10 @@ def main():
     )
 
     parser.add_argument(
-        "--monitor_bread_inverse_conditioning_and_intervene",
+        "--monitor_bread_conditioning_and_intervene",
         type=int,
         default=0,
-        help="Whether to monitor bread inverse conditioning and intervene if necessary. This is to facilitate after-study analysis.",
+        help="Whether to monitor bread conditioning and intervene if necessary. This is to facilitate after-study analysis.",
     )
 
     args = parser.parse_args()

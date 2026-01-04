@@ -217,9 +217,9 @@ def cli():
     type=click.Choice(
         [
             SmallSampleCorrections.NONE,
-            SmallSampleCorrections.HC1theta,
-            SmallSampleCorrections.HC2theta,
-            SmallSampleCorrections.HC3theta,
+            SmallSampleCorrections.Z1theta,
+            SmallSampleCorrections.Z2theta,
+            SmallSampleCorrections.Z3theta,
         ]
     ),
     default=SmallSampleCorrections.NONE,
@@ -235,13 +235,13 @@ def cli():
     "--form_adjusted_meat_adjustments_explicitly",
     type=bool,
     default=False,
-    help="If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive sandwich from the classical sandwich. This is for diagnostic purposes, as the adaptive sandwich is formed without doing this.",
+    help="If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted sandwich from the classical sandwich. This is for diagnostic purposes, as the adjusted sandwich is formed without doing this.",
 )
 @click.option(
-    "--stabilize_joint_adjusted_bread_inverse",
+    "--stabilize_joint_bread",
     type=bool,
     default=True,
-    help="If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning thresholds.",
+    help="If True, stabilizes the joint bread matrix if it does not meet conditioning thresholds.",
 )
 def analyze_dataset_wrapper(**kwargs):
     """
@@ -324,15 +324,15 @@ def analyze_dataset(
     small_sample_correction: str,
     collect_data_for_blowup_supervised_learning: bool,
     form_adjusted_meat_adjustments_explicitly: bool,
-    stabilize_joint_adjusted_bread_inverse: bool,
+    stabilize_joint_bread: bool,
 ) -> None:
     """
-    Analyzes a dataset to provide a parameter estimate and an estimate of its variance using adaptive and classical sandwich estimators.
+    Analyzes a dataset to provide a parameter estimate and an estimate of its variance using  and classical sandwich estimators.
 
     There are two modes of use for this function.
 
     First, it may be called indirectly from the command line by passing through
-    analyze_dataset.
+    analyze_dataset_wrapper.
 
     Second, it may be called directly from Python code with in-memory objects.
 
@@ -388,17 +388,17 @@ def analyze_dataset(
     small_sample_correction (str):
         Type of small sample correction to apply.
     collect_data_for_blowup_supervised_learning (bool):
-        Whether to collect data for doing supervised learning about adaptive sandwich blowup.
+        Whether to collect data for doing supervised learning about adjusted sandwich blowup.
     form_adjusted_meat_adjustments_explicitly (bool):
-        If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive
+        If True, explicitly forms the per-subject meat adjustments that differentiate the
         sandwich from the classical sandwich. This is for diagnostic purposes, as the
-        adaptive sandwich is formed without doing this.
-    stabilize_joint_adjusted_bread_inverse (bool):
-        If True, stabilizes the joint adaptive bread inverse matrix if it does not meet conditioning
+        adjusted sandwich is formed without doing this.
+    stabilize_joint_bread (bool):
+        If True, stabilizes the joint bread matrix if it does not meet conditioning
         thresholds.
 
     Returns:
-    dict: A dictionary containing the theta estimate, adaptive sandwich variance estimate, and
+    dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
     classical sandwich variance estimate.
     """
 
@@ -438,7 +438,6 @@ def analyze_dataset(
         )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
-
     beta_index_by_policy_num, initial_policy_num = (
         construct_beta_index_by_policy_num_map(
             analysis_df, policy_num_col_name, active_col_name
@@ -475,20 +474,20 @@ def analyze_dataset(
         active_col_name,
     )
 
-    # Use a per-subject weighted estimating function stacking functino to derive classical and joint
-    # adaptive meat and inverse bread matrices.  This is facilitated because the *value* of the
+    # Use a per-subject weighted estimating function stacking function to derive classical and joint
+    # meat and bread matrices.  This is facilitated because the *value* of the
     # weighted and unweighted stacks are the same, as the weights evaluate to 1 pre-differentiation.
     logger.info(
-        "Constructing joint adaptive bread inverse matrix, joint adaptive meat matrix, the classical analogs, and the avg estimating function stack across subjects."
+        "Constructing joint bread matrix, joint meat matrix, the classical analogs, and the avg estimating function stack across subjects."
     )
 
     subject_ids = jnp.array(analysis_df[subject_id_col_name].unique())
     (
-        stabilized_joint_adjusted_bread_inverse_matrix,
-        raw_joint_adjusted_bread_inverse_matrix,
+        stabilized_joint_adjusted_bread_matrix,
+        raw_joint_adjusted_bread_matrix,
         joint_adjusted_meat_matrix,
         joint_adjusted_sandwich_matrix,
-        classical_bread_inverse_matrix,
+        classical_bread_matrix,
         classical_meat_matrix,
         classical_sandwich_var_estimate,
         avg_estimating_function_stack,
@@ -524,7 +523,7 @@ def analyze_dataset(
         suppress_interactive_data_checks,
         small_sample_correction,
         form_adjusted_meat_adjustments_explicitly,
-        stabilize_joint_adjusted_bread_inverse,
+        stabilize_joint_bread,
         analysis_df,
         active_col_name,
         action_col_name,
@@ -550,17 +549,16 @@ def analyze_dataset(
     ]
 
     # Check for negative diagonal elements and set them to zero if found
-    adaptive_diagonal = np.diag(adjusted_sandwich_var_estimate)
-    if np.any(adaptive_diagonal < 0):
+    adjusted_diagonal = np.diag(adjusted_sandwich_var_estimate)
+    if np.any(adjusted_diagonal < 0):
         logger.warning(
-            "Found negative diagonal elements in adaptive sandwich variance estimate. Setting them to zero."
+            "Found negative diagonal elements in adjusted sandwich variance estimate. Setting them to zero."
         )
         np.fill_diagonal(
-            adjusted_sandwich_var_estimate, np.maximum(adaptive_diagonal, 0)
+            adjusted_sandwich_var_estimate, np.maximum(adjusted_diagonal, 0)
         )
 
     logger.info("Writing results to file...")
-    # Write analysis results to same directory that input files are in
     output_folder_abs_path = pathlib.Path(output_dir).resolve()
 
     analysis_dict = {
@@ -574,25 +572,23 @@ def analyze_dataset(
             f,
         )
 
-    joint_adjusted_bread_inverse_cond = jnp.linalg.cond(
-        raw_joint_adjusted_bread_inverse_matrix
-    )
+    joint_adjusted_bread_cond = jnp.linalg.cond(raw_joint_adjusted_bread_matrix)
     logger.info(
-        "Joint adjusted bread inverse condition number: %f",
-        joint_adjusted_bread_inverse_cond,
+        "Joint adjusted bread condition number: %f",
+        joint_adjusted_bread_cond,
     )
 
     debug_pieces_dict = {
         "theta_est": theta_est,
         "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-        "raw_joint_bread_inverse_matrix": raw_joint_adjusted_bread_inverse_matrix,
-        "stabilized_joint_bread_inverse_matrix": stabilized_joint_adjusted_bread_inverse_matrix,
+        "raw_joint_bread_matrix": raw_joint_adjusted_bread_matrix,
+        "stabilized_joint_bread_matrix": stabilized_joint_adjusted_bread_matrix,
         "joint_meat_matrix": joint_adjusted_meat_matrix,
-        "classical_bread_inverse_matrix": classical_bread_inverse_matrix,
+        "classical_bread_matrix": classical_bread_matrix,
         "classical_meat_matrix": classical_meat_matrix,
         "all_estimating_function_stacks": per_subject_estimating_function_stacks,
-        "joint_bread_inverse_condition_number": joint_adjusted_bread_inverse_cond,
+        "joint_bread_condition_number": joint_adjusted_bread_cond,
         "all_post_update_betas": all_post_update_betas,
         "per_subject_adjusted_corrections": per_subject_adjusted_corrections,
         "per_subject_classical_corrections": per_subject_classical_corrections,
@@ -606,8 +602,8 @@ def analyze_dataset(
 
     if collect_data_for_blowup_supervised_learning:
         datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
-            raw_joint_adjusted_bread_inverse_matrix,
-            joint_adjusted_bread_inverse_cond,
+            raw_joint_adjusted_bread_matrix,
+            joint_adjusted_bread_cond,
             avg_estimating_function_stack,
             per_subject_estimating_function_stacks,
             all_post_update_betas,
@@ -824,7 +820,7 @@ def single_subject_weighted_estimating_function_stacker(
     Returns:
         jnp.ndarray: A 1-D JAX NumPy array representing the subject's weighted estimating function
             stack.
-        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's adaptive meat contribution.
+        jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's adjusted meat contribution.
         jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical meat contribution.
         jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical bread contribution.
     """
@@ -1008,10 +1004,10 @@ def single_subject_weighted_estimating_function_stacker(
 
     # 6. Return the following outputs:
     # a. The first is simply the weighted estimating function stack for this subject. The average
-    # of these is what we differentiate with respect to theta to form the inverse adaptive joint
+    # of these is what we differentiate with respect to theta to form the joint
     # bread matrix, and we also compare that average to zero to check the estimating functions'
     # fidelity.
-    # b. The average outer product of these per-subject stacks across subjects is the adaptive joint meat
+    # b. The average outer product of these per-subject stacks across subjects is the adjusted joint meat
     # matrix, hence the second output.
     # c. The third output is averaged across subjects to obtain the classical meat matrix.
     # d. The fourth output is averaged across subjects to obtain the inverse classical bread
@@ -1068,7 +1064,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
 ]:
     """
     Computes the average weighted estimating function stack across all subjects, along with
-    auxiliary values used to construct the adaptive and classical sandwich variances.
+    auxiliary values used to construct the adjusted and classical sandwich variances.
 
     Args:
         flattened_betas_and_theta (jnp.ndarray):
@@ -1144,7 +1140,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing
             1. the average weighted estimating function stack
-            2. the subject-level adaptive meat matrix contributions
+            2. the subject-level adjusted meat matrix contributions
             3. the subject-level classical meat matrix contributions
             4. the subject-level inverse classical bread matrix contributions
             5. raw per-subject weighted estimating function
@@ -1248,7 +1244,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         )
 
     # 5. Now we can compute the weighted estimating function stacks for all subjects
-    # as well as collect related values used to construct the adaptive and classical
+    # as well as collect related values used to construct the adjusted and classical
     # sandwich variances.
     results = [
         single_subject_weighted_estimating_function_stacker(
@@ -1277,10 +1273,11 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
 
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
-    # for the adaptive meat matrix, estimating functions sum check, and classical meat and inverse
-    # bread matrices. The raw per-subject stacks are also returned for debugging purposes.
+    # for the estimating functions sum check, per_subject_classical_bread_contributions, and
+    # classical meat and inverse read matrices. The raw per-subject stacks are also returned for
+    # debugging purposes.
 
-    # Note that returning the raw stacks here as the first arguments is potentially
+    # Note that returning the raw stacks here as the first argument is potentially
     # memory-intensive when combined with differentiation. Keep this in mind if the per-subject bread
     # inverse contributions are needed for something like CR2/CR3 small-sample corrections.
     return jnp.mean(stacks, axis=0), (
@@ -1330,7 +1327,7 @@ def construct_classical_and_adjusted_sandwiches(
     suppress_interactive_data_checks: bool,
     small_sample_correction: str,
     form_adjusted_meat_adjustments_explicitly: bool,
-    stabilize_joint_adjusted_bread_inverse: bool,
+    stabilize_joint_bread: bool,
     analysis_df: pd.DataFrame | None,
     active_col_name: str | None,
     action_col_name: str | None,
@@ -1352,11 +1349,11 @@ def construct_classical_and_adjusted_sandwiches(
     jnp.ndarray[jnp.float32],
 ]:
     """
-    Constructs the classical and adaptive sandwich matrices, as well as various
+    Constructs the classical and adjusted sandwich matrices, as well as various
     intermediate pieces in their consruction.
 
     This is done by computing and differentiating the average weighted estimating function stack
-    with respect to the betas and theta, using the resulting Jacobian to compute the inverse bread
+    with respect to the betas and theta, using the resulting Jacobian to compute the bread
     and meat matrices, and then stably computing sandwiches.
 
     Args:
@@ -1426,13 +1423,13 @@ def construct_classical_and_adjusted_sandwiches(
             The type of small sample correction to apply. See SmallSampleCorrections class for
             options.
         form_adjusted_meat_adjustments_explicitly (bool):
-            If True, explicitly forms the per-subject meat adjustments that differentiate the adaptive
+            If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
-            adaptive sandwich is formed without doing this.
-        stabilize_joint_adjusted_bread_inverse (bool):
-            If True, will apply various techniques to stabilize the joint adaptive bread inverse if necessary.
+            adjusted sandwich is formed without doing this.
+        stabilize_joint_bread (bool):
+            If True, will apply various techniques to stabilize the joint bread if necessary.
         analysis_df (pd.DataFrame):
-            The full analysis dataframe, needed if forming the adaptive meat adjustments explicitly.
+            The full analysis dataframe, needed if forming the adjusted meat adjustments explicitly.
         active_col_name (str):
             The name of the column in analysis_df indicating whether a subject is active at a given decision time.
         action_col_name (str):
@@ -1443,25 +1440,25 @@ def construct_classical_and_adjusted_sandwiches(
             The name of the column in analysis_df indicating the subject ID.
         action_prob_func_args (tuple):
             The arguments to be passed to the action probability function, needed if forming the
-            adaptive meat adjustments explicitly.
+            adjusted meat adjustments explicitly.
         action_prob_col_name (str):
             The name of the column in analysis_df indicating the action probability of the action taken,
-            needed if forming the adaptive meat adjustments explicitly.
+            needed if forming the adjusted meat adjustments explicitly.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
-            - The raw joint adaptive inverse bread matrix.
-            - The (possibly) stabilized joint adaptive inverse bread matrix.
-            - The joint adaptive meat matrix.
-            - The joint adaptive sandwich matrix.
-            - The classical inverse bread matrix.
+            - The raw joint bread matrix.
+            - The (possibly) stabilized joint bread matrix.
+            - The joint meat matrix.
+            - The joint sandwich matrix.
+            - The classical bread matrix.
             - The classical meat matrix.
             - The classical sandwich matrix.
             - The average weighted estimating function stack.
             - All per-subject weighted estimating function stacks.
-            - The per-subject adaptive meat small-sample corrections.
+            - The per-subject adjusted meat small-sample corrections.
             - The per-subject classical meat small-sample corrections.
-            - The per-subject adaptive meat adjustments, if form_adjusted_meat_adjustments_explicitly
+            - The per-subject adjusted meat adjustments, if form_adjusted_meat_adjustments_explicitly
               is True, otherwise an array of NaNs.
     """
     logger.info(
@@ -1470,11 +1467,11 @@ def construct_classical_and_adjusted_sandwiches(
     theta_dim = theta_est.shape[0]
     beta_dim = all_post_update_betas.shape[1]
     # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
-    raw_joint_adjusted_bread_inverse_matrix, (
+    raw_joint_adjusted_bread_matrix, (
         avg_estimating_function_stack,
         per_subject_joint_adjusted_meat_contributions,
         per_subject_classical_meat_contributions,
-        per_subject_classical_bread_inverse_contributions,
+        per_subject_classical_bread_contributions,
         per_subject_estimating_function_stacks,
     ) = jax.jacrev(
         get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
@@ -1521,40 +1518,38 @@ def construct_classical_and_adjusted_sandwiches(
         small_sample_correction,
         per_subject_joint_adjusted_meat_contributions,
         per_subject_classical_meat_contributions,
-        per_subject_classical_bread_inverse_contributions,
+        per_subject_classical_bread_contributions,
         num_subjects,
         theta_dim,
     )
 
     # Increase diagonal block dominance possibly improve conditioning of diagonal
-    # blocks as necessary, to ensure mathematical stability of joint bread inverse
-    stabilized_joint_adjusted_bread_inverse_matrix = (
+    # blocks as necessary, to ensure mathematical stability of joint bread
+    stabilized_joint_adjusted_bread_matrix = (
         (
-            stabilize_joint_adjusted_bread_inverse_if_necessary(
-                raw_joint_adjusted_bread_inverse_matrix,
+            stabilize_joint_bread_if_necessary(
+                raw_joint_adjusted_bread_matrix,
                 beta_dim,
                 theta_dim,
             )
         )
-        if stabilize_joint_adjusted_bread_inverse
-        else raw_joint_adjusted_bread_inverse_matrix
+        if stabilize_joint_bread
+        else raw_joint_adjusted_bread_matrix
     )
 
     # Now stably (no explicit inversion) form our sandwiches.
-    joint_adjusted_sandwich = form_sandwich_from_bread_inverse_and_meat(
-        stabilized_joint_adjusted_bread_inverse_matrix,
+    joint_adjusted_sandwich = form_sandwich_from_bread_and_meat(
+        stabilized_joint_adjusted_bread_matrix,
         joint_adjusted_meat_matrix,
         num_subjects,
-        method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
+        method=SandwichFormationMethods.BREAD_T_QR,
     )
-    classical_bread_inverse_matrix = jnp.mean(
-        per_subject_classical_bread_inverse_contributions, axis=0
-    )
-    classical_sandwich = form_sandwich_from_bread_inverse_and_meat(
-        classical_bread_inverse_matrix,
+    classical_bread_matrix = jnp.mean(per_subject_classical_bread_contributions, axis=0)
+    classical_sandwich = form_sandwich_from_bread_and_meat(
+        classical_bread_matrix,
         classical_meat_matrix,
         num_subjects,
-        method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
+        method=SandwichFormationMethods.BREAD_T_QR,
     )
 
     per_subject_adjusted_meat_adjustments = jnp.full(
@@ -1565,7 +1560,7 @@ def construct_classical_and_adjusted_sandwiches(
             form_adjusted_meat_adjustments_directly(
                 theta_dim,
                 all_post_update_betas.shape[1],
-                stabilized_joint_adjusted_bread_inverse_matrix,
+                stabilized_joint_adjusted_bread_matrix,
                 per_subject_estimating_function_stacks,
                 analysis_df,
                 active_col_name,
@@ -1582,9 +1577,9 @@ def construct_classical_and_adjusted_sandwiches(
                 action_prob_col_name,
             )
         )
-        # Validate that the adaptive meat adjustments we just formed are accurate by constructing
-        # the theta-only adaptive sandwich from them and checking that it matches the standard result
-        # we get by taking a subset of the joint adaptive sandwich.
+        # Validate that the adjusted meat adjustments we just formed are accurate by constructing
+        # the theta-only adjusted sandwich from them and checking that it matches the standard result
+        # we get by taking a subset of the joint sandwich.
         # First just apply any small-sample correction for parity.
         (
             _,
@@ -1595,16 +1590,16 @@ def construct_classical_and_adjusted_sandwiches(
             small_sample_correction,
             per_subject_joint_adjusted_meat_contributions,
             per_subject_adjusted_classical_meat_contributions,
-            per_subject_classical_bread_inverse_contributions,
+            per_subject_classical_bread_contributions,
             num_subjects,
             theta_dim,
         )
         theta_only_adjusted_sandwich_from_adjustments = (
-            form_sandwich_from_bread_inverse_and_meat(
-                classical_bread_inverse_matrix,
+            form_sandwich_from_bread_and_meat(
+                classical_bread_matrix,
                 theta_only_adjusted_meat_matrix_v2,
                 num_subjects,
-                method=SandwichFormationMethods.BREAD_INVERSE_T_QR,
+                method=SandwichFormationMethods.BREAD_T_QR,
             )
         )
         theta_only_adjusted_sandwich = joint_adjusted_sandwich[-theta_dim:, -theta_dim:]
@@ -1615,17 +1610,17 @@ def construct_classical_and_adjusted_sandwiches(
             rtol=3e-2,
         ):
             logger.warning(
-                "There may be a bug in the explicit meat adjustment calculation (this doesn't affect the actual calculation, just diagnostics). We've calculated the theta-only adaptive sandwich two different ways and they do not match sufficiently."
+                "There may be a bug in the explicit meat adjustment calculation (this doesn't affect the actual calculation, just diagnostics). We've calculated the theta-only adjusted sandwich two different ways and they do not match sufficiently."
             )
 
-    # Stack the joint adaptive inverse bread pieces together horizontally and return the auxiliary
-    # values too. The joint adaptive bread inverse should always be block lower triangular.
+    # Stack the joint bread pieces together horizontally and return the auxiliary
+    # values too. The joint bread should always be block lower triangular.
     return (
-        raw_joint_adjusted_bread_inverse_matrix,
-        stabilized_joint_adjusted_bread_inverse_matrix,
+        raw_joint_adjusted_bread_matrix,
+        stabilized_joint_adjusted_bread_matrix,
         joint_adjusted_meat_matrix,
         joint_adjusted_sandwich,
-        classical_bread_inverse_matrix,
+        classical_bread_matrix,
         classical_meat_matrix,
         classical_sandwich,
         avg_estimating_function_stack,
@@ -1639,25 +1634,25 @@ def construct_classical_and_adjusted_sandwiches(
 # TODO: I think there should be interaction to confirm stabilization.  It is
 # important for the subject to know if this is happening. Even if enabled, it is important
 # that the subject know it actually kicks in.
-def stabilize_joint_adjusted_bread_inverse_if_necessary(
-    joint_adjusted_bread_inverse_matrix: jnp.ndarray,
+def stabilize_joint_bread_if_necessary(
+    joint_adjusted_bread_matrix: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
 ) -> jnp.ndarray:
     """
-    Stabilizes the joint adaptive bread inverse matrix if necessary by increasing diagonal block
+    Stabilizes the joint bread matrix if necessary by increasing diagonal block
     dominance and/or adding a small ridge penalty to the diagonal blocks.
 
     Args:
-        joint_adjusted_bread_inverse_matrix (jnp.ndarray):
-            A 2-D JAX NumPy array representing the joint adaptive bread inverse matrix.
+        joint_adjusted_bread_matrix (jnp.ndarray):
+            A 2-D JAX NumPy array representing the joint bread matrix.
         beta_dim (int):
             The dimension of each beta parameter.
         theta_dim (int):
             The dimension of the theta parameter.
     Returns:
         jnp.ndarray:
-            A 2-D NumPy array representing the stabilized joint adaptive bread inverse matrix.
+            A 2-D NumPy array representing the stabilized joint bread matrix.
     """
 
     # TODO: come up with more sophisticated settings here. These are maybe a little loose,
@@ -1670,7 +1665,7 @@ def stabilize_joint_adjusted_bread_inverse_if_necessary(
 
     # Grab just the RL block and convert numpy array for easier manipulation.
     RL_stack_beta_derivatives_block = np.array(
-        joint_adjusted_bread_inverse_matrix[:-theta_dim, :-theta_dim]
+        joint_adjusted_bread_matrix[:-theta_dim, :-theta_dim]
     )
     num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
     for i in range(1, num_updates + 1):
@@ -1789,31 +1784,31 @@ def stabilize_joint_adjusted_bread_inverse_if_necessary(
         [
             [
                 RL_stack_beta_derivatives_block,
-                joint_adjusted_bread_inverse_matrix[:-theta_dim, -theta_dim:],
+                joint_adjusted_bread_matrix[:-theta_dim, -theta_dim:],
             ],
             [
-                joint_adjusted_bread_inverse_matrix[-theta_dim:, :-theta_dim],
-                joint_adjusted_bread_inverse_matrix[-theta_dim:, -theta_dim:],
+                joint_adjusted_bread_matrix[-theta_dim:, :-theta_dim],
+                joint_adjusted_bread_matrix[-theta_dim:, -theta_dim:],
             ],
         ]
     )
 
 
-def form_sandwich_from_bread_inverse_and_meat(
-    bread_inverse: jnp.ndarray,
+def form_sandwich_from_bread_and_meat(
+    bread: jnp.ndarray,
     meat: jnp.ndarray,
     num_subjects: int,
-    method: str = SandwichFormationMethods.BREAD_INVERSE_T_QR,
+    method: str = SandwichFormationMethods.BREAD_T_QR,
 ) -> jnp.ndarray:
     """
-    Forms a sandwich variance matrix from the provided bread inverse and meat matrices.
+    Forms a sandwich variance matrix from the provided bread and meat matrices.
 
-    Attempts to do so STABLY without ever forming the bread matrix itself
+    Attempts to do so STABLY without ever forming the bread inverse matrix itself
     (except with naive option).
 
     Args:
-        bread_inverse (jnp.ndarray):
-            A 2-D JAX NumPy array representing the bread inverse matrix.
+        bread (jnp.ndarray):
+            A 2-D JAX NumPy array representing the bread matrix.
         meat (jnp.ndarray):
             A 2-D JAX NumPy array representing the meat matrix.
         num_subjects (int):
@@ -1821,12 +1816,12 @@ def form_sandwich_from_bread_inverse_and_meat(
         method (str):
             The method to use for forming the sandwich.
 
-            SandwichFormationMethods.BREAD_INVERSE_T_QR uses the QR decomposition of the transpose
-            of the bread inverse matrix.
+            SandwichFormationMethods.BREAD_T_QR uses the QR decomposition of the transpose
+            of the bread matrix.
 
             SandwichFormationMethods.MEAT_SVD_SOLVE uses a decomposition of the meat matrix.
 
-            SandwichFormationMethods.NAIVE simply inverts the bread inverse and forms the sandwich.
+            SandwichFormationMethods.NAIVE simply inverts the bread and forms the sandwich.
 
 
     Returns:
@@ -1834,9 +1829,9 @@ def form_sandwich_from_bread_inverse_and_meat(
             A 2-D JAX NumPy array representing the sandwich variance matrix.
     """
 
-    if method == SandwichFormationMethods.BREAD_INVERSE_T_QR:
+    if method == SandwichFormationMethods.BREAD_T_QR:
         # QR of B^T → Q orthogonal, R upper triangular; L = R^T lower triangular
-        Q, R = np.linalg.qr(bread_inverse.T, mode="reduced")
+        Q, R = np.linalg.qr(bread.T, mode="reduced")
         L = R.T
 
         new_meat = scipy.linalg.solve_triangular(
@@ -1854,21 +1849,21 @@ def form_sandwich_from_bread_inverse_and_meat(
         C_right = Vh.T * np.sqrt(s)
 
         # Solve B W_left = C_left and B W_right = C_right (no explicit inverses).
-        W_left = scipy.linalg.solve(bread_inverse, C_left)
-        W_right = scipy.linalg.solve(bread_inverse, C_right)
+        W_left = scipy.linalg.solve(bread, C_left)
+        W_right = scipy.linalg.solve(bread, C_right)
 
         # Return the exact sandwich: V = (B^{-1} C_left) (B^{-1} C_right)^T / num_subjects
         return W_left @ W_right.T / num_subjects
 
     elif method == SandwichFormationMethods.NAIVE:
-        # Simply invert the bread inverse and form the sandwich directly.
+        # Simply invert the bread and form the sandwich directly.
         # This is NOT numerically stable and is only included for comparison purposes.
-        bread = np.linalg.inv(bread_inverse)
-        return bread @ meat @ meat.T / num_subjects
+        bread_inverse = np.linalg.inv(bread)
+        return bread_inverse @ meat @ bread_inverse.T / num_subjects
 
     else:
         raise ValueError(
-            f"Unknown sandwich method: {method}. Please use 'bread_inverse_t_qr' or 'meat_decomposition_solve'."
+            f"Unknown sandwich method: {method}. Please use 'bread_t_qr' or 'meat_decomposition_solve'."
         )
 
 

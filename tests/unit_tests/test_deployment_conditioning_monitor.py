@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from lifejacket.deployment_conditioning_monitor import DeploymentConditioningMonitor
-from lifejacket.after_study_analysis import analyze_dataset
+from lifejacket.post_deployment_analysis import analyze_dataset
 
 
 # Mock functions and arguments
@@ -26,7 +26,7 @@ def inference_loss_func(theta, reward, states):
 def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
     """
     Test that phi dot bars from incremental assess_update calls match
-    successive upper left prefixes of the final RL adaptive bread inverse.
+    successive upper left prefixes of the final RL bread.
     """
     # Mock study data with multiple updates
     n_users = 6
@@ -124,7 +124,7 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
         # Store the phi_dot_bar from this update
         incremental_phi_dot_bars.append(monitor.latest_phi_dot_bar)
 
-    # Now run the full after_study_analysis to get the final RL adaptive bread inverse
+    # Now run the full after_study_analysis to get the final RL bread
     final_analysis_results = analyze_dataset(
         output_dir=pathlib.Path("."),
         analysis_df=study_df,
@@ -154,17 +154,17 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
         small_sample_correction="none",
         collect_data_for_blowup_supervised_learning=False,
         form_adjusted_meat_adjustments_explicitly=False,
-        stabilize_joint_adjusted_bread_inverse=False,
+        stabilize_joint_bread=False,
     )
 
-    # Extract the RL portion of the final adaptive bread inverse
-    final_rl_bread_inv = final_analysis_results["adaptive_bread_inverse_RL_block"]
+    # Extract the RL portion of the final bread
+    final_rl_bread_inv = final_analysis_results["adjusted_bread_RL_block"]
 
     # Verify that each incremental phi_dot_bar matches the corresponding upper-left prefix
     for i, phi_dot_bar in enumerate(incremental_phi_dot_bars):
         expected_size = (i + 1) * beta_dim
 
-        # Extract the upper-left prefix of the final RL bread inverse
+        # Extract the upper-left prefix of the final RL bread
         expected_prefix = final_rl_bread_inv[:expected_size, :expected_size]
 
         # Compare with the incremental phi_dot_bar

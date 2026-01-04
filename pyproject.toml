@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lifejacket"
-version = "1.0.0"
+version = "1.0.1"
 description = "Consistent standard errors for longitudinal data collected under pooling online decision policies."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-lifejacket = "lifejacket.after_study_analysis:cli"
+lifejacket = "lifejacket.post_deployment_analysis:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]

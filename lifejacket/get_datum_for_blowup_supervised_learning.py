@@ -12,7 +12,7 @@ import jax
 from jax import numpy as jnp
 import pandas as pd
 
-from . import after_study_analysis
+from . import post_deployment_analysis
 from .constants import FunctionTypes
 from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
@@ -25,8 +25,8 @@ logging.basicConfig(
 
 
 def get_datum_for_blowup_supervised_learning(
-    joint_adjusted_bread_inverse_matrix,
-    joint_adjusted_bread_inverse_cond,
+    joint_adjusted_bread_matrix,
+    joint_adjusted_bread_cond,
     avg_estimating_function_stack,
     per_subject_estimating_function_stacks,
     all_post_update_betas,
@@ -63,10 +63,10 @@ def get_datum_for_blowup_supervised_learning(
     A few plots are produced along the way to help visualize the data.
 
     Args:
-        joint_adjusted_bread_inverse_matrix (jnp.ndarray):
-            The joint adjusted bread inverse matrix.
-        joint_adjusted_bread_inverse_cond (float):
-            The condition number of the joint adjusted bread inverse matrix.
+        joint_adjusted_bread_matrix (jnp.ndarray):
+            The joint adjusted bread matrix.
+        joint_adjusted_bread_cond (float):
+            The condition number of the joint adjusted bread matrix.
         avg_estimating_function_stack (jnp.ndarray):
             The average estimating function stack across subjects.
         per_subject_estimating_function_stacks (jnp.ndarray):
@@ -125,7 +125,7 @@ def get_datum_for_blowup_supervised_learning(
         dict[str, Any]: A dictionary containing features and the label for supervised learning.
     """
     num_diagonal_blocks = (
-        (joint_adjusted_bread_inverse_matrix.shape[0] - theta_dim) // beta_dim
+        (joint_adjusted_bread_matrix.shape[0] - theta_dim) // beta_dim
     ) + 1
     diagonal_block_sizes = ([beta_dim] * (num_diagonal_blocks - 1)) + [theta_dim]
 
@@ -144,7 +144,7 @@ def get_datum_for_blowup_supervised_learning(
                 row_slice = slice(block_bounds[i], block_bounds[i + 1])
                 col_slice = slice(block_bounds[j], block_bounds[j + 1])
                 block_norm = np.linalg.norm(
-                    joint_adjusted_bread_inverse_matrix[row_slice, col_slice],
+                    joint_adjusted_bread_matrix[row_slice, col_slice],
                     ord="fro",
                 )
                 # We will sum here and take the square root later
@@ -155,9 +155,9 @@ def get_datum_for_blowup_supervised_learning(
         # handle diagonal blocks
         sl = slice(block_bounds[i], block_bounds[i + 1])
         diag_norms.append(
-            np.linalg.norm(joint_adjusted_bread_inverse_matrix[sl, sl], ord="fro")
+            np.linalg.norm(joint_adjusted_bread_matrix[sl, sl], ord="fro")
         )
-        diag_conds.append(np.linalg.cond(joint_adjusted_bread_inverse_matrix[sl, sl]))
+        diag_conds.append(np.linalg.cond(joint_adjusted_bread_matrix[sl, sl]))
 
     # Sqrt each row/col sum to truly get row/column norms.
     # Perhaps not necessary for learning, but more natural
@@ -214,8 +214,8 @@ def get_datum_for_blowup_supervised_learning(
     reward_means_by_t = grouped_reward.mean().values
     reward_stds_by_t = grouped_reward.std().values
 
-    joint_bread_inverse_min_singular_value = np.linalg.svd(
-        joint_adjusted_bread_inverse_matrix, compute_uv=False
+    joint_bread_min_singular_value = np.linalg.svd(
+        joint_adjusted_bread_matrix, compute_uv=False
     )[-1]
 
     max_reward = analysis_df.loc[in_study_mask][reward_col_name].max()
@@ -227,7 +227,7 @@ def get_datum_for_blowup_supervised_learning(
         premature_thetas,
         premature_adjusted_sandwiches,
         premature_classical_sandwiches,
-        premature_joint_adjusted_bread_inverse_condition_numbers,
+        premature_joint_adjusted_bread_condition_numbers,
         premature_avg_inference_estimating_functions,
     ) = calculate_sequence_of_premature_adjusted_estimates(
         analysis_df,
@@ -250,7 +250,7 @@ def get_datum_for_blowup_supervised_learning(
         inference_action_prob_decision_times_by_subject_id,
         action_prob_func_args,
         action_by_decision_time_by_subject_id,
-        joint_adjusted_bread_inverse_matrix,
+        joint_adjusted_bread_matrix,
         per_subject_estimating_function_stacks,
         beta_dim,
     )
@@ -261,23 +261,23 @@ def get_datum_for_blowup_supervised_learning(
         atol=1e-3,
     )
 
-    # Plot premature joint adjusted bread inverse log condition numbers
+    # Plot premature joint adjusted bread log condition numbers
     plt.clear_figure()
-    plt.title("Premature Joint Adaptive Bread Inverse Log Condition Numbers")
+    plt.title("Premature Joint Adjusted Bread Inverse Log Condition Numbers")
     plt.xlabel("Premature Update Index")
     plt.ylabel("Log Condition Number")
     plt.scatter(
-        np.log(premature_joint_adjusted_bread_inverse_condition_numbers),
+        np.log(premature_joint_adjusted_bread_condition_numbers),
         color="blue+",
     )
     plt.grid(True)
     plt.xticks(
         range(
             0,
-            len(premature_joint_adjusted_bread_inverse_condition_numbers),
+            len(premature_joint_adjusted_bread_condition_numbers),
             max(
                 1,
-                len(premature_joint_adjusted_bread_inverse_condition_numbers) // 10,
+                len(premature_joint_adjusted_bread_condition_numbers) // 10,
             ),
         )
     )
@@ -287,7 +287,7 @@ def get_datum_for_blowup_supervised_learning(
     num_diag = premature_adjusted_sandwiches.shape[-1]
     for i in range(num_diag):
         plt.clear_figure()
-        plt.title(f"Premature Adaptive Sandwich Diagonal Element {i}")
+        plt.title(f"Premature Adjusted Sandwich Diagonal Element {i}")
         plt.xlabel("Premature Update Index")
         plt.ylabel(f"Variance (Diagonal {i})")
         plt.scatter(np.array(premature_adjusted_sandwiches[:, i, i]), color="blue+")
@@ -303,7 +303,7 @@ def get_datum_for_blowup_supervised_learning(
 
         plt.clear_figure()
         plt.title(
-            f"Premature Adaptive Sandwich Diagonal Element {i} Ratio to Classical"
+            f"Premature Adjusted Sandwich Diagonal Element {i} Ratio to Classical"
         )
         plt.xlabel("Premature Update Index")
         plt.ylabel(f"Variance (Diagonal {i})")
@@ -338,7 +338,7 @@ def get_datum_for_blowup_supervised_learning(
         plt.show()
 
         # Grab predictors related to premature Phi-dot-bars
-        RL_stack_beta_derivatives_block = joint_adjusted_bread_inverse_matrix[
+        RL_stack_beta_derivatives_block = joint_adjusted_bread_matrix[
             :-theta_dim, :-theta_dim
         ]
         num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
@@ -397,8 +397,8 @@ def get_datum_for_blowup_supervised_learning(
             )
     return {
         **{
-            "joint_bread_inverse_condition_number": joint_adjusted_bread_inverse_cond,
-            "joint_bread_inverse_min_singular_value": joint_bread_inverse_min_singular_value,
+            "joint_bread_condition_number": joint_adjusted_bread_cond,
+            "joint_bread_min_singular_value": joint_bread_min_singular_value,
             "max_reward": max_reward,
             "norm_avg_estimating_function_stack": norm_avg_estimating_function_stack,
             "max_estimating_function_stack_norm": max_estimating_function_stack_norm,
@@ -455,12 +455,10 @@ def get_datum_for_blowup_supervised_learning(
         },
         **{f"theta_est_{i}": theta_est[i].item() for i in range(len(theta_est))},
         **{
-            f"premature_joint_adjusted_bread_inverse_condition_number_{i}": premature_joint_adjusted_bread_inverse_condition_numbers[
+            f"premature_joint_adjusted_bread_condition_number_{i}": premature_joint_adjusted_bread_condition_numbers[
                 i
             ]
-            for i in range(
-                len(premature_joint_adjusted_bread_inverse_condition_numbers)
-            )
+            for i in range(len(premature_joint_adjusted_bread_condition_numbers))
         },
         **{
             f"premature_adjusted_sandwich_update_{i}_diag_position_{j}": premature_adjusted_sandwich[
@@ -526,7 +524,7 @@ def calculate_sequence_of_premature_adjusted_estimates(
     action_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int]
     ],
-    full_joint_adjusted_bread_inverse_matrix: jnp.ndarray,
+    full_joint_adjusted_bread_matrix: jnp.ndarray,
     per_subject_estimating_function_stacks: jnp.ndarray,
     beta_dim: int,
 ) -> jnp.ndarray:
@@ -584,8 +582,8 @@ def calculate_sequence_of_premature_adjusted_estimates(
         action_by_decision_time_by_subject_id (dict[collections.abc.Hashable, dict[int, int]]):
             A dictionary mapping subject IDs to their respective actions taken at each decision time.
             Only applies to in-study decision times!
-        full_joint_adjusted_bread_inverse_matrix (jnp.ndarray):
-            The full joint adjusted bread inverse matrix as a NumPy array.
+        full_joint_adjusted_bread_matrix (jnp.ndarray):
+            The full joint adjusted bread matrix as a NumPy array.
         per_subject_estimating_function_stacks (jnp.ndarray):
             A NumPy array containing all per-subject (weighted) estimating function stacks.
         beta_dim (int):
@@ -598,7 +596,7 @@ def calculate_sequence_of_premature_adjusted_estimates(
     # variance estimates pretending that each was the final policy.
     premature_adjusted_sandwiches = []
     premature_thetas = []
-    premature_joint_adjusted_bread_inverse_condition_numbers = []
+    premature_joint_adjusted_bread_condition_numbers = []
     premature_avg_inference_estimating_functions = []
     premature_classical_sandwiches = []
     logger.info(
@@ -611,12 +609,10 @@ def calculate_sequence_of_premature_adjusted_estimates(
         )
         pretend_max_policy = policy_num
 
-        truncated_joint_adjusted_bread_inverse_matrix = (
-            full_joint_adjusted_bread_inverse_matrix[
-                : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
-                : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
-            ]
-        )
+        truncated_joint_adjusted_bread_matrix = full_joint_adjusted_bread_matrix[
+            : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
+            : (beta_index_by_policy_num[pretend_max_policy] + 1) * beta_dim,
+        ]
 
         max_decision_time = analysis_df[
             analysis_df["policy_num"] == pretend_max_policy
@@ -643,7 +639,7 @@ def calculate_sequence_of_premature_adjusted_estimates(
         }
 
         truncated_inference_func_args_by_subject_id, _, _ = (
-            after_study_analysis.process_inference_func_args(
+            post_deployment_analysis.process_inference_func_args(
                 inference_func,
                 inference_func_args_theta_index,
                 truncated_analysis_df,
@@ -690,7 +686,7 @@ def calculate_sequence_of_premature_adjusted_estimates(
             premature_classical_sandwich,
             premature_avg_inference_estimating_function,
         ) = construct_premature_classical_and_adjusted_sandwiches(
-            truncated_joint_adjusted_bread_inverse_matrix,
+            truncated_joint_adjusted_bread_matrix,
             truncated_per_subject_estimating_function_stacks,
             premature_theta,
             truncated_all_post_update_betas,
@@ -720,13 +716,13 @@ def calculate_sequence_of_premature_adjusted_estimates(
         jnp.array(premature_thetas),
         jnp.array(premature_adjusted_sandwiches),
         jnp.array(premature_classical_sandwiches),
-        jnp.array(premature_joint_adjusted_bread_inverse_condition_numbers),
+        jnp.array(premature_joint_adjusted_bread_condition_numbers),
         jnp.array(premature_avg_inference_estimating_functions),
     )
 
 
 def construct_premature_classical_and_adjusted_sandwiches(
-    truncated_joint_adjusted_bread_inverse_matrix: jnp.ndarray,
+    truncated_joint_adjusted_bread_matrix: jnp.ndarray,
     per_subject_truncated_estimating_function_stacks: jnp.ndarray,
     theta: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
@@ -769,15 +765,15 @@ def construct_premature_classical_and_adjusted_sandwiches(
 
     This is done by computing and differentiating the new average inference estimating function
     with respect to the betas and theta, and stitching this together with the existing
-    adjusted bread inverse matrix portion (corresponding to the updates still under consideration)
-    to form the new premature joint adjusted bread inverse matrix.
+    adjusted bread matrix portion (corresponding to the updates still under consideration)
+    to form the new premature joint adjusted bread matrix.
 
     Args:
-        truncated_joint_adjusted_bread_inverse_matrix (jnp.ndarray):
-            A 2-D JAX NumPy array holding the existing joint adjusted bread inverse but
+        truncated_joint_adjusted_bread_matrix (jnp.ndarray):
+            A 2-D JAX NumPy array holding the existing joint adjusted bread but
             with rows corresponding to updates not under consideration and inference dropped.
             We will stitch this together with the newly computed inference portion to form
-            our "premature" joint adjusted bread inverse matrix.
+            our "premature" joint adjusted bread matrix.
         per_subject_truncated_estimating_function_stacks (jnp.ndarray):
             A 2-D JAX NumPy array holding the existing per-subject weighted estimating function
             stacks but with rows corresponding to updates not under consideration dropped.
@@ -828,14 +824,14 @@ def construct_premature_classical_and_adjusted_sandwiches(
               jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32],
               jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
-            - The joint adjusted inverse bread matrix.
+            - The joint adjusted bread matrix.
             - The joint adjusted bread matrix.
             - The joint adjusted meat matrix.
-            - The classical inverse bread matrix.
+            - The classical bread matrix.
             - The classical bread matrix.
             - The classical meat matrix.
             - The average (weighted) inference estimating function.
-            - The joint adjusted inverse bread matrix condition number.
+            - The joint adjusted bread matrix condition number.
     """
     logger.info(
         "Differentiating average weighted inference estimating function stack and collecting auxiliary values."
@@ -847,12 +843,12 @@ def construct_premature_classical_and_adjusted_sandwiches(
         per_subject_inference_estimating_functions,
         avg_inference_estimating_function,
         per_subject_classical_meat_contributions,
-        per_subject_classical_bread_inverse_contributions,
+        per_subject_classical_bread_contributions,
     ) = jax.jacrev(get_weighted_inference_estimating_functions_only, has_aux=True)(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
         # it is more efficient to flatten them into a single array. This is done
         # here to improve performance. We can simply unflatten them inside the function.
-        after_study_analysis.flatten_params(all_post_update_betas, theta),
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
         all_post_update_betas.shape[1],
         theta.shape[0],
         subject_ids,
@@ -871,13 +867,13 @@ def construct_premature_classical_and_adjusted_sandwiches(
         action_by_decision_time_by_subject_id,
     )
 
-    joint_adjusted_bread_inverse_matrix = jnp.block(
+    joint_adjusted_bread_matrix = jnp.block(
         [
             [
-                truncated_joint_adjusted_bread_inverse_matrix,
+                truncated_joint_adjusted_bread_matrix,
                 np.zeros(
                     (
-                        truncated_joint_adjusted_bread_inverse_matrix.shape[0],
+                        truncated_joint_adjusted_bread_matrix.shape[0],
                         new_inference_block_row.shape[0],
                     )
                 ),
@@ -902,34 +898,30 @@ def construct_premature_classical_and_adjusted_sandwiches(
         per_subject_adjusted_meat_contributions, axis=0
     )
 
-    classical_bread_inverse_matrix = jnp.mean(
-        per_subject_classical_bread_inverse_contributions, axis=0
-    )
+    classical_bread_matrix = jnp.mean(per_subject_classical_bread_contributions, axis=0)
     classical_meat_matrix = jnp.mean(per_subject_classical_meat_contributions, axis=0)
 
     num_subjects = subject_ids.shape[0]
     joint_adjusted_sandwich = (
-        after_study_analysis.form_sandwich_from_bread_inverse_and_meat(
-            joint_adjusted_bread_inverse_matrix,
+        post_deployment_analysis.form_sandwich_from_bread_and_meat(
+            joint_adjusted_bread_matrix,
             joint_adjusted_meat_matrix,
             num_subjects,
-            method="bread_inverse_T_qr",
+            method="bread_T_qr",
         )
     )
     adjusted_sandwich = joint_adjusted_sandwich[-theta.shape[0] :, -theta.shape[0] :]
 
-    classical_bread_inverse_matrix = jnp.mean(
-        per_subject_classical_bread_inverse_contributions, axis=0
-    )
-    classical_sandwich = after_study_analysis.form_sandwich_from_bread_inverse_and_meat(
-        classical_bread_inverse_matrix,
+    classical_bread_matrix = jnp.mean(per_subject_classical_bread_contributions, axis=0)
+    classical_sandwich = post_deployment_analysis.form_sandwich_from_bread_and_meat(
+        classical_bread_matrix,
         classical_meat_matrix,
         num_subjects,
-        method="bread_inverse_T_qr",
+        method="bread_T_qr",
     )
 
-    # Stack the joint adjusted inverse bread pieces together horizontally and return the auxiliary
-    # values too. The joint adjusted bread inverse should always be block lower triangular.
+    # Stack the joint adjusted bread pieces together horizontally and return the auxiliary
+    # values too. The joint adjusted bread should always be block lower triangular.
     return (
         adjusted_sandwich,
         classical_sandwich,
@@ -1036,7 +1028,7 @@ def get_weighted_inference_estimating_functions_only(
         else inference_func
     )
 
-    betas, theta = after_study_analysis.unflatten_params(
+    betas, theta = post_deployment_analysis.unflatten_params(
         flattened_betas_and_theta,
         beta_dim,
         theta_dim,
@@ -1052,7 +1044,7 @@ def get_weighted_inference_estimating_functions_only(
     (
         threaded_action_prob_func_args_by_decision_time_by_subject_id,
         action_prob_func_args_by_decision_time_by_subject_id,
-    ) = after_study_analysis.thread_action_prob_func_args(
+    ) = post_deployment_analysis.thread_action_prob_func_args(
         action_prob_func_args_by_subject_id_by_decision_time,
         policy_num_by_decision_time_by_subject_id,
         initial_policy_num,
@@ -1069,7 +1061,7 @@ def get_weighted_inference_estimating_functions_only(
         "function args for all subjects"
     )
     threaded_inference_func_args_by_subject_id = (
-        after_study_analysis.thread_inference_func_args(
+        post_deployment_analysis.thread_inference_func_args(
             inference_func_args_by_subject_id,
             inference_func_args_theta_index,
             theta,
@@ -1205,9 +1197,11 @@ def single_subject_weighted_inference_estimating_function(
 
     # 1. Get the first time after the first update for convenience.
     # This is used to form the Radon-Nikodym weights for the right times.
-    _, first_time_after_first_update = after_study_analysis.get_min_time_by_policy_num(
-        policy_num_by_decision_time,
-        beta_index_by_policy_num,
+    _, first_time_after_first_update = (
+        post_deployment_analysis.get_min_time_by_policy_num(
+            policy_num_by_decision_time,
+            beta_index_by_policy_num,
+        )
     )
 
     # 2. Get the start and end times for this subject.
@@ -1268,7 +1262,7 @@ def single_subject_weighted_inference_estimating_function(
     # value, but impervious to differentiation with respect to all_post_update_betas. The
     # args, on the other hand, are a function of all_post_update_betas.
     in_study_weights = jax.vmap(
-        fun=after_study_analysis.get_radon_nikodym_weight,
+        fun=post_deployment_analysis.get_radon_nikodym_weight,
         in_axes=[0, None, None, 0] + batch_axes,
         out_axes=0,
     )(

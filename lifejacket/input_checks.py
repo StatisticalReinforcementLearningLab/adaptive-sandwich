@@ -8,7 +8,7 @@ from jax import numpy as jnp
 import pandas as pd
 import plotext as plt
 
-from .constants import InverseStabilizationMethods, SmallSampleCorrections
+from .constants import SmallSampleCorrections
 from .helper_functions import (
     confirm_input_check_result,
 )
@@ -64,7 +64,9 @@ def perform_first_wave_input_checks(
         analysis_df, active_col_name, policy_num_col_name, alg_update_func_args
     )
     confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
-        alg_update_func_args_action_prob_index, suppress_interactive_data_checks
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_previous_betas_index,
+        suppress_interactive_data_checks,
     )
     require_action_prob_times_given_if_index_supplied(
         alg_update_func_args_action_prob_index,
@@ -193,6 +195,7 @@ def perform_alg_only_input_checks(
     alg_update_func_args_beta_index,
     alg_update_func_args_action_prob_index,
     alg_update_func_args_action_prob_times_index,
+    alg_update_func_args_previous_betas_index,
     suppress_interactive_data_checks,
 ):
     ### Validate algorithm loss/estimating function and args
@@ -206,7 +209,9 @@ def perform_alg_only_input_checks(
         analysis_df, active_col_name, policy_num_col_name, alg_update_func_args
     )
     confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
-        alg_update_func_args_action_prob_index, suppress_interactive_data_checks
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_previous_betas_index,
+        suppress_interactive_data_checks,
     )
     require_action_prob_times_given_if_index_supplied(
         alg_update_func_args_action_prob_index,
@@ -278,7 +283,7 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
     action_prob_func,
 ):
     """
-    Check that the action probabilities in the study dataframe can be reconstructed from the supplied
+    Check that the action probabilities in the analysis DataFrame can be reconstructed from the supplied
     action probability function and its arguments.
 
     NOTE THAT THIS IS A HARD FAILURE IF THE RECONSTRUCTION DOESN'T PASS.
@@ -317,7 +322,7 @@ def require_all_subjects_have_all_times_in_analysis_df(
     # Check if all subjects have the same set of unique calendar times
     if not subject_calendar_times.apply(lambda x: x == unique_calendar_times).all():
         raise AssertionError(
-            "Not all subjects have all calendar times in the study dataframe. Please see the contract for details."
+            "Not all subjects have all calendar times in the analysis DataFrame. Please see the contract for details."
         )
 
 
@@ -345,7 +350,7 @@ def require_action_prob_args_in_alg_update_func_correspond_to_analysis_df(
 ):
     logger.info(
         "Checking that the action probabilities supplied in the algorithm update function args, if"
-        " any, correspond to those in the study dataframe for the corresponding subjects and decision"
+        " any, correspond to those in the analysis DataFrame for the corresponding subjects and decision"
         " times."
     )
     if alg_update_func_args_action_prob_index < 0:
@@ -377,7 +382,7 @@ def require_action_prob_args_in_alg_update_func_correspond_to_analysis_df(
             ), (
                 f"There is a mismatch for subject {subject_id} between the action probabilities supplied"
                 f" in the args to the algorithm update function at policy {policy_num} and those in"
-                " the study dataframe for the supplied times. Please see the contract for details."
+                " the analysis DataFrame for the supplied times. Please see the contract for details."
             )
 
 
@@ -418,7 +423,7 @@ def require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times
 ):
     logger.info(
         "Checking that action probability function args are blank for exactly the times each subject"
-        "is not in the study according to the study dataframe."
+        "is not in the study according to the analysis DataFrame."
     )
     inactive_df = analysis_df[analysis_df[active_col_name] == 0]
     inactive_times_by_subject_according_to_analysis_df = (
@@ -441,7 +446,7 @@ def require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times
         inactive_times_by_subject_according_to_analysis_df
         == inactive_times_by_subject_according_to_action_prob_func_args
     ), (
-        "Out-of-study decision times according to the study dataframe do not match up with the"
+        "Inactive decision times according to the analysis DataFrame do not match up with the"
         " times for which action probability arguments are blank for all subjects. Please see the"
         " contract for details."
     )
@@ -456,21 +461,27 @@ def require_all_named_columns_present_in_analysis_df(
     subject_id_col_name,
     action_prob_col_name,
 ):
-    logger.info("Checking that all named columns are present in the study dataframe.")
-    assert active_col_name in analysis_df.columns, f"{active_col_name} not in study df."
-    assert action_col_name in analysis_df.columns, f"{action_col_name} not in study df."
+    logger.info(
+        "Checking that all named columns are present in the analysis DataFrame."
+    )
+    assert (
+        active_col_name in analysis_df.columns
+    ), f"{active_col_name} not in analysis DataFrame."
+    assert (
+        action_col_name in analysis_df.columns
+    ), f"{action_col_name} not in analysis DataFrame."
     assert (
         policy_num_col_name in analysis_df.columns
-    ), f"{policy_num_col_name} not in study df."
+    ), f"{policy_num_col_name} not in analysis DataFrame."
     assert (
         calendar_t_col_name in analysis_df.columns
-    ), f"{calendar_t_col_name} not in study df."
+    ), f"{calendar_t_col_name} not in analysis DataFrame."
     assert (
         subject_id_col_name in analysis_df.columns
-    ), f"{subject_id_col_name} not in study df."
+    ), f"{subject_id_col_name} not in analysis DataFrame."
     assert (
         action_prob_col_name in analysis_df.columns
-    ), f"{action_prob_col_name} not in study df."
+    ), f"{action_prob_col_name} not in analysis DataFrame."
 
 
 def require_all_named_columns_not_object_type_in_analysis_df(
@@ -493,7 +504,7 @@ def require_all_named_columns_not_object_type_in_analysis_df(
     ):
         assert (
             analysis_df[colname].dtype != "object"
-        ), f"At least {colname} is of object type in study df."
+        ), f"At least {colname} is of object type in analysis DataFrame."
 
 
 def require_binary_actions(analysis_df, active_col_name, action_col_name):
@@ -574,12 +585,12 @@ def require_no_policy_numbers_present_in_alg_update_args_but_not_analysis_df(
     analysis_df, policy_num_col_name, alg_update_func_args
 ):
     logger.info(
-        "Checking that policy numbers in algorithm update function args are present in the study dataframe."
+        "Checking that policy numbers in algorithm update function args are present in the analysis DataFrame."
     )
     alg_update_policy_nums = sorted(alg_update_func_args.keys())
     analysis_df_policy_nums = sorted(analysis_df[policy_num_col_name].unique())
     assert set(alg_update_policy_nums).issubset(set(analysis_df_policy_nums)), (
-        f"There are policy numbers present in algorithm update function args but not in the study dataframe. "
+        f"There are policy numbers present in algorithm update function args but not in the analysis DataFrame. "
         f"\nalg_update_func_args policy numbers: {alg_update_policy_nums}"
         f"\nanalysis_df policy numbers: {analysis_df_policy_nums}.\nPlease see the contract for details."
     )
@@ -589,7 +600,7 @@ def require_all_policy_numbers_in_analysis_df_except_possibly_initial_and_fallba
     analysis_df, active_col_name, policy_num_col_name, alg_update_func_args
 ):
     logger.info(
-        "Checking that all policy numbers in the study dataframe are present in the algorithm update function args."
+        "Checking that all policy numbers in the analysis DataFrame are present in the algorithm update function args."
     )
     active_df = analysis_df[analysis_df[active_col_name] == 1]
     # Get the number of the initial policy. 0 is recommended but not required.
@@ -602,19 +613,23 @@ def require_all_policy_numbers_in_analysis_df_except_possibly_initial_and_fallba
         ].unique()
     ).issubset(
         alg_update_func_args.keys()
-    ), f"There are non-fallback, non-initial policy numbers in the study dataframe that are not in the update function args: {set(active_df[active_df[policy_num_col_name] > 0][policy_num_col_name].unique()) - set(alg_update_func_args.keys())}. Please see the contract for details."
+    ), f"There are non-fallback, non-initial policy numbers in the analysis DataFrame that are not in the update function args: {set(active_df[active_df[policy_num_col_name] > 0][policy_num_col_name].unique()) - set(alg_update_func_args.keys())}. Please see the contract for details."
 
 
 def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
     alg_update_func_args_action_prob_index,
+    alg_update_func_args_previous_betas_index,
     suppress_interactive_data_checks,
 ):
     logger.info(
         "Confirming that action probabilities are not in algorithm update function args IF their index is not specified"
     )
-    if alg_update_func_args_action_prob_index < 0:
+    if (
+        alg_update_func_args_action_prob_index < 0
+        and alg_update_func_args_previous_betas_index < 0
+    ):
         confirm_input_check_result(
-            "\nYou specified that the algorithm update function supplied does not have action probabilities as one of its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
+            "\nYou specified that the algorithm update function supplied does not have action probabilities or previous betas in its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
         )
 
@@ -629,20 +644,6 @@ def confirm_no_small_sample_correction_desired_if_not_requested(
     if small_sample_correction == SmallSampleCorrections.NONE:
         confirm_input_check_result(
             "\nYou specified that you would not like to perform any small-sample corrections. Please verify that this is correct.\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-        )
-
-
-def confirm_no_adaptive_bread_inverse_stabilization_method_desired_if_not_requested(
-    adaptive_bread_inverse_stabilization_method,
-    suppress_interactive_data_checks,
-):
-    logger.info(
-        "Confirming that no adaptive bread inverse stabilization method is desired if it's not requested."
-    )
-    if adaptive_bread_inverse_stabilization_method == InverseStabilizationMethods.NONE:
-        confirm_input_check_result(
-            "\nYou specified that you would not like to perform any inverse stabilization while forming the adaptive variance. This is not usually recommended. Please verify that it is correct or select one of the available options.\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
         )
 
@@ -809,7 +810,7 @@ def verify_analysis_df_summary_satisfactory(
     avg_reward_trajectory_plot = plt.build()
 
     confirm_input_check_result(
-        f"\nYou provided a study dataframe reflecting a study with"
+        f"\nYou provided an analysis DataFrame reflecting a study with"
         f"\n* {num_subjects} subjects"
         f"\n* {num_non_initial_or_fallback_policies} policy updates"
         f"\n* {num_decision_times} decision times, for an average of {avg_decisions_per_subject}"
@@ -924,7 +925,7 @@ def require_valid_action_prob_times_given_if_index_supplied(
             ), f"Non-strictly-increasing times were given for action probabilities in the algorithm update function args for subject {subject_id} and policy {policy_idx}. Please see the contract for details."
             assert (
                 times[0] >= min_time and times[-1] <= max_time
-            ), f"Times not present in the study were given for action probabilities in the algorithm update function args. The min and max times in the study dataframe are {min_time} and {max_time}, while subject {subject_id} has times {times} supplied for policy {policy_idx}. Please see the contract for details."
+            ), f"Times not present in the study were given for action probabilities in the algorithm update function args. The min and max times in the analysis DataFrame are {min_time} and {max_time}, while subject {subject_id} has times {times} supplied for policy {policy_idx}. Please see the contract for details."
 
 
 def require_estimating_functions_sum_to_zero(
@@ -1089,20 +1090,18 @@ def require_RL_estimating_functions_sum_to_zero(
         )
 
 
-def require_adaptive_bread_inverse_is_true_inverse(
-    joint_adaptive_bread_matrix,
-    joint_adaptive_bread_inverse_matrix,
+def require_joint_bread_inverse_is_true_inverse(
+    joint_bread_inverse_matrix,
+    joint_bread_matrix,
     suppress_interactive_data_checks,
 ):
     """
-    Check that the product of the joint adaptive bread matrix and its inverse is
+    Check that the product of the joint bread matrix and its inverse is
     sufficiently close to the identity matrix.  This is a direct check that the
-    joint_adaptive_bread_inverse_matrix we create is "well-conditioned".
+    joint_bread_matrix we create is "well-conditioned".
     """
-    should_be_identity = (
-        joint_adaptive_bread_matrix @ joint_adaptive_bread_inverse_matrix
-    )
-    identity = np.eye(joint_adaptive_bread_matrix.shape[0])
+    should_be_identity = joint_bread_inverse_matrix @ joint_bread_matrix
+    identity = np.eye(joint_bread_matrix.shape[0])
     try:
         np.testing.assert_allclose(
             should_be_identity,
@@ -1112,7 +1111,7 @@ def require_adaptive_bread_inverse_is_true_inverse(
         )
     except AssertionError as e:
         confirm_input_check_result(
-            f"\nJoint adaptive bread is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
+            f"\nJoint bread inverse is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
             e,
         )
@@ -1120,7 +1119,7 @@ def require_adaptive_bread_inverse_is_true_inverse(
     # If we haven't already errored out, return some measures of how far off we are from identity
     diff = should_be_identity - identity
     logger.debug(
-        "Difference between should-be-identity produced by multiplying joint adaptive bread inverse and its computed inverse and actual identity:\n%s",
+        "Difference between should-be-identity produced by multiplying joint bread and its computed inverse and actual identity:\n%s",
         diff,
     )
 

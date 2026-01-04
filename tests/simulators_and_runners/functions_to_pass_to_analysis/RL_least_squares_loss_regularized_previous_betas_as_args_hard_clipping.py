@@ -4,9 +4,15 @@ from jax import core
 from jax.experimental import host_callback as hcb
 import numpy as np
 
-from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
-    synthetic_get_action_1_prob_pure,
-)
+
+def synthetic_get_action_1_prob_pure(
+    beta_est, lower_clip, steepness, upper_clip, treat_states
+):
+    treat_est = beta_est[-len(treat_states) :]
+    lin_est = jnp.matmul(treat_states, treat_est)
+    raw_prob = jax.scipy.special.expit(steepness * lin_est)
+
+    return jnp.clip(raw_prob, lower_clip, upper_clip)[()]
 
 
 @jax.jit

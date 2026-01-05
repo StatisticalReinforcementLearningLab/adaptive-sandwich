@@ -3,28 +3,26 @@ import numpy as np
 from lifejacket import helper_functions
 
 
-def test_invert_inverse_bread_matrix_2x2_block_diagonal():
+def test_invert_bread_matrix_2x2_block_diagonal():
     # Test case 1: Simple 2x2 block matrix
-    inverse_bread = np.array([[4, 0, 0, 0], [0, 4, 0, 0], [0, 0, 2, 0], [0, 0, 0, 2]])
+    bread = np.array([[4, 0, 0, 0], [0, 4, 0, 0], [0, 0, 2, 0], [0, 0, 0, 2]])
     beta_dim = 2
     theta_dim = 2
-    expected_bread = np.array(
+    expected_bread_inverse = np.array(
         [[0.25, 0, 0, 0], [0, 0.25, 0, 0], [0, 0, 0.5, 0], [0, 0, 0, 0.5]]
     )
     np.testing.assert_allclose(
-        helper_functions.invert_inverse_bread_matrix(
-            inverse_bread, beta_dim, theta_dim
-        ),
-        expected_bread,
+        helper_functions.invert_bread_matrix(bread, beta_dim, theta_dim),
+        expected_bread_inverse,
         rtol=1e-05,
     )
 
 
-def test_invert_inverse_bread_matrix_4x4_block_diagonal():
-    inverse_bread = np.array([[4, 1, 0, 0], [1, 4, 0, 0], [0, 0, 2, 1], [0, 0, 1, 2]])
+def test_invert_bread_matrix_4x4_block_diagonal():
+    bread = np.array([[4, 1, 0, 0], [1, 4, 0, 0], [0, 0, 2, 1], [0, 0, 1, 2]])
     beta_dim = 2
     theta_dim = 2
-    expected_bread = np.array(
+    expected_bread_inverse = np.array(
         [
             [0.26666667, -0.06666667, 0, 0],
             [-0.06666667, 0.26666667, 0, 0],
@@ -33,16 +31,14 @@ def test_invert_inverse_bread_matrix_4x4_block_diagonal():
         ]
     )
     np.testing.assert_allclose(
-        helper_functions.invert_inverse_bread_matrix(
-            inverse_bread, beta_dim, theta_dim
-        ),
-        expected_bread,
+        helper_functions.invert_bread_matrix(bread, beta_dim, theta_dim),
+        expected_bread_inverse,
         rtol=1e-05,
     )
 
 
-def test_invert_inverse_bread_matrix_6x6_block_diagonal():
-    inverse_bread = np.array(
+def test_invert_bread_matrix_6x6_block_diagonal():
+    bread = np.array(
         [
             [4, 1, 0, 0, 0, 0],
             [1, 4, 0, 0, 0, 0],
@@ -54,7 +50,7 @@ def test_invert_inverse_bread_matrix_6x6_block_diagonal():
     )
     beta_dim = 2
     theta_dim = 2
-    expected_bread = np.array(
+    expected_bread_inverse = np.array(
         [
             [0.26666667, -0.06666667, 0, 0, 0, 0],
             [-0.06666667, 0.26666667, 0, 0, 0, 0],
@@ -65,16 +61,14 @@ def test_invert_inverse_bread_matrix_6x6_block_diagonal():
         ]
     )
     np.testing.assert_allclose(
-        helper_functions.invert_inverse_bread_matrix(
-            inverse_bread, beta_dim, theta_dim
-        ),
-        expected_bread,
+        helper_functions.invert_bread_matrix(bread, beta_dim, theta_dim),
+        expected_bread_inverse,
         rtol=1e-05,
     )
 
 
-def test_invert_inverse_bread_matrix_6x6_block_lower_triangular():
-    inverse_bread = np.array(
+def test_invert_bread_matrix_6x6_block_lower_triangular():
+    bread = np.array(
         [
             [4, 1, 0, 0, 0, 0],
             [1, 4, 0, 0, 0, 0],
@@ -87,19 +81,17 @@ def test_invert_inverse_bread_matrix_6x6_block_lower_triangular():
     beta_dim = 2
     theta_dim = 2
 
-    expected_bread = np.linalg.inv(inverse_bread)
+    expected_bread_inverse = np.linalg.inv(bread)
 
     np.testing.assert_allclose(
-        helper_functions.invert_inverse_bread_matrix(
-            inverse_bread, beta_dim, theta_dim
-        ),
-        expected_bread,
+        helper_functions.invert_bread_matrix(bread, beta_dim, theta_dim),
+        expected_bread_inverse,
         atol=1e-12,
     )
 
 
-def test_invert_inverse_bread_matrix_different_beta_theta_block_lower_triangular():
-    inverse_bread = np.array(
+def test_invert_bread_matrix_different_beta_theta_block_lower_triangular():
+    bread = np.array(
         [
             [4, 1, 0, 0, 0, 0, 0],
             [1, 4, 0, 0, 0, 0, 0],
@@ -113,12 +105,10 @@ def test_invert_inverse_bread_matrix_different_beta_theta_block_lower_triangular
     beta_dim = 2
     theta_dim = 3
 
-    expected_bread = np.linalg.inv(inverse_bread)
+    expected_bread_inverse = np.linalg.inv(bread)
 
     np.testing.assert_allclose(
-        helper_functions.invert_inverse_bread_matrix(
-            inverse_bread, beta_dim, theta_dim
-        ),
-        expected_bread,
+        helper_functions.invert_bread_matrix(bread, beta_dim, theta_dim),
+        expected_bread_inverse,
         atol=1e-12,
     )

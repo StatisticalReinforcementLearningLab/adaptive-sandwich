@@ -69,11 +69,11 @@ This branch relies on the up-to-date `lifejacket` package from the main branch, 
 
 Local testing serves as a sanity check for near-zero estimating equations and monotonic improvement in learning curves. Below are important notes for each component:
 
-- Treatment effect in a two-armed trial: we use a modified synthetic environment by incorporating some pre-treated features in the reward generation process. Please refer to Section 1.2 in ``ke/Inference_treatmenteffect.tex``.
+- **Treatment effect in a two-armed trial**: we use a modified synthetic environment by incorporating some pre-treated features in the reward generation process. Please refer to Section 1.2 in ``ke/Inference_treatmenteffect.tex``.
 
-- SAC algorithm: The implementation of SAC is harder than TS as we need to perform gradient descent to update the actor to achieve a nearly zero estimating equations, which can cause some instability for the after study inference. Please refer to Eq.8 of Section 1 in ``ke/Algorithm_SAC.tex``.
+- **SAC algorithm**: The implementation of SAC is harder than TS as we need to perform gradient descent to update the actor to achieve a nearly zero estimating equations, which can cause some instability for the after study inference. Please refer to Eq.8 of Section 1 in ``ke/Algorithm_SAC.tex``.
 
-- Miwave environment: For synthetic environment, we use ``rl_study_simulation_partial.py``, while for Miwaves environment, we use ``rl_study_simulation_partial_Miwaves.py``
+- **Miwave environment**: For synthetic environment, we use ``rl_study_simulation_partial.py``, while for Miwaves environment, we use ``rl_study_simulation_partial_Miwaves.py``. The two files can be unified in the future.
 
 
 ### Step 4: Overall evaluation on the cluster across multiple replications
@@ -92,25 +92,32 @@ Once we have passed the local test, we can create a virtual environment in the c
 
 - ``run_and_analysis_parallel_Miwaves_[TS/SAC]_[averagerewards/treatmenteffect].sh``: [TODO]
 
-The running examples can be:
+Examples of the running command can be:
+
+> synthetic environment + SAC + average rewards
+
 
 ```
 sbatch --array=[0-999] -n 16 -t 0-23:59 -p serial_requeue --mem=64G run_and_analysis_parallel_syn_SAC_averagerewards.sh -T 50 -n 30  --steepness=1.0 --synthetic_mode='delayed_1_action_dosage' --lclip=0.1 --uclip=0.9 
-sbatch --array=[0-999] -t 0-23:59 -p serial_requeue --mem=64G run_and_analysis_parallel_Miwaves_TS_averagerewards.sh -T 60 -n 30 --decisions_between_updates=1
 ```
 
+> Miwaves environment + TS + average rewards
 
-After the running is complete, we can use the evaluation script to calculate the variance estimate and coverage rate. For example, in Miwaves, we can run:
+```
+sbatch --array=[0-999] -t 0-23:59 -p serial_requeue --mem=64G run_and_analysis_parallel_Miwaves_TS_averagerewards.sh -T 60 -n 30 --decisions_between_updates=1
+````
+
+
+After the running is complete, we can use the evaluation script to calculate the variance estimate and coverage rate. The command can be found from the output log. For example, in Miwaves, we can run:
 
 ```
 bash simulation_collect_analyses.sh --input_glob=/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n500_T60/*/simulated_data/miwaves_alg=smooth_posterior_sampling_T=60_n=500_decisionsBtwnUpdates=1_actionC=0_averagerewards/exp=1/analysis.pkl --num_users=500 --index_to_check_ci_coverage=0 --in_study_col_name=in_study --action_col_name=action --action_prob_col_name=action1prob
 ```
 
+One needs to replace ``kesun`` by their folder name and be careful about the file path.
 
 
-## Development Notes (Internal)
-
-_Last updated by Ke on 01/06/2026_
+## Development Notes (Last updated by Ke on 01/06/2026)
 
 - SAC on Synthetic environment: although the updated lifejacket package can handle the RL algorithm with recursive updates, the variance estimate from our adaptive approach becomes overly large such that the coverage rate is close to 1. Empirical results are provided in Section 3 in ``ke/Algorithm_SAC.tex``.
 

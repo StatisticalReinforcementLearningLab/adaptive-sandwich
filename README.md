@@ -114,8 +114,11 @@ After the running is complete, we can use the evaluation script to calculate the
 bash simulation_collect_analyses.sh --input_glob=/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n500_T60/*/simulated_data/miwaves_alg=smooth_posterior_sampling_T=60_n=500_decisionsBtwnUpdates=1_actionC=0_averagerewards/exp=1/analysis.pkl --num_users=500 --index_to_check_ci_coverage=0 --in_study_col_name=in_study --action_col_name=action --action_prob_col_name=action1prob
 ```
 
-One needs to replace ``kesun`` by their folder name and be careful about the file path.
+One needs to replace ``kesun`` by their folder name and be careful about the file path. Hare are some caveat:
 
+- Unlike the original implementation in the main branch, the directory path for the saved data in the bash files in this branch is slightly changed, which facilitates the varying sample size n in the experiments but may cause inconsistency.
+
+- table_results_*.py: these files are used to save the evaluation results
 
 ## Development Notes (Last updated by Ke on 01/06/2026)
 

@@ -8,12 +8,12 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 
 # Arguments that affect RL study simulation side
-T=5
+T=50
 decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
-n=6
+n=30
 # recruit_n=$n is done below unless the user specifies recruit_n
 synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
@@ -29,19 +29,12 @@ action_centering_RL=0
 lclip=0.1 # smooth allocation function in policy instead of 
 uclip=0.9 
 dynamic_seeds=0
-# env_seed_override=-1
-env_seed_override=0
-# alg_seed_override=-1
-alg_seed_override=0
-# prior_mean="-0.37783337,0.18696958,2.3131008,0.32913807"
-# prior_var_upper_triangle="1000000,0,0,0,1000000,0,0,1000000,0,1000000"
-# prior_mean="naive"
-# prior_var_upper_triangle="naive"
-# noise_var=1.0
+env_seed_override=-1
+# env_seed_override=4955001
+alg_seed_override=-1
+# alg_seed_override=9910000
 
-# ####### new alpa for enviroment
-# alpha1=0.1
-# alpha2=0.1
+
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -54,8 +47,6 @@ reward_col_name="reward"
 action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_SAC.py" 
 action_prob_func_args_beta_index=0
 alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py" # vanilia SAC
-# alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAChistory_alg_update_function.py" # historical SAC (no!!)
-SAChistory=0 # 1: include SAC history in the saved data for analysis; 0: do not include it.
 alg_update_func_type="estimating" 
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
@@ -68,7 +59,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_av
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"
-# trim_small_singular_values=0
+trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
 stabilize_joint_adaptive_bread_inverse=0
 
@@ -176,8 +167,7 @@ python rl_study_simulation_partial.py \
   --lower_clip=$lclip \
   --save_dir="n${n}_T${T}/0" \
   --Twoarmed=0 \
-  --filename=$filename \
-  --SAChistory=$SAChistory \
+  --filename=$filename 
 
 
 echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Finished RL study simulation."
@@ -189,8 +179,7 @@ output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Beginning after-study analysis."
-# python after_study_analysis_partial.py analyze-dataset \
-python -m lifejacket.after_study_analysis analyze \
+lifejacket analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
@@ -218,7 +207,34 @@ python -m lifejacket.after_study_analysis analyze \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-  # --trim_small_singular_values=$trim_small_singular_values 
+
+
+# python after_study_analysis_partial.py analyze-dataset \
+#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+#   --action_prob_func_filename=$action_prob_func_filename \
+#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+#   --alg_update_func_filename=$alg_update_func_filename \
+#   --alg_update_func_type=$alg_update_func_type \
+#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+#   --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
+#   --inference_func_filename=$inference_func_filename \
+#   --inference_func_args_theta_index=$inference_func_args_theta_index \
+#   --inference_func_type=$inference_func_type \
+#   --theta_calculation_func_filename=$theta_calculation_func_filename \
+#   --in_study_col_name=$in_study_col_name \
+#   --action_col_name=$action_col_name \
+#   --policy_num_col_name=$policy_num_col_name \
+#   --calendar_t_col_name=$calendar_t_col_name \
+#   --user_id_col_name=$user_id_col_name \
+#   --action_prob_col_name=$action_prob_col_name \
+#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+#   --suppress_all_data_checks=$suppress_all_data_checks \
+#   --small_sample_correction=$small_sample_correction \
+#   --trim_small_singular_values=$trim_small_singular_values 
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Ending after-study analysis."
 

@@ -247,7 +247,7 @@ class BayesianLinearRegressionRD(RLAlgorithm):
         self.rng = rng
         self.bernoulli = stats.bernoulli
 
-        self.user_data = {}
+        self.user_data = {} # there is no environement. The algorithm incorporates the environmental information.
         self.num_users = num_users
 
         for i in range(self.num_users):
@@ -278,9 +278,9 @@ class BayesianLinearRegressionRD(RLAlgorithm):
 
     def create_state(self, user: int):
         """Create the state vector for the given features and decision point index"""
-        avg_reward = np.mean(self.user_data[user]["reward"][-3:])
+        avg_reward = np.mean(self.user_data[user]["reward"][-3:]) # there is no error if len(...) < 3
 
-        # create S1
+        # create S1: recent engagement
         if avg_reward >= 2:
             S1 = 1
         else:
@@ -307,7 +307,7 @@ class BayesianLinearRegressionRD(RLAlgorithm):
         return [S1, S2, S3]
 
     def compute_reward(self, user: int):
-        """Create the reward given the features for a given time index"""
+        """Create the reward given the features for a given time index [return back from features to the reward]"""
         reward = 0
         features = self.user_data[user]["features"][-1]
         if features["survey_completion"] == 1:
@@ -339,7 +339,7 @@ class BayesianLinearRegressionRD(RLAlgorithm):
         else:
             return 0
 
-    def update_design_row(self, user: int):
+    def update_design_row(self, user: int): # not use
         """Update the design row for a given user"""
 
         # Get the state, action, and action probability
@@ -373,7 +373,7 @@ class BayesianLinearRegressionRD(RLAlgorithm):
         """Clip the probability to be between min and max"""
         return np.clip(prob, min, max)
 
-    def get_action(self, user: int, decision_idx: int):
+    def get_action(self, user: int, decision_idx: int): # not use
         """
         Get the action for a particular user for a particular decision point
         """
@@ -450,7 +450,7 @@ class BayesianLinearRegressionRD(RLAlgorithm):
         for i in range(self.num_users):
             self.user_data[i]["real_reward"].append(self.compute_reward(i))
             self.user_data[i]["reward"].append(self.compute_reward(i) - self.action_cost(i))
-            self.user_data[i]["state"].append(self.create_state(i))
+            self.user_data[i]["state"].append(self.create_state(i)) # generate next state
 
     def create_design_and_reward_matrix(self):
         """
@@ -509,7 +509,7 @@ class BayesianLinearRegressionRD(RLAlgorithm):
         # with open(noise_var_path, "wb") as f:
         #     pkl.dump(self.noise_var_history, f)
 
-    def update_hyperparameters(self):
+    def update_hyperparameters(self): # no use, otherwise the algorith is very complicated, no close-form for the estimation function
         """
         Update the noise variance using data up until the current decision point using empirical Bayes
         """

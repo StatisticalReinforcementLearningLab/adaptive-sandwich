@@ -10,10 +10,13 @@ from jax import numpy as jnp
 from jax import debug
 from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering import (
     smooth_thompson_sampling_act_prob_function_no_action_centering,
-    # smooth_thompson_sampling_act_prob_function_no_action_centering_partial,
 )
-from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering_partial import (
-    smooth_thompson_sampling_act_prob_function_no_action_centering_partial,
+from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed import (
+    smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed,
+)
+
+from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering_Miwaves import (
+    smooth_thompson_sampling_act_prob_function_no_action_centering_Miwaves,
 )
 
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
@@ -22,6 +25,7 @@ from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_SAC import (
     synthetic_get_action_1_prob_SAC,
 )
+
 from helper_functions import clip
 
 logger = logging.getLogger(__name__)
@@ -112,7 +116,7 @@ def get_pis_batched_sigmoid(
         batched_treat_states_tensor,
     )
 
-def get_pis_batched_sigmoid_partial(
+def get_pis_batched_SAC_twoarmed(
     beta_est,
     lower_clip,
     steepness,
@@ -167,7 +171,7 @@ def get_pis_batched_thompson_sampling_twoarmed(
     # equivalent to a loop for each user    
     return jax.vmap(
         # fun=smooth_thompson_sampling_act_prob_function_no_action_centering,
-        fun=smooth_thompson_sampling_act_prob_function_no_action_centering_partial,
+        fun=smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed,
         # in_axes=(None, 0, None, None, None, None),
         in_axes=(None, 0, None, None, None, None, 0), # Z_id should be row-wise for computation
         out_axes=0,
@@ -181,6 +185,32 @@ def get_pis_batched_thompson_sampling_twoarmed(
         Z_id, # new 
     )
 
+
+def get_pis_batched_thompson_sampling_Miwaves(
+    beta_est,
+    batched_treat_states_tensor,
+    num_users_entered_before_last_update,
+    lower_clip,
+    upper_clip,
+    steepness,
+    Z_id, # new
+):
+    # equivalent to a loop for each user    
+    return jax.vmap(
+        # fun=smooth_thompson_sampling_act_prob_function_no_action_centering,
+        fun=smooth_thompson_sampling_act_prob_function_no_action_centering_Miwaves,
+        # in_axes=(None, 0, None, None, None, None),
+        in_axes=(None, 0, None, None, None, None, 0), # Z_id should be row-wise for computation
+        out_axes=0,
+    )(
+        beta_est,
+        batched_treat_states_tensor,
+        num_users_entered_before_last_update,
+        lower_clip,
+        upper_clip,
+        steepness,
+        Z_id, # new 
+    )
 
 class SigmoidLS:
     """
@@ -456,6 +486,7 @@ class SmoothPosteriorSampling:
         prior_sigma,
         noise_var,
         twoarmed=False,
+        Miwaves=False, # Miwaves
     ):
         self.state_feats = state_feats
         self.treat_feats = treat_feats
@@ -472,6 +503,7 @@ class SmoothPosteriorSampling:
         self.rl_update_args = {}
 
         self.twoarmed = twoarmed ##### new
+        self.Miwaves = Miwaves ##### new
 
         # Set an initial policy
         self.all_policies = [
@@ -488,6 +520,9 @@ class SmoothPosteriorSampling:
         self.action_centering = action_centering
         self.incremental_updates = False
 
+    
+
+
     # TODO: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
     # to be formatted as such (though I don't like the latter). Going with this
@@ -495,6 +530,11 @@ class SmoothPosteriorSampling:
     # a copy, but it seems to work perfectly.
 
     # TODO: Docstring
+    def get_Zids(self, df):
+        Z_ids = df['Z_id'].to_numpy().reshape(-1, 1)
+        return jnp.array(Z_ids)
+
+
     def get_base_states(self, df):
         base_states = df[self.state_feats].to_numpy()
         return jnp.array(base_states)
@@ -609,11 +649,6 @@ class SmoothPosteriorSampling:
             # only update the algorithm on the treatment group, (similar role of "in_study" column)
             in_study_data = in_study_data[in_study_data['Z_id']==1]
         
-        # if self.twoarmed:
-        #     actions = in_study_data.loc[in_study_data['Z_id']==1, "action"].to_numpy()
-        #     action1probs = in_study_data.loc[in_study_data['Z_id']==1,"action1prob"].to_numpy()
-        #     rewards = in_study_data.loc[in_study_data['Z_id']==1,"reward"].to_numpy()
-        # else: #
         actions = in_study_data["action"].to_numpy()
         action1probs = in_study_data["action1prob"].to_numpy()
         rewards = in_study_data["reward"].to_numpy()
@@ -667,26 +702,9 @@ class SmoothPosteriorSampling:
         }
 
         self.all_policies.append(update_dict)
-        """
-        if state = 2
-        {'beta_est': Array([-1.1359017 ,  3.5079467 ,  1.0000004 ,  0.33333334,  0.33333367],      dtype=float32), 
-        'num_users_entered_before_last_update': 3, 
-        'inc_data': {'reward': array([-1.72244138,  2.37204856, -0.54936675]), 
-                    'action': array([0., 1., 0.]), 
-                    'action1prob': array([0.50411886, 0.50411886, 0.50411886]),
-                      'base_states': array([[1],
-                    [1],
-                    [1]]), 'treat_states': array([[1],
-                    [1],
-                    [1]]), 'design': array([[1., 0.],
-                    [1., 1.],
-                    [1., 0.]])}}
-        """
         
     def get_all_users(self, study_df, user_id_column="user_id"):
         return study_df[user_id_column].unique()
-
-
     
     def get_current_beta_estimate(self):
         return self.all_policies[-1]["beta_est"]
@@ -709,42 +727,25 @@ class SmoothPosteriorSampling:
             in_study_user_data = all_prev_data.loc[
                 (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
             ]
-            if self.twoarmed:
-                self.rl_update_args[next_policy_num][user_id] = (
-                    (
-                        self.get_current_beta_estimate(), # save the model's parameters
-                        self.get_num_users_entered_before_last_update(),
-                        self.get_treat_states(in_study_user_data),
-                        self.get_actions(in_study_user_data),
-                        self.get_rewards(in_study_user_data),
-                        self.prior_mu,
-                        jnp.linalg.inv(self.prior_sigma),
-                        self.noise_var,
-                        in_study_user_data.loc[in_study_user_data['Z_id']==1,'Z_id'].to_numpy() if self.twoarmed else in_study_user_data['Z_id'].to_numpy(), # new
-                    )
-                    # We only care about the data overall, however, if there is any
-                    # in-study data for this user so far
-                    if not in_study_user_data.empty
-                    else ()
+            
+            self.rl_update_args[next_policy_num][user_id] = (
+                (
+                    self.get_current_beta_estimate(), # save the model's parameters
+                    self.get_num_users_entered_before_last_update(),
+                    self.get_treat_states(in_study_user_data),
+                    self.get_actions(in_study_user_data),
+                    self.get_rewards(in_study_user_data),
+                    self.prior_mu,
+                    jnp.linalg.inv(self.prior_sigma),
+                    self.noise_var,
+                    self.get_Zids(in_study_user_data), # new
                 )
-            else:
-                self.rl_update_args[next_policy_num][user_id] = (
-                    (
-                        self.get_current_beta_estimate(), # save the model's parameters
-                        self.get_num_users_entered_before_last_update(),
-                        self.get_treat_states(in_study_user_data),
-                        self.get_actions(in_study_user_data),
-                        self.get_rewards(in_study_user_data),
-                        self.prior_mu,
-                        jnp.linalg.inv(self.prior_sigma),
-                        self.noise_var,
-                        # in_study_user_data.loc[in_study_user_data['Z_id']==1,'Z_id'].to_numpy() if self.twoarmed else in_study_user_data['Z_id'].to_numpy(), # new
-                    )
-                    # We only care about the data overall, however, if there is any
-                    # in-study data for this user so far
-                    if not in_study_user_data.empty
-                    else ()
-                )
+                # We only care about the data overall, however, if there is any
+                # in-study data for this user so far
+                if not in_study_user_data.empty
+                else ()
+            )
+          
 
     # collect the learning policy's information at the current decision time
     def collect_pi_args(self, all_prev_data, calendar_t):
@@ -755,50 +756,28 @@ class SmoothPosteriorSampling:
         assert calendar_t == jnp.max(all_prev_data["calendar_t"].to_numpy())
 
         ###### consistent with smooth_thompson_sampling_act_prob_function_no_action_centering_partial ########
-        if self.twoarmed:
-            self.pi_args[calendar_t] = {
-                user_id: (
-                    (
-                        self.get_current_beta_estimate(),
-                        self.get_treat_states(
-                            all_prev_data.loc[all_prev_data.user_id == user_id]
-                        )[-1],
-                        self.get_num_users_entered_before_last_update(), # in self.all_policies, updated in the algorithm update function
-                        self.lower_clip,
-                        self.upper_clip,
-                        self.steepness,
-                        all_prev_data.loc[all_prev_data.user_id == user_id, 'Z_id'].values[-1], # new
-                    )
-                    if all_prev_data.loc[
-                        (all_prev_data.user_id == user_id)
-                        & (all_prev_data.calendar_t == calendar_t)
-                    ].in_study.item()
-                    else ()
+        self.pi_args[calendar_t] = {
+            user_id: (
+                (
+                    self.get_current_beta_estimate(),
+                    self.get_treat_states(
+                        all_prev_data.loc[all_prev_data.user_id == user_id]
+                    )[-1],
+                    self.get_num_users_entered_before_last_update(), # in self.all_policies, updated in the algorithm update function
+                    self.lower_clip,
+                    self.upper_clip,
+                    self.steepness,
+                    all_prev_data.loc[all_prev_data.user_id == user_id, 'Z_id'].values[-1], # new
                 )
-                for user_id in self.get_all_users(all_prev_data)
-            }
-        else:
-            self.pi_args[calendar_t] = {
-                user_id: (
-                    (
-                        self.get_current_beta_estimate(),
-                        self.get_treat_states(
-                            all_prev_data.loc[all_prev_data.user_id == user_id]
-                        )[-1],
-                        self.get_num_users_entered_before_last_update(), # in self.all_policies, updated in the algorithm update function
-                        self.lower_clip,
-                        self.upper_clip,
-                        self.steepness,
-                        # all_prev_data.loc[all_prev_data.user_id == user_id, 'Z_id'].values[-1], # new
-                    )
-                    if all_prev_data.loc[
-                        (all_prev_data.user_id == user_id)
-                        & (all_prev_data.calendar_t == calendar_t)
-                    ].in_study.item()
-                    else ()
-                )
-                for user_id in self.get_all_users(all_prev_data)
-            }
+                if all_prev_data.loc[
+                    (all_prev_data.user_id == user_id)
+                    & (all_prev_data.calendar_t == calendar_t)
+                ].in_study.item()
+                else ()
+            )
+            for user_id in self.get_all_users(all_prev_data)
+        }
+       
 
     def get_action_probs(self, curr_timestep_data):
         """
@@ -816,7 +795,19 @@ class SmoothPosteriorSampling:
         Z_id = curr_timestep_data['Z_id'].to_numpy() # [n, 1]
 
         # evalute the action prob for all users accoeding to Z_id
-        if self.twoarmed:
+        if self.Miwaves:
+            action_probs = get_pis_batched_thompson_sampling_Miwaves(
+                self.get_current_beta_estimate(),
+                treat_states,
+                self.get_num_users_entered_before_last_update(),
+                self.lower_clip,
+                self.upper_clip,
+                self.steepness,
+                Z_id, # new
+            )   
+
+            return action_probs
+        else:
             action_probs = get_pis_batched_thompson_sampling_twoarmed(
                 self.get_current_beta_estimate(),
                 treat_states,
@@ -826,25 +817,12 @@ class SmoothPosteriorSampling:
                 self.steepness,
                 Z_id, # new
             )   
-        else:
-            action_probs = get_pis_batched_thompson_sampling(
-                self.get_current_beta_estimate(),
-                treat_states,
-                self.get_num_users_entered_before_last_update(),
-                self.lower_clip,
-                self.upper_clip,
-                self.steepness,
-            )
-
         return action_probs
-        # if self.twoarmed: ###### control group, only assign 0.5
-        #     mask = jnp.array(curr_timestep_data['Z_id'].to_numpy()) == 0
-        #     return jnp.where(mask, 0.5, action_probs)
-        #     # action_probs[curr_timestep_data['Z_id'] == 0]  = 0.5
-        # else:
-        #     return action_probs
+
+
+
     
-        
+
 
 class SoftActorCritic:
     """
@@ -860,7 +838,6 @@ class SoftActorCritic:
         upper_clip,
         steepness,
         twoarmed=False,
-        history=False,
     ):
         self.state_feats = state_feats
         self.treat_feats = treat_feats
@@ -876,13 +853,9 @@ class SoftActorCritic:
         self.rl_update_args = {}
         self.lambda_entropy = 1.0 # entropy regularization coefficient
         
-        self.history=history # False: vanilla SAC; True: historical version of SAC 
-        if self.history:
-            self.lr_pi = 10.0
-            self.ridge_penalty = 1e-3 
-        else:
-            self.lr_pi = 10.0
-            self.ridge_penalty = 1e-3 # 0.0：NAN， 1e-8: still less stable. 1e-3 works better than 1e-5, similar to 1e-1
+       
+        self.lr_pi = 10.0
+        self.ridge_penalty = 1e-3 # 0.0：NAN， 1e-8: still less stable. 1e-3 works better than 1e-5, similar to 1e-1
         # self.lr_Q = 1e-2 # no use
         self.gamma = 0.99
         
@@ -892,33 +865,34 @@ class SoftActorCritic:
         self.twoarmed = twoarmed ##### new
 
         # Set an initial policy
-        self.betaQ = jnp.array(self.rng.normal(size=self.beta_dim_Q))# initial critic parameters
-        self.betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # initial actor parameters
-        self.betaQ_tar = self.betaQ.copy() # target critic parameters 
-        self.betapi_tar = self.betapi.copy() # target actor parameters 
-        self.betaQ_init = self.betaQ.copy()
-        self.betapi_init = self.betapi.copy()
-        # self.betaQ_tar = jnp.array(self.rng.normal(size=self.beta_dim_Q))
-        # self.betapi_tar = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # initial actor parameters      
+        self.betaQ_init = jnp.array(self.rng.normal(size=self.beta_dim_Q))# initial critic parameters
+        self.betapi_init = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # initial actor parameters
+        self.betaQ_tar = self.betaQ_init.copy() # target critic parameters 
+        self.betapi_tar = self.betapi_init.copy() # target actor parameters  
         self.tau = 0.0 # Polyak for target network, tau=0: only based on the last step's critic, i.e., self.betaQ_tar = self.betaQ; tau=1: only based on the target critic, i.e., self.betaQ_tar = self.betaQ_tar (always a fixed target Q)
         self.decay=0.5 # learning rate decay for the actor, which require gradient descent (not necessary, but suggested here)
         self.epoch_actor = 500
         self.all_policies = [
             {
-                "beta_est": jnp.concatenate([self.betaQ, self.betapi]),
+                "beta_est": jnp.concatenate([self.betaQ_tar, self.betapi_tar]),
                 "inc_data": {},
                 "num_users_entered_before_last_update": 0,
-                # "beta_previous": jnp.concatenate([self.betaQ_tar, self.betapi_tar]),
                 "betaQ_target": self.betaQ_tar,
                 "betapi_target": self.betapi_tar,
                 "next_action": jnp.zeros(self.beta_dim_pi),
             }
         ]
         self.incremental_updates = False
+        self.previous_betas_over_time = jnp.zeros((1, self.beta_dim))
         
 
 
     # TODO: Docstring
+    def get_Zids(self, df):
+        Z_ids = df['Z_id'].to_numpy().reshape(-1, 1)
+        return jnp.array(Z_ids)
+
+
     def get_base_states(self, df):
         base_states = df[self.state_feats].to_numpy()
         return jnp.array(base_states)
@@ -1001,12 +975,9 @@ class SoftActorCritic:
         ########## important: only update on the target users: in-study and treatment group Z_id=1 ##########
         in_study_data1 = all_data[all_data["in_study"] == 1] # only include unit data that have happened so far till t
         
-        if self.history:
-            in_study_data = in_study_data1 # for historical SAC, use all in-study data till time t
-            print('Historical SAC update at time t=', t)
-        else:
-            # for vanilla SAC, only update on the target users at the current time t (different from Tompson Sampling) ##########
-            in_study_data = in_study_data1[in_study_data1["calendar_t"] == t]
+       
+        # for vanilla SAC, only update on the target users at the current time t (different from Tompson Sampling) ##########
+        in_study_data = in_study_data1[in_study_data1["calendar_t"] == t]
 
         # twoarmed trial: only update data with Z_id=1
         if self.twoarmed:
@@ -1025,7 +996,8 @@ class SoftActorCritic:
         def neg_obj(beta_pi):
             # only update the actor parameters given self.betaQ
             return -self.policy_objective(beta_pi, self.betaQ_tar, base_states, treat_states, actions) # here we use self.betaQ_tar
-
+        
+        
         
         ################### [Incremental] Update Critic give the last step's policy
         # grad_beta_Q = jax.grad(q_loss_func)(self.betaQ)
@@ -1036,10 +1008,10 @@ class SoftActorCritic:
         # print('next state', next_states)
         # print('p_next', p_next)
         next_action = self.rng.binomial(1, p_next)
-        print("self.betaQ_tar:", self.betaQ_tar)
+        # print("self.betaQ_tar:", self.betaQ_tar)
         Q_states_next = jnp.hstack([next_states, next_states * next_action[:, None]]) 
         Q_values_next = self.Q_value(Q_states_next, self.betaQ_tar) # target network
-        print('Q_values_next', Q_values_next)
+        # print('Q_values_next', Q_values_next)
         # print("betapi_tar:", self.betapi_tar)
         # print("next_action:", next_action)
         # print('next_states:', next_states)
@@ -1052,47 +1024,35 @@ class SoftActorCritic:
         TD_target = rewards + self.gamma * (Q_values_next - self.lambda_entropy * logp_next) # [n/2, ]
         # print("logp_next:", logp_next)
         # print("reward:", rewards)
-        # if t > 3:
-        #     in_study_data = all_data[all_data["in_study"] == 1]
-        #     print(in_study_data[['user_id', 'past_reward', 'reward']])
-        #     print(1)
 
         current_Q_states = jnp.hstack([base_states, treat_states * actions[:, None] ]) # [n/2, beta_dim_Q=4]
         XTX = current_Q_states.T @ current_Q_states
         XTY = current_Q_states.T @ TD_target.flatten()
     
 
-        if self.history:
-            n_realunits = in_study_data["user_id"].nunique() * t # treat all time steps as pseudo units
-            assert n_realunits == current_Q_states.shape[0]
-        else:
-            n_realunits = in_study_data["user_id"].nunique()
+        n_realunits = in_study_data["user_id"].nunique()
        
         ################################ multiply n_treat_units here is very important ############################
         # in statistics, we use the average loss, and thus we also scale the ridge penalty by n_treat_units
-        self.betaQ = jnp.linalg.solve(XTX +  n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent
+        betaQ = jnp.linalg.solve(XTX +  n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent
         # print("TD target mean:", jnp.mean(TD_target), "Q value mean:", jnp.mean(self.Q_value(current_Q_states, self.betaQ)), 'betaQ_tar/pre', self.betaQ_tar, 'betaQ', self.betaQ)
         # print("States", base_states)
-        residuals = TD_target - current_Q_states @ self.betaQ
-        debug.print('updated betaQ: {}', self.betaQ)
+        residuals = TD_target - current_Q_states @ betaQ
+        # debug.print('betaQ: {}', self.betaQ)
         # debug.print('TD_target: {}', TD_target)
         # debug.print('Current_Q_values: {}', current_Q_states @ self.betaQ)
         # debug.print('current_Q_states: {}', current_Q_states)
         # debug.print('residuals: {}', residuals)
-        if self.history:
-            vector_Q0 = -2*current_Q_states*residuals.reshape(-1,1) # [nt, beta_dim_Q] * [nt, 1] -> [nt, beta_dim_Q]
-            vector_Q = jnp.mean(vector_Q0, axis=0).reshape(-1,1)  + 2*self.ridge_penalty * self.betaQ.reshape(-1, 1)
-            each_unit_Q = vector_Q0.reshape(-1, t, current_Q_states.shape[1]) # [n, t, beta_dim_Q]
-            each_unit_Q = jnp.mean(each_unit_Q, axis=1) + 2*self.ridge_penalty * self.betaQ.reshape(1, -1) # [n, beta_dim_Q]
-        else:
-            vector_Q = -2*jnp.dot(current_Q_states.T, residuals.reshape(-1,1)) # [beta_dim_Q, n/2] * [n/2, 1] -> [beta_dim_Q, 1]
-            vector_Q = vector_Q / n_realunits + 2*self.ridge_penalty * self.betaQ.reshape(-1, 1)
-            each_unit_Q = -2*residuals.reshape(-1,1) * current_Q_states + 2*self.ridge_penalty * self.betaQ.reshape(1, -1) # [n, beta_dim_Q]
-         # [beta_dim_Q, 1] + [beta_dim_Q, 1]
-        debug.print('t {}', t)
+        
+        vector_Q = -2* current_Q_states * residuals.reshape(-1,1) # [n/2, beta_dim_Q] * [n/2, 1] -> [n/2, beta_dim_Q]
+        vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty * betaQ.reshape(-1, 1)
+        each_unit_Q = -2*residuals.reshape(-1,1) * current_Q_states + 2*self.ridge_penalty * betaQ.reshape(1, -1) # [n, beta_dim_Q]
+        # debug.print('t {}', t)
         debug.print("averaged vector_Q {}", vector_Q.reshape(1, -1))
-        debug.print("each unit_q {}", each_unit_Q)
+        # debug.print("each unit_q {}", each_unit_Q)
        
+        
+        
         # this manual gradient is used to check the correctness of jax automatic differentiation (which is very close)
         def gradient_pi(beta_pi, beta_Q):
             def single_grad(treat_state):
@@ -1102,44 +1062,34 @@ class SoftActorCritic:
                 grad = (1-2*self.lower_clip) * p0 * (1 - p0) * self.steepness * temp * treat_state
                 return grad
             # return -jnp.mean(jax.vmap(single_grad, in_axes=(0))(treat_states), axis=0) # [2,1] averaged over n
-            return -jax.vmap(single_grad, in_axes=(0))(treat_states) 
+            return jax.vmap(single_grad, in_axes=(0))(treat_states) 
         
         ################### [Incremental] Update Actor based on the last step's critic self.betaQ_tar
         self.lr_pi_use = self.lr_pi
         threshold = 1e-5
         
         #################### in each time step, we randomly intialize the betapi to perform update to mirror TS, where posterior mean and variance are directly computed based on the data and prior mean and varaince
-        # betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi))
-        # debug.print('self.betapi target{}', self.betapi_tar)
-        # debug.print('beta_init{}', self.betapi_init)
+        betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi))
         for i in range(self.epoch_actor):
-            loss_pre = neg_obj(self.betapi)
-            grad_beta_pi = jax.grad(neg_obj)(self.betapi)
-            self.betapi = self.betapi - self.lr_pi_use * grad_beta_pi
-            loss_after = neg_obj(self.betapi)
+            loss_pre = neg_obj(betapi)
+            grad_beta_pi = jax.grad(neg_obj)(betapi)
+            betapi = betapi - self.lr_pi_use * grad_beta_pi
+            loss_after = neg_obj(betapi)
             if jnp.linalg.norm(grad_beta_pi) < threshold:
                 break
             if (i+1) % 50 == 0:
                 # print("grad_beta_pi", grad_beta_pi)
-                print(f"SAC update at step {i}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', self.betapi, 'lr_pi', self.lr_pi_use)
+                print(f"SAC update at step {i}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', betapi, 'lr_pi', self.lr_pi_use)
             
             if i % 200 == 0 and i >0:
                 self.lr_pi_use = self.lr_pi_use * self.decay # decay the learning rate for the actor
-        vector_pi = gradient_pi(self.betapi, self.betaQ_tar) # [n/2 * t, beta_dim_pi]
-        # debug.print('t {}', t)
-        # debug.print('vector_pi shape {}', vector_pi.shape)
-        # try:
-        # temp = vector_pi.reshape(-1, t, self.betapi.shape[0]) # [n/2, t, beta_dim_pi] historical
-        # temp = vector_pi.reshape(-1, t, self.betapi.shape[0]) # [n/2, t, beta_dim_pi] historical
-        # except:
-        #     print(1)
-        # debug.print('self.betapi {}', self.betapi)
+        vector_pi = gradient_pi(betapi, self.betaQ_tar) # [n/2 * t, beta_dim_pi]
         debug.print("averaged vector_pi {}", jnp.mean(vector_pi, axis=0))
-        # debug.print("vector_pi for each unit {}", jnp.mean(temp, axis=1)) # for each unit
-        debug.print("vector_pi for each unit {}", vector_pi) # for each unit
+        # debug.print("vector_pi for each unit {}", vector_pi) # for each unit
         debug.print("grad_beta_pi {}", -grad_beta_pi)
         
 
+        beta_est = jnp.concatenate([betaQ, betapi])
         # print(in_study_data1[['user_id', 'past_reward', 'reward']])
         num_users_before_update = in_study_data["user_id"].nunique()
         # save Data
@@ -1153,43 +1103,28 @@ class SoftActorCritic:
             "next_action": next_action.flatten(),
         }
         update_dict = {
-            "beta_est": jnp.concatenate([self.betaQ, self.betapi]),
+            "beta_est": beta_est,
             "num_users_entered_before_last_update": num_users_before_update, 
             "inc_data": inc_data,
-            # "beta_previous": jnp.concatenate([self.betaQ_tar, self.betapi_tar]),
             "betaQ_target": self.betaQ_tar,
             "betapi_target": self.betapi_tar,
         }
+        if t == 1:
+            self.previous_betas_over_time = jnp.concatenate([betaQ.reshape(-1,1), betapi.reshape(-1,1)], axis=0).reshape(1, -1) # [1, beta_dim]
+        else:
+            beta_t = jnp.concatenate([betaQ.reshape(-1,1), betapi.reshape(-1,1)], axis=0).reshape(1, -1) # [1, beta_dim]
+            self.previous_betas_over_time = jnp.concatenate([self.previous_betas_over_time, beta_t], axis=0)
 
         self.all_policies.append(update_dict)
 
-        if self.history:
-            pass
-        else:
-            # !!!!!!!!!!!!! update the target network after each decison time (after saving the self.policy)
-            self.betaQ_tar = self.tau * self.betaQ_tar + (1 - self.tau) * self.betaQ
-            self.betapi_tar = self.tau * self.betapi_tar + (1 - self.tau) * self.betapi
-        """
-        if state = 2
-        {'beta_est': Array([-1.1359017 ,  3.5079467 ,  1.0000004 ,  0.33333334,  0.33333367],      dtype=float32), 
-        'num_users_entered_before_last_update': 3, 
-        'inc_data': {'reward': array([-1.72244138,  2.37204856, -0.54936675]), 
-                    'action': array([0., 1., 0.]), 
-                    'action1prob': array([0.50411886, 0.50411886, 0.50411886]),
-                      'base_states': array([[1],
-                    [1],
-                    [1]]), 'treat_states': array([[1],
-                    [1],
-                    [1]]), 'design': array([[1., 0.],
-                    [1., 1.],
-                    [1., 0.]])}}
-        """
+      
+        # !!!!!!!!!!!!! update the target network after each decison time (after saving the self.policy)
+        self.betaQ_tar = self.tau * self.betaQ_tar + (1 - self.tau) * betaQ
+        self.betapi_tar = self.tau * self.betapi_tar + (1 - self.tau) * betapi
         
     def get_all_users(self, study_df, user_id_column="user_id"):
         return study_df[user_id_column].unique()
 
-
-    
     def get_current_beta_estimate(self):
         return self.all_policies[-1]["beta_est"]
 
@@ -1217,49 +1152,36 @@ class SoftActorCritic:
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
         self.rl_update_args[next_policy_num] = {}
         print('In saving collect_rl_update_args, beta:', self.get_current_beta_estimate())
+        
+        num_half = int(all_prev_data["user_id"].nunique()/2)  
+
         for i, user_id in enumerate(self.get_all_users(all_prev_data)): # n
-            if self.history:
-                in_study_user_data = all_prev_data.loc[
-                                (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
-                            ]
-            else:   # for SAC we only save data at the current time point to form the estimation questions !!!!!!!!!!!
-                in_study_user_data = all_prev_data.loc[
-                    (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1) & (all_prev_data.calendar_t == calendar_t)
-                ]
-            ######### the following is consistent with the function parameters in alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function_partial.py
-            num_half = int(all_prev_data["user_id"].nunique()/2)  
-
-            temp_next_action = self.get_next_action() # (n/2)*t
-            if self.history:
-                temp_next_action = temp_next_action.reshape(-1, calendar_t) # [n/2, t]
-            # if calendar_t == 2:
-            #     print(1)
-
-            ########### save the previous betas over time till the current time step ##########
-            # if calendar_t > 1:
-            self.previous_beta = jnp.concatenate([self.get_current_betaQ_target(), self.get_current_betapi_target()])
-            self.previous_betas_over_time = jnp.zeros((self.previous_beta.shape[0], calendar_t)) # e.g., when t=2, there is only one previous beta; when t=1, one column as well with the same value
-            self.previous_betas_over_time = self.previous_betas_over_time.at[:, -1].set(self.previous_beta) # pure functional, not replace
-            # print('calendar_t', calendar_t) # update time t: when t=1, beta is updaated once
-            # print('self.previous_betas_over_time',self.previous_betas_over_time)
+           # for SAC we only save data at the current time point to form the estimation questions !!!!!!!!!!!
+            in_study_user_data = all_prev_data.loc[
+                (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1) & (all_prev_data.calendar_t == calendar_t)
+            ]
+            ######### the following is consistent with the function parameters in alg_update_func_filename
+            if self.twoarmed:
+                next_action = jnp.array(self.get_next_action()[i%num_half].reshape(-1,1)) # (n/2) simply repeat the next action for the control group as the treatment group
+            else:
+                next_action = jnp.array(self.get_next_action()[i].reshape(-1,1)) # (n/2)
             self.beta_init = jnp.concatenate([self.betaQ_init, self.betapi_init])
             self.rl_update_args[next_policy_num][user_id] = (
                 (
                     self.get_current_beta_estimate(), # save the model's parameters
-                    self.previous_betas_over_time, ### we insert the previous betas based on all beta to allow gradient propagation|||| but we have a fake input check to pass the check function [TO BE DELEDTED LATER]
+                    self.previous_betas_over_time, ### we insert the previous betas based on all beta to allow gradient propagation|||| but the input here is mainly used as guidance to pass the checking function
                     self.get_num_users_entered_before_last_update(),
                     self.get_treat_states(in_study_user_data),
                     self.get_next_states(in_study_user_data),
                     self.get_actions(in_study_user_data),
-                    # self.get_next_action()[i%num_half], # the next action is only for the treatment group, which is the same as the in-study group with Z_id=1. For the control group, the next action is always 0, which is not used in the update of the critic and actor. Here we just simply repeat the next action for the control group as the treatment group
-                    temp_next_action[i%num_half], # [i, t],
+                    next_action, # [i, t],
                     self.get_rewards(in_study_user_data),
                     self.lower_clip,
                     self.upper_clip,
                     self.steepness,
                     self.ridge_penalty,
                     self.gamma,
-                    in_study_user_data.loc[in_study_user_data['Z_id']==1,'Z_id'].to_numpy() if self.twoarmed else in_study_user_data['Z_id'].to_numpy(), # new
+                    self.get_Zids(in_study_user_data),
                     self.beta_init,
                     self.lambda_entropy, # 1.0
                 )
@@ -1269,6 +1191,7 @@ class SoftActorCritic:
                 else ()
             )
 
+
     # collect the learning policy's information at the current decision time
     def collect_pi_args(self, all_prev_data, calendar_t):
         logger.info(
@@ -1277,11 +1200,11 @@ class SoftActorCritic:
         )
         assert calendar_t == jnp.max(all_prev_data["calendar_t"].to_numpy())
 
+       
         self.pi_args[calendar_t] = {
             user_id: (
                 (
                     self.get_current_beta_estimate(),
-                    #  self.get_num_users_entered_before_last_update(), # in self.all_policies, updated in the algorithm update function
                     self.lower_clip,
                     self.steepness,
                     self.upper_clip,
@@ -1298,16 +1221,15 @@ class SoftActorCritic:
             )
             for user_id in self.get_all_users(all_prev_data)
         }
+       
 
     def get_action_probs(self, curr_timestep_data):
         
         ####### curr_timestep_data should be all in-study users at the current time point #########
         treat_states = curr_timestep_data[self.treat_feats].to_numpy() # [n, 2] -> (intercept, past_reward)
         Z_id = curr_timestep_data['Z_id'].to_numpy() # [n, 1]
-        # print('beta_estimate',self.get_current_beta_estimate())
-        # print('treat_states',treat_states)
-        # evalute the action prob for all users accoeding to Z_id
-        action_probs = get_pis_batched_sigmoid_partial(
+        
+        action_probs = get_pis_batched_SAC_twoarmed(
             self.get_current_beta_estimate(),
             self.lower_clip,
             self.steepness,  # steepness fixed to 1.0

@@ -69,9 +69,7 @@ reward_col_name="reward"
 # action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering.py"
 action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_SAC.py" 
 action_prob_func_args_beta_index=0
-# alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py" # vanilia SAC
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAChistory_alg_update_function.py" # historical SAC
-SAChistory=1 # 1: include SAC history in the saved data for analysis; 0: do not include it.
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py" 
 alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
@@ -89,7 +87,6 @@ small_sample_correction="none"
 # trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
 stabilize_joint_adaptive_bread_inverse=0
-alg_update_func_args_previous_betas_index=-1
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -190,11 +187,10 @@ mamba activate inference_jax
 # cd ~/adaptive-sandwich
 cd ~
 cd 2Longitudinal/adaptive-sandwich
-# echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Making sure Python requirements are installed.
+# echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Making sure Python  s are installed.
 # pip install -r requirements.txt
 # echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
-# filename="_averagerewards_history${SAChistory}" # add C in both environment and inference
 filename="_averagerewards" # add C in both environment and inference
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n${n}_T${T}"
@@ -230,9 +226,8 @@ python rl_study_simulation_partial.py \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
-  --Twoarmed=1 \
+  --Twoarmed=0 \
   --filename=$filename \
-  --SAChistory=$SAChistory \
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished RL simulations.
 
@@ -244,7 +239,8 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginning after-study analysis.
 # python after_study_analysis_partial.py analyze-dataset \
-python -m lifejacket.after_study_analysis analyze \
+# python -m lifejacket.after_study_analysis analyze \
+lifejacket analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \

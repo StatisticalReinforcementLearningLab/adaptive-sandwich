@@ -112,6 +112,15 @@ def load_data():
     # Load data
     df = pd.read_csv(PATH)
 
+    # ### manipulate the data by myself
+    # df['cannabis_use'] = np.random.uniform(0, 5, size=len(df))
+    # df['time_spent'] = np.random.uniform(0, 10, size=len(df))
+    # df['IsSurveyCompleted'] = np.random.choice([0, 1], size=len(df))
+    # df['weekend'] = df['day'].apply(lambda x: 1 if (x % 7) >=5 else 0)
+    # df['reward'] = np.random.choice([0, 1, 2, 3], size=len(df))
+    # df['time_of_day'] = np.tile([0, 1], len(df)//2)
+
+    # breakpoint()
     # Normalize df
     df = normalize(df)
 
@@ -272,13 +281,17 @@ def format_data_for_prediction(data, action, day, start_day, dosage: float = Non
 
 def predict_probabilities(user_model, data, dropout_factor: float):
     """Predicts probabilities over reward distribution given some data"""
-
-    classes = user_model.classes_
+    """
+    Reward function is defined by the user_model, i.e., weights
+    """
+    classes = user_model.classes_ # subset of [0, 1, 2, 3]
 
     flag = 0
 
     final_weights = []
 
+
+    ##### construct a new weight: dosage_weight in the user model
     if len(classes) == 2:
         weights_list = list(user_model.coef_[0])
         weights = np.array(weights_list)
@@ -301,18 +314,16 @@ def predict_probabilities(user_model, data, dropout_factor: float):
                 dosage_weight = -dosage_weight
                 flag = 1
             
-            weights_list.append(dosage_weight)
-            final_weights.append(weights_list)
+            weights_list.append(dosage_weight) # 12 -> 13
+            final_weights.append(weights_list) # num_classes x 13
 
     final_weights = np.array(final_weights)
-    
     decision = np.dot(data, final_weights.T) + user_model.intercept_
     if len(classes) == 2:
         decision_vector = [[-decision[0], decision[0]]]
     else:
         decision_vector = decision
-    probabilities = np.exp(decision_vector) / np.exp(decision_vector).sum()
-
+    probabilities = np.exp(decision_vector) / np.exp(decision_vector).sum() # data/state+action -> rewards distribution over actions
     return probabilities
 # In[18]:
 
@@ -532,6 +543,15 @@ def run_simulation(
 
     # Load data
     df = load_data()
+    print(df.head())
+    """
+         user_id  day  cannabis_use  time_spent  IsSurveyCompleted  reward  weekend  time_of_day  std_cannabis_use  std_app_usage   std_day  engagement  intercept
+0  sara-study-22    1           0.0       220.0                  0       2      0.0            0         -0.962963      -0.371429 -1.000000         0.0        1.0
+1  sara-study-22    1           0.0       700.0                  1       2      0.0            1         -0.962963       1.000000 -1.000000         1.0        1.0
+2  sara-study-22    2           0.0       107.0                  1       2      1.0            0         -0.962963      -0.694286 -0.931034         1.0        1.0
+3  sara-study-22    2           0.0       140.0                  1       2      1.0            1         -0.962963      -0.600000 -0.931034         1.0        1.0
+4  sara-study-22    3           0.0         0.0                  1       2      1.0            0         -0.962963      -1.000000 -0.862069         1.0        1.0
+    """
 
     # Load user models
     user_models_ref = load_user_models()
@@ -561,15 +581,15 @@ def run_simulation(
     # Create a new dataframe to store the full dataset during the simulation
     full_df = pd.DataFrame()
 
-    # Get the unique users
+    # Get the unique users: 42
     list_of_users = df["user_id"].unique()
 
     # Sample NUSERS from list_of_users with replacement
-    sampled_users = rng.choice(list_of_users, num_users, replace=True)
+    sampled_users = rng.choice(list_of_users, num_users, replace=True) # user_list, resample user_model with replacement
 
     # Sample some number of users who will have dropout
     num_dropout_users = int(num_users * (dropout_percentage / 100))
-    dropout_users = rng2.choice(list(range(num_users)), num_dropout_users, replace=False)
+    dropout_users = rng2.choice(list(range(num_users)), num_dropout_users, replace=False) # resample all users without replacement => random order
 
     # Set dosage for each user to be 0
     dosage = np.zeros(num_users)
@@ -645,7 +665,7 @@ def run_simulation(
                 # Calculate the decision point index
                 decision_point = day * 2 + time_of_day
 
-                # Sample action from the algorithm
+                # Sample action from the algorithm: user -> state of this user from self.user_data in the algorithm -> allocation function -> action
                 action = rl_algorithm.get_action(user, decision_point)
 
                 # Get the data for the current decision point
@@ -658,14 +678,18 @@ def run_simulation(
                 )
 
                 # Get the user model
-                user_model = user_models[sampled_users[user]]
+                user_model = user_models[sampled_users[user]] # each user model is indexed by the user id, which is a multinormal logistic regression model to fit the categorical reward
 
+                # get the reward distribution
                 if dropout > 0 and user in dropout_users:
 
-                    # Format the data for the user model prediction
+                    # Format the data for the user model prediction !!!!! only use the offline data state given the time (instead of real state) to form the reward distribution
                     X = format_data_for_prediction(dp_data, action, day, start_day, dosage[user])
-
-                    probabilities = predict_probabilities(user_model, X, dropout)[0]
+                    """
+                        intercept  engagement  std_app_usage  std_cannabis_use  weekend  std_day  act_intercept  act_engagement  act_std_app_usage  act_std_cannabis_use  act_weekend  act_std_day  dosage
+                2100        1.0         1.0      -0.314286         -0.962963      0.0     -1.0            1.0             1.0          -0.314286             -0.962963          0.0         -1.0     0.0
+                    """
+                    probabilities = predict_probabilities(user_model, X, dropout)[0] # array([[0.21351227, 0.03651571, 0.74997202]]) -> the first one, incase X has multiple rows
                 else:
                     X = format_data_for_prediction(dp_data, action, day, start_day)
 
@@ -727,8 +751,8 @@ def run_simulation(
                 # Update the algorithm with the new data
                 # Make sure to not provide cannabis use when reward < 2
                 new_data = {
-                    "user": user,
-                    "decision_point": decision_point,
+                    "user": user, # number: e.g., 0
+                    "decision_point": decision_point, # t = 2*day + time_of_day
                     "day": day,
                     "time_of_day": time_of_day,
                     "app_usage": app_usage_flag,
@@ -737,7 +761,7 @@ def run_simulation(
                     else None,
                     "survey_completion": survey_completion,
                     "activity_question": activity_question,
-                    "action": action,
+                    "action": action, # one scalar
                     "expected_reward": expected_reward,
                 }
 
@@ -776,6 +800,7 @@ def run_simulation(
 
             rl_algorithm.end_decision_point(decision_point)
 
+        ### no use the hyper_param_update_cadence
         if hyper_param_update_cadence == "daily":
             rl_algorithm.update_hyperparameters()
         elif (
@@ -808,29 +833,29 @@ def main():
     parser.add_argument("-n", "--num_users", type=int, default=120)
     parser.add_argument("-d", "--num_days", type=int, default=30)
     parser.add_argument("-s", "--seed", type=int, default=0)
+    parser.add_argument("-rl", "--rl_alg", type=str, default="BLR", choices=["random", "BLR", "rebandit"])
 
-    parser.add_argument("-st", "--start_day", type=int, default=0)
-    parser.add_argument("-dbg", "--debug", type=bool, default=False)
-    parser.add_argument("-rl", "--rl_alg", type=str, default="random")
+    ### no use
+    parser.add_argument("-st", "--start_day", type=int, default=0) # no use
+    parser.add_argument("-dbg", "--debug", type=bool, default=False) # no use
+    parser.add_argument("-a", "--alg_variant", type=int, default=0) # no use
+    parser.add_argument("-b", "--logistic_b", type=float, default=20)  # If negative, then uses infinity # no use
+    parser.add_argument("-c", "--logistic_c", type=float, default=5.0) # no use
+    parser.add_argument("-lmin", "--l_min", type=float, default=0.2) # no use
+    parser.add_argument("-lmax", "--l_max", type=float, default=0.8) # no use
+    parser.add_argument("-dc", "--decay", type=bool, default=False) # no use
+    parser.add_argument("-hs", "--habituation", type=int, default=0) # no use
+    parser.add_argument("-dl", "--dosage_lookback", type=int, default=6) 
 
-    parser.add_argument("-a", "--alg_variant", type=int, default=0)
-    parser.add_argument(
-        "-b", "--logistic_b", type=float, default=20
-    )  # If negative, then uses infinity
-    parser.add_argument("-c", "--logistic_c", type=float, default=5.0)
-    parser.add_argument("-lmin", "--l_min", type=float, default=0.2)
-    parser.add_argument("-lmax", "--l_max", type=float, default=0.8)
+    ### fixed
+    parser.add_argument("-hp", "--hyper_param_update_cadence", type=str, default="weekly")
     parser.add_argument("-p", "--posterior_update_cadence", type=str, default="daily")
-    parser.add_argument(
-        "-hp", "--hyper_param_update_cadence", type=str, default="weekly"
-    )
-    parser.add_argument("-tx", "--tx_effect_env", type=str, default="none")
-    parser.add_argument("-dc", "--decay", type=bool, default=False)
-    parser.add_argument("-dl", "--dosage_lookback", type=int, default=6)
-    parser.add_argument("-dr", "--dropout", type=float, default=-1)
-    parser.add_argument("-dp", "--dropout_percentage", type=float, default=100.0)
-    parser.add_argument("-hs", "--habituation", type=int, default=0)
-    parser.add_argument("-act", "--act_cost_threshold", type=float, default=0.0)
+    parser.add_argument("-dp", "--dropout_percentage", type=float, default=100.0) # P, we always use 100%
+    parser.add_argument("-act", "--act_cost_threshold", type=float, default=0.1) 
+
+    ### need to be changed
+    parser.add_argument("-tx", "--tx_effect_env", type=str, default="overall_low", choices=["none", "overall_low", "overall_high", "morning_low", "morning_high"])    
+    parser.add_argument("-dr", "--dropout", type=float, default=6, choices=[-1, 1, 6]) # Habituation factor, / dropout_factor -> control
 
     args = parser.parse_args()
 
@@ -874,22 +899,10 @@ def main():
         + str(alg_variant)
         + "_lambda_"
         + str(act_cost_threshold)
-        #+ "_hs_"
-        #+ str(habituation)
-        # + "_hf_"
-        # + str(habituation_factor)
         + "_eta_"
         + str(dropout)
         + "_P_"
         + str(dropout_percentage)
-        #+ "_dl_"
-        #+ str(dosage_lookback)
-        #+ "_b_"
-        #+ str(logistic_b)
-        #+ "_posterior_"
-        #+ posterior_update_cadence
-        #+ "_hyper_"
-        #+ hyper_param_update_cadence
         + "_tx_"
         + args.tx_effect_env
         #+ "_decay_"
@@ -898,16 +911,14 @@ def main():
         + str(num_users)
         + "_num_days_"
         + str(num_days)
-        #+ "_start_"
-        #+ str(start_day)
     )
 
     # Set the simulation folder
     simfolder = SIMULATION_FOLDER + foldername
     os.makedirs(simfolder, exist_ok=True)
 
-    rv = load_random_vars()
-
+    rv = load_random_vars() # [5000,]
+    
     # Set the allocation function
     alloc_func_type = "smooth"
     if logistic_b < 0:
@@ -952,4 +963,8 @@ def main():
 
 
 sim_data = main()
+
+
+
+
 

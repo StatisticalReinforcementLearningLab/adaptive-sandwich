@@ -32,7 +32,6 @@ SLURM_JOB_ID="${SLURM_JOB_ID:-local}"
 SLURM_ARRAY_JOB_ID="${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}"
 SLURM_ARRAY_TASK_ID="${SLURM_ARRAY_TASK_ID:-1}"
 
-
 # Arguments that affect RL study simulation side
 T=50
 decisions_between_updates=1
@@ -62,10 +61,7 @@ prior_mean="naive"
 prior_var_upper_triangle="naive"
 noise_var=1.0
 
-####### new alpa for enviroment
-alpha1=0.1
-alpha2=0.1
-
+# Arguments that only affect inference side.
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
 action_col_name="action"
@@ -74,33 +70,31 @@ calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
 reward_col_name="reward"
-# action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering.py"
-action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_partial.py" 
+action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed.py"
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering_partial.py"
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering_twoarmed.py"
 alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
 alg_update_func_args_previous_betas_index=-1 # for recursive algorithms; -1 if not used
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
-inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
-inference_func_args_theta_index=0 
+inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
+inference_func_args_theta_index=0
 inference_func_type="loss"
 # theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
-theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_diff_partial_01feature.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_sum.py"
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
-small_sample_correction="none"
+small_sample_correction="none" # "HC3", "none"
 # trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
 stabilize_joint_adaptive_bread_inverse=0
-
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
 # Note that the N argument is not supplied here: the number of simulations is
 # determined by the number of jobs in the slurm job array.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:L:M:Q:q:z:J:K:O:w:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:J:K:O:k:m:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -129,6 +123,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     C  | calendar_t_col_name )                          needs_arg; calendar_t_col_name="$OPTARG" ;;
     U  | user_id_col_name )                             needs_arg; user_id_col_name="$OPTARG" ;;
     E  | action_prob_col_name )                         needs_arg; action_prob_col_name="$OPTARG" ;;
+    X  | reward_col_name )                              needs_arg; reward_col_name="$OPTARG" ;;
     P  | action_prob_func_filename )                    needs_arg; action_prob_func_filename="$OPTARG" ;;
     b  | action_prob_func_args_beta_index )             needs_arg; action_prob_func_args_beta_index="$OPTARG" ;;
     l  | alg_update_func_filename )                     needs_arg; alg_update_func_filename="$OPTARG" ;;
@@ -150,11 +145,9 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
     K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
     O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
-    # w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
-    V  | alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
-    W  | alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
+
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -199,8 +192,6 @@ cd 2Longitudinal/adaptive-sandwich
 # pip install -r requirements.txt
 # echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
-filename="_01envinference_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
-
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n${n}_T${T}"
 
 # if test -d "$save_dir_prefix"; then
@@ -212,7 +203,7 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning RL simulations.
-python rl_study_simulation_partial.py \
+python rl_study_simulation.py \
   --T=$T \
   --N=1 \
   --parallel_task_index=$SLURM_ARRAY_TASK_ID \
@@ -237,21 +228,19 @@ python rl_study_simulation_partial.py \
   --prior_mean=$prior_mean \
   --prior_var_upper_triangle=$prior_var_upper_triangle \
   --noise_var=$noise_var \
-  --Twoarmed=1 \
+  --Twoarmed=0 \
   --filename=$filename \
-  --alpha1=$alpha1 \
-  --alpha2=$alpha2  
-
+  
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_partial${filename}"             
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_recruitN=${recruit_n}_decisionsBtwnUpdates=${decisions_between_updates}_algfeats=${alg_state_feats}_errcorr=${err_corr}_actionC=${action_centering_RL}"
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning after-study analysis.
-# python after_study_analysis_partial.py analyze-dataset \
+
 python -m lifejacket.after_study_analysis analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
@@ -280,7 +269,35 @@ python -m lifejacket.after_study_analysis analyze \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-  # --trim_small_singular_values=$trim_small_singular_values 
+
+
+# python after_study_analysis_partial.py analyze-dataset \
+#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+#   --action_prob_func_filename=$action_prob_func_filename \
+#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+#   --alg_update_func_filename=$alg_update_func_filename \
+#   --alg_update_func_type=$alg_update_func_type \
+#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+#   --inference_func_filename=$inference_func_filename \
+#   --inference_func_args_theta_index=$inference_func_args_theta_index \
+#   --inference_func_type=$inference_func_type \
+#   --theta_calculation_func_filename=$theta_calculation_func_filename \
+#   --in_study_col_name=$in_study_col_name \
+#   --action_col_name=$action_col_name \
+#   --policy_num_col_name=$policy_num_col_name \
+#   --calendar_t_col_name=$calendar_t_col_name \
+#   --user_id_col_name=$user_id_col_name \
+#   --action_prob_col_name=$action_prob_col_name \
+#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+#   --suppress_all_data_checks=$suppress_all_data_checks \
+#   --small_sample_correction=$small_sample_correction \
+#   --trim_small_singular_values=$trim_small_singular_values 
+
+
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Simulation complete.

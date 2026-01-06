@@ -5,6 +5,7 @@ class RLStudyArgs:
     HEARTSTEPS = "heartsteps"
     SYNTHETIC = "synthetic"
     ORALYTICS = "oralytics"
+    MIWAVES = "miwaves"
 
     # Heartsteps Mode
     EVALSIM = "evalSim"

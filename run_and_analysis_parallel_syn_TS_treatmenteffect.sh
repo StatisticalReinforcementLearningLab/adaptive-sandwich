@@ -22,7 +22,7 @@
 # Stop on nonzero exit codes and use of undefined variables
 set -eu
 
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Parsing options.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Parsing options.
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -47,8 +47,8 @@ synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_2_dosage_paper'
 # synthetic_mode='delayed_5_action_dosage'
 # synthetic_mode='delayed_5_dosage_paper'
-steepness=1.0
-RL_alg="sac"
+steepness=5.0
+RL_alg="smooth_posterior_sampling"
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
@@ -58,9 +58,9 @@ dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
 # prior_mean="-0.37783337,0.18696958,2.3131008,0.32913807"
-# prior_mean="naive"
-# prior_var_upper_triangle="naive"
-# noise_var=1.0
+prior_mean="naive"
+prior_var_upper_triangle="naive"
+noise_var=1.0
 
 ####### new alpa for enviroment
 alpha1=0.1
@@ -75,14 +75,14 @@ user_id_col_name="user_id"
 action_prob_col_name="action1prob"
 reward_col_name="reward"
 # action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering.py"
-action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_SAC.py" 
+action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed.py" 
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py"
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering_twoarmed.py"
 alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
-alg_update_func_args_previous_betas_index=1 # for recursive algorithms; -1 if not used
+alg_update_func_args_previous_betas_index=-1 # for recursive algorithms; -1 if not used
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
 inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
 inference_func_args_theta_index=0 
@@ -95,7 +95,6 @@ small_sample_correction="none"
 # trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
 stabilize_joint_adaptive_bread_inverse=0
-
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -148,9 +147,9 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    # J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
-    # K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
-    # O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
+    J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
+    K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
+    O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
     # w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
@@ -177,7 +176,7 @@ if [ -z "${recruit_n:-}" ]; then
 fi
 
 # Load Python 3.10, among other things
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Loading mamba and CUDA modules.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Loading mamba and CUDA modules.
 module load Mambaforge/22.11.1-fasrc01
 # if using GPU, something like the following will be necessary:
 # module load cuda/12.2.0-fasrc01
@@ -200,7 +199,7 @@ cd 2Longitudinal/adaptive-sandwich
 # pip install -r requirements.txt
 # echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
-filename="_treatmenteffect_01envinference_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n${n}_T${T}"
 
@@ -212,7 +211,7 @@ save_dir_glob="${save_dir_prefix}/*"
 mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginning RL simulations.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning RL simulations.
 python rl_study_simulation_partial.py \
   --T=$T \
   --N=1 \
@@ -235,20 +234,23 @@ python rl_study_simulation_partial.py \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
+  --prior_mean=$prior_mean \
+  --prior_var_upper_triangle=$prior_var_upper_triangle \
+  --noise_var=$noise_var \
   --Twoarmed=1 \
   --filename=$filename \
   --alpha1=$alpha1 \
   --alpha2=$alpha2  
 
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished RL simulations.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}"             
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_partial${filename}"             
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginning after-study analysis.
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning after-study analysis.
 # python after_study_analysis_partial.py analyze-dataset \
 python -m lifejacket.after_study_analysis analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
@@ -278,9 +280,35 @@ python -m lifejacket.after_study_analysis analyze \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-  # --trim_small_singular_values=$trim_small_singular_values 
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished after-study analysis.
 
-echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Simulation complete.
-echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl --num_users=$n [--index_to_check_ci_coverage=<>]  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"
+# python after_study_analysis_partial.py analyze-dataset \
+#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+#   --action_prob_func_filename=$action_prob_func_filename \
+#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+#   --alg_update_func_filename=$alg_update_func_filename \
+#   --alg_update_func_type=$alg_update_func_type \
+#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+#   --inference_func_filename=$inference_func_filename \
+#   --inference_func_args_theta_index=$inference_func_args_theta_index \
+#   --inference_func_type=$inference_func_type \
+#   --theta_calculation_func_filename=$theta_calculation_func_filename \
+#   --in_study_col_name=$in_study_col_name \
+#   --action_col_name=$action_col_name \
+#   --policy_num_col_name=$policy_num_col_name \
+#   --calendar_t_col_name=$calendar_t_col_name \
+#   --user_id_col_name=$user_id_col_name \
+#   --action_prob_col_name=$action_prob_col_name \
+#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+#   --suppress_all_data_checks=$suppress_all_data_checks \
+#   --small_sample_correction=$small_sample_correction \
+#   --trim_small_singular_values=$trim_small_singular_values 
+
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished after-study analysis.
+
+echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Simulation complete.
+echo "$(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: When all jobs have completed, you may collect and summarize the analyses with: bash simulation_collect_analyses.sh --input_glob=${output_folder_glob}/exp=1/analysis.pkl --num_users=$n [--index_to_check_ci_coverage=<>]  --in_study_col_name=$in_study_col_name --action_col_name=$action_col_name --action_prob_col_name=$action_prob_col_name"
 

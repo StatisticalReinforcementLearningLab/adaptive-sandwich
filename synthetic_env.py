@@ -199,7 +199,7 @@ class SyntheticEnv:
         return study_df
 
     # TODO: This doesn't work with n = 1
-    def sample_rewards(self, curr_timestep_data, actions, t):
+    def _sample_rewards_base(self, curr_timestep_data, actions, t):
         """Generate "random" rewards from saved noise"""
         main_covariates = curr_timestep_data[self.gen_feats]
         TE_covariates = main_covariates.to_numpy() * actions.reshape(-1, 1)
@@ -211,25 +211,18 @@ class SyntheticEnv:
             params = self.env_params
         # 0,0,0,0,0,0,0,0,0,1 * [['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'], ['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'] * action] = k1 * A1 * dosage
         reward_means = np.matmul(gen_covariates, params)
+        return reward_means
+    
+    def sample_rewards(self, curr_timestep_data, actions, t):
+        reward_means = self._sample_rewards_base(curr_timestep_data, actions, t)
         rewards = (
             reward_means
             + self.reward_noise[curr_timestep_data["in_study_row_index"].to_numpy()]
         )
-
         return rewards
 
     def sample_rewards_prefeatures(self, curr_timestep_data, actions, t, alpha1, alpha2):
-        """Generate "random" rewards from saved noise"""
-        main_covariates = curr_timestep_data[self.gen_feats]
-        TE_covariates = main_covariates.to_numpy() * actions.reshape(-1, 1)
-        gen_covariates = np.hstack([main_covariates, TE_covariates])
-
-        if len(self.env_params.shape) == 2:
-            params = self.env_params[t - 1]
-        else:
-            params = self.env_params
-        # 0,0,0,0,0,0,0,0,0,1 * [['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'], ['intercept', 'past_action_1', 'past_reward', 'past_action_1_reward', 'dosage'] * action] = k1 * A1 * dosage
-        reward_means = np.matmul(gen_covariates, params)
+        reward_means = self._sample_rewards_base(curr_timestep_data, actions, t)
         rewards = (
             reward_means
             + alpha1 * curr_timestep_data['pretreat_feature1'].to_numpy()
@@ -237,7 +230,6 @@ class SyntheticEnv:
             + self.reward_noise[curr_timestep_data["in_study_row_index"].to_numpy()]
         )
         return rewards
-
 
     def make_empty_study_df(self, args, user_df):
         base_cols = [

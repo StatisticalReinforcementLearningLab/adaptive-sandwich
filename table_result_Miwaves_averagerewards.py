@@ -17,8 +17,8 @@ N_seed = args.N_seed
 
 # true variance
 
-# path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
-path = ''
+path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
+# path = ''
 
 rewards_list = []
 for i in tqdm(range(N_seed)):
@@ -82,67 +82,114 @@ print(args)
 ############################################################# results: TS  #############################################################
 """
 ######### n=30
-true variance of rewards: 0.005726
-mean of thetahat: 0.296367
-mean of classical variance estiamte: 0.003712
-median of classical variance estiamte: 0.003655
-mean of adaptive variance estiamte: 0.020846
-median of adaptive variance estiamte: 0.010398
-coverage rate of classical variance estiamte: 0.865000 / std errors: 0.010806
-coverage rate of adaptive variance estiamte: 0.971000 / std errors: 0.005307
+Mean parameter estimate:
+[2.1062086]
+
+Empirical variance of parameter estimates:
+[[0.00420813]]
+
+Mean adaptive sandwich variance estimate:
+[[0.857533]]
+
+Mean classical sandwich variance estimate:
+[[0.00424518]]
+
+Median adaptive sandwich variance estimate:
+[[0.09142613]]
+
+Median classical sandwich variance estimate:
+[[0.00408459]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+1.0
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.931
 
 ######### n=50
-true variance of rewards: 0.003659
-mean of thetahat: 0.301267
-mean of classical variance estiamte: 0.002249
-median of classical variance estiamte: 0.002225
-mean of adaptive variance estiamte: 0.008838
-median of adaptive variance estiamte: 0.005826
-coverage rate of classical variance estiamte: 0.861000 / std errors: 0.010940
-coverage rate of adaptive variance estiamte: 0.975000 / std errors: 0.004937
+Mean parameter estimate:
+[2.1086166]
+
+Empirical variance of parameter estimates:
+[[0.0024041]]
+
+Mean adaptive sandwich variance estimate:
+[[0.3931545]]
+
+Mean classical sandwich variance estimate:
+[[0.00258562]]
+
+Median adaptive sandwich variance estimate:
+[[0.05722548]]
+
+Median classical sandwich variance estimate:
+[[0.00252763]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+1.0
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.944
 
 ######### n=100
-true variance of rewards: 0.002060
-mean of thetahat: 0.301623
-mean of classical variance estiamte: 0.001138
-median of classical variance estiamte: 0.001128
-mean of adaptive variance estiamte: 0.003522
-median of adaptive variance estiamte: 0.002513
-coverage rate of classical variance estiamte: 0.847000 / std errors: 0.011384
-coverage rate of adaptive variance estiamte: 0.951000 / std errors: 0.006826
+Mean parameter estimate:
+[2.109141]
+
+Empirical variance of parameter estimates:
+[[0.00124483]]
+
+Mean adaptive sandwich variance estimate:
+[[0.06147134]]
+
+Mean classical sandwich variance estimate:
+[[0.00128868]]
+
+Median adaptive sandwich variance estimate:
+[[0.0224028]]
+
+Median classical sandwich variance estimate:
+[[0.00127273]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.999
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.949
 
 ######### n=300
-true variance of rewards: 0.000792
-mean of thetahat: 0.302433
-mean of classical variance estiamte: 0.000383
-median of classical variance estiamte: 0.000383
-mean of adaptive variance estiamte: 0.000953
-median of adaptive variance estiamte: 0.000829
-coverage rate of classical variance estiamte: 0.819000 / std errors: 0.012175
-coverage rate of adaptive variance estiamte: 0.947000 / std errors: 0.007085
 
+Mean parameter estimate:
+[2.1080263]
+
+Empirical variance of parameter estimates:
+[[0.00040944]]
+
+Mean adaptive sandwich variance estimate:
+[[0.00509669]]
+
+Mean classical sandwich variance estimate:
+[[0.00043647]]
+
+Median adaptive sandwich variance estimate:
+[[0.00279501]]
+
+Median classical sandwich variance estimate:
+[[0.00043344]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+1.0
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.958
 
 ######### n=500
-true variance of rewards: 0.000448
-mean of thetahat: 0.304311
-mean of classical variance estiamte: 0.000230
-median of classical variance estiamte: 0.000230
-mean of adaptive variance estiamte: 0.000517
-median of adaptive variance estiamte: 0.000473
-coverage rate of classical variance estiamte: 0.848000 / std errors: 0.011353
-coverage rate of adaptive variance estiamte: 0.946000 / std errors: 0.007147
 
 
 
-######### n=1000 [convergence rate is O(1/n), which is correct here.]
-true variance of rewards: 0.000224
-mean of thetahat: 0.304409
-mean of classical variance estiamte: 0.000115
-median of classical variance estiamte: 0.000115
-mean of adaptive variance estiamte: 0.000254
-median of adaptive variance estiamte: 0.000236
-coverage rate of classical variance estiamte: 0.843000 / std errors: 0.011504
-coverage rate of adaptive variance estiamte: 0.956000 / std errors: 0.006486
+
+######### n=1000 
+
+
 
 """
 
@@ -153,147 +200,18 @@ coverage rate of adaptive variance estiamte: 0.956000 / std errors: 0.006486
 """
 
 ######### n=30
-Mean parameter estimate:
-[0.24456318]
-
-Empirical variance of parameter estimates:
-[[0.006194]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00035272]]
-
-Mean adaptive sandwich variance estimate:
-[[0.8197159]]
-
-Mean classical sandwich variance estimate:
-[[0.00399096]]
-
-Median adaptive sandwich variance estimate:
-[[0.00407279]]
-
-Median classical sandwich variance estimate:
-[[0.00392348]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.892
 
 ######### n=50
-Mean parameter estimate:
-[0.23989122]
-
-Empirical variance of parameter estimates:
-[[0.00299804]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00016296]]
-
-Mean adaptive sandwich variance estimate:
-[[0.0061214]]
-
-Mean classical sandwich variance estimate:
-[[0.00235252]]
-
-Median adaptive sandwich variance estimate:
-[[0.00237417]]
-
-Median classical sandwich variance estimate:
-[[0.00232505]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.914
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.914
-
 
 ######### n=100
 
-Mean parameter estimate:
-[0.24534565]
 
-Empirical variance of parameter estimates:
-[[0.00131415]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[7.14874535e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00198201]]
-
-Mean classical sandwich variance estimate:
-[[0.00118791]]
-
-Median adaptive sandwich variance estimate:
-[[0.00118786]]
-
-Median classical sandwich variance estimate:
-[[0.00117638]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.934
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.933
 
 ######### n=300
-Mean parameter estimate:
-[0.25961846]
-
-Empirical variance of parameter estimates:
-[[0.00046748]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[2.5685892e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00047262]]
-
-Mean classical sandwich variance estimate:
-[[0.00040899]]
-
-Median adaptive sandwich variance estimate:
-[[0.00041054]]
-
-Median classical sandwich variance estimate:
-[[0.00040852]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.933
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.934
 
 
 ######### n=500
-Mean parameter estimate:
-[0.26483545]
 
-Empirical variance of parameter estimates:
-[[0.00026997]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[1.46907754e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00025795]]
-
-Mean classical sandwich variance estimate:
-[[0.00024676]]
-
-Median adaptive sandwich variance estimate:
-[[0.00024706]]
-
-Median classical sandwich variance estimate:
-[[0.00024645]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.941
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.941
 
 
 """

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
@@ -21,22 +21,21 @@ synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_2_dosage_paper'
 # synthetic_mode='delayed_5_action_dosage'
 # synthetic_mode='delayed_5_dosage_paper'
-steepness=5.0
-RL_alg="smooth_posterior_sampling"
-# RL_alg2="smooth_posterior_sampling"
+steepness=1.0
+RL_alg="sac" # smooth_posterior_sampling
 err_corr='time_corr'
 alg_state_feats="intercept,past_reward"
 action_centering_RL=0
-lclip=0.1
-uclip=0.9
+lclip=0.1 # smooth allocation function in policy instead of 
+uclip=0.9 
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-# prior_mean="-0.37783337,0.18696958,2.3131008,0.32913807"
-# prior_var_upper_triangle="1000000,0,0,0,1000000,0,0,1000000,0,1000000"
-prior_mean="naive"
-prior_var_upper_triangle="naive"
-noise_var=1.0
+
+
+####### new alpa for enviroment
+alpha1=0.1
+alpha2=0.1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -45,23 +44,27 @@ policy_num_col_name="policy_num"
 calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
-action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_partial.py" 
+reward_col_name="reward"
+action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_SAC.py" # smooth allocation (sigmoid) function 
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering_partial.py" # changed to a conditional function used in inference
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py"
 alg_update_func_type="estimating" 
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
+alg_update_func_args_previous_betas_index=1 # for recursive algorithms; -1 if not used
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
-inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_0.py"
-inference_func_args_theta_index=0
+inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
+inference_func_args_theta_index=0 ###### important
 inference_func_type="loss"
 # theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
-theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_diff_partial_0.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_diff_partial_01feature.py"
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"
 trim_small_singular_values=0
+collect_data_for_blowup_supervised_learning=0
+stabilize_joint_adaptive_bread_inverse=0
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -101,6 +104,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
     D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
     j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
+    R  | alg_update_func_args_previous_betas_index )    needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     I  | inference_func_filename )                      needs_arg; inference_func_filename="$OPTARG" ;;
     h  | inference_func_args_theta_index )              needs_arg; inference_func_args_theta_index="$OPTARG" ;;
     g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
@@ -111,10 +115,12 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
-    K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
-    O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
-    w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
+    # J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
+    # K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
+    # O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
+    # w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
+    k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
+    m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
 
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
@@ -135,10 +141,10 @@ if [ -z "${recruit_n:-}" ]; then
 fi
 
 
-filename="_0"
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
-echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning RL study simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Beginning RL study simulation."
 python rl_study_simulation_partial.py \
   --T=$T \
   --N=1 \
@@ -159,50 +165,23 @@ python rl_study_simulation_partial.py \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
-  --prior_mean=$prior_mean \
-  --prior_var_upper_triangle=$prior_var_upper_triangle \
-  --noise_var=$noise_var \
   --save_dir="n${n}_T${T}/0" \
   --Twoarmed=1 \
-  --filename=$filename
+  --filename=$filename \
+  --alpha1=$alpha1 \
+  --alpha2=$alpha2  
 
 
-# python rl_study_simulation_partial.py \
-#   --T=$T \
-#   --N=1 \
-#   --n=$n \
-#   --decisions_between_updates=$decisions_between_updates \
-#   --update_cadence_offset=$update_cadence_offset \
-#   --recruit_n=$recruit_n \
-#   --recruit_t=$recruit_t \
-#   --synthetic_mode=$synthetic_mode \
-#   --steepness=$steepness \
-#   --RL_alg=$RL_alg2 \
-#   --err_corr=$err_corr \
-#   --alg_state_feats=$alg_state_feats \
-#   --action_centering=$action_centering_RL \
-#   --dynamic_seeds=$dynamic_seeds \
-#   --env_seed_override=$env_seed_override \
-#   --alg_seed_override=$alg_seed_override \
-#   --min_update_time=$min_update_time \
-#   --upper_clip=$uclip \
-#   --lower_clip=$lclip \
-#   --prior_mean=$prior_mean \
-#   --prior_var_upper_triangle=$prior_var_upper_triangle \
-#   --noise_var=$noise_var \
-#   --save_dir="n${n}_T${T}/0" \
-#   --Z_id=0
-
-echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Finished RL study simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_partial${filename}" # we set 0 because we focus on the first repetition
-# output_folder_random="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg2}_T=${T}_n=${n}_partial"
+output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}" # we set 0 because we focus on the first repetition
 
 # Do after-study analysis on the single algorithm run from above
-echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning after-study analysis."
-python after_study_analysis_partial.py analyze-dataset \
+echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Beginning after-study analysis."
+# python -m lifejacket.after_study_analysis analyze \
+lifejacket analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
@@ -213,6 +192,7 @@ python after_study_analysis_partial.py analyze-dataset \
   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
   --inference_func_filename=$inference_func_filename \
   --inference_func_args_theta_index=$inference_func_args_theta_index \
   --inference_func_type=$inference_func_type \
@@ -223,11 +203,39 @@ python after_study_analysis_partial.py analyze-dataset \
   --calendar_t_col_name=$calendar_t_col_name \
   --user_id_col_name=$user_id_col_name \
   --action_prob_col_name=$action_prob_col_name \
+  --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
   --small_sample_correction=$small_sample_correction \
-  --trim_small_singular_values=$trim_small_singular_values 
+  --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
+  --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
 
-echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Ending after-study analysis."
+# python after_study_analysis_partial.py analyze-dataset \
+#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+#   --action_prob_func_filename=$action_prob_func_filename \
+#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+#   --alg_update_func_filename=$alg_update_func_filename \
+#   --alg_update_func_type=$alg_update_func_type \
+#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+#   --inference_func_filename=$inference_func_filename \
+#   --inference_func_args_theta_index=$inference_func_args_theta_index \
+#   --inference_func_type=$inference_func_type \
+#   --theta_calculation_func_filename=$theta_calculation_func_filename \
+#   --in_study_col_name=$in_study_col_name \
+#   --action_col_name=$action_col_name \
+#   --policy_num_col_name=$policy_num_col_name \
+#   --calendar_t_col_name=$calendar_t_col_name \
+#   --user_id_col_name=$user_id_col_name \
+#   --action_prob_col_name=$action_prob_col_name \
+#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+#   --suppress_all_data_checks=$suppress_all_data_checks \
+#   --small_sample_correction=$small_sample_correction \
+#   --trim_small_singular_values=$trim_small_singular_values 
 
-echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Finished simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Ending after-study analysis."
+
+echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Finished simulation."

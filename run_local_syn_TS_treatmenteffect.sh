@@ -50,9 +50,9 @@ calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
 reward_col_name="reward"
-action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_partial.py" 
+action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed.py" 
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering_partial.py" # changed to a conditional function used in inference
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_BLR_estimating_function_no_action_centering_twoarmed.py" # changed to a conditional function used in inference
 alg_update_func_type="estimating" 
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
@@ -67,7 +67,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_av
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 small_sample_correction="none"
-# trim_small_singular_values=0
+trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
 stabilize_joint_adaptive_bread_inverse=0
 
@@ -145,7 +145,7 @@ if [ -z "${recruit_n:-}" ]; then
 fi
 
 
-filename="_treatmenteffect_01envinference_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning RL study simulation."
@@ -188,8 +188,7 @@ output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning after-study analysis."
-# python after_study_analysis_partial.py analyze-dataset \
-python -m lifejacket.after_study_analysis analyze \
+lifejacket analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
@@ -217,7 +216,33 @@ python -m lifejacket.after_study_analysis analyze \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-  # --trim_small_singular_values=$trim_small_singular_values 
+
+# python after_study_analysis_partial.py analyze-dataset \
+#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+#   --action_prob_func_filename=$action_prob_func_filename \
+#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+#   --alg_update_func_filename=$alg_update_func_filename \
+#   --alg_update_func_type=$alg_update_func_type \
+#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+#   --inference_func_filename=$inference_func_filename \
+#   --inference_func_args_theta_index=$inference_func_args_theta_index \
+#   --inference_func_type=$inference_func_type \
+#   --theta_calculation_func_filename=$theta_calculation_func_filename \
+#   --in_study_col_name=$in_study_col_name \
+#   --action_col_name=$action_col_name \
+#   --policy_num_col_name=$policy_num_col_name \
+#   --calendar_t_col_name=$calendar_t_col_name \
+#   --user_id_col_name=$user_id_col_name \
+#   --action_prob_col_name=$action_prob_col_name \
+#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+#   --suppress_all_data_checks=$suppress_all_data_checks \
+#   --small_sample_correction=$small_sample_correction \
+#   --trim_small_singular_values=$trim_small_singular_values 
+
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Ending after-study analysis."
 

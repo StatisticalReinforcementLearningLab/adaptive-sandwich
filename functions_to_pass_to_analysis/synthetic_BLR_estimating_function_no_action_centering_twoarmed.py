@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from jax import lax
 
-def synthetic_BLR_estimating_function_no_action_centering_partial(
+def synthetic_BLR_estimating_function_no_action_centering_twoarmed(
     beta: jnp.array,
     n_users: int,  # Note this is the number of users that have entered the study *so far*
     state: jnp.array,

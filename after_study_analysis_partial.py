@@ -64,6 +64,7 @@ alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
+alg_update_func_args_previous_betas_index=1
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
 inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
 inference_func_args_theta_index=0 ###### important
@@ -159,6 +160,13 @@ trim_small_singular_values=0
     type=int,
     required=True,
     help="Index of the algorithm parameter vector beta in the tuple of algorithm update func args.",
+)
+@click.option(
+    "--alg_update_func_args_previous_betas_index",
+    default=alg_update_func_args_previous_betas_index,
+    type=int,
+    required=True,
+    help="Index of the algorithm parameter vector previous betas in the tuple of algorithm update func args.",
 )
 @click.option(
     "--alg_update_func_args_action_prob_index",
@@ -289,6 +297,7 @@ def analyze_dataset(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     inference_func_filename: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
@@ -422,6 +431,7 @@ def analyze_dataset(
             alg_update_func_args_beta_index,
             alg_update_func_args_action_prob_index,
             alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
             theta_est,
             beta_dim,
             suppress_interactive_data_checks,
@@ -496,6 +506,7 @@ def analyze_dataset(
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func_filename,
         inference_func_type,
         inference_func_args_theta_index,
@@ -1323,6 +1334,7 @@ def thread_update_func_args(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     threaded_action_prob_func_args_by_decision_time_by_user_id: dict[
         collections.abc.Hashable, dict[int, tuple[Any, ...]]
     ],
@@ -1405,6 +1417,46 @@ def thread_update_func_args(
                 )
             )
 
+            # Ke's previous version
+            # if alg_update_func_args_previous_betas_index > 0: 
+            #    """
+            #    Function: insert previous betas at the designated index: beta + previous beta (second argument) + other args 
+            #    Key: replace_tuple_index; previous_betas_to_introduce is based on all_post_update_betas to allow gradient propagation
+            #    Note: policy_num starts from 2 (calendar t =1, i.e., after the 1st update); all_post_update_betas are all UPDATED beta without the initial beta
+            #    """
+            #    indices = [v for k, v in beta_index_by_policy_num.items() if k <= policy_num] # index the current policy as well to avoid null
+            #    idx = jnp.array(indices, dtype=jnp.int32)
+            #    previous_betas_to_introduce = all_post_update_betas[idx,:] # 2D
+            # #    print('my version:    ',replace_tuple_index(threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num], alg_update_func_args_previous_betas_index, previous_betas_to_introduce0))
+            # #    threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
+            # #        replace_tuple_index(update_func_args_by_user_id[user_id], alg_update_func_args_previous_betas_index, previous_betas_to_introduce)
+            # #    )
+            #    threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num] = (
+            #        replace_tuple_index(threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num], alg_update_func_args_previous_betas_index, previous_betas_to_introduce)
+            #    )
+            # breakpoint()
+            # Nowell's version
+            if alg_update_func_args_previous_betas_index >= 0:
+                previous_betas_to_introduce = all_post_update_betas[ # [policy_num, dim_beta]
+                    : len(
+                        update_func_args_by_user_id[user_id][
+                            alg_update_func_args_previous_betas_index
+                        ]
+                    )
+                ]
+                if previous_betas_to_introduce.size > 0:
+                    threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                        policy_num
+                    ] = replace_tuple_index(
+                        threaded_update_func_args_by_policy_num_by_user_id[user_id][
+                            policy_num
+                        ],
+                        alg_update_func_args_previous_betas_index,
+                        previous_betas_to_introduce,
+                    )
+            #     print('Nowell version:    ', threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
+            # assert jnp.array_equal(replace_tuple_index(update_func_args_by_user_id[user_id], alg_update_func_args_previous_betas_index, previous_betas_to_introduce0), threaded_update_func_args_by_policy_num_by_user_id[user_id][policy_num])
+            
             if alg_update_func_args_action_prob_index >= 0:
                 logger.debug(
                     "Action probabilities are used in the algorithm update function. Reconstructing them using the shared betas."
@@ -1565,6 +1617,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     inference_func_filename: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
@@ -1727,6 +1780,7 @@ def get_avg_weighted_estimating_function_stack_and_aux_values(
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         threaded_action_prob_func_args_by_decision_time_by_user_id,
         action_prob_func,
     )
@@ -1825,6 +1879,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
     alg_update_func_args_beta_index: int,
     alg_update_func_args_action_prob_index: int,
     alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
     inference_func_filename: str,
     inference_func_type: str,
     inference_func_args_theta_index: int,
@@ -1965,6 +2020,7 @@ def construct_classical_and_adaptive_inverse_bread_and_meat_and_avg_estimating_f
         alg_update_func_args_beta_index,
         alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
         inference_func_filename,
         inference_func_type,
         inference_func_args_theta_index,

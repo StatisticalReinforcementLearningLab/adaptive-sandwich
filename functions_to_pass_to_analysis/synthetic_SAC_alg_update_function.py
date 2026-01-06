@@ -4,6 +4,7 @@ import jax
 # import numpy as np
 from jax import debug
 
+
 def synthetic_SAC_alg_update_function(
     beta: jnp.array, # beta_t: t>=2
     beta_previous: jnp.array, # beta_{:t}: t>=2
@@ -25,8 +26,6 @@ def synthetic_SAC_alg_update_function(
     """
     Estimating function for SAC. this function is used only in the inference phase
     """
-
-
     def zero_branch(_):
         # zero beta estiamte and 0 gradient
         return jnp.zeros_like(beta)
@@ -45,55 +44,48 @@ def synthetic_SAC_alg_update_function(
         if beta_previous.shape[0] == 1:
             beta_target = beta_initial # the target should the intial beta to evaluate the estimating function
         else:
-            beta_target = beta_previous[-2,:] # -1: the current beta, -2: the previous beta
+            beta_target = beta_previous[-2,:] # -1: the current beta, -2: the previous beta => this is because
+        
         betaQ_target = beta_target[:dim] # previous Q
         betapi_target = beta_target[dim:] # previous pi
-        # print('----------------------------------------------------------')
-        # debug.print("beta = {}", beta)
-        # debug.print("states = {}", state)
-        # debug.print("beta_previous = {}", beta_previous)
-        # debug.print("beta_target = {}", beta_target)
+
         ##### estimation function for Q
-        # print('state shape:', state.shape, state)
-        p_next = policy(next_state, betapi_target)  # we need to use the target policy to evaluate p_next in the last step
-        # next_action
+        p_next = policy(next_state, betapi_target)  
         Q_states_next = jnp.hstack([next_state, next_state * next_action])
         Q_values_next = jnp.dot(Q_states_next, betaQ_target) 
         logp_next = jnp.log(jnp.where(next_action==1, p_next, jnp.clip(1.0 - p_next, 1e-8, 1.0))) 
         TD_target = rewards + gamma * (Q_values_next - lambda_entropy * logp_next) 
-        # debug.print("p_next: {}", p_next)
-        # debug.print("rewards: {}", rewards)
-        # debug.print("gamma: {}", gamma)
-        # debug.print("lambda_entropy: {}", lambda_entropy)
-        # debug.print("next_action: {}", next_action)
-        # debug.print("Q_values_next: {}", Q_values_next)
-        # debug.print("logp_next: {}", logp_next)
         current_Q_states = jnp.hstack([state, action * state]) # (1, 4)
         Current_Q_values = jnp.dot(current_Q_states, beta_Q) # 
-       
-        # debug.print("Current_Q_values shape: {}", Current_Q_values)
-        # debug.print("beta: {}", beta)
-        debug.print('TD_target : {}', TD_target)
         residuals = jax.lax.stop_gradient(TD_target) - Current_Q_values
-        debug.print('residuals : {}', residuals)
-        # debug.print("current_Q_states: {}", current_Q_states)
-        vector_Q = -2*jnp.dot(current_Q_states.T, residuals.reshape(-1,1)) # [4, 1] * [1, 1] -> [4, 1]  
+        # debug.print('beta_pi_target: {}', beta_pi_target)
+        # debug.print('next_state: {}', next_state)
+        # debug.print('next_action: {}', next_action)
+        # debug.print('betaQ_tar: {}', betaQ_target)
+        # debug.print('rewards: {}', rewards)
+        # debug.print('Q_values_next: {}', Q_values_next)
+        # debug.print('logp_next: {}', logp_next)
+        # debug.print('betaQ: {}', beta_Q)
+        # debug.print('TD_target (wrong): {}', TD_target)
+        # debug.print('Current_Q_values: {}', Current_Q_values)
+        # debug.print('current_Q_states: {}', current_Q_states)
+        # debug.print('residuals: {}', residuals)
+
+
+        vector_Q = -2*current_Q_states * residuals.reshape(-1,1)  # [1, 4] * [1, 1] -> [1, 4]
+        vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1, 1)  # [4, 1] average over t
         vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # [4, 1]  
-        # debug.print('beta_Q : {}', beta_Q)
-        debug.print("vector_Q for each unit = {}", vector_Q)
+        # debug.print("vector_Q for each unit = {}", vector_Q)
         
         ##### estimation function for pi
         p0 = jax.nn.sigmoid(steepness * jnp.dot(state, beta_pi)).reshape(-1, 1)
-        p = policy(state, beta_pi).reshape(-1, 1)  # (num_decision_times, 1)
-        temp = jnp.dot(state, betaQ_target[int(dim/2):]) - lambda_entropy * jnp.log(p/(1-p))
-        
-        vector_pi = (1-2*lower_clip) * p0 * (1 - p0) * steepness * temp.reshape(-1, 1) * state
-        debug.print("vector_pi for each unit = {}", -vector_pi)
+        p = policy(state, beta_pi).reshape(-1, 1)  # (num_decision_times, 1) t=1
+        temp = jnp.dot(state, betaQ_target[int(dim/2):]).reshape(-1, 1) - lambda_entropy * jnp.log(p/(1-p))
+        vector_pi = (1-2*lower_clip) * p0 * (1 - p0) * steepness * temp.reshape(-1, 1) * state # (t, 1) * (t, 2) -> (t, 2)
+        vector_pi = jnp.mean(vector_pi, axis=0).reshape(-1, 1)  # (t, 2) -> (1, 2) -> (2, 1) t=1
+        # debug.print("vector_pi for each unit = {}", vector_pi)
         return jnp.concatenate([vector_Q.flatten(), vector_pi.flatten()]) # (4,) + (2,) = (6,)
 
     z = jnp.asarray(Z_id)
     pred = jnp.all(z == 0)
     return lax.cond(pred, zero_branch, active_branch, operand=None)
-
-
-

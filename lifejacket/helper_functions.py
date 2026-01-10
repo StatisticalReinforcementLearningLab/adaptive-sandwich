@@ -107,17 +107,17 @@ def zero_small_off_diagonal_blocks(
     return J_trim
 
 
-def invert_inverse_bread_matrix(
-    inverse_bread,
+def invert_bread_matrix(
+    bread,
     beta_dim,
     theta_dim,
 ):
     """
-    Invert the bread matrix to get the bread matrix.  This is a special
+    Invert the bread matrix to get the inverse bread matrix.  This is a special
     function in order to take advantage of the block lower triangular structure.
 
     The procedure is as follows:
-    1. Initialize the inverse matrix B = A^{-1} as a block lower triangular matrix
+    1. Initialize the matrix B = A^{-1} as a block lower triangular matrix
        with the same block structure as A.
 
     2. Compute the diagonal blocks B_{ii}:
@@ -129,13 +129,13 @@ def invert_inverse_bread_matrix(
            B_{ij} = -A_{ii}^{-1} * sum(A_{ik} * B_{kj} for k in range(j, i))
     """
     blocks = []
-    num_beta_block_rows = (inverse_bread.shape[0] - theta_dim) // beta_dim
+    num_beta_block_rows = (bread.shape[0] - theta_dim) // beta_dim
 
     # Create upper rows of block of bread (just the beta portion)
     for i in range(0, num_beta_block_rows):
         beta_block_row = []
         beta_diag_inverse = invert_matrix_and_check_conditioning(
-            inverse_bread[
+            bread[
                 beta_dim * i : beta_dim * (i + 1),
                 beta_dim * i : beta_dim * (i + 1),
             ],
@@ -145,7 +145,7 @@ def invert_inverse_bread_matrix(
                 beta_block_row.append(
                     -beta_diag_inverse
                     @ sum(
-                        inverse_bread[
+                        bread[
                             beta_dim * i : beta_dim * (i + 1),
                             beta_dim * k : beta_dim * (k + 1),
                         ]
@@ -167,7 +167,7 @@ def invert_inverse_bread_matrix(
     # Create the bottom block row of bread (the theta portion)
     theta_block_row = []
     theta_diag_inverse = invert_matrix_and_check_conditioning(
-        inverse_bread[
+        bread[
             -theta_dim:,
             -theta_dim:,
         ],
@@ -176,7 +176,7 @@ def invert_inverse_bread_matrix(
         theta_block_row.append(
             -theta_diag_inverse
             @ sum(
-                inverse_bread[
+                bread[
                     -theta_dim:,
                     beta_dim * h : beta_dim * (h + 1),
                 ]

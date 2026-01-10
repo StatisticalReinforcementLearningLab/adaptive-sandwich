@@ -578,6 +578,13 @@ def analyze_dataset(
         joint_adjusted_bread_cond,
     )
 
+    # calculate the max eigenvalue of the joint adjusted sandwich
+    max_eigenvalue = scipy.linalg.eigvalsh(joint_adjusted_sandwich_matrix).max()
+    logger.info(
+        "Max eigenvalue of joint adjusted sandwich matrix: %f",
+        max_eigenvalue,
+    )
+
     debug_pieces_dict = {
         "theta_est": theta_est,
         "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
@@ -589,6 +596,7 @@ def analyze_dataset(
         "classical_meat_matrix": classical_meat_matrix,
         "all_estimating_function_stacks": per_subject_estimating_function_stacks,
         "joint_bread_condition_number": joint_adjusted_bread_cond,
+        "max_eigenvalue_joint_adjusted_sandwich": max_eigenvalue,
         "all_post_update_betas": all_post_update_betas,
         "per_subject_adjusted_corrections": per_subject_adjusted_corrections,
         "per_subject_classical_corrections": per_subject_classical_corrections,

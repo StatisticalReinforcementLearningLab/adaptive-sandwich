@@ -84,6 +84,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "classical_meat_matrix",
             "all_estimating_function_stacks",
             "joint_bread_condition_number",
+            "max_eigenvalue_joint_adjusted_sandwich",
             "all_post_update_betas",
             "per_subject_adjusted_corrections",
             "per_subject_classical_corrections",

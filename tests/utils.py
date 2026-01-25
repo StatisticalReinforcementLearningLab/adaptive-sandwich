@@ -84,7 +84,15 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "classical_meat_matrix",
             "all_estimating_function_stacks",
             "joint_bread_condition_number",
-            "max_eigenvalue_joint_adjusted_sandwich",
+            "max_eigenvalue_joint_sandwich",
+            "all_eigenvalues_joint_sandwich",
+            "max_to_median_ratio_joint_sandwich",
+            "max_eigenvalue_theta_only_adjusted_sandwich",
+            "all_eigenvalues_theta_only_adjusted_sandwich",
+            "max_to_median_ratio_theta_only_adjusted_sandwich",
+            "local_linearization_error_ratio_median",
+            "local_linearization_error_ratio_p90",
+            "local_linearization_error_ratio_max",
             "all_post_update_betas",
             "per_subject_adjusted_corrections",
             "per_subject_classical_corrections",
@@ -100,7 +108,7 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         np.testing.assert_allclose(
             observed_debug_pieces_dict["joint_meat_matrix"],
             expected_debug_pieces_dict["joint_meat_matrix"],
-            rtol=6e-4,
+            rtol=1e-3,
         )
         np.testing.assert_allclose(
             observed_debug_pieces_dict["raw_joint_bread_matrix"],

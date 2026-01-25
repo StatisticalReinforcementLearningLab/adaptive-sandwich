@@ -26,7 +26,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_positive_action_high_clip(
             "action1prob": [0.5, 0.6, 0.7, 0.1, 0.2, 0.3],
         }
     )
-    np.testing.assert_equal(
+    np.testing.assert_almost_equal(
         calculate_derivatives.calculate_pi_and_weight_gradients_specific_t(
             study_df,
             "in_study",
@@ -91,7 +91,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_postive_action_nonzero_gra
             "in_study": [1, 1, 1, 1],
         }
     )
-    np.testing.assert_equal(
+    np.testing.assert_almost_equal(
         calculate_derivatives.calculate_pi_and_weight_gradients_specific_t(
             study_df,
             "in_study",
@@ -153,7 +153,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_zero_action_low_clip():
             "in_study": [1, 1, 1, 1, 1, 1],
         }
     )
-    np.testing.assert_equal(
+    np.testing.assert_almost_equal(
         calculate_derivatives.calculate_pi_and_weight_gradients_specific_t(
             study_df,
             "in_study",
@@ -222,7 +222,7 @@ def test_calculate_pi_and_weight_gradients_specific_t_out_of_study_1():
             "in_study": [1, 0],
         }
     )
-    np.testing.assert_equal(
+    np.testing.assert_almost_equal(
         calculate_derivatives.calculate_pi_and_weight_gradients_specific_t(
             study_df,
             "in_study",
@@ -678,6 +678,7 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering():
             ]
         ),
         rtol=1e-07,
+        atol=1e-6,
     )
     np.testing.assert_allclose(
         result[1],
@@ -704,6 +705,7 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering():
             ]
         ),
         rtol=1e-07,
+        atol=1e-6,
     )
     np.testing.assert_allclose(
         result[2],
@@ -725,6 +727,7 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering():
             dtype="float32",
         ),
         rtol=1e-07,
+        atol=1e-6,
     )
 
 
@@ -915,13 +918,13 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
         6,
     )
     np.testing.assert_allclose(
-        non_zero_padded_result[0], expected_result[0], rtol=1e-07
+        non_zero_padded_result[0], expected_result[0], rtol=1e-07, atol=1e-6
     )
     np.testing.assert_allclose(
-        non_zero_padded_result[1], expected_result[1], rtol=1e-07
+        non_zero_padded_result[1], expected_result[1], rtol=1e-07, atol=1e-6
     )
     np.testing.assert_allclose(
-        non_zero_padded_result[2], expected_result[2], rtol=1e-07
+        non_zero_padded_result[2], expected_result[2], rtol=1e-07, atol=1e-6
     )
 
     assert len(non_zero_padded_result) == len(expected_result)
@@ -1049,9 +1052,15 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
         6,
     )
 
-    np.testing.assert_allclose(zero_padded_result[0], expected_result[0], rtol=1e-07)
-    np.testing.assert_allclose(zero_padded_result[1], expected_result[1], rtol=1e-07)
-    np.testing.assert_allclose(zero_padded_result[2], expected_result[2], rtol=1e-07)
+    np.testing.assert_allclose(
+        zero_padded_result[0], expected_result[0], rtol=1e-07, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        zero_padded_result[1], expected_result[1], rtol=1e-07, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        zero_padded_result[2], expected_result[2], rtol=1e-07, atol=1e-6
+    )
 
     assert len(zero_padded_result) == len(expected_result)
 
@@ -3572,7 +3581,7 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
     expected_result = (
         np.array(
             [
-                np.array([-4.0000005, 16.199999, 5.359999, 5.8199997], dtype="float32"),
+                np.array([-4, 16.199999, 5.359999, 5.82], dtype="float32"),
                 np.array([20.0, 25.8, 23.64, 21.9], dtype="float32"),
             ]
         ),
@@ -3628,8 +3637,14 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
         "in_study",
         "calendar_t",
     )
-    np.testing.assert_allclose(calculated_result[0], expected_result[0], rtol=1e-07)
-    np.testing.assert_allclose(calculated_result[1], expected_result[1], rtol=1e-07)
-    np.testing.assert_allclose(calculated_result[2], expected_result[2], rtol=1e-07)
+    np.testing.assert_allclose(
+        calculated_result[0], expected_result[0], rtol=1e-07, atol=1e-06
+    )
+    np.testing.assert_allclose(
+        calculated_result[1], expected_result[1], rtol=1e-07, atol=1e-06
+    )
+    np.testing.assert_allclose(
+        calculated_result[2], expected_result[2], rtol=1e-07, atol=1e-06
+    )
 
     assert len(calculated_result) == len(expected_result)

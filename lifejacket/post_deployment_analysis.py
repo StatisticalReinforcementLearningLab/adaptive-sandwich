@@ -53,6 +53,8 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+jax.config.update("jax_enable_x64", True)
+
 
 @click.group()
 def cli():
@@ -483,10 +485,10 @@ def analyze_dataset(
 
     subject_ids = jnp.array(analysis_df[subject_id_col_name].unique())
     (
-        stabilized_joint_adjusted_bread_matrix,
-        raw_joint_adjusted_bread_matrix,
+        stabilized_joint_bread_matrix,
+        raw_joint_bread_matrix,
         joint_adjusted_meat_matrix,
-        joint_adjusted_sandwich_matrix,
+        joint_sandwich_matrix,
         classical_bread_matrix,
         classical_meat_matrix,
         classical_sandwich_var_estimate,
@@ -544,9 +546,7 @@ def analyze_dataset(
 
     # This bottom right corner of the joint (betas and theta) variance matrix is the portion
     # corresponding to just theta.
-    adjusted_sandwich_var_estimate = joint_adjusted_sandwich_matrix[
-        -theta_dim:, -theta_dim:
-    ]
+    adjusted_sandwich_var_estimate = joint_sandwich_matrix[-theta_dim:, -theta_dim:]
 
     # Check for negative diagonal elements and set them to zero if found
     adjusted_diagonal = np.diag(adjusted_sandwich_var_estimate)
@@ -572,31 +572,229 @@ def analyze_dataset(
             f,
         )
 
-    joint_adjusted_bread_cond = jnp.linalg.cond(raw_joint_adjusted_bread_matrix)
+    joint_bread_cond = jnp.linalg.cond(raw_joint_bread_matrix)
     logger.info(
-        "Joint adjusted bread condition number: %f",
-        joint_adjusted_bread_cond,
+        "Joint bread condition number: %f",
+        joint_bread_cond,
     )
 
-    # calculate the max eigenvalue of the joint adjusted sandwich
-    max_eigenvalue = scipy.linalg.eigvalsh(joint_adjusted_sandwich_matrix).max()
+    # calculate the max eigenvalue of the theta-only adjusted sandwich
+    max_eigenvalue_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
+        adjusted_sandwich_var_estimate
+    ).max()
+    logger.info(
+        "Max eigenvalue of theta-only adjusted sandwich matrix: %f",
+        max_eigenvalue_theta_only_adjusted_sandwich,
+    )
+
+    # Compute ratios: max eigenvalue / median eigenvalue among those >= 1e-8 * max.
+    eigvals_joint_sandwich = scipy.linalg.eigvalsh(joint_sandwich_matrix)
+    max_eig_joint = float(eigvals_joint_sandwich.max())
     logger.info(
         "Max eigenvalue of joint adjusted sandwich matrix: %f",
-        max_eigenvalue,
+        max_eig_joint,
     )
+
+    joint_keep = eigvals_joint_sandwich >= (1e-8 * max_eig_joint)
+    joint_median_kept = (
+        float(np.median(eigvals_joint_sandwich[joint_keep]))
+        if np.any(joint_keep)
+        else math.nan
+    )
+    max_to_median_ratio_joint_sandwich = (
+        (max_eig_joint / joint_median_kept)
+        if (not math.isnan(joint_median_kept) and joint_median_kept > 0)
+        else (
+            math.inf
+            if (not math.isnan(joint_median_kept) and joint_median_kept == 0)
+            else math.nan
+        )
+    )
+    logger.info(
+        "Max/median eigenvalue ratio (joint sandwich; median over eigvals >= 1e-8*max): %f",
+        max_to_median_ratio_joint_sandwich,
+    )
+
+    eigvals_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
+        adjusted_sandwich_var_estimate
+    )
+    max_eig_theta = float(eigvals_theta_only_adjusted_sandwich.max())
+    theta_keep = eigvals_theta_only_adjusted_sandwich >= (1e-8 * max_eig_theta)
+    theta_median_kept = (
+        float(np.median(eigvals_theta_only_adjusted_sandwich[theta_keep]))
+        if np.any(theta_keep)
+        else math.nan
+    )
+    max_to_median_ratio_theta_only_adjusted_sandwich = (
+        (max_eig_theta / theta_median_kept)
+        if (not math.isnan(theta_median_kept) and theta_median_kept > 0)
+        else (
+            math.inf
+            if (not math.isnan(theta_median_kept) and theta_median_kept == 0)
+            else math.nan
+        )
+    )
+    logger.info(
+        "Max/median eigenvalue ratio (theta-only adjusted sandwich; median over eigvals >= 1e-8*max): %f",
+        max_to_median_ratio_theta_only_adjusted_sandwich,
+    )
+
+    # --- Local linearization validity diagnostic (single-run) ---
+    # We compare the nonlinear Taylor remainder of the joint estimating-function map to the
+    # retained linear term, at perturbations on the O(1/sqrt(n)) scale.
+    #
+    # Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
+    # where g(eta) is the avg per-subject weighted estimating-function stack and B is the
+    # stabilized joint bread (Jacobian of g w.r.t. flattened betas+theta).
+    #
+    # This ratio is dimensionless and can be used as a necessary/sanity diagnostic that the
+    # first-order linearization is locally accurate at the estimation scale.
+
+    def _compute_local_linearization_error_ratio() -> tuple[float, float]:
+        # Ensure float64 for diagnostics even if upstream ran in float32.
+        joint_bread_float64 = jnp.asarray(
+            stabilized_joint_bread_matrix, dtype=jnp.float64
+        )
+        g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
+        stacks_float64 = jnp.asarray(
+            per_subject_estimating_function_stacks, dtype=jnp.float64
+        )
+
+        num_subjects = stacks_float64.shape[0]
+
+        def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
+            return jnp.asarray(
+                get_avg_weighted_estimating_function_stacks_and_aux_values(
+                    flattened_betas_and_theta,
+                    beta_dim,
+                    theta_dim,
+                    subject_ids,
+                    action_prob_func,
+                    action_prob_func_args_beta_index,
+                    alg_update_func,
+                    alg_update_func_type,
+                    alg_update_func_args_beta_index,
+                    alg_update_func_args_action_prob_index,
+                    alg_update_func_args_action_prob_times_index,
+                    alg_update_func_args_previous_betas_index,
+                    inference_func,
+                    inference_func_type,
+                    inference_func_args_theta_index,
+                    inference_func_args_action_prob_index,
+                    action_prob_func_args,
+                    policy_num_by_decision_time_by_subject_id,
+                    initial_policy_num,
+                    beta_index_by_policy_num,
+                    inference_func_args_by_subject_id,
+                    inference_action_prob_decision_times_by_subject_id,
+                    alg_update_func_args,
+                    action_by_decision_time_by_subject_id,
+                    True,  # suppress_all_data_checks
+                    True,  # suppress_interactive_data_checks
+                    False,  # include_auxiliary_outputs
+                ),
+                dtype=jnp.float64,
+            )
+
+        # Evaluate at the final estimate.
+        eta_hat = jnp.asarray(
+            flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
+        )
+
+        # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
+        # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
+        # square-root. If G is the (n x d) matrix of per-subject stacks, then (1/n) G^T G is the
+        # empirical covariance in joint estimating function stack space. Sampling u = (G^T w)/sqrt(n) with w~N(0, I_n) gives
+        # u ~ N(0, empirical joint estimating function stack covariance G^T G/n ) in joint estimating function stack space.
+        key = jax.random.PRNGKey(0)
+
+        # The number of perturbations we will probe
+        J = 15
+        # Each requires num_subjects standard normal draws, which we will then transform
+        # into joint estimating function space perturbations in U
+        W = jax.random.normal(key, shape=(J, num_subjects), dtype=jnp.float64)
+
+        # Joint estimating function space perturbations: u_j in R^{d_joint}
+        # U = (1/sqrt(n)) * W G, where rows of G are g_i^T
+        U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
+
+        # Parameter perturbations: delta = (c/sqrt(n)) * B^{-1} u
+        # Use solve rather than explicit inverse.
+        c = 1.0
+        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
+            joint_bread_float64, U.T
+        ).T
+
+        # Compute ratios r_j.
+        # NOTE: We use the Euclidean norm in score space; this is dimensionless and avoids
+        # forming/pseudoinverting a potentially rank-deficient matrix.
+        B_delta = (joint_bread_float64 @ delta.T).T
+        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
+        remainder = g_plus - g_hat - B_delta
+
+        denom = jnp.linalg.norm(B_delta, axis=1)
+        numer = jnp.linalg.norm(remainder, axis=1)
+
+        # Avoid division by zero (should not happen unless delta collapses numerically).
+        ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
+
+        local_error_ratio_median = float(jnp.median(ratios))
+        local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))
+        local_error_ratio_max = float(jnp.max(ratios))
+
+        logger.info(
+            "Local linearization error ratio (median over %d draws): %.6f",
+            J,
+            local_error_ratio_median,
+        )
+        logger.info(
+            "Local linearization error ratio (90th pct over %d draws): %.6f",
+            J,
+            local_error_ratio_p90,
+        )
+
+        logger.info(
+            "Local linearization error ratio (max over %d draws): %.6f",
+            J,
+            local_error_ratio_max,
+        )
+
+        return local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max
+
+    try:
+        local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
+            _compute_local_linearization_error_ratio()
+        )
+    except Exception as e:
+        # This diagnostic is best-effort; failure should not break analysis.
+        logger.warning(
+            "Failed to compute local linearization error ratio diagnostic: %s",
+            str(e),
+        )
+        local_error_ratio_median = math.nan
+        local_error_ratio_p90 = math.nan
+        local_error_ratio_max = math.nan
 
     debug_pieces_dict = {
         "theta_est": theta_est,
         "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-        "raw_joint_bread_matrix": raw_joint_adjusted_bread_matrix,
-        "stabilized_joint_bread_matrix": stabilized_joint_adjusted_bread_matrix,
+        "raw_joint_bread_matrix": raw_joint_bread_matrix,
+        "stabilized_joint_bread_matrix": stabilized_joint_bread_matrix,
         "joint_meat_matrix": joint_adjusted_meat_matrix,
         "classical_bread_matrix": classical_bread_matrix,
         "classical_meat_matrix": classical_meat_matrix,
         "all_estimating_function_stacks": per_subject_estimating_function_stacks,
-        "joint_bread_condition_number": joint_adjusted_bread_cond,
-        "max_eigenvalue_joint_adjusted_sandwich": max_eigenvalue,
+        "joint_bread_condition_number": joint_bread_cond,
+        "max_eigenvalue_joint_sandwich": max_eig_joint,
+        "all_eigenvalues_joint_sandwich": eigvals_joint_sandwich,
+        "max_to_median_ratio_joint_sandwich": max_to_median_ratio_joint_sandwich,
+        "max_eigenvalue_theta_only_adjusted_sandwich": max_eig_theta,
+        "all_eigenvalues_theta_only_adjusted_sandwich": eigvals_theta_only_adjusted_sandwich,
+        "max_to_median_ratio_theta_only_adjusted_sandwich": max_to_median_ratio_theta_only_adjusted_sandwich,
+        "local_linearization_error_ratio_median": local_error_ratio_median,
+        "local_linearization_error_ratio_p90": local_error_ratio_p90,
+        "local_linearization_error_ratio_max": local_error_ratio_max,
         "all_post_update_betas": all_post_update_betas,
         "per_subject_adjusted_corrections": per_subject_adjusted_corrections,
         "per_subject_classical_corrections": per_subject_classical_corrections,
@@ -610,8 +808,8 @@ def analyze_dataset(
 
     if collect_data_for_blowup_supervised_learning:
         datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
-            raw_joint_adjusted_bread_matrix,
-            joint_adjusted_bread_cond,
+            raw_joint_bread_matrix,
+            joint_bread_cond,
             avg_estimating_function_stack,
             per_subject_estimating_function_stacks,
             all_post_update_betas,
@@ -756,12 +954,16 @@ def single_subject_weighted_estimating_function_stacker(
     policy_num_by_decision_time: dict[collections.abc.Hashable, dict[int, int | float]],
     action_by_decision_time: dict[collections.abc.Hashable, dict[int, int]],
     beta_index_by_policy_num: dict[int | float, int],
-) -> tuple[
-    jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
-]:
+    include_auxiliary_outputs: bool = True,
+) -> (
+    tuple[
+        jnp.ndarray[jnp.float32],
+        jnp.ndarray[jnp.float32],
+        jnp.ndarray[jnp.float32],
+        jnp.ndarray[jnp.float32],
+    ]
+    | jnp.ndarray[jnp.float32]
+):
     """
     Computes a weighted estimating function stack for a given algorithm estimating function
     and arguments, inference estimating functio and arguments, and action probability function and
@@ -825,12 +1027,23 @@ def single_subject_weighted_estimating_function_stacker(
             A dictionary mapping policy numbers to the index of the corresponding beta in
             all_post_update_betas. Note that this is only for non-initial, non-fallback policies.
 
+        include_auxiliary_outputs (bool):
+            If True, returns the adjusted meat, classical meat, and classical bread contributions in
+            a second returned tuple. If False, only returns the weighted estimating function stack.
+
     Returns:
         jnp.ndarray: A 1-D JAX NumPy array representing the subject's weighted estimating function
             stack.
         jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's adjusted meat contribution.
         jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical meat contribution.
         jnp.ndarray: A 2-D JAX NumPy matrix representing the subject's classical bread contribution.
+
+        or
+
+        jnp.ndarray: A 1-D JAX NumPy array representing the subject's weighted estimating function
+            stack.
+
+        depending on the value of include_auxiliary_outputs.
     """
 
     logger.info(
@@ -1020,14 +1233,18 @@ def single_subject_weighted_estimating_function_stacker(
     # c. The third output is averaged across subjects to obtain the classical meat matrix.
     # d. The fourth output is averaged across subjects to obtain the inverse classical bread
     # matrix.
-    return (
-        weighted_stack,
-        jnp.outer(weighted_stack, weighted_stack),
-        jnp.outer(inference_component, inference_component),
-        jax.jacrev(inference_estimating_func, argnums=inference_func_args_theta_index)(
-            *threaded_inference_func_args
-        ),
-    )
+    if include_auxiliary_outputs:
+        return (
+            weighted_stack,
+            jnp.outer(weighted_stack, weighted_stack),
+            jnp.outer(inference_component, inference_component),
+            jax.jacrev(
+                inference_estimating_func, argnums=inference_func_args_theta_index
+            )(*threaded_inference_func_args),
+        )
+
+    else:
+        return weighted_stack
 
 
 def get_avg_weighted_estimating_function_stacks_and_aux_values(
@@ -1067,6 +1284,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     ],
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
+    include_auxiliary_outputs: bool = True,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
@@ -1141,10 +1359,14 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             If True, suppresses interactive data checks that would otherwise be performed to ensure
             the correctness of the threaded arguments. The checks are still performed, but
             any interactive prompts are suppressed.
+        include_auxiliary_outputs (bool):
+            If True, returns the adjusted meat, classical meat, and classical bread contributions in addition to the average weighted estimating function stack.
+            If False, returns only the average weighted estimating function stack.
 
     Returns:
         jnp.ndarray:
             A 2D JAX NumPy array holding the average weighted estimating function stack.
+
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing
             1. the average weighted estimating function stack
@@ -1153,6 +1375,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             4. the subject-level inverse classical bread matrix contributions
             5. raw per-subject weighted estimating function
             stacks.
+        or jnp.ndarray:
+            A 1-D JAX NumPy array representing the subject's weighted estimating function
+            stack.
+        depending on the value of include_auxiliary_outputs.
     """
 
     # 1. Collect estimating functions by differentiating the loss functions if needed.
@@ -1275,6 +1501,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     ]
 
     stacks = jnp.array([result[0] for result in results])
+
+    if not include_auxiliary_outputs:
+        return jnp.mean(stacks, axis=0)
+
     outer_products = jnp.array([result[1] for result in results])
     inference_only_outer_products = jnp.array([result[2] for result in results])
     inference_hessians = jnp.array([result[3] for result in results])
@@ -1475,7 +1705,7 @@ def construct_classical_and_adjusted_sandwiches(
     theta_dim = theta_est.shape[0]
     beta_dim = all_post_update_betas.shape[1]
     # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
-    raw_joint_adjusted_bread_matrix, (
+    raw_joint_bread_matrix, (
         avg_estimating_function_stack,
         per_subject_joint_adjusted_meat_contributions,
         per_subject_classical_meat_contributions,
@@ -1533,21 +1763,21 @@ def construct_classical_and_adjusted_sandwiches(
 
     # Increase diagonal block dominance possibly improve conditioning of diagonal
     # blocks as necessary, to ensure mathematical stability of joint bread
-    stabilized_joint_adjusted_bread_matrix = (
+    stabilized_joint_bread_matrix = (
         (
             stabilize_joint_bread_if_necessary(
-                raw_joint_adjusted_bread_matrix,
+                raw_joint_bread_matrix,
                 beta_dim,
                 theta_dim,
             )
         )
         if stabilize_joint_bread
-        else raw_joint_adjusted_bread_matrix
+        else raw_joint_bread_matrix
     )
 
     # Now stably (no explicit inversion) form our sandwiches.
-    joint_adjusted_sandwich = form_sandwich_from_bread_and_meat(
-        stabilized_joint_adjusted_bread_matrix,
+    joint_sandwich = form_sandwich_from_bread_and_meat(
+        stabilized_joint_bread_matrix,
         joint_adjusted_meat_matrix,
         num_subjects,
         method=SandwichFormationMethods.BREAD_T_QR,
@@ -1568,7 +1798,7 @@ def construct_classical_and_adjusted_sandwiches(
             form_adjusted_meat_adjustments_directly(
                 theta_dim,
                 all_post_update_betas.shape[1],
-                stabilized_joint_adjusted_bread_matrix,
+                stabilized_joint_bread_matrix,
                 per_subject_estimating_function_stacks,
                 analysis_df,
                 active_col_name,
@@ -1610,7 +1840,7 @@ def construct_classical_and_adjusted_sandwiches(
                 method=SandwichFormationMethods.BREAD_T_QR,
             )
         )
-        theta_only_adjusted_sandwich = joint_adjusted_sandwich[-theta_dim:, -theta_dim:]
+        theta_only_adjusted_sandwich = joint_sandwich[-theta_dim:, -theta_dim:]
 
         if not np.allclose(
             theta_only_adjusted_sandwich,
@@ -1624,10 +1854,10 @@ def construct_classical_and_adjusted_sandwiches(
     # Stack the joint bread pieces together horizontally and return the auxiliary
     # values too. The joint bread should always be block lower triangular.
     return (
-        raw_joint_adjusted_bread_matrix,
-        stabilized_joint_adjusted_bread_matrix,
+        raw_joint_bread_matrix,
+        stabilized_joint_bread_matrix,
         joint_adjusted_meat_matrix,
-        joint_adjusted_sandwich,
+        joint_sandwich,
         classical_bread_matrix,
         classical_meat_matrix,
         classical_sandwich,
@@ -1643,7 +1873,7 @@ def construct_classical_and_adjusted_sandwiches(
 # important for the subject to know if this is happening. Even if enabled, it is important
 # that the subject know it actually kicks in.
 def stabilize_joint_bread_if_necessary(
-    joint_adjusted_bread_matrix: jnp.ndarray,
+    joint_bread_matrix: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
 ) -> jnp.ndarray:
@@ -1652,7 +1882,7 @@ def stabilize_joint_bread_if_necessary(
     dominance and/or adding a small ridge penalty to the diagonal blocks.
 
     Args:
-        joint_adjusted_bread_matrix (jnp.ndarray):
+        joint_bread_matrix (jnp.ndarray):
             A 2-D JAX NumPy array representing the joint bread matrix.
         beta_dim (int):
             The dimension of each beta parameter.
@@ -1673,7 +1903,7 @@ def stabilize_joint_bread_if_necessary(
 
     # Grab just the RL block and convert numpy array for easier manipulation.
     RL_stack_beta_derivatives_block = np.array(
-        joint_adjusted_bread_matrix[:-theta_dim, :-theta_dim]
+        joint_bread_matrix[:-theta_dim, :-theta_dim]
     )
     num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
     for i in range(1, num_updates + 1):
@@ -1792,11 +2022,11 @@ def stabilize_joint_bread_if_necessary(
         [
             [
                 RL_stack_beta_derivatives_block,
-                joint_adjusted_bread_matrix[:-theta_dim, -theta_dim:],
+                joint_bread_matrix[:-theta_dim, -theta_dim:],
             ],
             [
-                joint_adjusted_bread_matrix[-theta_dim:, :-theta_dim],
-                joint_adjusted_bread_matrix[-theta_dim:, -theta_dim:],
+                joint_bread_matrix[-theta_dim:, :-theta_dim],
+                joint_bread_matrix[-theta_dim:, -theta_dim:],
             ],
         ]
     )

@@ -19,13 +19,13 @@ variances_methods = {}
 # theta_estimate, true variance, median of standard variance estimate, median adaptive variance estimate
 
 ################################################## synthetic env ##################################################
-################# TS: average rewards
-variances_methods['30'] = [0.296367, 0.005726, 0.003655, 0.010398]
-variances_methods['50'] = [0.301267, 0.003659, 0.002225, 0.005826]
-variances_methods['100'] = [0.301623, 0.002060,0.001128, 0.002513]
-variances_methods['300'] = [0.302433, 0.000792, 0.000383, 0.000829]
-variances_methods['500'] = [0.304311, 0.000448, 0.000230, 0.000473]
-variances_methods['1000'] = [0.304409, 0.000224, 0.000115, 0.000236]
+################# TS: average rewards [introduction]
+# variances_methods['30'] = [0.296367, 0.005726, 0.003655, 0.010398]
+# variances_methods['50'] = [0.301267, 0.003659, 0.002225, 0.005826]
+# variances_methods['100'] = [0.301623, 0.002060,0.001128, 0.002513]
+# variances_methods['300'] = [0.302433, 0.000792, 0.000383, 0.000829]
+# variances_methods['500'] = [0.304311, 0.000448, 0.000230, 0.000473]
+# variances_methods['1000'] = [0.304409, 0.000224, 0.000115, 0.000236]
 
 ################# TS: treatment effect
 # variances_methods['30'] = [0.13003476, 1.89196844e-02, 1.3528196e-02, 2.7703129e-02]
@@ -36,18 +36,18 @@ variances_methods['1000'] = [0.304409, 0.000224, 0.000115, 0.000236]
 # variances_methods['1000'] = [0.14653736, 6.62755788e-04, 4.5405561e-04, 6.8957836e-04]
 
 ################# SAC: average rewards
-# variances_methods['30'] = [0.24456318, 0.006194,0.00392348, 0.00407279]
-# variances_methods['50'] = [0.23989122, 0.00299804, 0.00232505, 0.00237417]
-# variances_methods['100']= [0.24534565, 0.00131415, 0.00117638, 0.00118786]
-# variances_methods['300'] = [0.25961846, 0.00046748, 0.00040852, 0.00041054]
-# variances_methods['500'] = [0.26483545, 0.00026997, 0.00024645, 0.00024706]
+variances_methods['30'] = []
+variances_methods['50'] = []
+variances_methods['100']= []
+variances_methods['300'] = []
+variances_methods['500'] = []
 
 ################# SAC: treatment effect
-# variances_methods['30'] = [0.17996839, 2.54966810e-2, 1.3580132e-2, 1.4134381e-2]
-# variances_methods['50'] = [0.16762662, 1.25121634e-2, 8.4480355e-3, 8.6873807e-3]
-# variances_methods['100']= [ 0.1762619, 5.41489872e-3, 4.35435958e-3, 4.3835528e-3]
-# variances_methods['300'] = [0.20686363, 1.71520708e-03, 1.4831771e-03, 1.4899302e-03]
-# variances_methods['500'] = [ 0.21479316, 1.08079133e-03, 8.9439156e-04, 8.9574198e-04]
+# variances_methods['30'] = []
+# variances_methods['50'] = []
+# variances_methods['100']= []
+# variances_methods['300'] = []
+# variances_methods['500'] = []
 
 
 ################################################## Miwaves env ##################################################

@@ -95,19 +95,12 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                 curr_timestep_data, actions, t
             )
         
-        else:
-        # elif args.dataset_type == RLStudyArgs.MIWAVES:
+        else:  # Miwaves and synthetic env: (1) average rewards without alphas, (2) treatment effect with alphas
             if args.alpha1 != 0.0 or args.alpha2 != 0.0: ####### importance to change
                 rewards = study_env.sample_rewards_prefeatures(curr_timestep_data, actions, t, args.alpha1, args.alpha2)  # from the environment
             else:
                 rewards = study_env.sample_rewards(curr_timestep_data, actions, t)  # from the environment
-        # elif args.dataset_type == RLStudyArgs.SYNTHETIC:
-        #     if args.alpha1 != 0.0 or args.alpha2 != 0.0: ####### importance to change
-        #         rewards = study_env.sample_rewards_prefeatures(curr_timestep_data, actions, t, args.alpha1, args.alpha2)  # from the environment
-        #     else:
-        #         rewards = study_env.sample_rewards(curr_timestep_data, actions, t)  # from the environment
-        # else:
-        #     raise ValueError("Invalid Dataset Type")
+     
 
         # Record all collected data #######################################
         if args.dataset_type == RLStudyArgs.ORALYTICS:
@@ -117,6 +110,15 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
                 (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
                 fill_columns,
             ] = fill_vals
+
+        elif args.dataset_type == RLStudyArgs.SYNTHETIC: 
+            fill_columns = ["reward", "action", "action1prob"]
+            fill_vals = np.vstack([rewards, actions, action_probs]).T
+            study_df.loc[
+                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
+                fill_columns,
+            ] = fill_vals
+
         elif args.dataset_type == RLStudyArgs.MIWAVES:
             ##### Step 1: update study_df with reward, action, action_prob ##########
             fill_columns = ["reward", "action", "action1prob"]
@@ -134,13 +136,8 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             # study_df.loc[(study_df["calendar_t"] == t) & (study_df["in_study"] == 1), "reward"] = modified_rewards
             # print(study_df)
             
-        else: # synthetic env
-            fill_columns = ["reward", "action", "action1prob"]
-            fill_vals = np.vstack([rewards, actions, action_probs]).T
-            study_df.loc[
-                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
-                fill_columns,
-            ] = fill_vals
+        else:
+            raise ValueError("Invalid Dataset Type")
 
         if t < study_env.calendar_T:
             logger.info("Updating study df for time %s.", t)
@@ -200,7 +197,7 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
 
             if args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
-                study_RLalg.update_alg(update_data, t) ######### incremental update for SAC
+                study_RLalg.update_alg(update_data, t) ######### incremental update for SAC, as opposed to TS that use all historical data
             else:
                 study_RLalg.update_alg(update_data) ######### important: update_data all users 
 
@@ -224,7 +221,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     alg_treat_feats = ['intercept', 'past_reward']
 
     Miwaves environment:
-    gen_features = ""
+    gen_feats = ""
     alg_state_feats = ['intercept', 'S1', 'S2', 'S3']
     alg_treat_feats = ['intercept', 'S1', 'S2', 'S3']
     """
@@ -252,46 +249,30 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 f"steepness={args.steepness}_algfeats={args.alg_state_feats}_errcorr={args.err_corr}_"
                 f"actionC={args.action_centering}"
             )
-        elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
-            
-            exp_str = (
-                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}{args.filename}" #### the name has been changed
-            )
         elif args.RL_alg == RLStudyArgs.FIXED_RANDOMIZATION:
-            # the same as SMOOTH_POSTERIOR_SAMPLING, but only change the names of saving data below
             exp_str = (
                 f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}{args.filename}"
             )
-        
+        elif args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
+            exp_str = (
+                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}{args.filename}" # the name used here is different from the Nowell's version
+            )
         elif args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
-            
             exp_str = (
                 f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}{args.filename}" 
             )
-        
         else:
             raise ValueError("Invalid RL Algorithm Type For Synthetic Dataset")
 
     elif args.dataset_type == RLStudyArgs.MIWAVES:
         # for both TS and SAC
         user_env_data = None
-        # paramf_path = f"./synthetic_env_params/{mode}.txt"
-        # env_params = load_synthetic_env_params(paramf_path)
-        # if len(env_params.shape) == 2:
-        #     assert env_params.shape[0] >= args.T
-
-        # exp_str = (
-        #         f"{args.dataset_type}_alg={args.RL_alg}_T={args.T}_n={args.n}{args.filename}" 
-        #     )
-
         exp_str = (
-                f"{args.dataset_type}_alg={args.RL_alg}_T={args.T}_n={args.n}_decisionsBtwnUpdates={args.decisions_between_updates}_actionC={args.action_centering}{args.filename}"
+                f"{args.dataset_type}_alg={args.RL_alg}_T={args.T}_n={args.n}_decisionsBtwnUpdates={args.decisions_between_updates}{args.filename}" #### can be changed to distinguish different settings
             )
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
         raise NotImplementedError()
-        # If we want this, there is an implementation in the replicable  bandits
-        # repo
 
     else:
         raise ValueError("Invalid Dataset Type")
@@ -306,9 +287,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     all_folder_path = os.path.join(simulation_data_path, exp_str) # n30_T50/0/simulated_data/miwaves_alg=TS_T=50_n=30_averagerewards
     if not os.path.isdir(all_folder_path):
         os.makedirs(all_folder_path, exist_ok=True)
-        # os.mkdir(all_folder_path)
 
-    # path: ./simulated_data/SYNTHETIC_mode=delayed_1_action_dosage_alg=SMOOTH_POSTERIOR_SAMPLING_T=50_n=100_recruitN=100_decisionsBtwnUpdates=1_algfeats=intercept_errcorr=time_corr_actionC=0
     logger.info("Dumping arguments to json file...")
     print("Saving to Path: {}".format(all_folder_path))
     with open(os.path.join(all_folder_path, "args.json"), "w", encoding="utf-8") as f:
@@ -429,6 +408,8 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 upper_clip=args.upper_clip,
                 steepness=args.steepness,
                 twoarmed=bool(args.Twoarmed), # Twoarmed=1, update for Z_id=1, and no update (fixed randomization)for Z_id=0 
+                Miwaves=bool(args.dataset_type == RLStudyArgs.MIWAVES), ######## new indicator function
+                n=args.n,
             )
         
         else:
@@ -758,6 +739,7 @@ def main():
     print("Args provided to RL_Study_Simulation.py:")
     # args.save_dir = f"./n{args.n}_T{args.T}/0" # only used for debugging locally
     print(args)
+
 
     assert args.T >= args.decisions_between_updates
 

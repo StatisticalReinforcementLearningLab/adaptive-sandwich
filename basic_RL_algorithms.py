@@ -123,9 +123,14 @@ def get_pis_batched_SAC_twoarmed(
     upper_clip,
     batched_treat_states_tensor,
     Z_id,
+    Miwaves,
 ):
+    if Miwaves:
+        Function = synthetic_get_action_1_prob_SAC # can be further modified if needed
+    else:
+        Function = synthetic_get_action_1_prob_SAC
     return jax.vmap(
-        fun=synthetic_get_action_1_prob_SAC,
+        fun=Function,
         in_axes=(None, None, None, None, 0, 0), # 0：batch dimension, None: broadcasted or fixed
         out_axes=0, # the first index would be batch dimension
     )(
@@ -167,11 +172,17 @@ def get_pis_batched_thompson_sampling_twoarmed(
     upper_clip,
     steepness,
     Z_id, # new
+    Miwaves,
 ):
+    if Miwaves:
+        Function = smooth_thompson_sampling_act_prob_function_no_action_centering_Miwaves
+    else:
+        Function = smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed
+    
     # equivalent to a loop for each user    
     return jax.vmap(
         # fun=smooth_thompson_sampling_act_prob_function_no_action_centering,
-        fun=smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed,
+        fun=Function,
         # in_axes=(None, 0, None, None, None, None),
         in_axes=(None, 0, None, None, None, None, 0), # Z_id should be row-wise for computation
         out_axes=0,
@@ -185,32 +196,6 @@ def get_pis_batched_thompson_sampling_twoarmed(
         Z_id, # new 
     )
 
-
-def get_pis_batched_thompson_sampling_Miwaves(
-    beta_est,
-    batched_treat_states_tensor,
-    num_users_entered_before_last_update,
-    lower_clip,
-    upper_clip,
-    steepness,
-    Z_id, # new
-):
-    # equivalent to a loop for each user    
-    return jax.vmap(
-        # fun=smooth_thompson_sampling_act_prob_function_no_action_centering,
-        fun=smooth_thompson_sampling_act_prob_function_no_action_centering_Miwaves,
-        # in_axes=(None, 0, None, None, None, None),
-        in_axes=(None, 0, None, None, None, None, 0), # Z_id should be row-wise for computation
-        out_axes=0,
-    )(
-        beta_est,
-        batched_treat_states_tensor,
-        num_users_entered_before_last_update,
-        lower_clip,
-        upper_clip,
-        steepness,
-        Z_id, # new 
-    )
 
 class SigmoidLS:
     """
@@ -795,28 +780,16 @@ class SmoothPosteriorSampling:
         Z_id = curr_timestep_data['Z_id'].to_numpy() # [n, 1]
 
         # evalute the action prob for all users accoeding to Z_id
-        if self.Miwaves:
-            action_probs = get_pis_batched_thompson_sampling_Miwaves(
-                self.get_current_beta_estimate(),
-                treat_states,
-                self.get_num_users_entered_before_last_update(),
-                self.lower_clip,
-                self.upper_clip,
-                self.steepness,
-                Z_id, # new
-            )   
-
-            return action_probs
-        else:
-            action_probs = get_pis_batched_thompson_sampling_twoarmed(
-                self.get_current_beta_estimate(),
-                treat_states,
-                self.get_num_users_entered_before_last_update(),
-                self.lower_clip,
-                self.upper_clip,
-                self.steepness,
-                Z_id, # new
-            )   
+        action_probs = get_pis_batched_thompson_sampling_twoarmed(
+            self.get_current_beta_estimate(),
+            treat_states,
+            self.get_num_users_entered_before_last_update(),
+            self.lower_clip,
+            self.upper_clip,
+            self.steepness,
+            Z_id, # new
+            Miwaves=self.Miwaves, # Miwaves -> different function
+        )   
         return action_probs
 
 
@@ -838,6 +811,8 @@ class SoftActorCritic:
         upper_clip,
         steepness,
         twoarmed=False,
+        Miwaves=False, # Miwaves
+        n=None,
     ):
         self.state_feats = state_feats
         self.treat_feats = treat_feats
@@ -851,27 +826,42 @@ class SoftActorCritic:
         self.beta_dim = self.beta_dim_Q + self.beta_dim_pi # 4 + 2 = 6
         self.pi_args = {}
         self.rl_update_args = {}
-        self.lambda_entropy = 1.0 # entropy regularization coefficient
+        self.lambda_entropy = 1.0 # entropy regularization coefficient, default 1.0
         
        
-        self.lr_pi = 10.0
-        self.ridge_penalty = 1e-3 # 0.0：NAN， 1e-8: still less stable. 1e-3 works better than 1e-5, similar to 1e-1
-        # self.lr_Q = 1e-2 # no use
-        self.gamma = 0.99
         
         self.next_states_index = ['intercept', 'reward'] 
         
 
         self.twoarmed = twoarmed ##### new
+        self.Miwaves = Miwaves ##### new
+
+        if self.Miwaves:
+            self.lr_pi = 10.0
+            self.ridge_penalty = 1.0 # 
+        else:
+            self.lr_pi = 10.0
+            """
+            we find n=30 or 50, the inference result are stable, while incresing n, e.g., 300 or 500, the coverage rate decreases.
+            This is because the real ridge regression in this algorithm is n*ridge_penalty, which increasese the biase (underfitting) when we increase n.
+            Therefore, we scale the real ridge regression hyper-parameter with 1/n here.
+            """
+            self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
+            # self.ridge_penalty = 0.1 # 1.0: n=30[suggest]/300, varaince=0.00752873/0.00046802  | 0.1: n=30/300[suggest], variance= 0.01494251 with warning/with   [seeds in treatment effect: increase the epoch to 1000]
+        print('self.ridge_penalty', self.ridge_penalty)
+        self.gamma = 0.99
+        
 
         # Set an initial policy
         self.betaQ_init = jnp.array(self.rng.normal(size=self.beta_dim_Q))# initial critic parameters
         self.betapi_init = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # initial actor parameters
         self.betaQ_tar = self.betaQ_init.copy() # target critic parameters 
         self.betapi_tar = self.betapi_init.copy() # target actor parameters  
-        self.tau = 0.0 # Polyak for target network, tau=0: only based on the last step's critic, i.e., self.betaQ_tar = self.betaQ; tau=1: only based on the target critic, i.e., self.betaQ_tar = self.betaQ_tar (always a fixed target Q)
-        self.decay=0.5 # learning rate decay for the actor, which require gradient descent (not necessary, but suggested here)
-        self.epoch_actor = 500
+        self.tau = 0.0 # Polyak for target network, tau=0: only based on the last step's critic, i.e., self.betaQ_tar = self.betaQ; tau=1: only based on the (initial) target critic, i.e., self.betaQ_tar = self.betaQ_tar = intialization (always a fixed target Q)
+        self.decay=0.5 # learning rate decay for the actor, default 0.5
+        self.epoch_actor = 1000 # default: 500
+
+        self.threshold_earlystopping = 1e-7 # default 1e-5
         self.all_policies = [
             {
                 "beta_est": jnp.concatenate([self.betaQ_tar, self.betapi_tar]),
@@ -1016,7 +1006,8 @@ class SoftActorCritic:
         # print("next_action:", next_action)
         # print('next_states:', next_states)
         # logp_next = jnp.log(jnp.where(next_action.reshape(-1,1)==1, p_next.reshape(-1,1), jnp.clip(1.0 - p_next.reshape(-1,1), 1e-8, 1.0))) 
-        logp_next = jnp.log(jnp.where(next_action==1, p_next, jnp.clip(1.0 - p_next, 1e-8, 1.0)))  # [n/2,] log(\pi(A_{t+1}|S_{t+1}))
+        # logp_next = jnp.log(jnp.where(next_action==1, p_next, jnp.clip(1.0 - p_next, 1e-8, 1.0)))  # [n/2,] log(\pi(A_{t+1}|S_{t+1}))
+        logp_next = jnp.log(jnp.where(next_action==1, p_next, 1.0 - p_next))  # [n/2,] log(\pi(A_{t+1}|S_{t+1})) element-wise if-else
         # debug.print('betaQ_tar: {}', self.betaQ_tar)
         # debug.print('rewards: {}', rewards)
         # debug.print('Q_values_next: {}', Q_values_next)
@@ -1064,23 +1055,21 @@ class SoftActorCritic:
             # return -jnp.mean(jax.vmap(single_grad, in_axes=(0))(treat_states), axis=0) # [2,1] averaged over n
             return jax.vmap(single_grad, in_axes=(0))(treat_states) 
         
-        ################### [Incremental] Update Actor based on the last step's critic self.betaQ_tar
-        self.lr_pi_use = self.lr_pi
-        threshold = 1e-5
-        
+        ################### [Incremental] Update Actor based on the last step's critic self.betaQ_tar ###################
         #################### in each time step, we randomly intialize the betapi to perform update to mirror TS, where posterior mean and variance are directly computed based on the data and prior mean and varaince
+        self.lr_pi_use = self.lr_pi
         betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi))
         for i in range(self.epoch_actor):
             loss_pre = neg_obj(betapi)
             grad_beta_pi = jax.grad(neg_obj)(betapi)
             betapi = betapi - self.lr_pi_use * grad_beta_pi
             loss_after = neg_obj(betapi)
-            if jnp.linalg.norm(grad_beta_pi) < threshold:
+            if jnp.linalg.norm(grad_beta_pi) < self.threshold_earlystopping: # early stopping accelerates the training but it induces the estimation error
                 break
             if (i+1) % 50 == 0:
-                # print("grad_beta_pi", grad_beta_pi)
-                print(f"SAC update at step {i}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', betapi, 'lr_pi', self.lr_pi_use)
+                print(f"DecisionTime {t}, SAC update step {i}/{self.epoch_actor}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', betapi, 'lr_pi', self.lr_pi_use)
             
+            # if i % int(self.epoch_actor/2) == 0 and i >0:
             if i % 200 == 0 and i >0:
                 self.lr_pi_use = self.lr_pi_use * self.decay # decay the learning rate for the actor
         vector_pi = gradient_pi(betapi, self.betaQ_tar) # [n/2 * t, beta_dim_pi]
@@ -1235,6 +1224,7 @@ class SoftActorCritic:
             self.steepness,  # steepness fixed to 1.0
             self.upper_clip,
             treat_states,
-            Z_id
+            Z_id,
+            Miwaves=self.Miwaves, # Miwaves 
         )
         return action_probs

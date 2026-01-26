@@ -10,16 +10,28 @@
 ```
 
 
+## Current Progress and Update !!! (by Ke on 01/26/2026)
+
+- **SAC on Synthetic environment**: The inference performs well on small samples sizes, but it is not consistent when we increase the sample size. Empirical results are provided in Section 3 in ``ke/Algorithm_SAC.tex``. Ke thinks the ridge regression hyper-parameter plays a key role and Susan commented that the stability should be further enhanced to ensure a more valid inference result.
+
+- **Thompson Sampling on Miwaves environment**: Under our adaptive method, inference after TS works well in the synthetic environment, but it leads to much larger variance estimate in the Miwaves environment (we increase the sample size to 300). We are checking whether TS can achieve a reasonable policy learning in this environment to look into the reason behind. Potentional solutions include turning the steepness to enhance the stability and also check the learning curves. Empirical results are provided in Section 1.1 in ``ke/Algorithm_TS.tex``.
+
+- **Others.** After the two components are done, we can work on SAC on Miwaves environment [TODO]
+
+
+
 ### Overview
 
-This branch (`ke`) extends the main codebase by adding:
-- new inference objectives (`ke/Inference_treatmenteffect.tex`),
-- an online Soft Actor-Critic (SAC) algorithm (`ke/Algorithm_SAC.tex`),
-- and the Miwaves environment ([reBandit paper](https://arxiv.org/abs/2402.17739)).
+This is the up-to-dated implementation code of the Overleaf project *Inference After Pooling (Susan Version)*.
 
-The TeX files referenced here correspond to the Overleaf project *Inference After Pooling (Susan Version)*.
+The main branch focuses on the lifejacket inference package, while this branch (`ke`) aims to have a comprehensive evaluation of our proposed inference method. Compared to the original experiment in the early arxiv version that includes the Thompson sampling on a synthetic environment, our implementation adds:
+- a new inference objective: treatment effect. (more detailed are provided in `ke/Inference_treatmenteffect.tex`.)
+- an online Soft Actor-Critic (SAC) algorithm (more detailed are provided in `ke/Algorithm_SAC.tex`),
+- a Miwaves environment ([reBandit paper](https://arxiv.org/abs/2402.17739)).
 
-In this branch, we vary environments and online RL algorithms to optimize interventions and collect adaptive data. After data collection, after-study inference is performed using the separate `lifejacket` package, which is treated as a largely fixed dependency. The current implementation includes two inference objectives, two environments, and two online RL algorithms:
+
+## Main Structure of the Implementation
+In this branch, we vary environments and online RL algorithms to optimize digital interventions and have the data adaptively collected. After data collection, after-study inference is performed using the separate `lifejacket` package. The current implementation includes two inference objectives, two environments, and two online RL algorithms:
 
 - **Inference objectives:**
   - average rewards
@@ -73,7 +85,7 @@ Local testing serves as a sanity check for near-zero estimating equations and mo
 
 - **SAC algorithm**: The implementation of SAC is harder than TS as we need to perform gradient descent to update the actor to achieve a nearly zero estimating equations, which can cause some instability for the after study inference. Please refer to Eq.8 of Section 1 in ``ke/Algorithm_SAC.tex``.
 
-- **Miwave environment**: For synthetic environment, we use ``rl_study_simulation_partial.py``, while for Miwaves environment, we use ``rl_study_simulation_partial_Miwaves.py``. The two files can be unified in the future.
+- **Miwave environment**: Implementations of both the synthetic and Miwaves enviroments are incorporated in ``rl_study_simulation_modified.py``.
 
 
 ### Step 4: Overall evaluation on the cluster across multiple replications
@@ -120,11 +132,4 @@ One needs to replace ``kesun`` by their folder name and be careful about the fil
 
 - table_results_*.py: these files are used to save the evaluation results
 
-## Development Notes (Last updated by Ke on 01/06/2026)
-
-- SAC on Synthetic environment: although the updated lifejacket package can handle the RL algorithm with recursive updates, the variance estimate from our adaptive approach becomes overly large such that the coverage rate is close to 1. Empirical results are provided in Section 3 in ``ke/Algorithm_SAC.tex``.
-
-- Thompson Sampling on Miwaves environment: Under our adaptive method, inference after TS works well in the synthetic environment, but it leads to much larger variance estimate in the Miwaves environment (we increase the sample size to 300). We are checking whether TS can achieve a reasonable policy learning in this environment to look into the reason behind. Empirical results are provided in Section 1.1 in ``ke/Algorithm_TS.tex``.
-
-- SAC on Miwaves environment [TODO]
 

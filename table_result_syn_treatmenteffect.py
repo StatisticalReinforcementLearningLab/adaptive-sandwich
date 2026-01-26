@@ -157,958 +157,11 @@ print(f'coverage rate of classical variance estiamte: {l_classical_covered.mean(
 print(f'coverage rate of adaptive variance estiamte: {l_adaptive_covered.mean():.6f} / std errors: {l_adaptive_covered.std() / np.sqrt(N_seed):.6f}')
 print(args)
 
-############################################################# results: SAC  #############################################################
 
-
-"""
-
-######### n=30
-Mean parameter estimate:
-[0.1575711  0.09470867 0.00857128 0.10366718]
-
-Empirical variance of parameter estimates:
-[[ 7.79073162e-03 -7.65262895e-03  1.44344223e-04  4.70388211e-04]
- [-7.65262895e-03  1.68620467e-02  6.84535380e-05 -8.06852012e-04]
- [ 1.44344223e-04  6.84535380e-05  5.95697591e-03 -2.92039110e-03]
- [ 4.70388211e-04 -8.06852012e-04 -2.92039110e-03  5.73599159e-03]]
-
-Mean adaptive sandwich variance estimate:
-[[ 3.0493542e+02 -3.4634836e+02  1.7680949e-01  5.6139252e+02]
- [-3.4571613e+02  1.9890375e+04 -1.8306339e+02 -5.5052183e+03]
- [-6.6784544e+00 -2.9070471e+02  4.1028809e+03 -2.6107129e+03]
- [ 5.6865802e+02 -5.3709409e+03 -2.6544878e+03  4.4280908e+03]]
-
-Mean classical sandwich variance estimate:
-[[ 6.9541484e-03 -6.9250129e-03  5.9410428e-05 -4.8966929e-05]
- [-6.9250129e-03  1.4156929e-02 -5.6802746e-05 -2.7594382e-05]
- [ 5.9410449e-05 -5.6802761e-05  4.8705190e-03 -2.4317661e-03]
- [-4.8966973e-05 -2.7594393e-05 -2.4317664e-03  4.8369430e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 8.4653497e-02 -3.2767911e-02  2.0741227e-03  1.2152276e-03]
- [-3.2801658e-02  3.7937028e+00  1.8499972e-03  2.1929365e-02]
- [ 1.7839974e-03 -8.6024735e-04  1.1323751e+00 -2.9800349e-01]
- [ 1.2004055e-03  2.1546042e-02 -2.9589805e-01  1.1970162e+00]]
-
-Median classical sandwich variance estimate:
-[[ 6.61167316e-03 -6.63308613e-03  1.09989764e-04 -1.46538641e-05]
- [-6.63308613e-03  1.37405200e-02 -1.96215642e-05 -9.50520334e-05]
- [ 1.09989625e-04 -1.96212786e-05  4.38645529e-03 -2.16635410e-03]
- [-1.46539278e-05 -9.50516915e-05 -2.16635363e-03  4.30313451e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9726516052318668
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9167657550535078
-
-######### n=50
-Mean parameter estimate:
-[0.15733634 0.12224485 0.01257522 0.09660486]
-
-Empirical variance of parameter estimates:
-[[ 4.38815700e-03 -4.48247758e-03 -1.06613373e-04 -4.68265581e-06]
- [-4.48247758e-03  1.00024994e-02  1.71623090e-04 -8.68358745e-05]
- [-1.06613373e-04  1.71623090e-04  3.37540480e-03 -1.67500947e-03]
- [-4.68265581e-06 -8.68358745e-05 -1.67500947e-03  3.17808019e-03]]
-
-Mean adaptive sandwich variance estimate:
-[[ 1.17627535e+01  2.71796173e+02  1.85986767e+01 -3.35853081e+01]
- [ 2.71794769e+02  1.21884443e+04  9.15651367e+02 -1.64591260e+03]
- [ 1.85934105e+01  9.15770081e+02  1.22526527e+02 -1.23659966e+02]
- [-3.35872116e+01 -1.64589050e+03 -1.23653221e+02  3.08792175e+02]]
-
-Mean classical sandwich variance estimate:
-[[ 4.2861141e-03 -4.2770323e-03 -1.0637590e-05  1.5368265e-05]
- [-4.2770323e-03  8.6177532e-03 -2.2381075e-06  1.4515839e-06]
- [-1.0637600e-05 -2.2380980e-06  2.9532162e-03 -1.4887505e-03]
- [ 1.5368278e-05  1.4516235e-06 -1.4887505e-03  2.9698506e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 3.1078162e-02 -1.9045033e-02 -1.3185991e-03  8.2163210e-04]
- [-1.9044461e-02  2.6920907e+00  2.5054820e-02 -1.3225939e-02]
- [-1.3160355e-03  2.5055842e-02  7.1147501e-01 -2.3679568e-01]
- [ 7.0794451e-04 -1.3231504e-02 -2.3678488e-01  8.4433067e-01]]
-
-Median classical sandwich variance estimate:
-[[ 4.1946522e-03 -4.1878344e-03 -1.9197752e-05 -2.9797871e-05]
- [-4.1878349e-03  8.5287057e-03  4.8752609e-06 -4.2020256e-05]
- [-1.9197767e-05  4.8751867e-06  2.7065501e-03 -1.2888849e-03]
- [-2.9797813e-05 -4.2020081e-05 -1.2888850e-03  2.7405361e-03]]
-
-Adaptive sandwich 95.0% t(49) CI coverage:
-0.9948400412796697
-
-Classical sandwich 95.0% t(49) CI coverage:
-0.9215686274509803
-
-######### n=100
-Mean parameter estimate:
-[0.15720569 0.16356306 0.00980728 0.10086501]
-
-Empirical variance of parameter estimates:
-[[ 2.33337841e-03 -2.40533710e-03  5.01264759e-05 -1.00995863e-04]
- [-2.40533710e-03  5.16076544e-03  6.57635280e-05  1.39634515e-04]
- [ 5.01264759e-05  6.57635280e-05  1.53966434e-03 -8.01864658e-04]
- [-1.00995863e-04  1.39634515e-04 -8.01864658e-04  1.58772334e-03]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[1.28359426e-04 2.79040677e-04 1.28359426e-04 1.28359426e-04]
- [2.79040677e-04 2.79040677e-04 2.79040677e-04 2.79040677e-04]
- [1.28359426e-04 2.79040677e-04 8.84987864e-05 8.84987864e-05]
- [1.28359426e-04 2.79040677e-04 8.84987864e-05 8.32937128e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.03162514 -0.35325328 -0.10471181  0.04914194]
- [-0.35325274  7.981276    2.2070794  -1.4738046 ]
- [-0.10471439  2.2070813   0.99845    -0.5866716 ]
- [ 0.04914281 -1.4738091  -0.58667094  0.69713044]]
-
-Mean classical sandwich variance estimate:
-[[ 2.1825344e-03 -2.1856225e-03  1.1683548e-05 -3.9307884e-06]
- [-2.1856225e-03  4.3963636e-03 -1.0481126e-06 -1.7870634e-05]
- [ 1.1683551e-05 -1.0481141e-06  1.4887837e-03 -7.4304757e-04]
- [-3.9307920e-06 -1.7870618e-05 -7.4304757e-04  1.4737057e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 3.9309338e-03 -3.4498242e-03 -2.0652797e-05  1.5422632e-04]
- [-3.4498663e-03  3.1071827e-01  3.5716824e-03 -7.2914348e-03]
- [-2.0696760e-05  3.5710651e-03  9.1326386e-02 -3.2519720e-02]
- [ 1.5421333e-04 -7.2914567e-03 -3.2519661e-02  8.9429438e-02]]
-
-Median classical sandwich variance estimate:
-[[ 2.13936530e-03 -2.14201817e-03  1.69468258e-05 -5.35730396e-06]
- [-2.14201841e-03  4.40344587e-03  1.21635985e-05 -2.49451259e-05]
- [ 1.69467894e-05  1.21635749e-05  1.42591179e-03 -7.03971717e-04]
- [-5.35735535e-06 -2.49451241e-05 -7.03971717e-04  1.38998602e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-1.0
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9348697394789579
-
-######### n=300
-
-
-
-######### n=500
-
-
-
-######### n=1000
-
-
-"""
 
 
 ############################################################# results: TS  #############################################################
-###### results[partial_0]: 10/04
-"""
-######### n=30
-Mean parameter estimate:
-[0.22249842]
-
-Empirical variance of parameter estimates:
-[[0.00454615]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00024887]]
-
-Mean adaptive sandwich variance estimate:
-[[0.01548968]]
-
-Mean classical sandwich variance estimate:
-[[0.00383807]]
-
-Median adaptive sandwich variance estimate:
-[[0.0080901]]
-
-Median classical sandwich variance estimate:
-[[0.00377557]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.978
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.925
-
-######### n=50
-Mean parameter estimate:
-[0.2247158]
-
-Empirical variance of parameter estimates:
-[[0.00288899]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00015577]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00938615]]
-
-Mean classical sandwich variance estimate:
-[[0.00233266]]
-
-Median adaptive sandwich variance estimate:
-[[0.0048192]]
-
-Median classical sandwich variance estimate:
-[[0.00228628]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.987
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.918
-
-######### n=100
-Mean parameter estimate:
-[0.22879328]
-
-Empirical variance of parameter estimates:
-[[0.00148607]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[8.03358925e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00294364]]
-
-Mean classical sandwich variance estimate:
-[[0.00117752]]
-
-Median adaptive sandwich variance estimate:
-[[0.0021057]]
-
-Median classical sandwich variance estimate:
-[[0.00117365]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.971
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.913
-
-######### n=300
-
-Mean parameter estimate:
-[0.22901689]
-
-Empirical variance of parameter estimates:
-[[0.00054021]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[2.86467286e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00075349]]
-
-Mean classical sandwich variance estimate:
-[[0.000396]]
-
-Median adaptive sandwich variance estimate:
-[[0.00062922]]
-
-Median classical sandwich variance estimate:
-[[0.0003948]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.960960960960961
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9029029029029029
-
-######### n=500
-
-Mean parameter estimate:
-[0.2308117]
-
-Empirical variance of parameter estimates:
-[[0.00033679]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[1.92833415e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00041026]]
-
-Mean classical sandwich variance estimate:
-[[0.00023715]]
-
-Median adaptive sandwich variance estimate:
-[[0.00036184]]
-
-Median classical sandwich variance estimate:
-[[0.00023693]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.96
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9
-
-######### n=1000
-
-
-"""
-
-###### results[partial_01]: 10/04
-"""
-######### n=30
-Mean parameter estimate:
-[0.1562236  0.13254973]
-
-Empirical variance of parameter estimates:
-[[ 0.00707705 -0.0070573 ]
- [-0.0070573   0.01810563]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00040562 0.00100349]
- [0.00100349 0.00100349]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00695902 -0.00695902]
- [-0.00695902  0.05738722]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00695903 -0.00695903]
- [-0.00695903  0.01416372]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00663255 -0.00663255]
- [-0.00663255  0.02995899]]
-
-Median classical sandwich variance estimate:
-[[ 0.00663256 -0.00663256]
- [-0.00663256  0.01400174]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.974
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.901
-
-######### n=50
-Mean parameter estimate:
-[0.15666448 0.13610247]
-
-Empirical variance of parameter estimates:
-[[ 0.00436625 -0.00439886]
- [-0.00439886  0.01168642]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00023567 0.00063981]
- [0.00063981 0.00063981]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00428456 -0.00428456]
- [-0.00428456  0.03511086]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00428455 -0.00428455]
- [-0.00428455  0.00872665]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00419367 -0.00419367]
- [-0.00419367  0.0173477 ]]
-
-Median classical sandwich variance estimate:
-[[ 0.00419366 -0.00419366]
- [-0.00419366  0.00863468]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.968
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.902
-
-######### n=100
-Mean parameter estimate:
-[0.15746553 0.14265543]
-
-Empirical variance of parameter estimates:
-[[ 0.00225233 -0.00231909]
- [-0.00231909  0.00621132]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00012265 0.00032685]
- [0.00032685 0.00032685]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00218823 -0.00218823]
- [-0.00218823  0.01115876]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00218823 -0.00218823]
- [-0.00218823  0.00444451]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00214917 -0.00214917]
- [-0.00214917  0.0079287 ]]
-
-Median classical sandwich variance estimate:
-[[ 0.00214917 -0.00214917]
- [-0.00214917  0.00442925]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.969
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.893
-
-######### n=300
-
-Mean parameter estimate:
-[0.15639773 0.14521033]
-
-Empirical variance of parameter estimates:
-[[ 0.00078483 -0.00076579]
- [-0.00076579  0.00208446]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[4.49509466e-05 1.18251895e-04]
- [1.18251895e-04 1.18251895e-04]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00074122 -0.00074122]
- [-0.00074122  0.00288367]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00074122 -0.00074122]
- [-0.00074122  0.00150656]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00073796 -0.00073796]
- [-0.00073796  0.00239358]]
-
-Median classical sandwich variance estimate:
-[[ 0.00073796 -0.00073796]
- [-0.00073796  0.00150396]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.954954954954955
-
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9119119119119119
-
-
-######### n=500
-
-Mean parameter estimate:
-[0.15823898 0.14514528]
-
-Empirical variance of parameter estimates:
-[[ 0.00044202 -0.00043452]
- [-0.00043452  0.00131715]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[2.49861895e-05 7.45336375e-05]
- [7.45336375e-05 7.45336375e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00044449 -0.00044449]
- [-0.00044449  0.0015757 ]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00044448 -0.00044448]
- [-0.00044448  0.00090383]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00044327 -0.00044327]
- [-0.00044327  0.00138789]]
-
-Median classical sandwich variance estimate:
-[[ 0.00044326 -0.00044326]
- [-0.00044326  0.000904  ]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.949
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.897
-
-######### n=1000
-
-
-"""
-
-
-###### results[partial_01feature]: 10/04
-"""
-######### n=30
-Mean parameter estimate:
-[0.15655148 0.13298166 0.00197849 0.00028855]
-
-Empirical variance of parameter estimates:
-[[ 0.00747215 -0.00742038 -0.00020626  0.00030146]
- [-0.00742038  0.01907834  0.00054832 -0.0003346 ]
- [-0.00020626  0.00054832  0.00569991 -0.00282771]
- [ 0.00030146 -0.0003346  -0.00282771  0.00583221]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00042016 0.00102416 0.00042016 0.00042016]
- [0.00102416 0.00102416 0.00102416 0.00102416]
- [0.00042016 0.00102416 0.00031317 0.00032602]
- [0.00042016 0.00102416 0.00032602 0.00032602]]
-
-Mean adaptive sandwich variance estimate:
-[[ 8.4800897e-03 -8.3248308e-03 -6.6106244e-05 -1.8207106e-04]
- [-8.3248308e-03  5.7028174e-02 -1.7050948e-04  1.8426389e-03]
- [-6.6106833e-05 -1.7051064e-04  1.9741423e-02 -1.0175218e-02]
- [-1.8207148e-04  1.8426382e-03 -1.0175220e-02  2.3503635e-02]]
-
-Mean classical sandwich variance estimate:
-[[ 7.00015482e-03 -6.99360110e-03 -1.02587670e-04  1.67649923e-05]
- [-6.99360063e-03  1.42292352e-02  8.50888318e-05 -4.16769835e-05]
- [-1.02587655e-04  8.50887882e-05  5.06989053e-03 -2.56807706e-03]
- [ 1.67650014e-05 -4.16769690e-05 -2.56807706e-03  5.00360550e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 7.43028894e-03 -7.04649743e-03 -2.44440394e-04 -1.12411335e-05]
- [-7.04649696e-03  2.96461470e-02 -1.67974678e-04  2.85160622e-05]
- [-2.44440278e-04 -1.67974707e-04  9.52514261e-03 -4.33684792e-03]
- [-1.12410562e-05  2.85182141e-05 -4.33685444e-03  9.34806094e-03]]
-
-Median classical sandwich variance estimate:
-[[ 6.6437842e-03 -6.6414494e-03 -1.0880448e-04 -3.6039157e-05]
- [-6.6414503e-03  1.3761424e-02 -1.0927919e-04 -4.1983018e-05]
- [-1.0880445e-04 -1.0927929e-04  4.4009341e-03 -2.1361001e-03]
- [-3.6038840e-05 -4.1982872e-05 -2.1361001e-03  4.3483069e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.975
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.895
-
-######### n=50
-Mean parameter estimate:
-[ 0.15707113  0.135732   -0.00059519  0.0008005 ]
-
-Empirical variance of parameter estimates:
-[[ 4.55313861e-03 -4.64466095e-03  2.01837062e-04  1.20553900e-05]
- [-4.64466095e-03  1.22122003e-02 -3.38637459e-04  2.00426025e-04]
- [ 2.01837062e-04 -3.38637459e-04  3.31179476e-03 -1.58379420e-03]
- [ 1.20553900e-05  2.00426025e-04 -1.58379420e-03  3.37637801e-03]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00024542 0.00066569 0.00024542 0.00024542]
- [0.00066569 0.00066569 0.00066569 0.00066569]
- [0.00024542 0.00066569 0.00017291 0.00018742]
- [0.00024542 0.00066569 0.00018742 0.00018742]]
-
-Mean adaptive sandwich variance estimate:
-[[ 4.7252839e-03 -4.6830815e-03 -5.9741964e-05  1.9709318e-05]
- [-4.6830815e-03  3.4368314e-02  2.7896222e-04  1.5357130e-03]
- [-5.9741964e-05  2.7896246e-04  9.9702049e-03 -4.8113116e-03]
- [ 1.9709303e-05  1.5357133e-03 -4.8113111e-03  1.0095515e-02]]
-
-Mean classical sandwich variance estimate:
-[[ 4.2834533e-03 -4.2779376e-03 -2.8819875e-06 -1.0872937e-05]
- [-4.2779376e-03  8.7298015e-03 -1.5798030e-05  7.4690390e-05]
- [-2.8819916e-06 -1.5798001e-05  2.9603641e-03 -1.5013537e-03]
- [-1.0872953e-05  7.4690368e-05 -1.5013537e-03  2.9909934e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 4.3720780e-03 -4.1920641e-03  1.8541534e-05  3.7883554e-05]
- [-4.1920636e-03  1.7515380e-02 -2.3139926e-04  9.7846103e-05]
- [ 1.8541599e-05 -2.3139850e-04  5.2724369e-03 -2.3994250e-03]
- [ 3.7883856e-05  9.7844997e-05 -2.3994255e-03  5.4014167e-03]]
-
-Median classical sandwich variance estimate:
-[[ 4.1242684e-03 -4.0818518e-03  9.7337224e-06 -4.8979177e-06]
- [-4.0818518e-03  8.5779727e-03 -7.3272429e-05  5.1330982e-05]
- [ 9.7337215e-06 -7.3272473e-05  2.7250133e-03 -1.3588828e-03]
- [-4.8978904e-06  5.1331008e-05 -1.3588828e-03  2.8069080e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.959
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.899
-
-######### n=100
-Mean parameter estimate:
-[ 1.5772654e-01  1.4231712e-01  1.8248806e-03 -2.5532714e-05]
-
-Empirical variance of parameter estimates:
-[[ 2.31353577e-03 -2.39431996e-03 -8.41154635e-05  3.74958543e-05]
- [-2.39431996e-03  6.34529344e-03  2.23641295e-04 -7.00642283e-05]
- [-8.41154635e-05  2.23641295e-04  1.56710340e-03 -8.08591759e-04]
- [ 3.74958543e-05 -7.00642283e-05 -8.08591759e-04  1.58819536e-03]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[1.25273005e-04 3.35228691e-04 1.25273005e-04 1.25273005e-04]
- [3.35228691e-04 3.35228691e-04 3.35228691e-04 3.35228691e-04]
- [1.25273005e-04 3.35228691e-04 8.43876190e-05 8.68081012e-05]
- [1.25273005e-04 3.35228691e-04 8.68081012e-05 8.68081012e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 2.2292514e-03 -2.2365311e-03  2.9995106e-05 -1.4496494e-05]
- [-2.2365309e-03  1.1082906e-02 -2.0566114e-04 -7.2253701e-05]
- [ 2.9995110e-05 -2.0566124e-04  3.1606110e-03 -1.5776196e-03]
- [-1.4496494e-05 -7.2253752e-05 -1.5776196e-03  2.9988931e-03]]
-
-Mean classical sandwich variance estimate:
-[[ 2.1861864e-03 -2.1850308e-03  2.6103784e-05 -1.2784669e-05]
- [-2.1850308e-03  4.4451393e-03 -1.8617871e-05  8.8007901e-06]
- [ 2.6103782e-05 -1.8617868e-05  1.5044885e-03 -7.6875545e-04]
- [-1.2784674e-05  8.8007882e-06 -7.6875550e-04  1.5117069e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 2.1868614e-03 -2.1482389e-03  1.6273403e-05  2.5132883e-06]
- [-2.1482389e-03  7.9046162e-03 -4.6238762e-05  3.4844623e-05]
- [ 1.6273199e-05 -4.6238980e-05  2.3376918e-03 -1.1264591e-03]
- [ 2.5133054e-06  3.4844619e-05 -1.1264591e-03  2.3345710e-03]]
-
-Median classical sandwich variance estimate:
-[[ 2.1529617e-03 -2.1510625e-03  1.7831775e-05 -1.6448491e-06]
- [-2.1510627e-03  4.4199321e-03 -9.7010570e-07 -4.4955568e-06]
- [ 1.7831788e-05 -9.7010354e-07  1.4536588e-03 -7.2269497e-04]
- [-1.6448334e-06 -4.4955641e-06 -7.2269491e-04  1.4646517e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.965
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.891
-
-######### n=300
-
-Mean parameter estimate:
-[1.5645871e-01 1.4506038e-01 1.0835000e-03 4.5880388e-05]
-
-Empirical variance of parameter estimates:
-[[ 7.85603987e-04 -7.66018671e-04  2.91856231e-05 -1.35513548e-05]
- [-7.66018671e-04  2.09347310e-03  2.97471125e-05  1.32591792e-06]
- [ 2.91856231e-05  2.97471125e-05  5.31635357e-04 -2.53518865e-04]
- [-1.35513548e-05  1.32591792e-06 -2.53518865e-04  5.15238465e-04]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[4.51495708e-05 1.19123702e-04 4.51495708e-05 4.51495708e-05]
- [1.19123702e-04 1.19123702e-04 1.19123702e-04 1.19123702e-04]
- [4.51495708e-05 1.19123702e-04 2.90756752e-05 2.90756752e-05]
- [4.51495708e-05 1.19123702e-04 2.90756752e-05 2.89598789e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 7.4275729e-04 -7.4631668e-04 -7.0177151e-07 -1.4183503e-06]
- [-7.4631663e-04  2.8802142e-03  2.1226711e-07 -1.9576205e-06]
- [-7.0177038e-07  2.1227726e-07  7.1577507e-04 -3.5642929e-04]
- [-1.4183487e-06 -1.9576128e-06 -3.5642926e-04  7.0015801e-04]]
-
-Mean classical sandwich variance estimate:
-[[ 7.4079516e-04 -7.4092596e-04 -1.0111116e-06 -1.5558542e-06]
- [-7.4092596e-04  1.5063266e-03 -4.7336584e-07  3.6384963e-06]
- [-1.0111108e-06 -4.7336584e-07  5.0972356e-04 -2.5648600e-04]
- [-1.5558546e-06  3.6384972e-06 -2.5648598e-04  5.0558074e-04]]
-
-Median adaptive sandwich variance estimate:
-[[ 7.3976920e-04 -7.4215699e-04 -9.4078945e-07 -1.1225745e-06]
- [-7.4215693e-04  2.3949284e-03  4.9114351e-06  7.1622394e-06]
- [-9.4079644e-07  4.9115347e-06  6.5740111e-04 -3.2078239e-04]
- [-1.1225704e-06  7.1622803e-06 -3.2078242e-04  6.5151165e-04]]
-
-Median classical sandwich variance estimate:
-[[ 7.3850737e-04 -7.3752017e-04 -1.8209953e-08 -1.8045688e-06]
- [-7.3752023e-04  1.5016802e-03 -1.2468895e-07  7.0191578e-07]
- [-1.8214116e-08 -1.2468793e-07  5.0592312e-04 -2.5268906e-04]
- [-1.8045662e-06  7.0192345e-07 -2.5268906e-04  4.9951620e-04]]
-
- Adaptive sandwich 95.0% standard normal CI coverage:
-0.955955955955956
-
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9059059059059059
-
-######### n=500
-
-Mean parameter estimate:
-[0.1582681  0.14509869 0.00109277 0.00046132]
-
-Empirical variance of parameter estimates:
-[[ 4.43998905e-04 -4.37470639e-04  4.84569804e-06 -9.04666293e-06]
- [-4.37470639e-04  1.31968885e-03 -6.16818089e-06  3.56881060e-06]
- [ 4.84569804e-06 -6.16818089e-06  3.06415127e-04 -1.54881664e-04]
- [-9.04666293e-06  3.56881060e-06 -1.54881664e-04  3.02490091e-04]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[2.50868913e-05 7.47703179e-05 2.50868913e-05 2.50868913e-05]
- [7.47703179e-05 7.47703179e-05 7.47703179e-05 7.47703179e-05]
- [2.50868913e-05 7.47703179e-05 1.70793231e-05 1.70793231e-05]
- [2.50868913e-05 7.47703179e-05 1.70793231e-05 1.70392358e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 4.4493782e-04 -4.4440990e-04 -7.2851060e-07 -6.3747018e-07]
- [-4.4440990e-04  1.5718888e-03  3.7382110e-06  5.0088197e-06]
- [-7.2851043e-07  3.7382113e-06  3.7929296e-04 -1.8965898e-04]
- [-6.3747103e-07  5.0088220e-06 -1.8965897e-04  3.8465706e-04]]
-
-Mean classical sandwich variance estimate:
-[[ 4.4444588e-04 -4.4447716e-04 -5.7394203e-07 -5.2572415e-07]
- [-4.4447713e-04  9.0374990e-04  1.8800531e-06  9.1856329e-08]
- [-5.7394243e-07  1.8800531e-06  3.0213202e-04 -1.4992309e-04]
- [-5.2572415e-07  9.1856620e-08 -1.4992309e-04  3.0206857e-04]]
-
-Median adaptive sandwich variance estimate:
-[[ 4.4368164e-04 -4.4263309e-04 -7.7131835e-07 -5.3164433e-07]
- [-4.4263326e-04  1.3856665e-03  2.2686086e-06  1.6153865e-06]
- [-7.7132847e-07  2.2686609e-06  3.6089076e-04 -1.7715893e-04]
- [-5.3164365e-07  1.6154190e-06 -1.7715895e-04  3.6458546e-04]]
-
-Median classical sandwich variance estimate:
-[[ 4.4318370e-04 -4.4280678e-04 -4.8100981e-07 -2.7298353e-07]
- [-4.4280681e-04  9.0506527e-04  1.5710943e-06  9.2268425e-07]
- [-4.8101299e-07  1.5710932e-06  2.9913164e-04 -1.4740747e-04]
- [-2.7298370e-07  9.2267970e-07 -1.4740747e-04  3.0013645e-04]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9469469469469469
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.8998998998998999
-
-
-######### n=1000
-
-
-
-
-
-"""
-
-###### results[partial_01envfeatures]: 10/11
-
-
-"""
-######### n=30
-Mean parameter estimate:
-[0.15704693 0.1331404 ]
-
-Empirical variance of parameter estimates:
-[[ 0.00793453 -0.00825922]
- [-0.00825922  0.02014379]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00044916 0.0011478 ]
- [0.0011478  0.0011478 ]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00769216 -0.00769216]
- [-0.00769216  0.06422266]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00769217 -0.00769217]
- [-0.00769217  0.0156229 ]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00725626 -0.00725626]
- [-0.00725626  0.03069103]]
-
-Median classical sandwich variance estimate:
-[[ 0.00725627 -0.00725627]
- [-0.00725627  0.01528695]]
-
- Adaptive sandwich 95.0% standard normal CI coverage:
-0.967
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.898
-
-######### n=50
-
-Mean parameter estimate:
-[0.15708375 0.13718876]
-
-Empirical variance of parameter estimates:
-[[ 0.00469875 -0.00477092]
- [-0.00477092  0.01223744]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00025337 0.00069295]
- [0.00069295 0.00069295]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00474403 -0.00474403]
- [-0.00474403  0.03517093]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00474402 -0.00474402]
- [-0.00474402  0.00963685]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00459426 -0.00459426]
- [-0.00459426  0.01947442]]
-
-Median classical sandwich variance estimate:
-[[ 0.00459425 -0.00459425]
- [-0.00459425  0.0094664 ]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.975
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.907
-
-######### n=100
-Mean parameter estimate:
-[0.15786481 0.1415722 ]
-
-Empirical variance of parameter estimates:
-[[ 0.00249042 -0.00251676]
- [-0.00251676  0.0066971 ]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00014031 0.00035868]
- [0.00035868 0.00035868]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00240422 -0.00240422]
- [-0.00240422  0.01220649]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00240422 -0.00240422]
- [-0.00240422  0.00487279]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00235969 -0.00235969]
- [-0.00235969  0.00861138]]
-
-Median classical sandwich variance estimate:
-[[ 0.00235969 -0.00235969]
- [-0.00235969  0.0048518 ]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.968
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.901
-
-######### n=300
-
-Mean parameter estimate:
-[0.15627219 0.14581767]
-
-Empirical variance of parameter estimates:
-[[ 0.0008585  -0.00086364]
- [-0.00086364  0.00229677]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[4.72137123e-05 1.26695412e-04]
- [1.26695412e-04 1.26695412e-04]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00081594 -0.00081594]
- [-0.00081594  0.00310408]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00081594 -0.00081594]
- [-0.00081594  0.0016562 ]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00081077 -0.00081077]
- [-0.00081077  0.00261903]]
-
-Median classical sandwich variance estimate:
-[[ 0.00081077 -0.00081077]
- [-0.00081077  0.00165354]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9579579579579579
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.908908908908909
-
-######### n=500
-
-Mean parameter estimate:
-[0.1581754  0.14493303]
-
-Empirical variance of parameter estimates:
-[[ 0.00048568 -0.00046796]
- [-0.00046796  0.0013951 ]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[2.74986149e-05 7.97500811e-05]
- [7.97500811e-05 7.97500811e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00048935 -0.00048935]
- [-0.00048935  0.0016698 ]]
-
-Mean classical sandwich variance estimate:
-[[ 0.00048934 -0.00048934]
- [-0.00048934  0.00099326]]
-
-Median adaptive sandwich variance estimate:
-[[ 0.00048662 -0.00048662]
- [-0.00048662  0.00147158]]
-
-Median classical sandwich variance estimate:
-[[ 0.00048661 -0.00048661]
- [-0.00048661  0.00099426]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.958958958958959
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.913913913913914
-
-
-######### n=1000
-
-Mean parameter estimate:
-[0.15734106 0.14653736 0.0100045  0.10032322]
-
-Empirical variance of parameter estimates:
-[[ 2.19872597e-04 -2.16141243e-04  3.80806131e-06 -5.91923851e-08]
- [-2.16141243e-04  6.62755788e-04 -5.04453060e-06 -1.23234254e-05]
- [ 3.80806131e-06 -5.04453060e-06  1.52435578e-04 -7.72040285e-05]
- [-5.91923851e-08 -1.23234254e-05 -7.72040285e-05  1.56096710e-04]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[1.19093526e-05 3.55759733e-05 1.19093526e-05 1.19093526e-05]
- [3.55759733e-05 3.55759733e-05 3.55759733e-05 3.55759733e-05]
- [1.19093526e-05 3.55759733e-05 8.41725399e-06 8.75994547e-06]
- [1.19093526e-05 3.55759733e-05 8.75994547e-06 8.75994547e-06]]
-
-Mean adaptive sandwich variance estimate:
-[[ 2.2412825e-04 -2.2410696e-04 -7.7286913e-08  2.2919798e-07]
- [-2.2410693e-04  7.4028329e-04  1.4198474e-06  1.4361902e-06]
- [-7.7286913e-08  1.4198506e-06  1.7144799e-04 -8.6144209e-05]
- [ 2.2919836e-07  1.4361895e-06 -8.6144217e-05  1.7357070e-04]]
-
-Mean classical sandwich variance estimate:
-[[ 2.2406006e-04 -2.2404663e-04 -2.1844965e-08  1.9325417e-07]
- [-2.2404664e-04  4.5374327e-04  3.5099885e-07 -8.0200113e-07]
- [-2.1845063e-08  3.5099876e-07  1.5074950e-04 -7.5460266e-05]
- [ 1.9325410e-07 -8.0200084e-07 -7.5460266e-05  1.5157953e-04]]
-
-Median adaptive sandwich variance estimate:
-[[ 2.2382756e-04 -2.2373101e-04 -3.3276766e-07 -2.0313229e-07]
- [-2.2373107e-04  6.8957836e-04 -2.0803692e-07  1.1737366e-06]
- [-3.3276916e-07 -2.0802162e-07  1.6706096e-04 -8.3571278e-05]
- [-2.0313189e-07  1.1737145e-06 -8.3571285e-05  1.6961309e-04]]
-
-Median classical sandwich variance estimate:
-[[ 2.2371669e-04 -2.2365397e-04 -3.0833874e-07 -2.3437163e-07]
- [-2.2365397e-04  4.5405561e-04  1.7398997e-07 -6.4651624e-07]
- [-3.0833834e-07  1.7398921e-07  1.5004167e-04 -7.5186428e-05]
- [-2.3437151e-07 -6.4651670e-07 -7.5186443e-05  1.5093249e-04]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.952
-
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.897
-
-
-"""
-
-
-###### results[partial_01envfeatures_inference]: 10/15, add C in both environments and inference
+###### [partial_01envfeatures_inference]: 10/15, add C in both environments and inference
 
 """
 ##### n=30
@@ -1354,7 +407,255 @@ Classical sandwich 95.0% standard normal CI coverage:
 #### n=1000
 
 
+"""
 
+
+############################################################# results: SAC  #############################################################
+"""
+
+################# n=30
+Mean parameter estimate:
+[0.15643144 0.11524222 0.0069426  0.10920726]
+
+Empirical variance of parameter estimates:
+[[ 0.007826   -0.00774365  0.00013311  0.00030865]
+ [-0.00774365  0.01956957  0.00013125 -0.00066964]
+ [ 0.00013311  0.00013125  0.00659428 -0.00332849]
+ [ 0.00030865 -0.00066964 -0.00332849  0.00641364]]
+
+Mean adaptive sandwich variance estimate:
+[[ 7.1914787e-03 -7.0899217e-03  7.3448151e-05 -2.4757679e-05]
+ [-7.0899222e-03  2.0704076e-02  1.5522722e-04 -1.8698040e-04]
+ [ 7.3448107e-05  1.5522729e-04  7.1038483e-03 -3.5856392e-03]
+ [-2.4757637e-05 -1.8698045e-04 -3.5856396e-03  7.0588291e-03]]
+
+Mean classical sandwich variance estimate:
+[[ 7.0069460e-03 -6.9747390e-03  5.1918472e-05 -2.1687383e-05]
+ [-6.9747390e-03  1.5059580e-02  6.0809921e-06 -7.3927447e-05]
+ [ 5.1918516e-05  6.0810080e-06  5.2379258e-03 -2.6130001e-03]
+ [-2.1687414e-05 -7.3927498e-05 -2.6129999e-03  5.1870048e-03]]
+
+Median adaptive sandwich variance estimate:
+[[ 6.77447580e-03 -6.74793124e-03  1.43074518e-04  1.35341616e-05]
+ [-6.74793078e-03  1.84118487e-02  1.06577107e-04 -7.82176940e-05]
+ [ 1.43073499e-04  1.06576947e-04  5.97175770e-03 -2.78622797e-03]
+ [ 1.35344935e-05 -7.82180214e-05 -2.78622843e-03  5.63397072e-03]]
+
+Median classical sandwich variance estimate:
+[[ 6.6320570e-03 -6.6012908e-03  1.2978146e-04 -9.1832062e-06]
+ [-6.6012908e-03  1.4490068e-02 -4.8717980e-06 -7.7435638e-05]
+ [ 1.2978137e-04 -4.8708953e-06  4.6767415e-03 -2.2741691e-03]
+ [-9.1828633e-06 -7.7435703e-05 -2.2741696e-03  4.5328466e-03]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.9236947791164659
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.9006024096385542
+
+## [epoch=1000, threshold=1e-7 to contribute more to the zero estimation function]
+Mean parameter estimate:
+[0.15639761 0.11519118 0.00747066 0.10862108]
+
+Empirical variance of parameter estimates:
+[[ 0.00780855 -0.00772102  0.00013218  0.00031828]
+ [-0.00772102  0.01961319  0.00016491 -0.00066293]
+ [ 0.00013218  0.00016491  0.00668535 -0.00339302]
+ [ 0.00031828 -0.00066293 -0.00339302  0.00647503]]
+
+Mean adaptive sandwich variance estimate:
+[[ 0.00728956 -0.00706018  0.00047254 -0.00018883]
+ [-0.00706018  0.02121208  0.00052804 -0.00049947]
+ [ 0.00047254  0.00052804  0.00862727 -0.00422598]
+ [-0.00018883 -0.00049947 -0.00422598  0.00736415]]
+
+Mean classical sandwich variance estimate:
+[[ 7.0068818e-03 -6.9732531e-03  4.9439666e-05 -2.5056015e-05]
+ [-6.9732536e-03  1.5057282e-02  6.5463969e-06 -6.9414011e-05]
+ [ 4.9439699e-05  6.5463664e-06  5.2406811e-03 -2.6167470e-03]
+ [-2.5056059e-05 -6.9414047e-05 -2.6167470e-03  5.1888875e-03]]
+
+Median adaptive sandwich variance estimate:
+[[ 6.76653115e-03 -6.71494938e-03  1.52717650e-04  2.77078470e-07]
+ [-6.71494845e-03  1.83745697e-02  1.19263139e-04 -6.42267551e-05]
+ [ 1.52718378e-04  1.19262964e-04  5.94255701e-03 -2.79027782e-03]
+ [ 2.77286063e-07 -6.42267041e-05 -2.79027806e-03  5.64690167e-03]]
+
+Median classical sandwich variance estimate:
+[[ 6.6257566e-03 -6.5908260e-03  1.2978146e-04 -7.8981848e-06]
+ [-6.5908264e-03  1.4490068e-02 -4.8717980e-06 -7.1030110e-05]
+ [ 1.2978137e-04 -4.8708953e-06  4.6862187e-03 -2.2832765e-03]
+ [-7.8976627e-06 -7.1030256e-05 -2.2832770e-03  4.5259488e-03]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.923
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.9
+
+
+################# n=50
+Mean parameter estimate:
+[0.15738548 0.11578687 0.01323248 0.1002    ]
+
+Empirical variance of parameter estimates:
+[[ 4.40261022e-03 -4.55480197e-03 -1.08680904e-04  6.31479091e-06]
+ [-4.55480197e-03  1.16783312e-02  7.50287419e-05 -3.13517815e-05]
+ [-1.08680904e-04  7.50287419e-05  3.64889499e-03 -1.80038992e-03]
+ [ 6.31479091e-06 -3.13517815e-05 -1.80038992e-03  3.41279073e-03]]
+
+Mean adaptive sandwich variance estimate:
+[[ 4.3583834e-03 -4.3454510e-03 -1.3590394e-05  1.9071198e-05]
+ [-4.3454515e-03  1.1645216e-02 -7.6065353e-06  4.0998755e-05]
+ [-1.3590398e-05 -7.6065580e-06  3.8661766e-03 -1.9359377e-03]
+ [ 1.9071225e-05  4.0998741e-05 -1.9359376e-03  3.8813609e-03]]
+
+Mean classical sandwich variance estimate:
+[[ 4.3171444e-03 -4.3098466e-03 -1.2874476e-05  1.4113235e-05]
+ [-4.3098466e-03  9.2925020e-03 -3.3918657e-06  1.0742562e-05]
+ [-1.2874467e-05 -3.3918725e-06  3.1868485e-03 -1.6019146e-03]
+ [ 1.4113232e-05  1.0742572e-05 -1.6019145e-03  3.1855504e-03]]
+
+Median adaptive sandwich variance estimate:
+[[ 4.2524366e-03 -4.2372788e-03 -3.2339947e-06 -3.9209772e-05]
+ [-4.2372784e-03  1.0973946e-02  3.6975598e-06 -9.6247768e-06]
+ [-3.2341800e-06  3.6974702e-06  3.4683037e-03 -1.6438222e-03]
+ [-3.9209841e-05 -9.6248850e-06 -1.6438222e-03  3.4871325e-03]]
+
+Median classical sandwich variance estimate:
+[[ 4.22372203e-03 -4.19766735e-03 -1.15621415e-05 -3.98038392e-05]
+ [-4.19766735e-03  9.10305511e-03  1.70076983e-05 -4.27044870e-05]
+ [-1.15618823e-05  1.70077947e-05  2.95121875e-03 -1.40100776e-03]
+ [-3.98040720e-05 -4.27043669e-05 -1.40100776e-03  2.95141689e-03]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.9359359359359359
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.9109109109109109
+
+################# n=100
+Mean parameter estimate:
+[0.15719199 0.11846436 0.01021192 0.10494081]
+
+Empirical variance of parameter estimates:
+[[ 2.32827957e-03 -2.36267844e-03  5.61628327e-05 -1.21611040e-04]
+ [-2.36267844e-03  5.72757608e-03  6.30093179e-05  2.19619091e-04]
+ [ 5.61628327e-05  6.30093179e-05  1.68074556e-03 -8.76816132e-04]
+ [-1.21611040e-04  2.19619091e-04 -8.76816132e-04  1.72750202e-03]]
+
+Mean adaptive sandwich variance estimate:
+[[ 2.19552428e-03 -2.20092712e-03  1.24912349e-05 -4.36754544e-06]
+ [-2.20092712e-03  5.57145569e-03  1.83849243e-05 -1.82760996e-05]
+ [ 1.24912185e-05  1.83849334e-05  1.78693258e-03 -8.91034259e-04]
+ [-4.36754135e-06 -1.82761141e-05 -8.91034259e-04  1.77507766e-03]]
+
+Mean classical sandwich variance estimate:
+[[ 2.19050236e-03 -2.19402090e-03  1.20978275e-05 -3.69909890e-06]
+ [-2.19402066e-03  4.76095220e-03  2.02511387e-06 -1.47474602e-05]
+ [ 1.20978175e-05  2.02511114e-06  1.61237631e-03 -8.04396288e-04]
+ [-3.69910026e-06 -1.47474702e-05 -8.04396230e-04  1.59614556e-03]]
+
+Median adaptive sandwich variance estimate:
+[[ 2.1521593e-03 -2.1597217e-03  1.8659910e-05 -5.1833940e-06]
+ [-2.1597217e-03  5.4140184e-03  4.0369825e-05 -2.3847209e-05]
+ [ 1.8659905e-05  4.0369938e-05  1.6998332e-03 -8.3887530e-04]
+ [-5.1834231e-06 -2.3847228e-05 -8.3887542e-04  1.6581630e-03]]
+
+Median classical sandwich variance estimate:
+[[ 2.1457020e-03 -2.1530127e-03  2.1567681e-05 -4.9833843e-06]
+ [-2.1530124e-03  4.7422699e-03  2.6744689e-05 -2.2551945e-05]
+ [ 2.1567630e-05  2.6744619e-05  1.5382734e-03 -7.6417578e-04]
+ [-4.9833397e-06 -2.2551851e-05 -7.6417578e-04  1.5016809e-03]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.946
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.925
+
+################# n=300
+Mean parameter estimate:
+[0.15642679 0.12007388 0.01024075 0.10387681]
+
+Empirical variance of parameter estimates:
+[[ 7.90471398e-04 -7.41214642e-04 -1.11068677e-06  1.51976504e-05]
+ [-7.41214642e-04  1.88846439e-03 -3.55111246e-05  1.82746514e-06]
+ [-1.11068677e-06 -3.55111246e-05  5.67259842e-04 -2.81671771e-04]
+ [ 1.51976504e-05  1.82746514e-06 -2.81671771e-04  5.83432045e-04]]
+
+
+Mean adaptive sandwich variance estimate:
+[[ 7.65481207e-04 -6.17136597e-04 -1.19507597e-04  4.71572421e-05]
+ [-6.17136655e-04  2.41336669e-03 -6.31802424e-04  2.53047328e-04]
+ [-1.19507655e-04 -6.31802541e-04  1.16121792e-03 -5.18586137e-04]
+ [ 4.71574676e-05  2.53047474e-04 -5.18586545e-04  6.50887610e-04]]
+
+Mean classical sandwich variance estimate:
+[[ 7.4188859e-04 -7.4154971e-04 -5.5221454e-07  2.6003005e-07]
+ [-7.4154971e-04  1.6080234e-03  3.4973905e-07 -9.8121370e-07]
+ [-5.5221381e-07  3.4973945e-07  5.3669396e-04 -2.7049772e-04]
+ [ 2.6003093e-07 -9.8121245e-07 -2.7049772e-04  5.3657463e-04]]
+
+Median adaptive sandwich variance estimate:
+[[ 7.3753227e-04 -7.3881418e-04 -2.6530538e-06  4.4619463e-07]
+ [-7.3881412e-04  1.7330154e-03  5.7568122e-06  2.5796677e-08]
+ [-2.6530477e-06  5.7568295e-06  5.4898742e-04 -2.7448119e-04]
+ [ 4.4620799e-07  2.5813417e-08 -2.7448114e-04  5.5032934e-04]]
+
+Median classical sandwich variance estimate:
+[[ 7.3630706e-04 -7.3879235e-04 -2.9432479e-06 -3.9381342e-07]
+ [-7.3879235e-04  1.6011922e-03  4.1876010e-06 -4.1630119e-06]
+ [-2.9432770e-06  4.1875801e-06  5.2917370e-04 -2.6443682e-04]
+ [-3.9381752e-07 -4.1630024e-06 -2.6443682e-04  5.2902324e-04]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.933
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.925
+
+################# n=500
+Mean parameter estimate:
+[0.15815185 0.11881006 0.01022531 0.10433598]
+
+Empirical variance of parameter estimates:
+[[ 4.42398306e-04 -4.28774820e-04  9.13392784e-06  2.54636101e-06]
+ [-4.28774820e-04  1.19587200e-03  2.85676220e-06 -1.12344983e-06]
+ [ 9.13392784e-06  2.85676220e-06  3.34479786e-04 -1.75266740e-04]
+ [ 2.54636101e-06 -1.12344983e-06 -1.75266740e-04  3.31841936e-04]]
+
+Mean adaptive sandwich variance estimate:
+[[ 4.4529641e-04 -4.4528782e-04 -9.8525686e-07 -1.6502399e-07]
+ [-4.4528782e-04  1.0406240e-03  3.1541601e-06  1.3654180e-06]
+ [-9.8525675e-07  3.1541585e-06  3.3030388e-04 -1.6609095e-04]
+ [-1.6502446e-07  1.3654191e-06 -1.6609092e-04  3.3057685e-04]]
+
+Mean classical sandwich variance estimate:
+[[ 4.4524224e-04 -4.4521948e-04 -1.0002227e-06 -1.4678695e-07]
+ [-4.4521957e-04  9.6730463e-04  2.5707548e-06 -2.6846880e-07]
+ [-1.0002225e-06  2.5707566e-06  3.2301687e-04 -1.6246787e-04]
+ [-1.4678686e-07 -2.6846925e-07 -1.6246788e-04  3.2316975e-04]]
+
+Median adaptive sandwich variance estimate:
+[[ 4.4395970e-04 -4.4398534e-04 -2.2698873e-06  2.0940377e-07]
+ [-4.4398534e-04  1.0403958e-03  4.5239995e-06  2.3863108e-06]
+ [-2.2698855e-06  4.5239854e-06  3.2878859e-04 -1.6434060e-04]
+ [ 2.0939913e-07  2.3863308e-06 -1.6434060e-04  3.2921508e-04]]
+
+Median classical sandwich variance estimate:
+[[ 4.4391240e-04 -4.4397637e-04 -2.1958131e-06  2.1585922e-07]
+ [-4.4397634e-04  9.6620910e-04  4.4209110e-06 -6.4933965e-07]
+ [-2.1958144e-06  4.4209237e-06  3.2232518e-04 -1.6143723e-04]
+ [ 2.1586914e-07 -6.4934540e-07 -1.6143723e-04  3.2124147e-04]]
+
+Adaptive sandwich 95.0% standard normal CI coverage:
+0.936
+
+Classical sandwich 95.0% standard normal CI coverage:
+0.926
 
 """
+
+
 

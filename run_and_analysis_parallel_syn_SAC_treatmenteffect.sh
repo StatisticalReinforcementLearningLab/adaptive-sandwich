@@ -5,7 +5,6 @@
 #SBATCH --mem=64G                                                                                            # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -p sapphire                                                                                   # Target Partition
 #SBATCH -o /n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/slurm-%A_%a.out       # STDOUT
-#SBATCH -e /n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/slurm-%A_%a.err       # STDERR 
 #SBATCH --mail-type=ALL                                                                                 # This command would send an email when the job ends.
 #SBATCH --mail-user=kesun@fas.harvard.edu                                                             # Email to which notifications will be sent
 
@@ -202,7 +201,7 @@ cd 2Longitudinal/adaptive-sandwich
 
 filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
 
-save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n${n}_T${T}"
+save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/syn_sac_n${n}_T${T}"
 
 # if test -d "$save_dir_prefix"; then
 #   die 'Output directory already exists. Please supply a unique label, perhaps a datetime.'
@@ -213,7 +212,7 @@ mkdir -p "$save_dir"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginning RL simulations.
-python rl_study_simulation_partial.py \
+python rl_study_simulation_modified.py \
   --T=$T \
   --N=1 \
   --parallel_task_index=$SLURM_ARRAY_TASK_ID \

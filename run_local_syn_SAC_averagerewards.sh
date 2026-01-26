@@ -13,7 +13,7 @@ decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
-n=30
+n=100
 # recruit_n=$n is done below unless the user specifies recruit_n
 synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
@@ -51,7 +51,7 @@ alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
-alg_update_func_args_previous_betas_index=1 # for recursive algorithms; -1 if not used
+alg_update_func_args_previous_betas_index=1 # for recursive algorithms; -1 if not used | 0:current beta, 1:previous beta
 inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
 inference_func_args_theta_index=0 
 inference_func_type="loss"
@@ -113,10 +113,6 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    # J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
-    # K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
-    # O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
-    # w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
@@ -144,8 +140,9 @@ filename="_averagerewards" # add C in both environment and inference
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_SAC.sh: Beginning RL study simulation."
 
-# python rl_study_simulation.py \
-python rl_study_simulation_partial.py \
+# python rl_study_simulation.py \ 
+# python rl_study_simulation_partial.py \
+python rl_study_simulation_modified.py \
   --T=$T \
   --N=1 \
   --n=$n \
@@ -175,7 +172,6 @@ echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Finished RL study simulation."
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
 output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}" # we set 0 because we focus on the first repetition
-# output_folder_random="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg2}_T=${T}_n=${n}_partial"
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Beginning after-study analysis."

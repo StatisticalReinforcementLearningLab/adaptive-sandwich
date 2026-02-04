@@ -53,8 +53,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-jax.config.update("jax_enable_x64", True)
-
 
 @click.group()
 def cli():

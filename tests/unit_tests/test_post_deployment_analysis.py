@@ -2935,7 +2935,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
         jnp.mean(
             jnp.array([expected_weighted_stack_1, expected_weighted_stack_2]), axis=0
         ),
-        rtol=1e-5,
+        rtol=1e-6,
     )
     np.testing.assert_array_equal(
         result[1][0],

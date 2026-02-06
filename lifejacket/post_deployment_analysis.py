@@ -643,7 +643,7 @@ def analyze_dataset(
     #
     # Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
     # where g(eta) is the avg per-subject weighted estimating-function stack and B is the
-    # stabilized joint bread (Jacobian of g w.r.t. flattened betas+theta).
+    # joint bread (Jacobian of g w.r.t. flattened betas+theta).
     #
     # This ratio is dimensionless and can be used as a necessary/sanity diagnostic that the
     # first-order linearization is locally accurate at the estimation scale.
@@ -657,6 +657,26 @@ def analyze_dataset(
         stacks_float64 = jnp.asarray(
             per_subject_estimating_function_stacks, dtype=jnp.float64
         )
+
+        # Add a small ridge to improve numerical stability for ill-conditioned bread.
+        ridge_scale = 1e-8
+
+        # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
+        cond_threshold = 1e12
+        bread_cond = float(jnp.linalg.cond(joint_bread_float64))
+
+        if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
+            diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
+            ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
+            joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
+                joint_bread_float64.shape[0], dtype=jnp.float64
+            )
+            logger.info(
+                "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
+                float(ridge),
+                bread_cond,
+                cond_threshold,
+            )
 
         num_subjects = stacks_float64.shape[0]
 
@@ -708,33 +728,47 @@ def analyze_dataset(
 
         # The number of perturbations we will probe
         J = 15
-        # Each requires num_subjects standard normal draws, which we will then transform
-        # into joint estimating function space perturbations in U
-        W = jax.random.normal(key, shape=(J, num_subjects), dtype=jnp.float64)
+        # Chunk size to reduce peak memory
+        chunk_size = 1
 
-        # Joint estimating function space perturbations: u_j in R^{d_joint}
-        # U = (1/sqrt(n)) * W G, where rows of G are g_i^T
-        U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
+        ratios_list = []
+        num_chunks = (J + chunk_size - 1) // chunk_size
 
-        # Parameter perturbations: delta = (c/sqrt(n)) * B^{-1} u
-        # Use solve rather than explicit inverse.
-        c = 1.0
-        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
-            joint_bread_float64, U.T
-        ).T
+        for chunk_idx in range(num_chunks):
+            start = chunk_idx * chunk_size
+            end = min(start + chunk_size, J)
+            cur_size = end - start
+            if cur_size <= 0:
+                continue
 
-        # Compute ratios r_j.
-        # NOTE: We use the Euclidean norm in score space; this is dimensionless and avoids
-        # forming/pseudoinverting a potentially rank-deficient matrix.
-        B_delta = (joint_bread_float64 @ delta.T).T
-        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
-        remainder = g_plus - g_hat - B_delta
+            subkey = jax.random.fold_in(key, chunk_idx)
+            W = jax.random.normal(
+                subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
+            )
 
-        denom = jnp.linalg.norm(B_delta, axis=1)
-        numer = jnp.linalg.norm(remainder, axis=1)
+            U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
 
-        # Avoid division by zero (should not happen unless delta collapses numerically).
-        ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
+            c = 1.0
+
+            # Solve joint_bread_float64 * X = U.T via QR: joint_bread_float64 = Q @ R
+            Q, R = jnp.linalg.qr(joint_bread_float64, mode="reduced")
+            Y = Q.T @ U.T  # shape (d, cur_size)
+            X = jax.scipy.linalg.solve_triangular(
+                R, Y, lower=False
+            )  # shape (d, cur_size)
+            delta = (c / jnp.sqrt(num_subjects)) * X.T  # shape (cur_size, d)
+
+            B_delta = (joint_bread_float64 @ delta.T).T
+            g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
+            remainder = g_plus - g_hat - B_delta
+
+            denom = jnp.linalg.norm(B_delta, axis=1)
+            numer = jnp.linalg.norm(remainder, axis=1)
+            ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
+
+            ratios_list.append(ratios)
+
+        ratios = jnp.concatenate(ratios_list, axis=0)
 
         local_error_ratio_median = float(jnp.median(ratios))
         local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))

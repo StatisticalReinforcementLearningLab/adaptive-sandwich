@@ -749,14 +749,10 @@ def analyze_dataset(
             U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
 
             c = 1.0
-
-            # Solve joint_bread_float64 * X = U.T via QR: joint_bread_float64 = Q @ R
-            Q, R = jnp.linalg.qr(joint_bread_float64, mode="reduced")
-            Y = Q.T @ U.T  # shape (d, cur_size)
-            X = jax.scipy.linalg.solve_triangular(
-                R, Y, lower=False
-            )  # shape (d, cur_size)
-            delta = (c / jnp.sqrt(num_subjects)) * X.T  # shape (cur_size, d)
+            # TODO: Consider QR decomposition
+            delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
+                joint_bread_float64, U.T
+            ).T
 
             B_delta = (joint_bread_float64 @ delta.T).T
             g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)

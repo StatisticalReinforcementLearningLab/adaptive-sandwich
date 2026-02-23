@@ -5,7 +5,6 @@
 #SBATCH --mem=64G                                                                                            # Memory pool for all cores (see also --mem-per-cpu)
 #SBATCH -p sapphire                                                                                   # Target Partition
 #SBATCH -o /n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/slurm-%A_%a.out       # STDOUT
-#SBATCH -e /n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/slurm-%A_%a.err       # STDERR 
 #SBATCH --mail-type=ALL                                                                                 # This command would send an email when the job ends.
 #SBATCH --mail-user=kesun@fas.harvard.edu                                                             # Email to which notifications will be sent
 
@@ -40,7 +39,11 @@ min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
 n=30 # 
 
-steepness=21.05 # 20/0.95
+######## new hyperparameters to set for Miwaves sim
+steepness=10 # 20/0.95=21.053
+miwaves_habituation=1 # -1: no habituation; 1: high habituation, 6: low habituation
+miwaves_treatmenteffect=2 # 1: overall_low, 2: overall_high, 0:none
+
 RL_alg="smooth_posterior_sampling"
 alg_state_feats="intercept,S1,S2,S3" # design state
 action_centering_RL=0
@@ -138,7 +141,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
-
+    H  | miwaves_habituation )                          needs_arg; miwaves_habituation="$OPTARG" ;;
+    T  | miwaves_treatmenteffect )                      needs_arg; miwaves_treatmenteffect="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -183,8 +187,7 @@ cd 2Longitudinal/adaptive-sandwich
 # pip install -r requirements.txt
 # echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
-save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/n${n}_T${T}"
-
+save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/Miwaves_TS_n${n}_T${T}"
 # if test -d "$save_dir_prefix"; then
 #   die 'Output directory already exists. Please supply a unique label, perhaps a datetime.'
 # fi
@@ -197,7 +200,7 @@ filename="_averagerewards" # add C in both environment and inference
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning RL simulations.
 # python rl_study_simulation.py \
-python rl_study_simulation_partial_Miwaves.py \
+python rl_study_simulation_modified.py \
   --T=$T \
   --N=1 \
   --parallel_task_index=$SLURM_ARRAY_TASK_ID \
@@ -223,19 +226,20 @@ python rl_study_simulation_partial_Miwaves.py \
   --noise_var=$noise_var \
   --Twoarmed=0 \
   --filename=$filename \
-  --act_cost_threshold=$act_cost_threshold
+  --act_cost_threshold=$act_cost_threshold \
+  --Miwaves_habituation=$miwaves_habituation \
+  --Miwaves_treatmenteffect=$miwaves_treatmenteffect
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/miwaves_alg=${RL_alg}_T=${T}_n=${n}_decisionsBtwnUpdates=${decisions_between_updates}_actionC=${action_centering_RL}${filename}"
+save_dir_suffix="decisionBtwnUpdates=${decisions_between_updates}_habituation=${miwaves_habituation}_treatment=${miwaves_treatmenteffect}_steepness=${steepness}${filename}"
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"  
 
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning after-study analysis.
 
-# python -m lifejacket.after_study_analysis analyze \
 lifejacket analyze \
   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
   --action_prob_func_filename=$action_prob_func_filename \
@@ -264,34 +268,6 @@ lifejacket analyze \
   --small_sample_correction=$small_sample_correction \
   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-
-
-# python after_study_analysis_partial.py analyze-dataset \
-#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
-#   --action_prob_func_filename=$action_prob_func_filename \
-#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
-#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
-#   --alg_update_func_filename=$alg_update_func_filename \
-#   --alg_update_func_type=$alg_update_func_type \
-#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
-#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
-#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
-#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
-#   --inference_func_filename=$inference_func_filename \
-#   --inference_func_args_theta_index=$inference_func_args_theta_index \
-#   --inference_func_type=$inference_func_type \
-#   --theta_calculation_func_filename=$theta_calculation_func_filename \
-#   --in_study_col_name=$in_study_col_name \
-#   --action_col_name=$action_col_name \
-#   --policy_num_col_name=$policy_num_col_name \
-#   --calendar_t_col_name=$calendar_t_col_name \
-#   --user_id_col_name=$user_id_col_name \
-#   --action_prob_col_name=$action_prob_col_name \
-#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-#   --suppress_all_data_checks=$suppress_all_data_checks \
-#   --small_sample_correction=$small_sample_correction \
-#   --trim_small_singular_values=$trim_small_singular_values 
-
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished after-study analysis.
 

@@ -62,7 +62,7 @@ prior_var_upper_triangle="naive"
 noise_var=1.0
 
 ####### new alpa for enviroment
-alpha1=0.1
+alpha1=0.01
 alpha2=0.1
 
 # Arguments that only affect inference side.
@@ -244,7 +244,7 @@ python rl_study_simulation_modified.py \
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_partial${filename}"             
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}"        
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 

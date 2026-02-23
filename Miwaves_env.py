@@ -383,9 +383,15 @@ class MiwavesEnv:
         self.decay_factor = 1.0
 
         ###### the following two are important
-        self.tx_effect_env = "overall_low"  # "none", "overall_low", "overall_high"
-        self.dropout = 6 # -1, 1, 6
-
+        
+        self.dropout = args.Miwaves_habituation # -1: no habituation, 1: high habituation, 6: low habituation
+        # args.Miwaves_treatmenteffect # 0: no treatment effect, 1: low treatment effect, 2: high treatment effect
+        if args.Miwaves_treatmenteffect ==1:
+            self.tx_effect_env = "overall_low"  # "none", "overall_low", "overall_high"
+        elif args.Miwaves_treatmenteffect == 2:
+            self.tx_effect_env = "overall_high"  # "none", "overall_low", "overall_high"
+        else:
+            self.tx_effect_env = "none"  # "none", "overall_low", "overall_high"
 
         # environment setup
         self.user_models = self.load_user_models() # user_models define the reward function of the user environment and then the next state
@@ -658,51 +664,52 @@ class MiwavesEnv:
 
             if self.dropout > 0 and user in self.dropout_users:
                 X = format_data_for_prediction(dp_data, action, day, time_of_day, dosage)
-                # try:
                 probabilities = predict_probabilities(user_model, X, self.dropout)[0]
-                # except:
-                #     breakpoint()
-                #     pass
-                reward = self.rng.choice(user_model.classes_, p=probabilities)
-                reward_all[user] = reward
+            else: # no habituation
+                X = format_data_for_prediction(dp_data, action, day, time_of_day)
+                probabilities = user_model.predict_proba(X)[0]
+                
+            reward = self.rng.choice(user_model.classes_, p=probabilities)
+            reward_all[user] = reward
 
-                # update the data
-                expected_reward = (
-                    np.array(probabilities)
-                    .ravel()
-                    .dot(np.array(user_model.classes_).ravel())
-                )
-                if reward == 3:
-                    activity_question = 1
-                    survey_completion = 1
-                    app_usage_flag = 1
-                elif reward == 2:
-                    activity_question = 0
-                    survey_completion = 1
-                    app_usage_flag = 1
-                elif reward == 1:
-                    activity_question = None
-                    survey_completion = 0
-                    app_usage_flag = 1
-                else:
-                    activity_question = None
-                    survey_completion = 0
-                    app_usage_flag = 0
-                new_data = {
-                    "user": user, # number: e.g., 0
-                    "decision_point": decision_point, # calendar_t - 1
-                    "day": day,
-                    "time_of_day": dp_data["time_of_day"].values[0],
-                    "app_usage": app_usage_flag,
-                    "cannabis_use": dp_data["cannabis_use"].values[0]
-                    if reward > 1
-                    else None,
-                    "survey_completion": survey_completion,
-                    "activity_question": activity_question,
-                    "action": action, # one scalar
-                    "expected_reward": expected_reward,
-                }
-                self.new_data.append(new_data)
+            # update the data
+            expected_reward = (
+                np.array(probabilities)
+                .ravel()
+                .dot(np.array(user_model.classes_).ravel())
+            )
+            if reward == 3:
+                activity_question = 1
+                survey_completion = 1
+                app_usage_flag = 1
+            elif reward == 2:
+                activity_question = 0
+                survey_completion = 1
+                app_usage_flag = 1
+            elif reward == 1:
+                activity_question = None
+                survey_completion = 0
+                app_usage_flag = 1
+            else:
+                activity_question = None
+                survey_completion = 0
+                app_usage_flag = 0
+            new_data = {
+                "user": user, # number: e.g., 0
+                "decision_point": decision_point, # calendar_t - 1
+                "day": day,
+                "time_of_day": dp_data["time_of_day"].values[0],
+                "app_usage": app_usage_flag,
+                "cannabis_use": dp_data["cannabis_use"].values[0]
+                if reward > 1
+                else None,
+                "survey_completion": survey_completion,
+                "activity_question": activity_question,
+                "action": action, # one scalar
+                "expected_reward": expected_reward,
+            }
+            self.new_data.append(new_data)
+            
              
         return reward_all
     

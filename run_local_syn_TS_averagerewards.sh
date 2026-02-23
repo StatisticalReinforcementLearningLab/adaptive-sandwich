@@ -145,7 +145,7 @@ filename="_averagerewards"
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic_thompson_sampling.sh: Beginning RL study simulation."
 # python rl_study_simulation.py \
-python rl_study_simulation_partial.py \
+python rl_study_simulation_modified.py \
   --T=$T \
   --N=1 \
   --n=$n \

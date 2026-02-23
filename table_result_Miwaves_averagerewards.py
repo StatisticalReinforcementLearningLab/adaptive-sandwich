@@ -2,57 +2,131 @@ import numpy as np
 import pandas as pd
 from argparse import ArgumentParser
 from tqdm import tqdm
-
+import sys
+from sklearn.linear_model import LinearRegression
 
 parser = ArgumentParser(description="Parameters for the code - ARTD on gym envs")
-
+parser.add_argument('--alg', type=str, default='TS', help="algorithm name", choices=['TS', 'SAC'])
 parser.add_argument('--T', type=int, default=50, help="number of decision times")
 parser.add_argument('--n', type=int, default=30, help="sample size")
-parser.add_argument('--N_seed', type=int, default=3, help="N_seed")
+parser.add_argument('--N_seed', type=int, default=1000, help="N_seed")
+parser.add_argument('--variance_rewards', type=int, default=0, help="evaluate the reward variance to intialize b")
+parser.add_argument('--evaluate', type=int, default=0, help="evaluate the true thetahat on a large n")
 args = parser.parse_args()
 n=args.n
 T=args.T
 
-N_seed = args.N_seed
+Variance_rewards = args.variance_rewards
 
+N_seed = args.N_seed
+algo_name = 'smooth_posterior_sampling' if args.alg == 'TS' else 'sac'
+
+n_true = 10000 # the true theta should be evaluated on a large n
+
+b=1
 # true variance
 
 path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
 # path = ''
 
-rewards_list = []
-for i in tqdm(range(N_seed)):
-    subpath = path + f"n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=smooth_posterior_sampling_T={T}_n={n}_recruitN={n}_decisionsBtwnUpdates=1_algfeats=intercept,past_reward_errcorr=time_corr_actionC=0/exp=1"
-    data = pd.read_csv(subpath+'/data.csv')
-    # data = pd.read_csv('n100_T50/data.csv') # local laptop
-    print(data)
-    rewards_list.append(data['reward'].mean())
+if Variance_rewards:
+    rewards_list_initialization = []
+    residuals_list_initialization = []
+    for i in tqdm(range(N_seed)):
+        subpath = path + f"Miwaves_TS_n42_T60/{i}/simulated_data/miwaves_alg=fixed_randomization_T=60_n=42_decisionBtwnUpdates=1_averagerewards/exp=1"
+        data = pd.read_csv(subpath+'/data.csv')
+        rewards_list_initialization.append(data['reward'].mean())
+        data['S1A'] = data['S1'] * data['action']
+        data['S2A'] = data['S2'] * data['action']
+        data['S3A'] = data['S3'] * data['action']
+        df_X = data[['intercept','S1','S2','S3','action','S1A','S2A','S3A']]
+        df_Y = data['reward']
+        linear_model_single = LinearRegression(fit_intercept=False)
+        linear_model_single.fit(df_X, df_Y)
+        y_pred = linear_model_single.predict(df_X)
+        residuals = df_Y - y_pred
+        residuals_list_initialization.append(np.std(residuals))
+    reward_mean = np.mean(rewards_list_initialization)
+    # reward_std = np.std(np.array(rewards_list_initialization))
+    # print(rewards_list_initialization)
+    mean_std_residuals = np.mean(residuals_list_initialization)
+    print('mean rewards: ', reward_mean)
+    print('std of reward residuals: ', mean_std_residuals)
+    print(f'b: 20/{mean_std_residuals:.3f}= {20/mean_std_residuals:.3f}, 10/{mean_std_residuals:.3f}= {10/mean_std_residuals:.3f}')
+    sys.exit()
 
-true_var = np.var(np.array(rewards_list)) # assume n * N_seed units, evaluate the population variance here as the true one
-print(f'true variance of rewards: {true_var:.6f}')
+    
+if args.evaluate > 0: # n = 10000
+    n_true = args.n if args.evaluate == 2 else n_true # 1: use n=10000 as the true reward, 2: use the reward evaluated on n as the true reward
+    rewards_list_true = []
+    for i in tqdm(range(N_seed)):
+        if args.alg == 'TS': # old path
+            subpath = path + f"Miwaves_TS_n{n_true}_T{T}/{i}/simulated_data/miwaves_alg={algo_name}_T={T}_n={n_true}_decisionBtwnUpdates=1_averagerewards/exp=1"
+        else: # SAC
+            subpath = path + f"Miwaves_sac_n{n_true}_T{T}/{i}/simulated_data/miwaves_alg={algo_name}_T={T}_n={n_true}_decisionBtwnUpdates=1_averagerewards/exp=1"
+        data = pd.read_csv(subpath+'/data.csv')
+        rewards_list_true.append(data['reward'].mean())
+
+    true_reward_mean = np.mean(rewards_list_true)
+    true_reward_median = np.median(rewards_list_true)
+    true_var = np.var(np.array(rewards_list_true)) 
+else: # 0
+    if args.alg == 'TS': # TOBE UPDATED
+        true_reward_mean = 2.106088
+        true_reward_median = 2.106066
+        true_var = 0.000014
+    elif args.alg == 'SAC':
+        true_reward_mean = None
+        true_reward_median = None
+        true_var = None
+    else:
+        raise NotImplementedError
 
 
-### estiamted mean and variance
+######################################## Step 2: access all replications, compute all the classical and adaptive variance estimates. 
 theta_hat_list = []
 classical_var_list = []
 adaptive_var_list = []
 
+count = 0
+rewards_list = []
 for i in tqdm(range(N_seed)):
-    subpath = path + f"n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=smooth_posterior_sampling_T={T}_n={n}_recruitN={n}_decisionsBtwnUpdates=1_algfeats=intercept,past_reward_errcorr=time_corr_actionC=0/exp=1"
+    if args.alg == 'TS': # old path
+        subpath = path + f"Miwaves_TS_n{n}_T{T}/{i}/simulated_data/miwaves_alg={algo_name}_T={T}_n={n}_decisionBtwnUpdates=1_averagerewards/exp=1"
+    else:
+        subpath = path + f"Miwaves_sac_n{n}_T{T}/{i}/simulated_data/miwaves_alg={algo_name}_T={T}_n={n}_decisionBtwnUpdates=1_averagerewards/exp=1"
+    # try:
+    RL_data = pd.read_csv(subpath+'/data.csv')
+    rewards_list.append(RL_data['reward'].mean())
     data = np.load(subpath+'/analysis.pkl', allow_pickle=True)
     theta_hat_list.append(data['theta_est'].item())
     classical_var_list.append(data['classical_sandwich_var_estimate'].item())
     adaptive_var_list.append(data['adaptive_sandwich_var_estimate'].item())
+    count += 1
+    # except:
+    #     continue
 
-true_reward_mean = np.mean(rewards_list)
-print(f'mean of thetahat: {true_reward_mean:.6f}')
+reward_mean = np.mean(rewards_list)
+reward_median = np.median(rewards_list)
+reward_variance = np.var(np.array(rewards_list))
+
+
+print(f'Evaluation on the average reward inference when n={n}')
+print(f'true mean of thetahat when n={n_true}: {true_reward_mean:.6f}')
+print(f'true median of thetahat when n={n_true}: {true_reward_median:.6f}')
+print(f'true variance of thetahat when n={n_true}: {true_var:.6f}')
+print(f'number of successful experiments: {count}/{N_seed}')
+print(f'mean of thetahat: {reward_mean:.6f}')
+print(f'median of thetahat: {reward_median:.6f}')
+print(f'variance of thetahat: {reward_variance:.6f}')
 print(f'mean of classical variance estimate: {np.mean(classical_var_list, axis=0):.6f}')
 print(f'median of classical variance estimate: {np.median(classical_var_list, axis=0):.6f}')
 print(f'mean of adaptive variance estimate: {np.mean(adaptive_var_list, axis=0):.6f}' )
 print(f'median of adaptive variance estimate: {np.median(adaptive_var_list, axis=0):.6f}' )
 
 
-### converage rate
+
+######################################## Step 3: compute the coverage rates 
 
 def Coverage(theta_hat, variance, true_mean):
     # confidence interval: theta_hat +- 1.96 * sqrt(variance) / n
@@ -65,7 +139,7 @@ def Coverage(theta_hat, variance, true_mean):
     return count
 
 l_classical_covered, l_adaptive_covered = [],[]
-for i in range(N_seed):
+for i in range(len(theta_hat_list)):
     num_classical_covered = Coverage(theta_hat_list[i], classical_var_list[i], true_reward_mean)
     num_adaptive_covered = Coverage(theta_hat_list[i], adaptive_var_list[i], true_reward_mean)
     l_classical_covered.append(num_classical_covered)
@@ -74,113 +148,68 @@ for i in range(N_seed):
 l_classical_covered = np.array(l_classical_covered)
 l_adaptive_covered = np.array(l_adaptive_covered)
 
-print(f'coverage rate of classical variance estiamte: {l_classical_covered.mean():.6f} / std errors: {l_classical_covered.std() / np.sqrt(N_seed):.6f}')
-print(f'coverage rate of adaptive variance estiamte: {l_adaptive_covered.mean():.6f} / std errors: {l_adaptive_covered.std() / np.sqrt(N_seed):.6f}')
+print(f'coverage rate of classical variance estiamte: {l_classical_covered.mean():.6f} / std errors: {l_classical_covered.std() / np.sqrt(count):.6f}')
+print(f'coverage rate of adaptive variance estiamte: {l_adaptive_covered.mean():.6f} / std errors: {l_adaptive_covered.std() / np.sqrt(count):.6f}')
 print(args)
 
 
+
 ############################################################# results: TS  #############################################################
+
+##### b=10.0
 """
 ######### n=30
-Mean parameter estimate:
-[2.1062086]
+true mean of thetahat when n=30: 2.104946
+true median of thetahat when n=30: 2.106111
+true variance of thetahat when n=30: 0.004239
+mean of thetahat: 2.104946
+median of thetahat: 2.106111
+variance of thetahat: 0.004239
+mean of classical variance estimate: 0.004243
+median of classical variance estimate: 0.004096
+mean of adaptive variance estimate: 0.087116
+median of adaptive variance estimate: 0.028394
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.930000 / std errors: 0.008068
+coverage rate of adaptive variance estiamte: 0.991000 / std errors: 0.002986
 
-Empirical variance of parameter estimates:
-[[0.00420813]]
 
-Mean adaptive sandwich variance estimate:
-[[0.857533]]
-
-Mean classical sandwich variance estimate:
-[[0.00424518]]
-
-Median adaptive sandwich variance estimate:
-[[0.09142613]]
-
-Median classical sandwich variance estimate:
-[[0.00408459]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-1.0
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.931
 
 ######### n=50
-Mean parameter estimate:
-[2.1086166]
-
-Empirical variance of parameter estimates:
-[[0.0024041]]
-
-Mean adaptive sandwich variance estimate:
-[[0.3931545]]
-
-Mean classical sandwich variance estimate:
-[[0.00258562]]
-
-Median adaptive sandwich variance estimate:
-[[0.05722548]]
-
-Median classical sandwich variance estimate:
-[[0.00252763]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-1.0
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.944
+Evaluation on the average reward inference when n=50
+true mean of thetahat when n=50: 2.106880
+true median of thetahat when n=50: 2.107500
+true variance of thetahat when n=50: 0.002395
+mean of thetahat: 2.106880
+median of thetahat: 2.107500
+variance of thetahat: 0.002395
+mean of classical variance estimate: 0.002586
+median of classical variance estimate: 0.002510
+mean of adaptive variance estimate: 0.031296
+median of adaptive variance estimate: 0.014415
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.942000 / std errors: 0.007392
+coverage rate of adaptive variance estiamte: 0.996000 / std errors: 0.001996
 
 ######### n=100
-Mean parameter estimate:
-[2.109141]
+true mean of thetahat when n=100: 2.107318
+true median of thetahat when n=100: 2.107500
+true variance of thetahat when n=100: 0.001240
+mean of thetahat: 2.107318
+median of thetahat: 2.107500
+variance of thetahat: 0.001240
+mean of classical variance estimate: 0.001291
+median of classical variance estimate: 0.001278
+mean of adaptive variance estimate: 0.008600
+median of adaptive variance estimate: 0.005571
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.946000 / std errors: 0.007147
+coverage rate of adaptive variance estiamte: 0.998000 / std errors: 0.001413
 
-Empirical variance of parameter estimates:
-[[0.00124483]]
-
-Mean adaptive sandwich variance estimate:
-[[0.06147134]]
-
-Mean classical sandwich variance estimate:
-[[0.00128868]]
-
-Median adaptive sandwich variance estimate:
-[[0.0224028]]
-
-Median classical sandwich variance estimate:
-[[0.00127273]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.999
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.949
 
 ######### n=300
 
-Mean parameter estimate:
-[2.1080263]
 
-Empirical variance of parameter estimates:
-[[0.00040944]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00509669]]
-
-Mean classical sandwich variance estimate:
-[[0.00043647]]
-
-Median adaptive sandwich variance estimate:
-[[0.00279501]]
-
-Median classical sandwich variance estimate:
-[[0.00043344]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-1.0
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.958
 
 ######### n=500
 
@@ -189,6 +218,118 @@ Classical sandwich 95.0% standard normal CI coverage:
 
 ######### n=1000 
 
+
+
+"""
+##### b=1.0
+
+"""
+######### n=30
+true mean of thetahat when n=30: 2.102693
+true median of thetahat when n=30: 2.103889
+true variance of thetahat when n=30: 0.004311
+mean of thetahat: 2.102693
+median of thetahat: 2.103889
+variance of thetahat: 0.004311
+mean of classical variance estimate: 0.004278
+median of classical variance estimate: 0.004126
+mean of adaptive variance estimate: 0.004419
+median of adaptive variance estimate: 0.004198
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.927000 / std errors: 0.008226
+coverage rate of adaptive variance estiamte: 0.930000 / std errors: 0.008068
+
+true mean of thetahat when n=10000: 2.106088
+true median of thetahat when n=10000: 2.106066
+true variance of thetahat when n=10000: 0.000014
+number of successful experiments: 1000/1000
+mean of thetahat: 2.102693
+median of thetahat: 2.103889
+variance of thetahat: 0.004311
+mean of classical variance estimate: 0.004278
+median of classical variance estimate: 0.004126
+mean of adaptive variance estimate: 0.004419
+median of adaptive variance estimate: 0.004198
+coverage rate of classical variance estiamte: 0.928000 / std errors: 0.008174
+coverage rate of adaptive variance estiamte: 0.934000 / std errors: 0.007851
+
+######### n=50
+true mean of thetahat when n=50: 2.105157
+true median of thetahat when n=50: 2.105333
+true variance of thetahat when n=50: 0.002403
+mean of thetahat: 2.105157
+median of thetahat: 2.105333
+variance of thetahat: 0.002403
+mean of classical variance estimate: 0.002602
+median of classical variance estimate: 0.002516
+mean of adaptive variance estimate: 0.002669
+median of adaptive variance estimate: 0.002588
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.945000 / std errors: 0.007209
+coverage rate of adaptive variance estiamte: 0.948000 / std errors: 0.007021
+
+Evaluation on the average reward inference when n=50
+true mean of thetahat when n=10000: 2.106088
+true median of thetahat when n=10000: 2.106066
+true variance of thetahat when n=10000: 0.000014
+number of successful experiments: 1000/1000
+mean of thetahat: 2.105157
+median of thetahat: 2.105333
+variance of thetahat: 0.002403
+mean of classical variance estimate: 0.002602
+median of classical variance estimate: 0.002516
+mean of adaptive variance estimate: 0.002669
+median of adaptive variance estimate: 0.002588
+coverage rate of classical variance estiamte: 0.948000 / std errors: 0.007021
+coverage rate of adaptive variance estiamte: 0.949000 / std errors: 0.006957
+
+######### n=100
+true mean of thetahat when n=100: 2.105751
+true median of thetahat when n=100: 2.106250
+true variance of thetahat when n=100: 0.001245
+mean of thetahat: 2.105751
+median of thetahat: 2.106250
+variance of thetahat: 0.001245
+mean of classical variance estimate: 0.001300
+median of classical variance estimate: 0.001284
+mean of adaptive variance estimate: 0.001322
+median of adaptive variance estimate: 0.001303
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.953000 / std errors: 0.006693
+coverage rate of adaptive variance estiamte: 0.955000 / std errors: 0.006556
+
+
+Evaluation on the average reward inference when n=100
+true mean of thetahat when n=10000: 2.106088
+true median of thetahat when n=10000: 2.106066
+true variance of thetahat when n=10000: 0.000014
+number of successful experiments: 1000/1000
+mean of thetahat: 2.105751
+median of thetahat: 2.106250
+variance of thetahat: 0.001245
+mean of classical variance estimate: 0.001300
+median of classical variance estimate: 0.001284
+mean of adaptive variance estimate: 0.001322
+median of adaptive variance estimate: 0.001303
+coverage rate of classical variance estiamte: 0.953000 / std errors: 0.006693
+coverage rate of adaptive variance estiamte: 0.955000 / std errors: 0.006556
+
+######### n=300
+true mean of thetahat when n=300: 2.104612
+true median of thetahat when n=300: 2.104806
+true variance of thetahat when n=300: 0.000413
+mean of thetahat: 2.104612
+median of thetahat: 2.104806
+variance of thetahat: 0.000413
+mean of classical variance estimate: 0.000440
+median of classical variance estimate: 0.000438
+mean of adaptive variance estimate: 0.000443
+median of adaptive variance estimate: 0.000442
+number of successful experiments: 999/1000
+coverage rate of classical variance estiamte: 0.951952 / std errors: 0.006766
+coverage rate of adaptive variance estiamte: 0.951952 / std errors: 0.006766
+
+######### n=500
 
 
 """

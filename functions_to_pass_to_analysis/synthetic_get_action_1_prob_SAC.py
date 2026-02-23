@@ -4,7 +4,12 @@ from jax import lax
 
 
 def synthetic_get_action_1_prob_SAC(
-    beta_est, lower_clip, steepness, upper_clip, treat_states, Z_id
+    beta_est, # (n, 4+2) 
+    lower_clip, 
+    steepness, 
+    upper_clip, 
+    treat_states, # (n, 2) 
+    Z_id # (n, 1)
 ):
     
     def zero_branch(_):
@@ -17,9 +22,9 @@ def synthetic_get_action_1_prob_SAC(
         return probs
 
     def active_branch(_):
-        treat_est = beta_est[-len(treat_states) :]
-        raw_prob = policy(treat_states, treat_est)
+        treat_est = beta_est[-len(treat_states) :] # (2, )
+        raw_prob = policy(treat_states, treat_est) # (n,2)*(2,) -> (n,)
         return raw_prob[()]
     
-    return lax.cond(jnp.asarray(Z_id) == 0, zero_branch, active_branch, operand=None)
+    return lax.cond(jnp.asarray(Z_id) == 0, zero_branch, active_branch, operand=None) # (n, )
 

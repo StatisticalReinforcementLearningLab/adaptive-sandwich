@@ -3,140 +3,114 @@ import pandas as pd
 from argparse import ArgumentParser
 from tqdm import tqdm
 from sklearn.linear_model import LinearRegression
+import sys, os
 
 parser = ArgumentParser(description="Parameters for the code - ARTD on gym envs")
 
+parser.add_argument('--alg', type=str, default='TS', help="algorithm name", choices=['TS', 'SAC'])
 parser.add_argument('--T', type=int, default=50, help="number of decision times")
 parser.add_argument('--n', type=int, default=30, help="sample size")
-parser.add_argument('--N_seed', type=int, default=10, help="N_seed")
-parser.add_argument('--filename', type=str, default='', help="filename", choices=['','full', 'simplfied'])
+parser.add_argument('--reg', type=float, default=0.1, help="ridge regression parameter")
+parser.add_argument('--reg_true', type=float, default=0.1, help="ridge regression parameter for evaluation")
+parser.add_argument('--N_seed', type=int, default=1000, help="N_seed")
+parser.add_argument('--evaluate', type=int, default=0, help="evaluate the true thetahat on a large n")
 args = parser.parse_args()
 n=args.n
 T=args.T
+reg = args.reg
+reg_true = args.reg_true
 N_seed = args.N_seed
-FILENAME = args.filename # full
 
+alpha1 = 0.01
+alpha2 = 0.1
+algo_name = 'smooth_posterior_sampling' if args.alg == 'TS' else 'sac'
+n_true = 10000 
+# n_true = args.n
 
-########### true mean and variance
-# path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
-path = ''
+######################################## Step 1: access all replications, compute each average rewards, assess the true theta1
+path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
 
-dfs = []
-theta1_list = []
-for i in tqdm(range(N_seed)):
-    subpath = path + f"n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=smooth_posterior_sampling_T={T}_n={n}_partial{FILENAME}/exp=1"
-    df = pd.read_csv(subpath+'/data.csv')
-    # df2 = pd.read_csv(subpath+'/data_random.csv')
-    # df = pd.concat([df1, df2], axis=0, ignore_index=True)
-    # data = pd.read_csv('n100_T50/data.csv') # local laptop
-    if FILENAME in ['', 'simplfied']:
-        df_X = df[['intercept','Z_id']]
-    elif FILENAME == 'full':
+if args.evaluate == 1:
+    theta1_list_true = []
+    for i in tqdm(range(N_seed)):
+        if args.alg == 'TS': # old path
+            subpath = path + f"syn_TS_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_treatmenteffect_alpha1{alpha1}_alpha2{alpha2}/exp=1"
+        else: # SAC
+            subpath = path + f"syn_sac_n{n_true}_T{T}_reg{reg_true}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_treatmenteffect_alpha1{alpha1}_alpha2{alpha2}/exp=1" # use the largest n to compute true variance
+        df = pd.read_csv(subpath+'/data.csv')
         df_X = df[['intercept','pretreat_feature1','pretreat_feature2','Z_id']]
-    else:
-        raise ValueError('Invalid filename')
-    df_Y = df['reward']
-    linear_model_single = LinearRegression(fit_intercept=False)
-    linear_model_single.fit(df_X, df_Y)
-    theta1_list.append(linear_model_single.coef_[-1])
-    # print(df)
-    # theta1_list.append(df.loc[df['Z_id']==1, 'reward'].mean() - df.loc[df['Z_id']==0, 'reward'].mean())
-    if FILENAME in ['', 'simplfied']:
-        dfs.append(df[['intercept','Z_id','reward']])
-    elif FILENAME == 'full':
-        dfs.append(df[['intercept','pretreat_feature1','pretreat_feature2','Z_id','reward']])
-    else:
-        raise ValueError('Invalid filename')
+        df_Y = df['reward']
+        linear_model_single = LinearRegression(fit_intercept=False)
+        linear_model_single.fit(df_X, df_Y)
+        theta1_list_true.append(linear_model_single.coef_[-1])
 
-true_var_theta1 = np.var(np.array(theta1_list)) 
-print(f'true variance of \hat(theta1): {true_var_theta1:.6f}')
 
-df_all = pd.concat(dfs, axis=0, ignore_index=True)
-
-intercept = df_all["intercept"].values.reshape(n*N_seed, T)[:,0:1]
-ave_reward = df_all["reward"].values.reshape(n*N_seed, T).mean(axis=1, keepdims=True) # [n, 1]
-if FILENAME in ['', 'simplfied']:
-    pass
-elif FILENAME == 'full':
-    pretreat_features1 = df_all["pretreat_feature1"].values.reshape(n*N_seed, T)[:,0:1]
-    pretreat_features2 = df_all["pretreat_feature2"].values.reshape(n*N_seed, T)[:,0:1]
+    ## Remark: the true mean is averaged over all replications with mutiple theta1 estimate instead of one-time theta1 estimation on the combined large dataset n_true * replications
+    true_theta1_mean = np.mean(np.array(theta1_list_true))
+    true_theta1_median = np.median(np.array(theta1_list_true))
+    true_var_theta1 = np.var(np.array(theta1_list_true)) 
 else:
-    raise ValueError('Invalid filename')
-Z_id = df_all["Z_id"].values.reshape(n*N_seed, T)[:,0:1]
+    if args.alg == 'TS': # TOBE UPDATED
+        true_theta1_mean = 0.147552
+        true_theta1_median = 0.147443
+        true_var_theta1 = 0.000067
+    elif args.alg == 'SAC':
+        true_theta1_mean = 0.1
+        true_theta1_median = 0.1
+        true_var_theta1 = 0.0
+    else:
+        raise NotImplementedError
 
-
-# C_design = np.hstack((intercept, pretreat_features1, pretreat_features2)) # [n, 3]
-
-if FILENAME == 'simplfied':
-    C_design_full = np.hstack((intercept, Z_id))
-elif FILENAME == 'full':
-    C_design_full = np.hstack((intercept, pretreat_features1, pretreat_features2, Z_id)) 
-else:
-    raise ValueError('Invalid filename')
-# df = pd.DataFrame(np.hstack((intercept, pretreat_features1, pretreat_features2, Z_id, ave_reward)), columns=['intercept','pretreat_feature1','pretreat_feature2','Z_id', 'reward'])
-# data['reward'] = ave_reward
-# data.to_csv(f'data_n{n}_T{T}.csv', index=False)
-
-##### inv
-# CtC = C_design.T @ C_design
-# CtC_inv = np.linalg.inv(CtC)
-# P = C_design @ (CtC_inv @ C_design.T)
-# e_y = ave_reward - P @ ave_reward
-# e_z = Z_id - P @ Z_id
-# theta_fwl = float((e_z.T @ e_y) / (e_z.T @ e_z))
-# print(f'true mean of theta (FWL): {theta_fwl:.6f}', np.linalg.pinv(e_z) @ e_y)
-
-
-# resi = ave_reward - C_design @ (np.linalg.pinv(C_design) @ ave_reward)
-# resi_ = Z_id - C_design @ (np.linalg.pinv(C_design) @ Z_id) 
-# true_theta_mean = np.linalg.pinv(resi_) @ resi
-# true_theta_mean = true_theta_mean.flatten().item()
-# print(f'true mean of theta (two-phase): {true_theta_mean:.6f}')
-
-# [n, 4]
-
-# true_theta_mean_pinv = np.linalg.pinv(C_design_full) @ ave_reward
-# true_theta_mean_pinv = true_theta_mean_pinv.flatten()[-1]
-# print(f'true mean of theta (pinv): {true_theta_mean_pinv:.6f}')
-
-
-###### run a full linear regression to evaluate the true mean of theta
-linear_model = LinearRegression(fit_intercept=False)
-linear_model.fit(C_design_full, ave_reward)
-true_theta_mean = linear_model.coef_[0][-1]
-print(f'true mean of theta (linear regression): {true_theta_mean:.6f}')
-
-### estiamted mean and variance
+######################################## Step 2: access all replications, compute all the classical and adaptive variance estimates. 
 theta_hat_list = []
 classical_var_list = []
 adaptive_var_list = []
 
+count = 0
+theta1_list = []
 for i in tqdm(range(N_seed)):
-    subpath = path + f"n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=smooth_posterior_sampling_T={T}_n={n}_partial_{FILENAME}/exp=1"
-    data = np.load(subpath+'/analysis.pkl', allow_pickle=True)
-    theta_hat_list.append(data['theta_est'].item())
-    classical_var_list.append(data['classical_sandwich_var_estimate'].item())
-    adaptive_var_list.append(data['adaptive_sandwich_var_estimate'].item())
+    if args.alg == 'TS': # old path
+        subpath = path + f"syn_TS_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n}_treatmenteffect_alpha1{alpha1}_alpha2{alpha2}/exp=1"
+    else:
+        subpath = path + f"syn_sac_n{n}_T{T}_reg{reg}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n}_treatmenteffect_alpha1{alpha1}_alpha2{alpha2}/exp=1"
+    try:
+        RL_data = pd.read_csv(subpath+'/data.csv')
+        df_X = RL_data[['intercept','pretreat_feature1','pretreat_feature2','Z_id']]
+        df_Y = RL_data['reward']
+        linear_model_single = LinearRegression(fit_intercept=False)
+        linear_model_single.fit(df_X, df_Y)
+        theta1_list.append(linear_model_single.coef_[-1])
+        data = np.load(subpath+'/analysis.pkl', allow_pickle=True)
+        theta_hat_list.append(data['theta_est'][1].item())
+        classical_var_list.append(data['classical_sandwich_var_estimate'][1,1].item())
+        adaptive_var_list.append(data['adaptive_sandwich_var_estimate'][1,1].item())
+        count += 1
+    except:
+        continue
 
+theta1_mean = np.mean(np.array(theta1_list))
+theta1_median = np.median(np.array(theta1_list))
+theta1_var = np.var(np.array(theta1_list))
 
-true_var = np.var(np.array(theta_hat_list)) 
-print(f'true variance of theta: {true_var:.6f}')
-
-
-
-print(f'mean of thetahat: {true_theta_mean:.6f}')
+print(f'Evaluation on the treatment effect inference when n={n}')
+print(f'true mean of thetahat when n={n_true}: {true_theta1_mean:.6f}')
+print(f'true median of thetahat when n={n_true}: {true_theta1_median:.6f}')
+print(f'true variance of thetahat when n={n_true}: {true_var_theta1:.6f}')
+print(f'mean of thetahat: {theta1_mean:.6f}')
+print(f'median of thetahat: {theta1_median:.6f}')
+print(f'variance of thetahat: {theta1_var:.6f}')
 print(f'mean of classical variance estimate: {np.mean(classical_var_list, axis=0):.6f}')
 print(f'median of classical variance estimate: {np.median(classical_var_list, axis=0):.6f}')
 print(f'mean of adaptive variance estimate: {np.mean(adaptive_var_list, axis=0):.6f}' )
 print(f'median of adaptive variance estimate: {np.median(adaptive_var_list, axis=0):.6f}' )
+print(f'number of successful experiments: {count}/{N_seed}')
 
-
-### converage rate
+######################################## Step 3: compute the coverage rates 
 
 def Coverage(theta_hat, variance, true_mean):
     # confidence interval: theta_hat +- 1.96 * sqrt(variance) / n
     count = 0
-    CI_width = 1.96 * np.sqrt(variance) #  the variance here is var/n
+    CI_width = 1.96 * np.sqrt(variance) # / np.sqrt(n), the variance here is var/n
     low_bound = theta_hat - CI_width
     up_bound = theta_hat + CI_width
     if low_bound <= true_mean and up_bound >= true_mean:
@@ -144,268 +118,118 @@ def Coverage(theta_hat, variance, true_mean):
     return count
 
 l_classical_covered, l_adaptive_covered = [],[]
-for i in range(N_seed):
-    num_classical_covered = Coverage(theta_hat_list[i], classical_var_list[i], true_theta_mean)
-    num_adaptive_covered = Coverage(theta_hat_list[i], adaptive_var_list[i], true_theta_mean)
+for i in range(len(theta_hat_list)):
+    num_classical_covered = Coverage(theta_hat_list[i], classical_var_list[i], true_theta1_mean)
+    num_adaptive_covered = Coverage(theta_hat_list[i], adaptive_var_list[i], true_theta1_mean)
     l_classical_covered.append(num_classical_covered)
     l_adaptive_covered.append(num_adaptive_covered)
 
 l_classical_covered = np.array(l_classical_covered)
 l_adaptive_covered = np.array(l_adaptive_covered)
 
-print(f'coverage rate of classical variance estiamte: {l_classical_covered.mean():.6f} / std errors: {l_classical_covered.std() / np.sqrt(N_seed):.6f}')
-print(f'coverage rate of adaptive variance estiamte: {l_adaptive_covered.mean():.6f} / std errors: {l_adaptive_covered.std() / np.sqrt(N_seed):.6f}')
+print(f'coverage rate of classical variance estiamte: {l_classical_covered.mean():.6f} / std errors: {l_classical_covered.std() / np.sqrt(count):.6f}')
+print(f'coverage rate of adaptive variance estiamte: {l_adaptive_covered.mean():.6f} / std errors: {l_adaptive_covered.std() / np.sqrt(count):.6f}')
 print(args)
 
 
-
-
 ############################################################# results: TS  #############################################################
-###### [partial_01envfeatures_inference]: 10/15, add C in both environments and inference
 
 """
 ##### n=30
-
-Mean parameter estimate:
-[0.15712914 0.13003476 0.00740601 0.09734621]
-
-Empirical variance of parameter estimates:
-[[ 7.81717176e-03 -7.72711755e-03 -2.44378817e-04  1.00062663e-04]
- [-7.72711755e-03  1.89196844e-02  2.81402890e-04 -8.88551995e-05]
- [-2.44378817e-04  2.81402890e-04  6.62372072e-03 -3.13739734e-03]
- [ 1.00062663e-04 -8.88551995e-05 -3.13739734e-03  5.95697597e-03]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00043975 0.00105069 0.00043975 0.00043975]
- [0.00105069 0.00105069 0.00105069 0.00105069]
- [0.00043975 0.00105069 0.00039953 0.00039953]
- [0.00043975 0.00105069 0.00039953 0.00035416]]
-
-Mean adaptive sandwich variance estimate:
-[[ 0.00865306 -0.01048793  0.00041532  0.00037535]
- [-0.01048794  0.0797765  -0.00071353 -0.00385377]
- [ 0.00041532 -0.00071353  0.01987583 -0.00982322]
- [ 0.00037535 -0.00385376 -0.00982321  0.02315233]]
-
-Mean classical sandwich variance estimate:
-[[ 6.9464585e-03 -6.9361757e-03 -4.6558318e-05  4.9199756e-05]
- [-6.9361757e-03  1.4072265e-02  1.1170364e-05 -3.2480169e-05]
- [-4.6558300e-05  1.1170434e-05  5.0303987e-03 -2.4562308e-03]
- [ 4.9199756e-05 -3.2480188e-05 -2.4562308e-03  4.9341456e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 7.3636505e-03 -6.9549726e-03 -1.0955885e-04  3.5452860e-05]
- [-6.9549726e-03  2.7703129e-02  2.7006710e-05  1.7222794e-04]
- [-1.0955788e-04  2.7005250e-05  9.7275116e-03 -4.1211359e-03]
- [ 3.5452154e-05  1.7222541e-04 -4.1211341e-03  9.1651790e-03]]
-
-Median classical sandwich variance estimate:
-[[ 6.4961212e-03 -6.4212522e-03 -3.5848348e-05  2.0196503e-05]
- [-6.4212517e-03  1.3528196e-02 -1.4157299e-04  2.5535133e-05]
- [-3.5848378e-05 -1.4157302e-04  4.3175309e-03 -2.0132530e-03]
- [ 2.0196529e-05  2.5534971e-05 -2.0132530e-03  4.3405904e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.962
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.894
-
+true mean of thetahat when n=10000: 0.147552
+true median of thetahat when n=10000: 0.147443
+true variance of thetahat when n=10000: 0.000067
+mean of thetahat: 0.133062
+median of thetahat: 0.130657
+variance of thetahat: 0.019427
+mean of classical variance estimate: 0.014094
+median of classical variance estimate: 0.013642
+mean of adaptive variance estimate: 0.063839
+median of adaptive variance estimate: 0.029325
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.900000 / std errors: 0.009487
+coverage rate of adaptive variance estiamte: 0.967000 / std errors: 0.005649
 
 ##### n=50
-
-Mean parameter estimate:
-[0.15698916 0.13621828 0.01102616 0.09599094]
-
-Empirical variance of parameter estimates:
-[[ 4.57253651e-03 -4.70730911e-03 -1.29730359e-04  7.98780986e-05]
- [-4.70730911e-03  1.19798024e-02  4.11900510e-04 -4.46809555e-04]
- [-1.29730359e-04  4.11900510e-04  3.38637239e-03 -1.62954940e-03]
- [ 7.98780986e-05 -4.46809555e-04 -1.62954940e-03  3.30192389e-03]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00024918 0.00066365 0.00024918 0.00024918]
- [0.00066365 0.00066365 0.00066365 0.00066365]
- [0.00024918 0.00066365 0.00018667 0.00018667]
- [0.00024918 0.00066365 0.00018667 0.00017807]]
-
-Mean adaptive sandwich variance estimate:
-[[ 4.6564899e-03 -4.6714772e-03 -1.6842286e-04  1.7569211e-05]
- [-4.6714777e-03  3.4825400e-02 -2.2390839e-03  2.6044720e-03]
- [-1.6842298e-04 -2.2390853e-03  1.0950172e-02 -6.0818335e-03]
- [ 1.7569317e-05  2.6044731e-03 -6.0818321e-03  1.1033015e-02]]
-
-Mean classical sandwich variance estimate:
-[[ 4.2752568e-03 -4.2681708e-03 -2.2346827e-05  8.3418927e-06]
- [-4.2681708e-03  8.6927759e-03  3.8967308e-05 -1.7987704e-05]
- [-2.2346836e-05  3.8967337e-05  3.0279967e-03 -1.5267927e-03]
- [ 8.3418990e-06 -1.7987697e-05 -1.5267925e-03  3.0123962e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 4.4479803e-03 -4.3429593e-03 -6.4642727e-06  4.2973967e-05]
- [-4.3429602e-03  1.7226841e-02  1.2368819e-04  3.2242722e-05]
- [-6.4643291e-06  1.2368902e-04  5.5347383e-03 -2.4617952e-03]
- [ 4.2973967e-05  3.2242890e-05 -2.4617927e-03  5.4184939e-03]]
-
-Median classical sandwich variance estimate:
-[[ 4.2035915e-03 -4.1922317e-03 -1.8851350e-05 -3.2680618e-05]
- [-4.1922312e-03  8.5263029e-03  2.7200749e-05 -1.3387571e-05]
- [-1.8851337e-05  2.7200629e-05  2.7720199e-03 -1.3466107e-03]
- [-3.2680648e-05 -1.3387643e-05 -1.3466107e-03  2.7551465e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.971
-
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.884
+Evaluation on the treatment effect inference when n=50
+true mean of thetahat when n=10000: 0.147552
+true median of thetahat when n=10000: 0.147443
+true variance of thetahat when n=10000: 0.000067
+mean of thetahat: 0.135509
+median of thetahat: 0.136156
+variance of thetahat: 0.012279
+mean of classical variance estimate: 0.008714
+median of classical variance estimate: 0.008561
+mean of adaptive variance estimate: 0.031031
+median of adaptive variance estimate: 0.017905
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.893000 / std errors: 0.009775
+coverage rate of adaptive variance estiamte: 0.968000 / std errors: 0.005566
 
 ##### n=100
-
-Mean parameter estimate:
-[0.1573859  0.1422507  0.00966151 0.09984484]
-
-Empirical variance of parameter estimates:
-[[ 2.32108692e-03 -2.35805136e-03  1.18102709e-04 -7.14531564e-05]
- [-2.35805136e-03  6.34026079e-03 -7.20783833e-05  4.47527964e-05]
- [ 1.18102709e-04 -7.20783833e-05  1.50090128e-03 -7.87721485e-04]
- [-7.14531564e-05  4.47527964e-05 -7.87721485e-04  1.54742673e-03]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[1.27131950e-04 3.35433452e-04 1.27131950e-04 1.27131950e-04]
- [3.35433452e-04 3.35433452e-04 3.35433452e-04 3.35433452e-04]
- [1.27131950e-04 3.35433452e-04 7.94693310e-05 8.38295671e-05]
- [1.27131950e-04 3.35433452e-04 8.38295671e-05 8.38295671e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 2.24333908e-03 -2.27259332e-03  1.58457660e-05 -2.50452413e-05]
- [-2.27259309e-03  1.13852350e-02 -4.67495811e-05  1.03898303e-04]
- [ 1.58457951e-05 -4.67498357e-05  3.08924704e-03 -1.51191908e-03]
- [-2.50452722e-05  1.03898354e-04 -1.51191908e-03  3.17589752e-03]]
-
-Mean classical sandwich variance estimate:
-[[ 2.1925361e-03 -2.1934719e-03  6.2793879e-06  5.2922019e-06]
- [-2.1934719e-03  4.4393102e-03 -5.3471481e-06 -3.2102034e-05]
- [ 6.2793888e-06 -5.3471458e-06  1.5050212e-03 -7.6594960e-04]
- [ 5.2921991e-06 -3.2102023e-05 -7.6594960e-04  1.5239984e-03]]
-
-Median adaptive sandwich variance estimate:
-[[ 2.2202113e-03 -2.1954495e-03  1.0131691e-05  1.3367276e-05]
- [-2.1954500e-03  7.8176325e-03 -5.2951116e-05  1.4816784e-05]
- [ 1.0131355e-05 -5.2951371e-05  2.3801445e-03 -1.1473638e-03]
- [ 1.3367233e-05  1.4816932e-05 -1.1473637e-03  2.4514995e-03]]
-
-Median classical sandwich variance estimate:
-[[ 2.1637501e-03 -2.1636744e-03  8.7577200e-06  6.8228164e-06]
- [-2.1636749e-03  4.3996195e-03 -3.7277910e-06 -2.7452852e-05]
- [ 8.7576136e-06 -3.7277894e-06  1.4385545e-03 -7.1888365e-04]
- [ 6.8228151e-06 -2.7452834e-05 -7.1888370e-04  1.4650859e-03]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9677093844601413
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.8980827447023209
+Evaluation on the treatment effect inference when n=100
+true mean of thetahat when n=10000: 0.147552
+true median of thetahat when n=10000: 0.147443
+true variance of thetahat when n=10000: 0.000067
+mean of thetahat: 0.142783
+median of thetahat: 0.144153
+variance of thetahat: 0.006265
+mean of classical variance estimate: 0.004442
+median of classical variance estimate: 0.004431
+mean of adaptive variance estimate: 0.010775
+median of adaptive variance estimate: 0.007721
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.896000 / std errors: 0.009653
+coverage rate of adaptive variance estiamte: 0.964000 / std errors: 0.005891
 
 ##### n=300
-
-Mean parameter estimate:
-[0.15650621 0.145417   0.00954527 0.1002373 ]
-
-Empirical variance of parameter estimates:
-[[ 7.88873718e-04 -7.59425418e-04  1.84270187e-07 -7.24346007e-06]
- [-7.59425418e-04  2.11213185e-03 -1.10925304e-05  2.61650786e-05]
- [ 1.84270187e-07 -1.10925304e-05  5.49305780e-04 -2.62541425e-04]
- [-7.24346007e-06  2.61650786e-05 -2.62541425e-04  4.91172565e-04]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[4.51664970e-05 1.18881866e-04 4.51664970e-05 4.51664970e-05]
- [1.18881866e-04 1.18881866e-04 1.18881866e-04 1.18881866e-04]
- [4.51664970e-05 1.18881866e-04 3.25668022e-05 3.25668022e-05]
- [4.51664970e-05 1.18881866e-04 3.25668022e-05 2.61360483e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 7.4372062e-04 -7.4247341e-04  1.7516372e-06 -6.9347340e-07]
- [-7.4247341e-04  2.9452110e-03 -1.9922837e-07  3.2951801e-05]
- [ 1.7516351e-06 -1.9922376e-07  7.0850004e-04 -3.5436486e-04]
- [-6.9347283e-07  3.2951797e-05 -3.5436492e-04  6.9978746e-04]]
-
-Mean classical sandwich variance estimate:
-[[ 7.4169179e-04 -7.4175542e-04  1.0712337e-06 -3.1494267e-07]
- [-7.4175536e-04  1.5064322e-03 -1.6116103e-06  7.3907913e-08]
- [ 1.0712336e-06 -1.6116093e-06  5.0487596e-04 -2.5089338e-04]
- [-3.1494270e-07  7.3907543e-08 -2.5089338e-04  4.9957848e-04]]
-
-Median adaptive sandwich variance estimate:
-[[ 7.4012898e-04 -7.3638716e-04  2.3267580e-06 -1.0211265e-06]
- [-7.3638727e-04  2.4244864e-03  7.0293123e-07  1.7293667e-05]
- [ 2.3267278e-06  7.0298171e-07  6.5305718e-04 -3.2159919e-04]
- [-1.0211265e-06  1.7293629e-05 -3.2159919e-04  6.4077077e-04]]
-
-Median classical sandwich variance estimate:
-[[ 7.3863019e-04 -7.3684019e-04  1.4099897e-06 -2.8343472e-06]
- [-7.3684024e-04  1.5008608e-03 -3.0792148e-06  1.1416740e-06]
- [ 1.4099838e-06 -3.0792251e-06  4.9722136e-04 -2.4715584e-04]
- [-2.8343459e-06  1.1416693e-06 -2.4715581e-04  4.9219071e-04]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.95995995995996
-
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9049049049049049
+Evaluation on the treatment effect inference when n=300
+true mean of thetahat when n=10000: 0.147552
+true median of thetahat when n=10000: 0.147443
+true variance of thetahat when n=10000: 0.000067
+mean of thetahat: 0.145818
+median of thetahat: 0.145149
+variance of thetahat: 0.002136
+mean of classical variance estimate: 0.001505
+median of classical variance estimate: 0.001499
+mean of adaptive variance estimate: 0.002854
+median of adaptive variance estimate: 0.002429
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.901000 / std errors: 0.009445
+coverage rate of adaptive variance estiamte: 0.952000 / std errors: 0.006760
 
 
 ##### n=500
-
-Mean parameter estimate:
-[0.15823668 0.1453746  0.00965101 0.10107199]
-
-Empirical variance of parameter estimates:
-[[ 4.47942490e-04 -4.40673255e-04 -6.00117370e-06  8.29560298e-06]
- [-4.40673255e-04  1.33133568e-03 -1.31771069e-05  3.65176062e-05]
- [-6.00117370e-06 -1.31771069e-05  3.23474654e-04 -1.62240461e-04]
- [ 8.29560298e-06  3.65176062e-05 -1.62240461e-04  3.08645430e-04]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[2.54164859e-05 7.53247895e-05 2.54164859e-05 2.54164859e-05]
- [7.53247895e-05 7.53247895e-05 7.53247895e-05 7.53247895e-05]
- [2.54164859e-05 7.53247895e-05 1.73359454e-05 1.73359454e-05]
- [2.54164859e-05 7.53247895e-05 1.73359454e-05 1.60969466e-05]]
-
-Mean adaptive sandwich variance estimate:
-[[ 4.4491034e-04 -4.4499859e-04 -1.8311063e-06 -3.3950471e-07]
- [-4.4499859e-04  1.5630804e-03 -5.1511842e-07  1.8574598e-06]
- [-1.8311064e-06 -5.1512291e-07  3.7833583e-04 -1.8926835e-04]
- [-3.3950491e-07  1.8574628e-06 -1.8926836e-04  3.8209249e-04]]
-
-Mean classical sandwich variance estimate:
-[[ 4.4441322e-04 -4.4440111e-04 -1.3910376e-06 -1.0330369e-07]
- [-4.4440114e-04  9.0309611e-04  8.4382737e-07 -5.0985494e-07]
- [-1.3910374e-06  8.4382782e-07  3.0042062e-04 -1.4948063e-04]
- [-1.0330387e-07 -5.0985483e-07 -1.4948063e-04  2.9982466e-04]]
-
-Median adaptive sandwich variance estimate:
-[[ 4.4379802e-04 -4.4259097e-04 -2.4355550e-06 -8.9604583e-08]
- [-4.4259103e-04  1.3764334e-03 -3.5114913e-06  4.1853775e-07]
- [-2.4355575e-06 -3.5115004e-06  3.6175846e-04 -1.7870305e-04]
- [-8.9610694e-08  4.1856197e-07 -1.7870305e-04  3.6289013e-04]]
-
-Median classical sandwich variance estimate:
-[[ 4.4330128e-04 -4.4318548e-04 -1.8496835e-06  2.0915924e-07]
- [-4.4318553e-04  9.0210827e-04  1.9063201e-06 -1.7267314e-06]
- [-1.8496821e-06  1.9063241e-06  2.9697808e-04 -1.4757458e-04]
- [ 2.0916090e-07 -1.7267316e-06 -1.4757458e-04  2.9620060e-04]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.953
-
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.891
+Evaluation on the treatment effect inference when n=500
+true mean of thetahat when n=10000: 0.147552
+true median of thetahat when n=10000: 0.147443
+true variance of thetahat when n=10000: 0.000067
+mean of thetahat: 0.144502
+median of thetahat: 0.144186
+variance of thetahat: 0.001340
+mean of classical variance estimate: 0.000903
+median of classical variance estimate: 0.000902
+mean of adaptive variance estimate: 0.001601
+median of adaptive variance estimate: 0.001374
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.904000 / std errors: 0.009316
+coverage rate of adaptive variance estiamte: 0.955000 / std errors: 0.006556
 
 #### n=1000
-
+Evaluation on the treatment effect inference when n=1000
+true mean of thetahat when n=10000: 0.147552
+true median of thetahat when n=10000: 0.147443
+true variance of thetahat when n=10000: 0.000067
+mean of thetahat: 0.146655
+median of thetahat: 0.146045
+variance of thetahat: 0.000673
+mean of classical variance estimate: 0.000454
+median of classical variance estimate: 0.000455
+mean of adaptive variance estimate: 0.000752
+median of adaptive variance estimate: 0.000700
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.899000 / std errors: 0.009529
+coverage rate of adaptive variance estiamte: 0.950000 / std errors: 0.006892
 
 """
 

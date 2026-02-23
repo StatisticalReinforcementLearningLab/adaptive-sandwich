@@ -268,7 +268,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
         # for both TS and SAC
         user_env_data = None
         exp_str = (
-                f"{args.dataset_type}_alg={args.RL_alg}_T={args.T}_n={args.n}_decisionsBtwnUpdates={args.decisions_between_updates}{args.filename}" #### can be changed to distinguish different settings
+                f"decisionBtwnUpdates={args.decisions_between_updates}_habituation={args.Miwaves_habituation}_treatment={args.Miwaves_treatmenteffect}_steepness={args.steepness}{args.filename}" #### can be changed to distinguish different settings
             )
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
@@ -280,8 +280,11 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     ###############################################################
     # Simulate Studies ############################################
     ###############################################################
-    
-    simulation_data_path = os.path.join(args.save_dir, "simulated_data")
+    if args.dataset_type == RLStudyArgs.MIWAVES:
+        simulation_data_path = args.save_dir
+    else:
+        simulation_data_path = os.path.join(args.save_dir, "simulated_data")
+
     if not os.path.isdir(simulation_data_path): # n30_T50/simulated_data
         os.makedirs(simulation_data_path, exist_ok=True)
     all_folder_path = os.path.join(simulation_data_path, exp_str) # n30_T50/0/simulated_data/miwaves_alg=TS_T=50_n=30_averagerewards
@@ -448,28 +451,28 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             pickle.dump(study_RLalg.rl_update_args, f)
 
 
+        if args.RL_alg != RLStudyArgs.FIXED_RANDOMIZATION:
+            beta_dim = study_RLalg.get_current_beta_estimate().size # 8 + 36 = 44
 
-        beta_dim = study_RLalg.get_current_beta_estimate().size # 8 + 36 = 44
+            # df: policy num, beta_0, beta_1, beta_2, beta_3
+            beta_df = pd.DataFrame(
+                data=np.array(
+                    [
+                        np.concatenate(
+                            # Note the plus 1 in policy num. This is just how we do
+                            # things when setting up study df.
+                            [np.array([i + 1]), policy["beta_est"]]
+                        )
+                        for i, policy in enumerate(study_RLalg.all_policies)
+                    ]
+                ),
+                columns=["policy_num", *[f"beta_{j}" for j in range(beta_dim)]],
+            )
+            beta_df = beta_df.astype({"policy_num": "Int64"})
 
-        # df: policy num, beta_0, beta_1, beta_2, beta_3
-        beta_df = pd.DataFrame(
-            data=np.array(
-                [
-                    np.concatenate(
-                        # Note the plus 1 in policy num. This is just how we do
-                        # things when setting up study df.
-                        [np.array([i + 1]), policy["beta_est"]]
-                    )
-                    for i, policy in enumerate(study_RLalg.all_policies)
-                ]
-            ),
-            columns=["policy_num", *[f"beta_{j}" for j in range(beta_dim)]],
-        )
-        beta_df = beta_df.astype({"policy_num": "Int64"})
-
-    
-        with open(f"{folder_path}/beta_df{add_name}.pkl", "wb") as f:
-            pickle.dump(beta_df, f)
+        
+            with open(f"{folder_path}/beta_df{add_name}.pkl", "wb") as f:
+                pickle.dump(beta_df, f)
 
     logger.info(
         "Simulation %d of %d ran in %.4f seconds",
@@ -733,6 +736,20 @@ def main():
         type=float,
         default=0.0,
         help="act_cost_threshold for Miwaves",
+    )
+
+    parser.add_argument(
+        "--Miwaves_habituation",
+        type=int,
+        default=6,
+        help="Habituation factor in Miwaves: -1: no hatituation, 1: high habituation, 6: low habituation (paper)",
+    )
+
+    parser.add_argument(
+        "--Miwaves_treatmenteffect",
+        type=int,
+        default=2,
+        help="0: no treatment effect, 1: overall low treatment effect, 2: overall low treatment effect",
     )
 
     args = parser.parse_args()

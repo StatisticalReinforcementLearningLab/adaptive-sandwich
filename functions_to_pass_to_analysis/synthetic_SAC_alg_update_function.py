@@ -5,7 +5,7 @@ from jax import debug
 
 
 def synthetic_SAC_alg_update_function(
-    beta: jnp.array, # updated beta_t: t>=2 (4+2, 1)
+    beta: jnp.array, # the current updated beta_t: t>=2 (4+2, 1)
     beta_previous: jnp.array, # all updated beta_{:t}: t>=2 (t-1, 4+2)
     n_users: int,  # Note this is the number of users that have entered the study *so far*
     state: jnp.array, # (1, 2)

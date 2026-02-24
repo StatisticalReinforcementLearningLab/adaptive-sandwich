@@ -57,21 +57,24 @@ def synthetic_SAC_alg_update_function(
         current_Q_states = jnp.hstack([state, action * state]) # (1, 4)
         Current_Q_values = jnp.dot(current_Q_states, beta_Q) # (1,)
         residuals = jax.lax.stop_gradient(TD_target) - Current_Q_values # (1,1)
-        vector_Q = -2*current_Q_states * residuals.reshape(-1,1)  # [1, 4] * [1, 1] -> [1, 4]
-        vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1, 1)  # [4, 1] average over t
-        vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # [4, 1]  
+        vector_Q = -2*current_Q_states * residuals.reshape(-1,1)  # (1, 4) * (1, 1) -> (1, 4)
+        vector_Q = vector_Q.reshape(-1, 1) # (4, 1)
+        # vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1, 1)  # [4, 1] average over t
+        # vector_Q =  vector_Q +  2 * ridge_penalty / n_users * beta_Q.reshape(-1, 1)  # (4, 1)  
+        vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # (4, 1) 
         # debug.print("vector_Q for each unit = {}", vector_Q)
         
         ##### estimation function for pi (refer Eq.8 in Algorithm_SAC.tex)
         p0 = jax.nn.sigmoid(steepness * jnp.dot(state, beta_pi)).reshape(-1, 1) # (1,)
-        p = policy(state, beta_pi).reshape(-1, 1)  # (num_decision_times, 1) t=1
-        temp = jnp.dot(state, betaQ_target[int(dim/2):]).reshape(-1, 1) - lambda_entropy * jnp.log(p/(1-p))
-        vector_pi = (1-2*lower_clip) * p0 * (1 - p0) * steepness * temp.reshape(-1, 1) * state # (t, 1) * (t, 2) -> (t, 2)
-        vector_pi = jnp.mean(vector_pi, axis=0).reshape(-1, 1)  # (t, 2) -> (1, 2) -> (2, 1) t=1
+        p = policy(state, beta_pi).reshape(-1, 1)  # (1, 1) 
+        temp = jnp.dot(state, betaQ_target[int(dim/2):]).reshape(-1, 1) - lambda_entropy  * jnp.log(p/(1-p)) 
+        # temp = jnp.dot(state, betaQ_target[int(dim/2):]).reshape(-1, 1) - lambda_entropy / n_users * jnp.log(p/(1-p)) 
+        vector_pi = (1-2*lower_clip) * steepness * p0 * (1 - p0) * steepness * temp.reshape(-1, 1) * state # (1, 1) * (1, 2) -> (1, 2)
+        vector_pi = vector_pi.reshape(-1, 1)  # (1, 2) -> (2, 1)
+        # vector_pi = jnp.mean(vector_pi, axis=0).reshape(-1, 1)  # (1, 2) -> (1, 2) -> (2, 1) 
         # debug.print("vector_pi for each unit = {}", vector_pi)
         return jnp.concatenate([vector_Q.flatten(), vector_pi.flatten()]) # (4,) + (2,) = (6,)
 
     z = jnp.asarray(Z_id) # (1,1)
     pred = jnp.all(z == 0)
-    breakpoint()
     return lax.cond(pred, zero_branch, active_branch, operand=None) # (6,)

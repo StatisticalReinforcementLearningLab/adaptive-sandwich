@@ -81,10 +81,27 @@ else: # 0
                 true_reward_median = 1.944872 # 2.106066
                 true_var = 0.000023 # 0.000014
             elif args.steepness == 3.0:
-                true_reward_mean = 2.106088
-                true_reward_median = 2.106066
+                true_reward_mean = 1.964477
+                true_reward_median = 1.964489
+                true_var = 0.000021
+        elif args.habituation == 1 and args.treatment == 1: # high habituation, low treatment effect
+            if args.steepness == 5.0:
+                true_reward_mean = 1.926816
+                true_reward_median = 1.926825
+                true_var = 0.000024
+            elif args.steepness == 3.0:
+                true_reward_mean = 1.941743
+                true_reward_median = 1.941744
+                true_var = 0.000022
+        elif args.habituation == 6 and args.treatment == 1: # high habituation, low treatment effect
+            if args.steepness == 5.0:
+                true_reward_mean = 2.105260
+                true_reward_median = 2.105208
                 true_var = 0.000014
-        # elif args.habituation == 6 and args.treatment == 1: # low habituation, low treatment effect
+            elif args.steepness == 3.0:
+                true_reward_mean = 2.105013
+                true_reward_median = 2.104938
+                true_var = 0.000014
         else:
             raise NotImplementedError
     elif args.alg == 'SAC':

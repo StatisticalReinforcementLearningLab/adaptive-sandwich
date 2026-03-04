@@ -9,6 +9,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that affect RL study simulation side
 T=50
+ridge_penalty=1.0
 decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
@@ -121,7 +122,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     # w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
-
+    R  | ridge_penalty )                                needs_arg; ridge_penalty="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -169,7 +170,8 @@ python rl_study_simulation_partial.py \
   --Twoarmed=1 \
   --filename=$filename \
   --alpha1=$alpha1 \
-  --alpha2=$alpha2  
+  --alpha2=$alpha2 \
+  --ridge_penalty=$ridge_penalty
 
 
 echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Finished RL study simulation."

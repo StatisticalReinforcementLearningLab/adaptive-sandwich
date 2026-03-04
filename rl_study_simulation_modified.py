@@ -83,9 +83,9 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         # Sample Actions #####################################################
         logger.info("Sampling actions for time %s.", t)
         action_probs = study_RLalg.get_action_probs(curr_timestep_data) # based on S1, S2, S3, which is updated in study_env.update_study_df() in the previous time step
-        print('action_probs: ', action_probs)
+        # print('action_probs: ', action_probs)
         actions = study_RLalg.rng.binomial(1, action_probs)
-        print('actions: ', actions)
+        # print('actions: ', actions)
         
 
         # Sample Rewards #####################################################
@@ -259,7 +259,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             )
         elif args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
             exp_str = (
-                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}{args.filename}" 
+                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_ridge{args.ridge_penalty}{args.filename}" 
             )
         else:
             raise ValueError("Invalid RL Algorithm Type For Synthetic Dataset")
@@ -413,6 +413,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 twoarmed=bool(args.Twoarmed), # Twoarmed=1, update for Z_id=1, and no update (fixed randomization)for Z_id=0 
                 Miwaves=bool(args.dataset_type == RLStudyArgs.MIWAVES), ######## new indicator function
                 n=args.n,
+                ridge_penalty=args.ridge_penalty,
             )
         
         else:
@@ -751,7 +752,12 @@ def main():
         default=2,
         help="0: no treatment effect, 1: overall low treatment effect, 2: overall low treatment effect",
     )
-
+    parser.add_argument(
+        "--ridge_penalty",
+        type=float,
+        default=1.0,
+        help="Ridge penalty for Soft Actor Critic's policy update",
+    )
     args = parser.parse_args()
     print("Args provided to RL_Study_Simulation.py:")
     # args.save_dir = f"./n{args.n}_T{args.T}/0" # only used for debugging locally

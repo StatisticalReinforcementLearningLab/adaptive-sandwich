@@ -34,6 +34,7 @@ SLURM_ARRAY_TASK_ID="${SLURM_ARRAY_TASK_ID:-1}"
 
 # Arguments that affect RL study simulation side
 T=50
+ridge_penalty=1.0
 decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
@@ -146,6 +147,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
     # V  | alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
     # W  | alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
+    R  | ridge_penalty )                                needs_arg; ridge_penalty="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -227,11 +229,12 @@ python rl_study_simulation_modified.py \
   --lower_clip=$lclip \
   --Twoarmed=0 \
   --filename=$filename \
+  --ridge_penalty=$ridge_penalty
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}${filename}"             
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_ridge${ridge_penalty}${filename}"             
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 

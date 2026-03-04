@@ -39,7 +39,7 @@ decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
-n=100
+n=10
 # recruit_n=$n is done below unless the user specifies recruit_n
 synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
@@ -57,14 +57,6 @@ uclip=0.9
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-# prior_mean="-0.37783337,0.18696958,2.3131008,0.32913807"
-# prior_mean="naive"
-# prior_var_upper_triangle="naive"
-# noise_var=1.0
-
-####### new alpa for enviroment
-alpha1=0.1
-alpha2=0.1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -77,25 +69,24 @@ reward_col_name="reward"
 # action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering.py"
 action_prob_func_filename="functions_to_pass_to_analysis/synthetic_get_action_1_prob_SAC.py" 
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py"
+alg_update_func_filename="functions_to_pass_to_analysis/synthetic_SAC_alg_update_function.py" 
 alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
 alg_update_func_args_previous_betas_index=1 # for recursive algorithms; -1 if not used
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
-inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
+inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
 inference_func_args_theta_index=0 
 inference_func_type="loss"
 # theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
-theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_diff_partial_01feature.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_sum.py"
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none"
 # trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
 stabilize_joint_adaptive_bread_inverse=0
-
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
@@ -154,8 +145,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     # w  | trim_small_singular_values )                   needs_arg; trim_small_singular_values="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
-    V  | alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
-    W  | alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
+    # V  | alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
+    # W  | alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
     R  | ridge_penalty )                                needs_arg; ridge_penalty="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
@@ -197,11 +188,11 @@ mamba activate inference_jax
 # cd ~/adaptive-sandwich
 cd ~
 cd 2Longitudinal/adaptive-sandwich
-# echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Making sure Python requirements are installed.
+# echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Making sure Python  s are installed.
 # pip install -r requirements.txt
 # echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: All Python requirements installed.
 
-filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+filename="_averagerewards" 
 
 save_dir_prefix="/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/syn_sac_n${n}_T${T}"
 
@@ -236,10 +227,9 @@ python rl_study_simulation_modified.py \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
-  --Twoarmed=1 \
+  --Twoarmed=0 \
   --filename=$filename \
-  --alpha1=$alpha1 \
-  --alpha2=$alpha2  
+  --ridge_penalty=$ridge_penalty
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished RL simulations.
 
@@ -250,37 +240,37 @@ output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
 # Analyze dataset created in the above simulation
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginning after-study analysis.
-# python after_study_analysis_partial.py analyze-dataset \
-# python -m lifejacket.after_study_analysis analyze \
-lifejacket analyze \
-  --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
-  --action_prob_func_filename=$action_prob_func_filename \
-  --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
-  --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
-  --alg_update_func_filename=$alg_update_func_filename \
-  --alg_update_func_type=$alg_update_func_type \
-  --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
-  --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
-  --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
-  --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
-  --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
-  --inference_func_filename=$inference_func_filename \
-  --inference_func_args_theta_index=$inference_func_args_theta_index \
-  --inference_func_type=$inference_func_type \
-  --theta_calculation_func_filename=$theta_calculation_func_filename \
-  --in_study_col_name=$in_study_col_name \
-  --action_col_name=$action_col_name \
-  --policy_num_col_name=$policy_num_col_name \
-  --calendar_t_col_name=$calendar_t_col_name \
-  --user_id_col_name=$user_id_col_name \
-  --action_prob_col_name=$action_prob_col_name \
-  --reward_col_name=$reward_col_name \
-  --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-  --suppress_all_data_checks=$suppress_all_data_checks \
-  --small_sample_correction=$small_sample_correction \
-  --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
-  --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
-  # --trim_small_singular_values=$trim_small_singular_values 
+
+
+# lifejacket analyze \
+#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+#   --action_prob_func_filename=$action_prob_func_filename \
+#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+#   --alg_update_func_filename=$alg_update_func_filename \
+#   --alg_update_func_type=$alg_update_func_type \
+#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+#   --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
+#   --inference_func_filename=$inference_func_filename \
+#   --inference_func_args_theta_index=$inference_func_args_theta_index \
+#   --inference_func_type=$inference_func_type \
+#   --theta_calculation_func_filename=$theta_calculation_func_filename \
+#   --in_study_col_name=$in_study_col_name \
+#   --action_col_name=$action_col_name \
+#   --policy_num_col_name=$policy_num_col_name \
+#   --calendar_t_col_name=$calendar_t_col_name \
+#   --user_id_col_name=$user_id_col_name \
+#   --action_prob_col_name=$action_prob_col_name \
+#   --reward_col_name=$reward_col_name \
+#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+#   --suppress_all_data_checks=$suppress_all_data_checks \
+#   --small_sample_correction=$small_sample_correction \
+#   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
+#   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
+
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished after-study analysis.
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Simulation complete.

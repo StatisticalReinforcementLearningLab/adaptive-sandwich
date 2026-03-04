@@ -9,15 +9,12 @@ parser = ArgumentParser(description="Parameters for the code - ARTD on gym envs"
 parser.add_argument('--alg', type=str, default='TS', help="algorithm name", choices=['TS', 'SAC'])
 parser.add_argument('--T', type=int, default=50, help="number of decision times")
 parser.add_argument('--n', type=int, default=30, help="sample size")
-parser.add_argument('--reg', type=float, default=0.1, help="ridge regression parameter")
-parser.add_argument('--reg_true', type=float, default=0.1, help="ridge regression parameter for evaluation")
+parser.add_argument('--ridge_penalty', type=float, default=0.1, help="ridge regression parameter")
 parser.add_argument('--N_seed', type=int, default=1000, help="N_seed")
-parser.add_argument('--evaluate', type=int, default=0, help="evaluate the true thetahat on a large n")
+parser.add_argument('--evaluate', type=int, default=0, help="0: fixed true values after evaluation, 1: evaluate the true thetahat on a large n, 2: evaluate on the current n")
 args = parser.parse_args()
 n=args.n
 T=args.T
-reg = args.reg
-reg_true = args.reg_true
 N_seed = args.N_seed
 
 algo_name = 'smooth_posterior_sampling' if args.alg == 'TS' else 'sac'
@@ -28,13 +25,15 @@ n_true = 10000 # the true theta should be evaluated on a large n
 path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
 # path = ''
 # "synthetic_mode=delayed_1_action_dosage_alg=sac_T=50_n=30_averagerewards"
-if args.evaluate == 1:
+if args.evaluate > 0:
+    n_true = args.n if args.evaluate == 2 else n_true 
     rewards_list_true = []
     for i in tqdm(range(N_seed)):
         if args.alg == 'TS': # old path
             subpath = path + f"syn_TS_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1"
         else: # SAC
-            subpath = path + f"syn_sac_n{n_true}_T{T}_reg{reg_true}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1" # use the largest n to compute true variance
+            # subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_ridge{args.ridge_penalty}_averagerewards/exp=1" # use the largest n to compute true variance
+            subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1" # use the largest n to compute true variance
         data = pd.read_csv(subpath+'/data.csv')
         # data = pd.read_csv('n100_T50/data.csv') # local laptop
         # print(data)
@@ -49,9 +48,16 @@ else:
         true_reward_median = 0.305021
         true_var = 0.000023
     elif args.alg == 'SAC':
-        true_reward_mean = 0.276
-        true_reward_median = 0.276
-        true_var = 0.00065
+        if args.ridge_penalty == 20.0:
+            true_reward_mean = 0.391321
+            true_reward_median = 0.391504
+            true_var = 0.000053
+        elif args.ridge_penalty == 1.0:
+            true_reward_mean = 0.276
+            true_reward_median = 0.276
+            true_var = 0.00065
+        else:
+            raise NotImplementedError
     else:
         raise NotImplementedError
 
@@ -67,7 +73,8 @@ for i in tqdm(range(N_seed)):
     if args.alg == 'TS': # old path
         subpath = path + f"syn_TS_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n}_averagerewards/exp=1"
     else:
-        subpath = path + f"syn_sac_n{n}_T{T}_reg{reg}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_averagerewards/exp=1"
+        # subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_ridge{args.ridge_penalty}_averagerewards/exp=1"
+        subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_averagerewards/exp=1"
     try:
         RL_data = pd.read_csv(subpath+'/data.csv')
         rewards_list.append(RL_data['reward'].mean())

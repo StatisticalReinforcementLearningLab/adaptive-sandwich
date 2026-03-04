@@ -810,6 +810,7 @@ class SoftActorCritic:
         twoarmed=False,
         Miwaves=False, # Miwaves
         n=None,
+        ridge_penalty=1.0, # ridge penalty for the actor, default 1.0
     ):
         self.state_feats = state_feats # syn: ['intercept', 'past_reward']
         self.treat_feats = treat_feats # syn: ['intercept', 'past_reward']
@@ -831,10 +832,11 @@ class SoftActorCritic:
 
         if self.Miwaves:
             self.lr_pi = 10.0
-            self.ridge_penalty = 1.0 # 
+            self.ridge_penalty = ridge_penalty 
         else:
             self.lr_pi = 10.0
-            self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
+            # self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
+            self.ridge_penalty = ridge_penalty 
         print('self.ridge_penalty', self.ridge_penalty)
         self.gamma = 0.99
         
@@ -975,13 +977,14 @@ class SoftActorCritic:
         n_realunits = in_study_data["user_id"].nunique()
        
         # in statistics, we use the average loss, and thus we also scale the ridge penalty by n_treat_units
-        betaQ = jnp.linalg.solve(XTX +  n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
+        # betaQ = jnp.linalg.solve(XTX +  n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
+        betaQ = jnp.linalg.solve(XTX + self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
         residuals = TD_target - current_Q_states @ betaQ # (n,)
         vector_Q = -2* current_Q_states * residuals.reshape(-1,1) # (n, 4) * (n, 1) -> (n, 4)
         vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty * betaQ.reshape(-1, 1) # (4,1)
         each_unit_Q = -2*residuals.reshape(-1,1) * current_Q_states + 2*self.ridge_penalty * betaQ.reshape(1, -1) # (n, beta_dim_Q) for debugging
         # debug.print('t {}', t)
-        debug.print("averaged vector_Q {}", vector_Q.reshape(1, -1))
+        # debug.print("averaged vector_Q {}", vector_Q.reshape(1, -1))
         # debug.print("each unit_q {}", each_unit_Q)
        
         
@@ -1007,15 +1010,15 @@ class SoftActorCritic:
             loss_after = neg_obj(betapi)
             if jnp.linalg.norm(grad_beta_pi) < self.threshold_earlystopping: # early stopping accelerates the training but it induces the estimation error
                 break
-            if (i+1) % 50 == 0:
-                print(f"DecisionTime {t}, SAC update step {i}/{self.epoch_actor}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', betapi, 'lr_pi', self.lr_pi_use)
+            # if (i+1) % 50 == 0:
+            #     print(f"DecisionTime {t}, SAC update step {i}/{self.epoch_actor}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', betapi, 'lr_pi', self.lr_pi_use)
             
             if i % 200 == 0 and i >0:
                 self.lr_pi_use = self.lr_pi_use * self.decay # decay the learning rate for the actor
         vector_pi = gradient_pi(betapi, self.betaQ_tar) # (n, 2)
-        debug.print("averaged vector_pi {}", jnp.mean(vector_pi, axis=0))
+        # debug.print("averaged vector_pi {}", jnp.mean(vector_pi, axis=0))
         # debug.print("vector_pi for each unit {}", vector_pi) # for each unit
-        debug.print("grad_beta_pi {}", -grad_beta_pi)
+        # debug.print("grad_beta_pi {}", -grad_beta_pi)
         
 
         beta_est = jnp.concatenate([betaQ, betapi]) # (6,))

@@ -60,8 +60,8 @@ def synthetic_SAC_alg_update_function(
         vector_Q = -2*current_Q_states * residuals.reshape(-1,1)  # (1, 4) * (1, 1) -> (1, 4)
         vector_Q = vector_Q.reshape(-1, 1) # (4, 1)
         # vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1, 1)  # [4, 1] average over t
-        # vector_Q =  vector_Q +  2 * ridge_penalty / n_users * beta_Q.reshape(-1, 1)  # (4, 1)  
-        vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # (4, 1) 
+        vector_Q =  vector_Q +  2 * ridge_penalty / n_users * beta_Q.reshape(-1, 1)  # (4, 1)  
+        # vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # (4, 1) 
         # debug.print("vector_Q for each unit = {}", vector_Q)
         
         ##### estimation function for pi (refer Eq.8 in Algorithm_SAC.tex)

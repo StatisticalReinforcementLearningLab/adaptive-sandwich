@@ -259,7 +259,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             )
         elif args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
             exp_str = (
-                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_ridge{args.ridge_penalty}{args.filename}" 
+                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_ridge{args.ridge_penalty}_s{args.steepness}_epoch{args.epoch_actor}_lr{args.lr_pi}{args.filename}" 
             )
         else:
             raise ValueError("Invalid RL Algorithm Type For Synthetic Dataset")
@@ -758,6 +758,20 @@ def main():
         default=1.0,
         help="Ridge penalty for Soft Actor Critic's policy update",
     )
+    parser.add_argument(
+        "--epoch_actor",
+        type=int,
+        default=500,
+        help="Number of epochs for Soft Actor Critic's policy update",
+    )
+    parser.add_argument(
+        "--lr_pi",
+        type=float,
+        default=10.0,
+        help="Learning rate for Soft Actor Critic's policy update",
+    )
+
+
     args = parser.parse_args()
     print("Args provided to RL_Study_Simulation.py:")
     # args.save_dir = f"./n{args.n}_T{args.T}/0" # only used for debugging locally

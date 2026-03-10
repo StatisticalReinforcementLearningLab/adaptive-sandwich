@@ -32,8 +32,8 @@ if args.evaluate > 0:
         if args.alg == 'TS': # old path
             subpath = path + f"syn_TS_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1"
         else: # SAC
-            # subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_ridge{args.ridge_penalty}_averagerewards/exp=1" # use the largest n to compute true variance
-            subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1" # use the largest n to compute true variance
+            subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_ridge{args.ridge_penalty}_averagerewards/exp=1" # use the largest n to compute true variance
+            # subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1" # use the largest n to compute true variance
         data = pd.read_csv(subpath+'/data.csv')
         # data = pd.read_csv('n100_T50/data.csv') # local laptop
         # print(data)
@@ -52,10 +52,10 @@ else:
             true_reward_mean = 0.391321
             true_reward_median = 0.391504
             true_var = 0.000053
-        elif args.ridge_penalty == 1.0:
-            true_reward_mean = 0.276
-            true_reward_median = 0.276
-            true_var = 0.00065
+        elif args.ridge_penalty == 10.0:
+            true_reward_mean = 0.384854
+            true_reward_median = 0.385128
+            true_var = 0.000052
         else:
             raise NotImplementedError
     else:
@@ -73,8 +73,8 @@ for i in tqdm(range(N_seed)):
     if args.alg == 'TS': # old path
         subpath = path + f"syn_TS_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n}_averagerewards/exp=1"
     else:
-        # subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_ridge{args.ridge_penalty}_averagerewards/exp=1"
-        subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_averagerewards/exp=1"
+        subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_ridge{args.ridge_penalty}_averagerewards/exp=1"
+        # subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_averagerewards/exp=1"
     try:
         RL_data = pd.read_csv(subpath+'/data.csv')
         rewards_list.append(RL_data['reward'].mean())

@@ -9,7 +9,7 @@ needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
 # Arguments that affect RL study simulation side
 T=50
-ridge_penalty=1.0
+ridge_penalty=20.0
 decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
@@ -174,7 +174,7 @@ echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_ridge${ridge_penalty}${filename}" # we set 0 because we focus on the first repetition
+output_folder="n${n}_T${T}/0/simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_ridge${ridge_penalty}_s${steepness}${filename}" # we set 0 because we focus on the first repetition
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_SAC.sh: Beginning after-study analysis."

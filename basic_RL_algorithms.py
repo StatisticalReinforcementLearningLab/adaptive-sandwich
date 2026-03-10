@@ -834,7 +834,7 @@ class SoftActorCritic:
             self.lr_pi = 10.0
             self.ridge_penalty = ridge_penalty 
         else:
-            self.lr_pi = 10.0
+            self.lr_pi = 10.0 # default 10.0, which is aggressive
             # self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
             self.ridge_penalty = ridge_penalty 
         print('self.ridge_penalty', self.ridge_penalty)
@@ -845,10 +845,12 @@ class SoftActorCritic:
         self.betapi_init = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # initial actor parameters syn: (2,)
         self.betaQ_tar = self.betaQ_init.copy() # target critic parameters  syn: (4,)
         self.betapi_tar = self.betapi_init.copy() # target actor parameters  syn: (2,)
+        self.betapi = self.betapi_init.copy() # current actor parameters  syn: (2,)
+        
         self.tau = 0.0 # Polyak for target network, tau=0: only based on the last step's critic, i.e., self.betaQ_tar = self.betaQ; tau=1: only based on the (initial) target critic, i.e., self.betaQ_tar = self.betaQ_tar = intialization (always a fixed target Q)
         self.decay=0.5 # learning rate decay for the actor, default 0.5
-        self.epoch_actor = 1000 # default: 500
-        self.threshold_earlystopping = 1e-7 # default 1e-5
+        self.epoch_actor = 500 # default: 500 vs 1000
+        self.threshold_earlystopping = 1e-5 # default 1e-5 cs 1e-7
         self.all_policies = [
             {
                 "beta_est": jnp.concatenate([self.betaQ_tar, self.betapi_tar]),
@@ -975,13 +977,13 @@ class SoftActorCritic:
         XTX = current_Q_states.T @ current_Q_states # (4,4)
         XTY = current_Q_states.T @ TD_target.flatten() # (4,)
         n_realunits = in_study_data["user_id"].nunique()
-       
+        # print('n_realunits', n_realunits) # 30
         # in statistics, we use the average loss, and thus we also scale the ridge penalty by n_treat_units
         # betaQ = jnp.linalg.solve(XTX +  n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
         betaQ = jnp.linalg.solve(XTX + self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
         residuals = TD_target - current_Q_states @ betaQ # (n,)
         vector_Q = -2* current_Q_states * residuals.reshape(-1,1) # (n, 4) * (n, 1) -> (n, 4)
-        vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty * betaQ.reshape(-1, 1) # (4,1)
+        vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty / n_realunits * betaQ.reshape(-1, 1) # (4,1)
         each_unit_Q = -2*residuals.reshape(-1,1) * current_Q_states + 2*self.ridge_penalty * betaQ.reshape(1, -1) # (n, beta_dim_Q) for debugging
         # debug.print('t {}', t)
         # debug.print("averaged vector_Q {}", vector_Q.reshape(1, -1))
@@ -1002,26 +1004,26 @@ class SoftActorCritic:
         
         ################### [Incremental] Update Actor based on the last step's critic self.betaQ_tar ###################
         self.lr_pi_use = self.lr_pi
-        betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # (2,)
+        # betapi = jnp.array(self.rng.normal(size=self.beta_dim_pi)) # (2,)
         for i in range(self.epoch_actor):
-            loss_pre = neg_obj(betapi)
-            grad_beta_pi = jax.grad(neg_obj)(betapi) # (2,))
-            betapi = betapi - self.lr_pi_use * grad_beta_pi
-            loss_after = neg_obj(betapi)
+            loss_pre = neg_obj(self.betapi)
+            grad_beta_pi = jax.grad(neg_obj)(self.betapi) # (2,))
+            self.betapi = self.betapi - self.lr_pi_use * grad_beta_pi
+            loss_after = neg_obj(self.betapi)
             if jnp.linalg.norm(grad_beta_pi) < self.threshold_earlystopping: # early stopping accelerates the training but it induces the estimation error
                 break
-            # if (i+1) % 50 == 0:
-            #     print(f"DecisionTime {t}, SAC update step {i}/{self.epoch_actor}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', betapi, 'lr_pi', self.lr_pi_use)
+            if (i+1) % 50 == 0:
+                print(f"DecisionTime {t}, SAC update step {i}/{self.epoch_actor}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', self.betapi, 'lr_pi', self.lr_pi_use)
             
             if i % 200 == 0 and i >0:
                 self.lr_pi_use = self.lr_pi_use * self.decay # decay the learning rate for the actor
-        vector_pi = gradient_pi(betapi, self.betaQ_tar) # (n, 2)
+        vector_pi = gradient_pi(self.betapi, self.betaQ_tar) # (n, 2)
         # debug.print("averaged vector_pi {}", jnp.mean(vector_pi, axis=0))
         # debug.print("vector_pi for each unit {}", vector_pi) # for each unit
         # debug.print("grad_beta_pi {}", -grad_beta_pi)
         
 
-        beta_est = jnp.concatenate([betaQ, betapi]) # (6,))
+        beta_est = jnp.concatenate([betaQ, self.betapi]) # (6,))
         # print(in_study_data1[['user_id', 'past_reward', 'reward']])
         num_users_before_update = in_study_data["user_id"].nunique()
         # save Data
@@ -1042,9 +1044,9 @@ class SoftActorCritic:
             "betapi_target": self.betapi_tar,
         }
         if t == 1:
-            self.previous_betas_over_time = jnp.concatenate([betaQ.reshape(-1,1), betapi.reshape(-1,1)], axis=0).reshape(1, -1) # [1, beta_dim]
+            self.previous_betas_over_time = jnp.concatenate([betaQ.reshape(-1,1), self.betapi.reshape(-1,1)], axis=0).reshape(1, -1) # [1, beta_dim]
         else:
-            beta_t = jnp.concatenate([betaQ.reshape(-1,1), betapi.reshape(-1,1)], axis=0).reshape(1, -1) # [1, beta_dim]
+            beta_t = jnp.concatenate([betaQ.reshape(-1,1), self.betapi.reshape(-1,1)], axis=0).reshape(1, -1) # [1, beta_dim]
             self.previous_betas_over_time = jnp.concatenate([self.previous_betas_over_time, beta_t], axis=0)
 
         self.all_policies.append(update_dict)
@@ -1052,7 +1054,7 @@ class SoftActorCritic:
       
         # update the target network after each decison time (after saving the self.policy)
         self.betaQ_tar = self.tau * self.betaQ_tar + (1 - self.tau) * betaQ # (4,)
-        self.betapi_tar = self.tau * self.betapi_tar + (1 - self.tau) * betapi # (2,)
+        self.betapi_tar = self.tau * self.betapi_tar + (1 - self.tau) * self.betapi # (2,)
         
     def get_all_users(self, study_df, user_id_column="user_id"):
         return study_df[user_id_column].unique()

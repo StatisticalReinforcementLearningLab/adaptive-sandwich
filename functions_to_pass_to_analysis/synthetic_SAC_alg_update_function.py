@@ -17,6 +17,7 @@ def synthetic_SAC_alg_update_function(
     upper_clip: float,
     steepness: float,
     ridge_penalty: float,
+    constant_ridge: int,
     gamma: float,
     Z_id: jnp.array,
     beta_initial: jnp.array, # not allow the gradient trace
@@ -41,7 +42,7 @@ def synthetic_SAC_alg_update_function(
         beta_pi = beta[dim:] # (2,)
         
         if beta_previous.shape[0] == 1:
-            beta_target = beta_initial # the target should the intial beta to evaluate the estimating function
+            beta_target = beta_initial # the target should the initial beta to evaluate the estimating function
         else:
             beta_target = beta_previous[-2,:] # -1: the current beta, -2: the previous beta 
 
@@ -50,18 +51,32 @@ def synthetic_SAC_alg_update_function(
 
         ##### estimation function for Q
         p_next = policy(next_state, betapi_target) # (1,)
-        Q_states_next = jnp.hstack([next_state, next_state * next_action]) # (1,4)
-        Q_values_next = jnp.dot(Q_states_next, betaQ_target) # (1,)
-        logp_next = jnp.log(jnp.where(next_action==1, p_next, jnp.clip(1.0 - p_next, 1e-8, 1.0))) 
+        
+        # method 1: sample-based evaluation: Q(S_{t+1}, A_{t+1})
+        # Q_states_next = jnp.hstack([next_state, next_state * next_action]) # (1,4)
+        # Q_values_next = jnp.dot(Q_states_next, betaQ_target) # (1,)
+        # logp_next = jnp.log(jnp.where(next_action==1, p_next, 1.0 - p_next)) 
+        
+        # method 2: expectation-based evaluation: E[Q(S_{t+1}, A_{t+1})]
+        Q_state_next1 = jnp.hstack([next_state, next_state * jnp.ones_like(next_action)]) # (1, 4)
+        Q_state_next0 = jnp.hstack([next_state, next_state * jnp.zeros_like(next_action)]) # (1, 4)
+        Q_value_next1 = jnp.dot(Q_state_next1, betaQ_target) # (1,)
+        Q_value_next0 = jnp.dot(Q_state_next0, betaQ_target) # (1,)
+        Q_values_next = p_next * Q_value_next1 + (1.0 - p_next) * Q_value_next0 # (1,)
+        logp_next = p_next * jnp.log(p_next) + (1.0 - p_next) * jnp.log(1.0 - p_next) # (1,)
+        
         TD_target = rewards + gamma * (Q_values_next - lambda_entropy * logp_next) 
         current_Q_states = jnp.hstack([state, action * state]) # (1, 4)
         Current_Q_values = jnp.dot(current_Q_states, beta_Q) # (1,)
-        residuals = jax.lax.stop_gradient(TD_target) - Current_Q_values # (1,1)
+        # residuals = jax.lax.stop_gradient(TD_target) - Current_Q_values # (1,1)
+        residuals = TD_target - Current_Q_values # (1,1) allow the gradient to flow through the beta_previous
         vector_Q = -2*current_Q_states * residuals.reshape(-1,1)  # (1, 4) * (1, 1) -> (1, 4)
         vector_Q = vector_Q.reshape(-1, 1) # (4, 1)
         # vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1, 1)  # [4, 1] average over t
-        vector_Q =  vector_Q +  2 * ridge_penalty / n_users * beta_Q.reshape(-1, 1)  # (4, 1)  
-        # vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # (4, 1) 
+        if constant_ridge:
+            vector_Q =  vector_Q +  2 * ridge_penalty * beta_Q.reshape(-1, 1)  # (4, 1)  
+        else:
+            vector_Q =  vector_Q +  2 * ridge_penalty / n_users * beta_Q.reshape(-1, 1)  # (4, 1)  
         # debug.print("vector_Q for each unit = {}", vector_Q)
         # print(';n_users in the estimating function', n_users)
         ##### estimation function for pi (refer Eq.8 in Algorithm_SAC.tex)

@@ -35,7 +35,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-
 class FixedRandomization:
     """
     Fixed randomization algorithm; no learning
@@ -811,6 +810,9 @@ class SoftActorCritic:
         Miwaves=False, # Miwaves
         n=None,
         ridge_penalty=1.0, # ridge penalty for the actor, default 1.0
+        epoch_actor=500, # epoch of actor update in SAC
+        lr_pi=10.0, # learning rate for the actor
+        constant_ridge=0, # 1: constant ridge penalty, 0: decayed ridge penalty (classical)
     ):
         self.state_feats = state_feats # syn: ['intercept', 'past_reward']
         self.treat_feats = treat_feats # syn: ['intercept', 'past_reward']
@@ -834,9 +836,10 @@ class SoftActorCritic:
             self.lr_pi = 10.0
             self.ridge_penalty = ridge_penalty 
         else:
-            self.lr_pi = 10.0 # default 10.0, which is aggressive
+            self.lr_pi = lr_pi # default 10.0, which is aggressive
             # self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
             self.ridge_penalty = ridge_penalty 
+            self.constant_ridge = constant_ridge
         print('self.ridge_penalty', self.ridge_penalty)
         self.gamma = 0.99
         
@@ -849,7 +852,7 @@ class SoftActorCritic:
         
         self.tau = 0.0 # Polyak for target network, tau=0: only based on the last step's critic, i.e., self.betaQ_tar = self.betaQ; tau=1: only based on the (initial) target critic, i.e., self.betaQ_tar = self.betaQ_tar = intialization (always a fixed target Q)
         self.decay=0.5 # learning rate decay for the actor, default 0.5
-        self.epoch_actor = 500 # default: 500 vs 1000
+        self.epoch_actor = epoch_actor # default: 500 vs 1000
         self.threshold_earlystopping = 1e-5 # default 1e-5 cs 1e-7
         self.all_policies = [
             {
@@ -969,9 +972,21 @@ class SoftActorCritic:
         # close-form solution 
         p_next = self.policy(next_states, self.betapi_tar) # use the target policy from the last step to evaluate p_next (n, )
         next_action = self.rng.binomial(1, p_next) # (n,)
-        Q_states_next = jnp.hstack([next_states, next_states * next_action[:, None]]) # (n, 4)
-        Q_values_next = self.Q_value(Q_states_next, self.betaQ_tar) # target network (n,)
-        logp_next = jnp.log(jnp.where(next_action==1, p_next, 1.0 - p_next))  # (n,) log(\pi(A_{t+1}|S_{t+1})) element-wise if-else
+        
+        # method 1: sample-based evaluation: Q(S_{t+1}, A_{t+1})
+        
+        # Q_states_next = jnp.hstack([next_states, next_states * next_action[:, None]]) # (n, 4)
+        # Q_values_next = self.Q_value(Q_states_next, self.betaQ_tar) # target network (n,)
+        # logp_next = jnp.log(jnp.where(next_action==1, p_next, 1.0 - p_next))  # (n,) log(\pi(A_{t+1}|S_{t+1})) element-wise if-else
+        
+        # meethod 2: expectation-based evaluation: E[Q(S_{t+1}, A_{t+1})]
+        Q_state_next1 = jnp.hstack([next_states, next_states * jnp.ones_like(next_action[:, None])]) # (n, 4)
+        Q_state_next0 = jnp.hstack([next_states, next_states * jnp.zeros_like(next_action[:, None])]) # (n, 4)
+        Q_value_next1 = self.Q_value(Q_state_next1, self.betaQ_tar) # (n,)
+        Q_value_next0 = self.Q_value(Q_state_next0, self.betaQ_tar) # (n,)
+        Q_values_next = p_next * Q_value_next1 + (1.0 - p_next) * Q_value_next0 # (n,)
+        logp_next = p_next * jnp.log(p_next) + (1.0 - p_next) * jnp.log(1.0 - p_next) # (n,)
+        
         TD_target = rewards + self.gamma * (Q_values_next - self.lambda_entropy * logp_next) # (n,)
         current_Q_states = jnp.hstack([base_states, treat_states * actions[:, None] ]) # (n, 4)
         XTX = current_Q_states.T @ current_Q_states # (4,4)
@@ -980,16 +995,17 @@ class SoftActorCritic:
         # print('n_realunits', n_realunits) # 30
         # in statistics, we use the average loss, and thus we also scale the ridge penalty by n_treat_units
         # betaQ = jnp.linalg.solve(XTX +  n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
-        betaQ = jnp.linalg.solve(XTX + self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
+        if self.constant_ridge:
+            betaQ = jnp.linalg.solve(XTX + n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
+        else:# classical: decayed ridge penalty
+            betaQ = jnp.linalg.solve(XTX + self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
         residuals = TD_target - current_Q_states @ betaQ # (n,)
         vector_Q = -2* current_Q_states * residuals.reshape(-1,1) # (n, 4) * (n, 1) -> (n, 4)
-        vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty / n_realunits * betaQ.reshape(-1, 1) # (4,1)
+        if self.constant_ridge:
+            vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty * betaQ.reshape(-1, 1) # (4,1)
+        else:
+            vector_Q = jnp.mean(vector_Q, axis=0).reshape(-1,1) + 2*self.ridge_penalty / n_realunits * betaQ.reshape(-1, 1) # (4,1)
         each_unit_Q = -2*residuals.reshape(-1,1) * current_Q_states + 2*self.ridge_penalty * betaQ.reshape(1, -1) # (n, beta_dim_Q) for debugging
-        # debug.print('t {}', t)
-        # debug.print("averaged vector_Q {}", vector_Q.reshape(1, -1))
-        # debug.print("each unit_q {}", each_unit_Q)
-       
-        
         
         # this manual gradient is used to check the correctness of jax automatic differentiation (which is very close)
         def gradient_pi(beta_pi, beta_Q):
@@ -1114,6 +1130,7 @@ class SoftActorCritic:
                     self.upper_clip,
                     self.steepness,
                     self.ridge_penalty,
+                    self.constant_ridge,
                     self.gamma,
                     self.get_Zids(in_study_user_data), # (1,1)
                     self.beta_init,

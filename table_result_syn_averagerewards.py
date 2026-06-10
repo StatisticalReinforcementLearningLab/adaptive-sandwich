@@ -9,7 +9,11 @@ parser = ArgumentParser(description="Parameters for the code - ARTD on gym envs"
 parser.add_argument('--alg', type=str, default='TS', help="algorithm name", choices=['TS', 'SAC'])
 parser.add_argument('--T', type=int, default=50, help="number of decision times")
 parser.add_argument('--n', type=int, default=30, help="sample size")
-parser.add_argument('--ridge_penalty', type=float, default=0.1, help="ridge regression parameter")
+parser.add_argument('--ridge_penalty', type=float, default=20.0, help="ridge regression parameter")
+parser.add_argument('--constant_ridge', type=int, default=0, help="1: constant ridge penalty, 0: decayed ridge penalty (classical)")
+parser.add_argument('--s', type=float, default=1.0, help="steepness for the sigmoid function in SAC")
+parser.add_argument('--epoch', type=int, default=500, help="epoch of actor update in SAC")
+parser.add_argument('--lr', type=float, default=10.0, help="lr in SAC")
 parser.add_argument('--N_seed', type=int, default=1000, help="N_seed")
 parser.add_argument('--evaluate', type=int, default=0, help="0: fixed true values after evaluation, 1: evaluate the true thetahat on a large n, 2: evaluate on the current n")
 args = parser.parse_args()
@@ -23,6 +27,7 @@ n_true = 10000 # the true theta should be evaluated on a large n
 
 ######################################## Step 1: access all replications, compute each average rewards, assess the true average rewards and its variance
 path = '/n/netscratch/murphy_lab/Lab/kesun/2Longitudinal/adaptive-sandwich/'
+constant_ridge = '_constant1' if args.constant_ridge == 1 else ''
 # path = ''
 # "synthetic_mode=delayed_1_action_dosage_alg=sac_T=50_n=30_averagerewards"
 if args.evaluate > 0:
@@ -32,7 +37,7 @@ if args.evaluate > 0:
         if args.alg == 'TS': # old path
             subpath = path + f"syn_TS_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1"
         else: # SAC
-            subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_ridge{args.ridge_penalty}_averagerewards/exp=1" # use the largest n to compute true variance
+            subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_ridge{args.ridge_penalty}_s{args.s}_epoch{args.epoch}_lr{args.lr}_nostopping_expectation{constant_ridge}_averagerewards/exp=1" # use the largest n to compute true variance
             # subpath = path + f"syn_sac_n{n_true}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_averagerewards/exp=1" # use the largest n to compute true variance
         data = pd.read_csv(subpath+'/data.csv')
         # data = pd.read_csv('n100_T50/data.csv') # local laptop
@@ -53,9 +58,14 @@ else:
             true_reward_median = 0.391504
             true_var = 0.000053
         elif args.ridge_penalty == 10.0:
-            true_reward_mean = 0.384854
-            true_reward_median = 0.385128
-            true_var = 0.000052
+            if args.constant_ridge == 1:
+                true_reward_mean = 0.166955
+                true_reward_median = 0.166928
+                true_var = 0.000017
+            else:
+                true_reward_mean = 0.385006 # without stopping: 0.385006 # with stopping: 0.385007 
+                true_reward_median = 0.385421 # without stopping: 0.385421 # with stopping: 0.385421 
+                true_var = 0.000053 # without stopping: 0.000053 # with stopping: 0.000053 
         else:
             raise NotImplementedError
     else:
@@ -73,7 +83,9 @@ for i in tqdm(range(N_seed)):
     if args.alg == 'TS': # old path
         subpath = path + f"syn_TS_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n}_averagerewards/exp=1"
     else:
-        subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_ridge{args.ridge_penalty}_averagerewards/exp=1"
+        subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n}_ridge{args.ridge_penalty}_s{args.s}_epoch{args.epoch}_lr{args.lr}_nostopping_expectation{constant_ridge}_averagerewards/exp=1" # use the largest n to compute true variance
+        # subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg={algo_name}_T={T}_n={n_true}_ridge{args.ridge_penalty}_s{args.s}_epoch{args.epoch}_lr{args.lr}_averagerewards/exp=1" # use the largest n to compute true variance
+        # subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_ridge{args.ridge_penalty}_averagerewards/exp=1"
         # subpath = path + f"syn_sac_n{n}_T{T}/{i}/simulated_data/synthetic_mode=delayed_1_action_dosage_alg=sac_T={T}_n={n}_averagerewards/exp=1"
     try:
         RL_data = pd.read_csv(subpath+'/data.csv')
@@ -316,365 +328,194 @@ coverage rate of adaptive variance estiamte: 0.957916 / std errors: 0.006356
 """
 
 ################# n=30
-# ridge_regression=1.0
-Mean parameter estimate:
-[0.2736279]
+### decayed ridge penalty (classical)
+# each n
+true mean of thetahat when n=30: 0.397378
+true median of thetahat when n=30: 0.399895
+true variance of thetahat when n=30: 0.005268
+mean of thetahat: 0.397378
+median of thetahat: 0.399895
+variance of thetahat: 0.005268
+mean of classical variance estimate: 0.004167
+median of classical variance estimate: 0.004072
+mean of adaptive variance estimate: 0.223250
+median of adaptive variance estimate: 0.009073
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.913000 / std errors: 0.008912
+coverage rate of adaptive variance estiamte: 0.978000 / std errors: 0.004639
 
-Empirical variance of parameter estimates:
-[[0.00544728]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00601462]]
-
-Mean classical sandwich variance estimate:
-[[0.00421583]]
-
-Median adaptive sandwich variance estimate:
-[[0.00546962]]
-
-Median classical sandwich variance estimate:
-[[0.00415732]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.95
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.902
-
-# ridge_regression=1.0*3/n
-Mean parameter estimate:
-[0.4331892]
-
-Empirical variance of parameter estimates:
-[[0.00439431]]
-
-Mean adaptive sandwich variance estimate:
-[[1.2191781]]
-
-Mean classical sandwich variance estimate:
-[[0.00380698]]
-
-Median adaptive sandwich variance estimate:
-[[0.01266304]]
-
-Median classical sandwich variance estimate:
-[[0.00378271]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9909638554216867
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.9347389558232931
+# large n = 10000
+true mean of thetahat when n=10000: 0.385006
+true median of thetahat when n=10000: 0.385421
+true variance of thetahat when n=10000: 0.000053
+mean of thetahat: 0.397378
+median of thetahat: 0.399895
+variance of thetahat: 0.005268
+mean of classical variance estimate: 0.004167
+median of classical variance estimate: 0.004072
+mean of adaptive variance estimate: 0.223250
+median of adaptive variance estimate: 0.009073
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.905000 / std errors: 0.009272
+coverage rate of adaptive variance estiamte: 0.970000 / std errors: 0.005394
 
 ################# n=50
-# ridge_regression=1.0
-Mean parameter estimate:
-[0.27498797]
+### decayed ridge penalty (classical)
+# each n
+true mean of thetahat when n=50: 0.431741
+true median of thetahat when n=50: 0.430571
+true variance of thetahat when n=50: 0.002875
+mean of thetahat: 0.431741
+median of thetahat: 0.430571
+variance of thetahat: 0.002875
+mean of classical variance estimate: 0.002382
+median of classical variance estimate: 0.002351
+mean of adaptive variance estimate: 0.136148
+median of adaptive variance estimate: 0.005002
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.930000 / std errors: 0.008068
+coverage rate of adaptive variance estiamte: 0.982000 / std errors: 0.004204
 
-Empirical variance of parameter estimates:
-[[0.00332289]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00336951]]
-
-Mean classical sandwich variance estimate:
-[[0.00255753]]
-
-Median adaptive sandwich variance estimate:
-[[0.00313932]]
-
-Median classical sandwich variance estimate:
-[[0.00252592]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.95
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.917
-
-# ridge_regression=1.0*30/n
-Mean parameter estimate:
-[0.33922848]
-
-Empirical variance of parameter estimates:
-[[0.00344663]]
-
-Empirical variance standard errors (off-diagonals approximated by taking max of corresponding two diagonal terms):
-[[0.00018765]]
-
-Mean adaptive sandwich variance estimate:
-[[0.2739766]]
-
-Mean classical sandwich variance estimate:
-[[0.00261799]]
-
-Median adaptive sandwich variance estimate:
-[[0.0034383]]
-
-Median classical sandwich variance estimate:
-[[0.00260686]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.949
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.915
-
-# ridge_regression=1.0*3/n
-Mean parameter estimate:
-[0.43459508]
-
-Empirical variance of parameter estimates:
-[[0.00263142]]
-
-Mean adaptive sandwich variance estimate:
-[[0.2804591]]
-
-Mean classical sandwich variance estimate:
-[[0.00226091]]
-
-Median adaptive sandwich variance estimate:
-[[0.00657748]]
-
-Median classical sandwich variance estimate:
-[[0.00224159]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.991
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.932
-
+# large n = 10000
+true mean of thetahat when n=10000: 0.385006
+true median of thetahat when n=10000: 0.385421
+true variance of thetahat when n=10000: 0.000053
+mean of thetahat: 0.431741
+median of thetahat: 0.430571
+variance of thetahat: 0.002875
+mean of classical variance estimate: 0.002382
+median of classical variance estimate: 0.002351
+mean of adaptive variance estimate: 0.136148
+median of adaptive variance estimate: 0.005002
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.804000 / std errors: 0.012553
+coverage rate of adaptive variance estiamte: 0.941000 / std errors: 0.007451
 
 ################# n=100
-# ridge_regression=1.0
-Mean parameter estimate:
-[0.27688453]
+### decayed ridge penalty (classical)
+# each n
+true mean of thetahat when n=100: 0.443914
+true median of thetahat when n=100: 0.443191
+true variance of thetahat when n=100: 0.001358
+mean of thetahat: 0.443914
+median of thetahat: 0.443191
+variance of thetahat: 0.001358
+mean of classical variance estimate: 0.001150
+median of classical variance estimate: 0.001142
+mean of adaptive variance estimate: 0.022267
+median of adaptive variance estimate: 0.001758
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.925000 / std errors: 0.008329
+coverage rate of adaptive variance estiamte: 0.973000 / std errors: 0.005126
 
-Empirical variance of parameter estimates:
-[[0.00169417]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00155251]]
-
-Mean classical sandwich variance estimate:
-[[0.00129056]]
-
-Median adaptive sandwich variance estimate:
-[[0.0015275]]
-
-Median classical sandwich variance estimate:
-[[0.00128569]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.929
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.91
-
-# ridge_regression=1.0*30/n
-Mean parameter estimate:
-[0.41509205]
-
-Empirical variance of parameter estimates:
-[[0.00164293]]
-
-Mean adaptive sandwich variance estimate:
-[[0.01969936]]
-
-Mean classical sandwich variance estimate:
-[[0.00124683]]
-
-Median adaptive sandwich variance estimate:
-[[0.00166864]]
-
-Median classical sandwich variance estimate:
-[[0.00124059]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.954
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.911
-
-# ridge_regression=1.0*3/n
-
-Mean parameter estimate:
-[0.42765185]
-
-Empirical variance of parameter estimates:
-[[0.00139269]]
-
-Mean adaptive sandwich variance estimate:
-[[0.51008356]]
-
-Mean classical sandwich variance estimate:
-[[0.001129]]
-
-Median adaptive sandwich variance estimate:
-[[0.00286803]]
-
-Median classical sandwich variance estimate:
-[[0.00112382]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.994
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.914
-
+# large n = 10000
+true mean of thetahat when n=10000: 0.385006
+true median of thetahat when n=10000: 0.385421
+true variance of thetahat when n=10000: 0.000053
+mean of thetahat: 0.443914
+median of thetahat: 0.443191
+variance of thetahat: 0.001358
+mean of classical variance estimate: 0.001150
+median of classical variance estimate: 0.001142
+mean of adaptive variance estimate: 0.022267
+median of adaptive variance estimate: 0.001758
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.589000 / std errors: 0.015559
+coverage rate of adaptive variance estiamte: 0.733000 / std errors: 0.013990
 
 ################# n=300
-Mean parameter estimate:
-[0.2765282]
+### decayed ridge penalty (classical)
+# each n
+true mean of thetahat when n=300: 0.433757
+true median of thetahat when n=300: 0.433857
+true variance of thetahat when n=300: 0.000535
+mean of thetahat: 0.433757
+median of thetahat: 0.433857
+variance of thetahat: 0.000535
+mean of classical variance estimate: 0.000381
+median of classical variance estimate: 0.000378
+mean of adaptive variance estimate: 0.000610
+median of adaptive variance estimate: 0.000541
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.912000 / std errors: 0.008959
+coverage rate of adaptive variance estiamte: 0.952000 / std errors: 0.006760
 
-Empirical variance of parameter estimates:
-[[0.00064934]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00049266]]
-
-Mean classical sandwich variance estimate:
-[[0.00043498]]
-
-Median adaptive sandwich variance estimate:
-[[0.00048934]]
-
-Median classical sandwich variance estimate:
-[[0.0004342]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.905
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.888
-
-## [ridge_regression=1.0*30/n]
-Mean parameter estimate:
-[0.4450719]
-
-Empirical variance of parameter estimates:
-[[0.00056656]]
-
-Mean adaptive sandwich variance estimate:
-[[0.03817153]]
-
-Mean classical sandwich variance estimate:
-[[0.0003868]]
-
-Median adaptive sandwich variance estimate:
-[[0.00045294]]
-
-Median classical sandwich variance estimate:
-[[0.00038536]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.928
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.903
-
-## ridge_regression=1.0*3/n]
-Mean parameter estimate:
-[0.40956098]
-
-Empirical variance of parameter estimates:
-[[0.00053729]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00099715]]
-
-Mean classical sandwich variance estimate:
-[[0.00037584]]
-
-Median adaptive sandwich variance estimate:
-[[0.00073118]]
-
-Median classical sandwich variance estimate:
-[[0.00037504]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.98
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.906
-
+# large n = 10000
+true mean of thetahat when n=10000: 0.385006
+true median of thetahat when n=10000: 0.385421
+true variance of thetahat when n=10000: 0.000053
+mean of thetahat: 0.433757
+median of thetahat: 0.433857
+variance of thetahat: 0.000535
+mean of classical variance estimate: 0.000381
+median of classical variance estimate: 0.000378
+mean of adaptive variance estimate: 0.000610
+median of adaptive variance estimate: 0.000541
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.330000 / std errors: 0.014869
+coverage rate of adaptive variance estiamte: 0.457000 / std errors: 0.015753
 
 ################# n=500
-## ridge_regression=1.0
-Mean parameter estimate:
-[0.2778481]
+### decayed ridge penalty (classical)
+# each n
+true mean of thetahat when n=500: 0.426610
+true median of thetahat when n=500: 0.426133
+true variance of thetahat when n=500: 0.000337
+mean of thetahat: 0.426610
+median of thetahat: 0.426133
+variance of thetahat: 0.000337
+mean of classical variance estimate: 0.000227
+median of classical variance estimate: 0.000227
+mean of adaptive variance estimate: 0.000385
+median of adaptive variance estimate: 0.000318
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.886000 / std errors: 0.010050
+coverage rate of adaptive variance estiamte: 0.943000 / std errors: 0.007332
 
-Empirical variance of parameter estimates:
-[[0.00039302]]
+# large n = 10000
+true mean of thetahat when n=10000: 0.385006
+true median of thetahat when n=10000: 0.385421
+true variance of thetahat when n=10000: 0.000053
+mean of thetahat: 0.426610
+median of thetahat: 0.426133
+variance of thetahat: 0.000337
+mean of classical variance estimate: 0.000227
+median of classical variance estimate: 0.000227
+mean of adaptive variance estimate: 0.000385
+median of adaptive variance estimate: 0.000318
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.252000 / std errors: 0.013729
+coverage rate of adaptive variance estiamte: 0.379000 / std errors: 0.015341
 
-Mean adaptive sandwich variance estimate:
-[[0.00029076]]
+################# n=1000
+### decayed ridge penalty (classical)
+# each n
+true mean of thetahat when n=1000: 0.414542
+true median of thetahat when n=1000: 0.414513
+true variance of thetahat when n=1000: 0.000188
+mean of thetahat: 0.414542
+median of thetahat: 0.414513
+variance of thetahat: 0.000188
+mean of classical variance estimate: 0.000113
+median of classical variance estimate: 0.000113
+mean of adaptive variance estimate: 0.000859
+median of adaptive variance estimate: 0.000155
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.860000 / std errors: 0.010973
+coverage rate of adaptive variance estiamte: 0.920000 / std errors: 0.008579
 
-Mean classical sandwich variance estimate:
-[[0.00026066]]
-
-Median adaptive sandwich variance estimate:
-[[0.00029091]]
-
-Median classical sandwich variance estimate:
-[[0.0002607]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.905
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.893
-
-## ridge_regression=1.0*30/n
-Mean parameter estimate:
-[0.44310087]
-
-Empirical variance of parameter estimates:
-[[0.00035467]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00027257]]
-
-Mean classical sandwich variance estimate:
-[[0.00022975]]
-
-Median adaptive sandwich variance estimate:
-[[0.00026344]]
-
-Median classical sandwich variance estimate:
-[[0.00022993]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.906
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.886
-
-## ridge_regression=1.0*3/n
-Mean parameter estimate:
-[0.40301606]
-
-Empirical variance of parameter estimates:
-[[0.00033206]]
-
-Mean adaptive sandwich variance estimate:
-[[0.00394498]]
-
-Mean classical sandwich variance estimate:
-[[0.00022471]]
-
-Median adaptive sandwich variance estimate:
-[[0.00038897]]
-
-Median classical sandwich variance estimate:
-[[0.00022437]]
-
-Adaptive sandwich 95.0% standard normal CI coverage:
-0.9599198396793587
-
-Classical sandwich 95.0% standard normal CI coverage:
-0.8967935871743486
-
-
+# large n = 10000
+true mean of thetahat when n=10000: 0.385006
+true median of thetahat when n=10000: 0.385421
+true variance of thetahat when n=10000: 0.000053
+mean of thetahat: 0.414542
+median of thetahat: 0.414513
+variance of thetahat: 0.000188
+mean of classical variance estimate: 0.000113
+median of classical variance estimate: 0.000113
+mean of adaptive variance estimate: 0.000859
+median of adaptive variance estimate: 0.000155
+number of successful experiments: 1000/1000
+coverage rate of classical variance estiamte: 0.259000 / std errors: 0.013853
+coverage rate of adaptive variance estiamte: 0.354000 / std errors: 0.015122
 """

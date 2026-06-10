@@ -89,16 +89,16 @@ else: # 0
                 true_reward_mean = 1.926816
                 true_reward_median = 1.926825
                 true_var = 0.000024
-            elif args.steepness == 3.0:
-                true_reward_mean = 1.941743
-                true_reward_median = 1.941744
-                true_var = 0.000022
-        elif args.habituation == 6 and args.treatment == 1: # high habituation, low treatment effect
+            elif args.steepness == 3.0: # our focus in the paper
+                true_reward_mean = 1.941743 # 1.941743
+                true_reward_median = 1.941744 # 1.941744
+                true_var = 0.000022 # 0.000022
+        elif args.habituation == 6 and args.treatment == 1: # low habituation, low treatment effect
             if args.steepness == 5.0:
                 true_reward_mean = 2.105260
                 true_reward_median = 2.105208
                 true_var = 0.000014
-            elif args.steepness == 3.0:
+            elif args.steepness == 3.0: 
                 true_reward_mean = 2.105013
                 true_reward_median = 2.104938
                 true_var = 0.000014
@@ -185,53 +185,172 @@ print(args)
 
 ############################################################# results: TS  #############################################################
 
-################################ high habituation, high treatment effect
-##### b=5.0
+################################ high habituation, low treatment effect=1, b=3.0
 """
-######### n=30
+######### n=20
+true mean of thetahat when n=10000: 1.941743
+true median of thetahat when n=10000: 1.941744
+true variance of thetahat when n=10000: 0.000022
+number of successful experiments: 1000/1000
+mean of thetahat: 1.941898
+median of thetahat: 1.944167
+variance of thetahat: 0.010290
+mean of classical variance estimate: 0.009187
+median of classical variance estimate: 0.008675
+mean of adaptive variance estimate: 0.016171
+median of adaptive variance estimate: 0.012991
+coverage rate of classical variance estiamte: 0.923000 / std errors: 0.008430
+coverage rate of adaptive variance estiamte: 0.951000 / std errors: 0.006826
 
+
+######### n=30
+true mean of thetahat when n=10000: 1.941743
+true median of thetahat when n=10000: 1.941744
+true variance of thetahat when n=10000: 0.000022
+number of successful experiments: 1000/1000
+mean of thetahat: 1.939479
+median of thetahat: 1.938611
+variance of thetahat: 0.006710
+mean of classical variance estimate: 0.006315
+median of classical variance estimate: 0.006149
+mean of adaptive variance estimate: 0.009701
+median of adaptive variance estimate: 0.008566
+coverage rate of classical variance estiamte: 0.925000 / std errors: 0.008329
+coverage rate of adaptive variance estiamte: 0.951000 / std errors: 0.006826
 
 ######### n=50
+true mean of thetahat when n=10000: 1.941743
+true median of thetahat when n=10000: 1.941744
+true variance of thetahat when n=10000: 0.000022
+number of successful experiments: 1000/1000
+mean of thetahat: 1.941490
+median of thetahat: 1.942667
+variance of thetahat: 0.003789
+mean of classical variance estimate: 0.003848
+median of classical variance estimate: 0.003764
+mean of adaptive variance estimate: 0.005493
+median of adaptive variance estimate: 0.005121
+coverage rate of classical variance estiamte: 0.934000 / std errors: 0.007851
+coverage rate of adaptive variance estiamte: 0.965000 / std errors: 0.005812
 
+######### n=75
+true mean of thetahat when n=10000: 1.941743
+true median of thetahat when n=10000: 1.941744
+true variance of thetahat when n=10000: 0.000022
+number of successful experiments: 1000/1000
+mean of thetahat: 1.942439
+median of thetahat: 1.941889
+variance of thetahat: 0.002668
+mean of classical variance estimate: 0.002553
+median of classical variance estimate: 0.002535
+mean of adaptive variance estimate: 0.003426
+median of adaptive variance estimate: 0.003202
+coverage rate of classical variance estiamte: 0.940000 / std errors: 0.007510
+coverage rate of adaptive variance estiamte: 0.962000 / std errors: 0.006046
 
 ######### n=100
+true mean of thetahat when n=10000: 1.941743
+true median of thetahat when n=10000: 1.941744
+true variance of thetahat when n=10000: 0.000022
+number of successful experiments: 1000/1000
+mean of thetahat: 1.942310
+median of thetahat: 1.943167
+variance of thetahat: 0.001929
+mean of classical variance estimate: 0.001925
+median of classical variance estimate: 0.001907
+mean of adaptive variance estimate: 0.002482
+median of adaptive variance estimate: 0.002370
+coverage rate of classical variance estiamte: 0.953000 / std errors: 0.006693
+coverage rate of adaptive variance estiamte: 0.971000 / std errors: 0.005307
 
+######### n=300
+
+
+"""
+
+################################ high habituation, high treatment effect, b=3.0
+"""
+######### n=20
+true mean of thetahat when n=10000: 1.964477
+true median of thetahat when n=10000: 1.964489
+true variance of thetahat when n=10000: 0.000021
+number of successful experiments: 1000/1000
+mean of thetahat: 1.967692
+median of thetahat: 1.972500
+variance of thetahat: 0.009845
+mean of classical variance estimate: 0.008820
+median of classical variance estimate: 0.008319
+mean of adaptive variance estimate: 0.016693
+median of adaptive variance estimate: 0.012537
+coverage rate of classical variance estiamte: 0.918000 / std errors: 0.008676
+coverage rate of adaptive variance estiamte: 0.946000 / std errors: 0.007147
+
+
+######### n=30
+true mean of thetahat when n=10000: 1.964477
+true median of thetahat when n=10000: 1.964489
+true variance of thetahat when n=10000: 0.000021
+number of successful experiments: 1000/1000
+mean of thetahat: 1.964551
+median of thetahat: 1.963889
+variance of thetahat: 0.006371
+mean of classical variance estimate: 0.006080
+median of classical variance estimate: 0.005931
+mean of adaptive variance estimate: 0.010139
+median of adaptive variance estimate: 0.008629
+coverage rate of classical variance estiamte: 0.924000 / std errors: 0.008380
+coverage rate of adaptive variance estiamte: 0.958000 / std errors: 0.006343
+
+######### n=50
+true mean of thetahat when n=10000: 1.964477
+true median of thetahat when n=10000: 1.964489
+true variance of thetahat when n=10000: 0.000021
+number of successful experiments: 1000/1000
+mean of thetahat: 1.965792
+median of thetahat: 1.966333
+variance of thetahat: 0.003579
+mean of classical variance estimate: 0.003710
+median of classical variance estimate: 0.003646
+mean of adaptive variance estimate: 0.005562
+median of adaptive variance estimate: 0.004991
+coverage rate of classical variance estiamte: 0.937000 / std errors: 0.007683
+coverage rate of adaptive variance estiamte: 0.964000 / std errors: 0.005891
+
+######### n=75
+true mean of thetahat when n=10000: 1.964477
+true median of thetahat when n=10000: 1.964489
+true variance of thetahat when n=10000: 0.000021
+number of successful experiments: 1000/1000
+mean of thetahat: 1.966214
+median of thetahat: 1.964222
+variance of thetahat: 0.002552
+mean of classical variance estimate: 0.002463
+median of classical variance estimate: 0.002431
+mean of adaptive variance estimate: 0.003397
+median of adaptive variance estimate: 0.003166
+coverage rate of classical variance estiamte: 0.935000 / std errors: 0.007796
+coverage rate of adaptive variance estiamte: 0.960000 / std errors: 0.006197
+
+######### n=100
+true mean of thetahat when n=10000: 1.964477
+true median of thetahat when n=10000: 1.964489
+true variance of thetahat when n=10000: 0.000021
+number of successful experiments: 1000/1000
+mean of thetahat: 1.965606
+median of thetahat: 1.966000
+variance of thetahat: 0.001884
+mean of classical variance estimate: 0.001859
+median of classical variance estimate: 0.001841
+mean of adaptive variance estimate: 0.002472
+median of adaptive variance estimate: 0.002347
+coverage rate of classical variance estiamte: 0.947000 / std errors: 0.007085
+coverage rate of adaptive variance estiamte: 0.967000 / std errors: 0.005649
 
 ######### n=300
 
 
 
-######### n=500
-
-
-
-
-######### n=1000 
-
-
-
 """
-##### b=3.0
-
-"""
-######### n=30
-
-
-######### n=50
-
-
-######### n=100
-
-
-
-######### n=300
-
-
-######### n=500
-
-
-"""
-
 
 ############################################################# results: SAC  #############################################################
 

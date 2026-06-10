@@ -34,12 +34,15 @@ SLURM_ARRAY_TASK_ID="${SLURM_ARRAY_TASK_ID:-1}"
 
 # Arguments that affect RL study simulation side
 T=50
+constant_ridge=1 # 1: constant ridge penalty, 0: decayed ridge penalty (classical)
 ridge_penalty=1.0
+epoch_actor=500
+lr_pi=10.0
 decisions_between_updates=1
 update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
-n=100
+n=10
 # recruit_n=$n is done below unless the user specifies recruit_n
 synthetic_mode='delayed_1_action_dosage'
 # synthetic_mode='delayed_1_dosage_paper'
@@ -157,6 +160,9 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:P:b:l:Z:B:D:j:E:I:h:g:H:F:
     V  | alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
     W  | alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
     R  | ridge_penalty )                                needs_arg; ridge_penalty="$OPTARG" ;;
+    C  | constant_ridge )                               needs_arg; constant_ridge="$OPTARG" ;;
+    A  | epoch_actor )                                  needs_arg; epoch_actor="$OPTARG" ;;
+    G  | lr_pi )                                        needs_arg; lr_pi="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -238,19 +244,22 @@ python rl_study_simulation_modified.py \
   --lower_clip=$lclip \
   --Twoarmed=1 \
   --filename=$filename \
+  --ridge_penalty=$ridge_penalty \
+  --constant_ridge=$constant_ridge \
+  --epoch_actor=$epoch_actor \
+  --lr_pi=$lr_pi \
   --alpha1=$alpha1 \
   --alpha2=$alpha2  
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished RL simulations.
 
 # Create a convenience variable that holds the output folder for the last script
-save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_ridge${ridge_penalty}_s${steepness}${filename}"             
+save_dir_suffix="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=${T}_n=${n}_ridge${ridge_penalty}_s${steepness}_epoch${epoch_actor}_lr${lr_pi}_nostopping_expectation_constant${constant_ridge}${filename}"             
 output_folder="${save_dir}/${save_dir_suffix}"
 output_folder_glob="${save_dir_glob}/${save_dir_suffix}"
 
-# Analyze dataset created in the above simulation
+# Analyze dataset created in the above simulation (same flags as run_and_analysis_parallel_syn_SAC_treatmenteffect.sh; leave commented for simulation-only runs like averagerewards_true.sh).
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginning after-study analysis.
-
 
 # lifejacket analyze \
 #   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
@@ -280,6 +289,7 @@ echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Beginnin
 #   --small_sample_correction=$small_sample_correction \
 #   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
 #   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
+#   --trim_small_singular_values=$trim_small_singular_values
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_SAC.sh: Finished after-study analysis.
 

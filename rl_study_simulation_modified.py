@@ -259,7 +259,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
             )
         elif args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
             exp_str = (
-                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_ridge{args.ridge_penalty}_s{args.steepness}_epoch{args.epoch_actor}_lr{args.lr_pi}{args.filename}" 
+                f"{args.dataset_type}_mode={mode}_alg={args.RL_alg}_T={args.T}_n={args.n}_ridge{args.ridge_penalty}_s{args.steepness}_epoch{args.epoch_actor}_lr{args.lr_pi}_nostopping_expectation_constant{args.constant_ridge}{args.filename}" 
             )
         else:
             raise ValueError("Invalid RL Algorithm Type For Synthetic Dataset")
@@ -414,6 +414,9 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 Miwaves=bool(args.dataset_type == RLStudyArgs.MIWAVES), ######## new indicator function
                 n=args.n,
                 ridge_penalty=args.ridge_penalty,
+                epoch_actor=args.epoch_actor,
+                lr_pi=args.lr_pi,
+                constant_ridge=args.constant_ridge,
             )
         
         else:
@@ -769,6 +772,13 @@ def main():
         type=float,
         default=10.0,
         help="Learning rate for Soft Actor Critic's policy update",
+    )
+
+    parser.add_argument(
+        "--constant_ridge",
+        type=int,
+        default=0,
+        help="1: constant ridge penalty, 0: decayed ridge penalty (classical)",
     )
 
 

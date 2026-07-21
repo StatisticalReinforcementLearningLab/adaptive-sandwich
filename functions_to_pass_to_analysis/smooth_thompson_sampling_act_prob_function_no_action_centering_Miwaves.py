@@ -5,6 +5,17 @@ import pickle as pkl
 from jax import lax
 from jax import debug
 
+
+### changes from Synthetic dataset: smooth_thompson_sampling_act_prob_function_no_action_centering_twoarmed.py
+"""
+- C_logistic is set to 5
+- RANDOM_VARS is loaded from Miwaves/randomvars.pkl
+- RANDOM_VARS is a (5000,) array of random variables from a normal distribution with mean 0 and var 1
+- RANDOM_VARS is used to sample from the distribution of the advantage features
+- RANDOM_VARS is used to sample from the distribution of the advantage features
+"""
+
+
 def load_random_vars() -> jnp.array:
     RANDOMVARS_PATH = './Miwaves/randomvars.pkl'
     # Load random variables - normal with mean 0 and var 1

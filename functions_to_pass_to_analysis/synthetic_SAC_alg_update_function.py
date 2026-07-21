@@ -18,6 +18,7 @@ def synthetic_SAC_alg_update_function(
     steepness: float,
     ridge_penalty: float,
     constant_ridge: int,
+    actor_ridge_penalty: float,
     gamma: float,
     Z_id: jnp.array,
     beta_initial: jnp.array, # not allow the gradient trace

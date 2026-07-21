@@ -90,6 +90,9 @@ def make_base_study_df(args, rng_seed=None, all_cols=None, df=None, sample_users
     study_df["S1"] = np.repeat(np.nan, max_calendar_t * args.n)
     study_df["S2"] = np.repeat(np.nan, max_calendar_t * args.n)
     study_df["S3"] = np.repeat(np.nan, max_calendar_t * args.n)
+    study_df["S1_next"] = np.repeat(np.nan, max_calendar_t * args.n)
+    study_df["S2_next"] = np.repeat(np.nan, max_calendar_t * args.n)
+    study_df["S3_next"] = np.repeat(np.nan, max_calendar_t * args.n)
     study_df["dosage"] = np.repeat(np.nan, max_calendar_t * args.n)
 
     return study_df
@@ -432,7 +435,9 @@ class MiwavesEnv:
             }
     
     def create_state(self, user, time_of_day):
-        """Create the state vector for the given features and decision point index"""
+        """Create the state vector for the given features and decision point index
+        time_of_day: 0 or 1
+        """
         avg_reward = np.mean(self.user_data[user]["reward"][-3:])
 
         # create S1: recent engagement
@@ -556,11 +561,14 @@ class MiwavesEnv:
         ## update S1, S2, S3
         temp_df = study_df.loc[cont_user_current_bool, :]
         next_state = []
+        # breakpoint()
         for i in range(temp_df.shape[0]):
-            assert temp_df.iloc[i]["time_of_day"] == ((t+1) % 2)
-            next_state.append(self.create_state(i, (t+1) % 2))
+            assert temp_df.iloc[i]["time_of_day"] == ((t-1) % 2) # t=1, -> 0, 1 
+            # next_state.append(self.create_state(i, (t+1) % 2))
+            next_state.append(self.create_state(i, t % 2)) # need to flip the time of day
         next_state = np.vstack(next_state)
         study_df.loc[cont_user_next_bool, ["S1", "S2", "S3"]] = next_state
+        study_df.loc[cont_user_current_bool, ["S1_next", "S2_next", "S3_next"]] = next_state
         
         
         ## update dosage: for each user at the next time step, compute dosage based on last 6 actions for the current time step
@@ -629,7 +637,7 @@ class MiwavesEnv:
             self.user_data[i]["act_prob"].append(action_prob[i])
             self.user_data[i]["real_reward"].append(rewards[i]) # original reward
             self.user_data[i]["reward"].append(rewards[i] - self.action_cost(i)) # received rewards for the algorithm update
-            self.user_data[i]["state"].append(self.create_state(i, time_of_day)) # next state !!!!!!!!!!
+            self.user_data[i]["state"].append(self.create_state(i, 1-time_of_day)) # next state !!!!!!!!!! flip the time of day
 
     # TODO: This doesn't work with n = 1
     def _sample_rewards_base(self, curr_timestep_data, actions, t):
@@ -663,10 +671,10 @@ class MiwavesEnv:
                 )
 
             if self.dropout > 0 and user in self.dropout_users:
-                X = format_data_for_prediction(dp_data, action, day, time_of_day, dosage)
+                X = format_data_for_prediction(dp_data, action, day, self.start_day, dosage)
                 probabilities = predict_probabilities(user_model, X, self.dropout)[0]
             else: # no habituation
-                X = format_data_for_prediction(dp_data, action, day, time_of_day)
+                X = format_data_for_prediction(dp_data, action, day, self.start_day)
                 probabilities = user_model.predict_proba(X)[0]
                 
             reward = self.rng.choice(user_model.classes_, p=probabilities)
@@ -756,6 +764,9 @@ class MiwavesEnv:
             "S1",
             "S2",
             "S3",
+            "S1_next",
+            "S2_next",
+            "S3_next",
             "dosage",
         ]
         study_df = make_base_study_df(

@@ -1,11 +1,18 @@
 #!/bin/bash
 set -eu
 
-echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Beginning simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Beginning simulation."
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
 
+
+# SAC hyperparameters (aligned with syn_SAC defaults)
+ridge_penalty=10.0 # 10.0
+epoch_actor=500
+lr_pi=10.0 # 10.0
+constant_ridge=0
+actor_ridge_penalty=0.01
 
 # Arguments that affect RL study simulation side
 T=60 # 60
@@ -13,13 +20,17 @@ decisions_between_updates=1 ##### important
 update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
-n=42 # 
+n=30 #
+reward_modification=0 # 0: no reward modification; 1: reward modification
+
+
 
 ######## new hyperparameters to set for Miwaves sim
-steepness=1.0 # 20/0.95=21.053
-miwaves_habituation=-1
+steepness=1.0 
+miwaves_habituation=1 # -1: no habituation; 1: high habituation, 6: low habituation
+miwaves_treatmenteffect=2 # 1: overall_low, 2: overall_high, 0:none
 
-RL_alg="fixed_randomization" #fixed_randomization, smooth_posterior_sampling
+RL_alg="sac"
 alg_state_feats="intercept,S1,S2,S3" # design state
 action_centering_RL=0
 lclip=0.2
@@ -27,10 +38,9 @@ uclip=0.8
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-prior_mean="2.12,0.0,0.0,-0.69,0.0,0.0,0.0,0.0" # Dim=8 for no action-centering; Dim=12 for action-centering; double everything if considering the intersection terms between states
-prior_var_upper_triangle="0.6084,0,0,0,0,0,0,0,0.1444,0,0,0,0,0,0,0.3844,0,0,0,0,0,0.9604,0,0,0,0,0.0729,0,0,0,0.1089,0,0,0.09,0,0.1024" # 8+7+6+5+4+3+2+1=36 elements for no action-centering
-noise_var=1.0
 act_cost_threshold=0.1 # need to be changed
+
+
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -40,14 +50,14 @@ calendar_t_col_name="calendar_t"
 user_id_col_name="user_id"
 action_prob_col_name="action1prob"
 reward_col_name="reward"
-action_prob_func_filename="functions_to_pass_to_analysis/smooth_thompson_sampling_act_prob_function_no_action_centering_Miwaves.py"
+action_prob_func_filename="functions_to_pass_to_analysis/Miwaves_get_action_1_prob_SAC.py"
 action_prob_func_args_beta_index=0
-alg_update_func_filename="functions_to_pass_to_analysis/Miwaves_BLR_estimating_function_no_action_centering_twoarmed.py"
+alg_update_func_filename="functions_to_pass_to_analysis/Miwaves_SAC_alg_update_function.py"
 alg_update_func_type="estimating"
 alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
-alg_update_func_args_previous_betas_index=-1 # for recursive algorithms; -1 if not used
+alg_update_func_args_previous_betas_index=1 # SAC recursive: 0 current beta, 1 previous beta
 inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
@@ -57,11 +67,12 @@ suppress_all_data_checks=0
 small_sample_correction="none"
 trim_small_singular_values=0
 collect_data_for_blowup_supervised_learning=0
-stabilize_joint_adaptive_bread_inverse=0
+stabilize_joint_adaptive_bread_inverse=0 # Miwaves SAC bread blocks are often ill-conditioned without this
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:z:J:K:O:k:m:-: OPT; do
+# Short opts: w=ridge, x=epoch_actor, v=lr_pi, W=constant_ridge; avoid H/T/R collisions.
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:F:L:M:Q:q:z:k:m:w:x:v:W:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -96,23 +107,27 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     B  | alg_update_func_args_beta_index )              needs_arg; alg_update_func_args_beta_index="$OPTARG" ;;
     D  | alg_update_func_args_action_prob_index )       needs_arg; alg_update_func_args_action_prob_index="$OPTARG" ;;
     j  | alg_update_func_args_action_prob_times_index ) needs_arg; alg_update_func_args_action_prob_times_index="$OPTARG" ;;
-    R  | alg_update_func_args_previous_betas_index )    needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
+    previous_betas_index | alg_update_func_args_previous_betas_index ) needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     I  | inference_func_filename )                      needs_arg; inference_func_filename="$OPTARG" ;;
     h  | inference_func_args_theta_index )              needs_arg; inference_func_args_theta_index="$OPTARG" ;;
     g  | inference_func_type )                          needs_arg; inference_func_type="$OPTARG" ;;
-    H  | theta_calculation_func_filename )              needs_arg; theta_calculation_func_filename="$OPTARG" ;;
+    theta_calculation_func_filename )                   needs_arg; theta_calculation_func_filename="$OPTARG" ;;
     F  | dynamic_seeds )                                needs_arg; dynamic_seeds="$OPTARG" ;;
     L  | env_seed_override )                            needs_arg; env_seed_override="$OPTARG" ;;
     M  | alg_seed_override )                            needs_arg; alg_seed_override="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )             needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                     needs_arg; suppress_all_data_checks="$OPTARG" ;;
     z  | small_sample_correction )                      needs_arg; small_sample_correction="$OPTARG" ;;
-    J  | prior_mean )                                   needs_arg; prior_mean="$OPTARG" ;;
-    K  | prior_var_upper_triangle )                     needs_arg; prior_var_upper_triangle="$OPTARG" ;;
-    O  | noise_var )                                    needs_arg; noise_var="$OPTARG" ;;
     k  | collect_data_for_blowup_supervised_learning )  needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
-
+    miwaves_habituation )                               needs_arg; miwaves_habituation="$OPTARG" ;;
+    miwaves_treatmenteffect )                           needs_arg; miwaves_treatmenteffect="$OPTARG" ;;
+    reward_modification )                               needs_arg; reward_modification="$OPTARG" ;;
+    w  | ridge_penalty )                                needs_arg; ridge_penalty="$OPTARG" ;;
+    x  | epoch_actor )                                  needs_arg; epoch_actor="$OPTARG" ;;
+    v  | lr_pi )                                        needs_arg; lr_pi="$OPTARG" ;;
+    W  | constant_ridge )                               needs_arg; constant_ridge="$OPTARG" ;;
+    V  | actor_ridge_penalty )                        needs_arg; actor_ridge_penalty="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -134,8 +149,7 @@ fi
 filename="_averagerewards"
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
-echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Beginning RL study simulation."
-# python rl_study_simulation.py \
+echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Beginning RL study simulation."
 python rl_study_simulation_modified.py \
   --T=$T \
   --N=1 \
@@ -155,54 +169,58 @@ python rl_study_simulation_modified.py \
   --min_update_time=$min_update_time \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
-  --prior_mean=$prior_mean \
-  --prior_var_upper_triangle=$prior_var_upper_triangle \
-  --noise_var=$noise_var \
-  --save_dir="n${n}_T${T}/0" \
+  --save_dir="Miwaves_sac_n${n}_T${T}/0" \
   --Twoarmed=0 \
   --filename=$filename \
   --act_cost_threshold=$act_cost_threshold \
-  --Miwaves_habituation=$miwaves_habituation
+  --Miwaves_habituation=$miwaves_habituation \
+  --Miwaves_treatmenteffect=$miwaves_treatmenteffect \
+  --reward_modification=$reward_modification \
+  --ridge_penalty=$ridge_penalty \
+  --epoch_actor=$epoch_actor \
+  --lr_pi=$lr_pi \
+  --constant_ridge=$constant_ridge \
+  --actor_ridge_penalty=$actor_ridge_penalty
 
-echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Finished RL study simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
 # This should really be output by that script or passed into it as an arg, but alas.
-output_folder="n${n}_T${T}/0/simulated_data/miwaves_alg=${RL_alg}_T=${T}_n=${n}_decisionBtwnUpdates=${decisions_between_updates}${filename}"
+output_folder="Miwaves_sac_n${n}_T${T}/0/decisionBtwnUpdates=${decisions_between_updates}_habituation=${miwaves_habituation}_treatment=${miwaves_treatmenteffect}_steepness=${steepness}_actorridge${actor_ridge_penalty}${filename}"
 
 # Do after-study analysis on the single algorithm run from above
-echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Beginning after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Beginning after-study analysis."
 
 ######### Using the package
-# lifejacket analyze \
-#   --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
-#   --action_prob_func_filename=$action_prob_func_filename \
-#   --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
-#   --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
-#   --alg_update_func_filename=$alg_update_func_filename \
-#   --alg_update_func_type=$alg_update_func_type \
-#   --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
-#   --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
-#   --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
-#   --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
-#   --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
-#   --inference_func_filename=$inference_func_filename \
-#   --inference_func_args_theta_index=$inference_func_args_theta_index \
-#   --inference_func_type=$inference_func_type \
-#   --theta_calculation_func_filename=$theta_calculation_func_filename \
-#   --in_study_col_name=$in_study_col_name \
-#   --action_col_name=$action_col_name \
-#   --policy_num_col_name=$policy_num_col_name \
-#   --calendar_t_col_name=$calendar_t_col_name \
-#   --user_id_col_name=$user_id_col_name \
-#   --action_prob_col_name=$action_prob_col_name \
-#   --reward_col_name=$reward_col_name \
-#   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
-#   --suppress_all_data_checks=$suppress_all_data_checks \
-#   --small_sample_correction=$small_sample_correction \
-#   --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
-#   --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
+lifejacket analyze \
+  --study_df_pickle="${output_folder}/exp=1/study_df.pkl" \
+  --action_prob_func_filename=$action_prob_func_filename \
+  --action_prob_func_args_pickle="${output_folder}/exp=1/pi_args.pkl" \
+  --action_prob_func_args_beta_index=$action_prob_func_args_beta_index \
+  --alg_update_func_filename=$alg_update_func_filename \
+  --alg_update_func_type=$alg_update_func_type \
+  --alg_update_func_args_pickle="${output_folder}/exp=1/rl_update_args.pkl" \
+  --alg_update_func_args_beta_index=$alg_update_func_args_beta_index \
+  --alg_update_func_args_action_prob_index=$alg_update_func_args_action_prob_index \
+  --alg_update_func_args_action_prob_times_index=$alg_update_func_args_action_prob_times_index \
+  --alg_update_func_args_previous_betas_index=$alg_update_func_args_previous_betas_index \
+  --inference_func_filename=$inference_func_filename \
+  --inference_func_args_theta_index=$inference_func_args_theta_index \
+  --inference_func_type=$inference_func_type \
+  --theta_calculation_func_filename=$theta_calculation_func_filename \
+  --in_study_col_name=$in_study_col_name \
+  --action_col_name=$action_col_name \
+  --policy_num_col_name=$policy_num_col_name \
+  --calendar_t_col_name=$calendar_t_col_name \
+  --user_id_col_name=$user_id_col_name \
+  --action_prob_col_name=$action_prob_col_name \
+  --reward_col_name=$reward_col_name \
+  --suppress_interactive_data_checks=$suppress_interactive_data_checks \
+  --suppress_all_data_checks=$suppress_all_data_checks \
+  --small_sample_correction=$small_sample_correction \
+  --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
+  --stabilize_joint_adaptive_bread_inverse=$stabilize_joint_adaptive_bread_inverse
 
-echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Ending after-study analysis."
+echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Ending after-study analysis."
 
-echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Finished simulation."
+echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Finished simulation."

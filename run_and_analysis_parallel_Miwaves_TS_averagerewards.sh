@@ -38,6 +38,7 @@ update_cadence_offset=0
 min_update_time=0
 recruit_t=1 # How many UPDATES between recruitments
 n=30 # 
+reward_modification=0 # 0: no reward modification; 1: reward modification
 
 ######## new hyperparameters to set for Miwaves sim
 steepness=10 # 20/0.95=21.053
@@ -143,6 +144,7 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     m  | stabilize_joint_adaptive_bread_inverse )       needs_arg; stabilize_joint_adaptive_bread_inverse="$OPTARG" ;;
     H  | miwaves_habituation )                          needs_arg; miwaves_habituation="$OPTARG" ;;
     T  | miwaves_treatmenteffect )                      needs_arg; miwaves_treatmenteffect="$OPTARG" ;;
+    R  | reward_modification )                          needs_arg; reward_modification="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -228,7 +230,8 @@ python rl_study_simulation_modified.py \
   --filename=$filename \
   --act_cost_threshold=$act_cost_threshold \
   --Miwaves_habituation=$miwaves_habituation \
-  --Miwaves_treatmenteffect=$miwaves_treatmenteffect
+  --Miwaves_treatmenteffect=$miwaves_treatmenteffect \
+  --reward_modification=$reward_modification
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 

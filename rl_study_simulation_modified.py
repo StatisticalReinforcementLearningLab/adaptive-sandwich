@@ -132,10 +132,10 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             study_env.end_decision_point(t, rewards, actions, action_probs) 
 
             #### Step 3: user modified rewards in study_df based on self.user_data's reward for the following update
-            # modified_rewards = [study_env.user_data[i]["reward"][0] for i in range(study_env.n)]
-            # study_df.loc[(study_df["calendar_t"] == t) & (study_df["in_study"] == 1), "reward"] = modified_rewards
-            # print(study_df)
-            
+            if args.reward_modification == 1:
+                modified_rewards = [study_env.user_data[i]["reward"][-1] for i in range(study_env.n)] # append, -1 is the latest reward
+                study_df.loc[(study_df["calendar_t"] == t) & (study_df["in_study"] == 1), "reward"] = modified_rewards
+                # print(study_df)
         else:
             raise ValueError("Invalid Dataset Type")
 
@@ -197,15 +197,16 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
 
 
             if args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
+                # update_data: [n, 21]
                 study_RLalg.update_alg(update_data, t) ######### incremental update for SAC, as opposed to TS that use all historical data
+                study_RLalg.collect_rl_update_args(all_prev_data, t) # [n, 21]
             else:
                 study_RLalg.update_alg(update_data) ######### important: update_data all users 
-
-            # NOTE: Very important that this is called AFTER the above update.
-            # It is a little confusing that the beta here is the beta that the
-            # rest of the data already produced, whereas for the pis the beta
-            # is used to produce the probability at that decision time.
-            study_RLalg.collect_rl_update_args(all_prev_data, t)
+                # NOTE: Very important that this is called AFTER the above update.
+                # It is a little confusing that the beta here is the beta that the
+                # rest of the data already produced, whereas for the pis the beta
+                # is used to produce the probability at that decision time.
+                study_RLalg.collect_rl_update_args(all_prev_data, t)
     return study_df, study_RLalg
 
 
@@ -267,9 +268,16 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
     elif args.dataset_type == RLStudyArgs.MIWAVES:
         # for both TS and SAC
         user_env_data = None
-        exp_str = (
-                f"decisionBtwnUpdates={args.decisions_between_updates}_habituation={args.Miwaves_habituation}_treatment={args.Miwaves_treatmenteffect}_steepness={args.steepness}{args.filename}" #### can be changed to distinguish different settings
+        if args.RL_alg == RLStudyArgs.SMOOTH_POSTERIOR_SAMPLING:
+            exp_str = (
+                f"decisionBtwnUpdates={args.decisions_between_updates}_habituation={args.Miwaves_habituation}_treatment={args.Miwaves_treatmenteffect}_steepness={args.steepness}{args.filename}" 
             )
+        elif args.RL_alg == RLStudyArgs.SOFT_ACTOR_CRITIC:
+            exp_str = (
+                f"decisionBtwnUpdates={args.decisions_between_updates}_habituation={args.Miwaves_habituation}_treatment={args.Miwaves_treatmenteffect}_steepness={args.steepness}_actorridge{args.actor_ridge_penalty}{args.filename}" #### can be changed to distinguish different settings
+            )
+        else:
+            raise ValueError("Invalid RL Algorithm Type For Miwaves Dataset")
 
     elif args.dataset_type == RLStudyArgs.ORALYTICS:
         raise NotImplementedError()
@@ -344,6 +352,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 err_corr=args.err_corr,
             )
         elif args.dataset_type == RLStudyArgs.MIWAVES:
+            # import the Miwaves environment and use it here
             study_env = MiwavesEnv(
                 args,
                 env_seed=env_seed,
@@ -417,6 +426,7 @@ def load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_f
                 epoch_actor=args.epoch_actor,
                 lr_pi=args.lr_pi,
                 constant_ridge=args.constant_ridge,
+                actor_ridge_penalty=args.actor_ridge_penalty,
             )
         
         else:
@@ -779,6 +789,19 @@ def main():
         type=int,
         default=0,
         help="1: constant ridge penalty, 0: decayed ridge penalty (classical)",
+    )
+
+    parser.add_argument(
+        "--reward_modification",
+        type=int,
+        default=0,
+        help="1: reward modification, 0: no reward modification in Miwaves",
+    )
+    parser.add_argument(
+        "--actor_ridge_penalty",
+        type=float,
+        default=0.0,
+        help="Ridge penalty for Soft Actor Critic's policy update",
     )
 
 

@@ -25,6 +25,10 @@ from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_SAC import (
     synthetic_get_action_1_prob_SAC,
 )
+from functions_to_pass_to_analysis.Miwaves_get_action_1_prob_SAC import (
+    Miwaves_get_action_1_prob_SAC,
+)
+
 
 from helper_functions import clip
 
@@ -125,7 +129,7 @@ def get_pis_batched_SAC_twoarmed(
     Miwaves,
 ):
     if Miwaves:
-        Function = synthetic_get_action_1_prob_SAC # can be further modified if needed
+        Function = Miwaves_get_action_1_prob_SAC 
     else:
         Function = synthetic_get_action_1_prob_SAC
     return jax.vmap(
@@ -813,6 +817,7 @@ class SoftActorCritic:
         epoch_actor=500, # epoch of actor update in SAC
         lr_pi=10.0, # learning rate for the actor
         constant_ridge=0, # 1: constant ridge penalty, 0: decayed ridge penalty (classical)
+        actor_ridge_penalty=0.0, # ridge penalty for the actor, default 0.0
     ):
         self.state_feats = state_feats # syn: ['intercept', 'past_reward']
         self.treat_feats = treat_feats # syn: ['intercept', 'past_reward']
@@ -827,19 +832,22 @@ class SoftActorCritic:
         self.pi_args = {}
         self.rl_update_args = {}
         self.lambda_entropy = 1.0 # entropy regularization coefficient, default 1.0
-        self.next_states_index = ['intercept', 'reward'] 
         
         self.twoarmed = twoarmed ##### new
         self.Miwaves = Miwaves ##### new
 
+        # Synthetic: S_{t+1}=(1, R_t) lives on the current row as ['intercept', 'reward'].
+        # Miwaves: S_{t+1}=(1,S1_next,S2_next,S3_next) lives on the t+1 row as ['intercept','S1_next', 'S2_next', 'S3_next'].
         if self.Miwaves:
-            self.lr_pi = 10.0
-            self.ridge_penalty = ridge_penalty 
+            self.next_states_index = ['intercept','S1_next', 'S2_next', 'S3_next']
         else:
-            self.lr_pi = lr_pi # default 10.0, which is aggressive
-            # self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
-            self.ridge_penalty = ridge_penalty 
-            self.constant_ridge = constant_ridge
+            self.next_states_index = ['intercept', 'reward']
+
+        self.lr_pi = lr_pi # default 10.0, which is aggressive
+        # self.ridge_penalty = 1.0 * 30 / n # 10,0: sacrifice RL performance, 1.0: perform well, 1e-3: not stable
+        self.ridge_penalty = ridge_penalty 
+        self.actor_ridge_penalty = actor_ridge_penalty
+        self.constant_ridge = constant_ridge
         print('self.ridge_penalty', self.ridge_penalty)
         self.gamma = 0.99
         
@@ -853,7 +861,10 @@ class SoftActorCritic:
         self.tau = 0.0 # Polyak for target network, tau=0: only based on the last step's critic, i.e., self.betaQ_tar = self.betaQ; tau=1: only based on the (initial) target critic, i.e., self.betaQ_tar = self.betaQ_tar = intialization (always a fixed target Q)
         self.decay=0.5 # learning rate decay for the actor, default 0.5
         self.epoch_actor = epoch_actor # default: 500 vs 1000
-        self.threshold_earlystopping = 1e-5 # default 1e-5 cs 1e-7
+        if self.Miwaves:
+            self.threshold_earlystopping = 1e-5
+        else: # synthetic
+            self.threshold_earlystopping = 1e-5 # default 1e-7
         self.all_policies = [
             {
                 "beta_est": jnp.concatenate([self.betaQ_tar, self.betapi_tar]),
@@ -910,6 +921,7 @@ class SoftActorCritic:
 
     # TODO: Docstring
     def get_states(self, df):
+        # df: [n, 21]
         base_states = df[self.state_feats].to_numpy()
         treat_states = df[self.treat_feats].to_numpy() # same as base_states
         next_states = df[self.next_states_index].to_numpy()
@@ -965,8 +977,12 @@ class SoftActorCritic:
         
         def neg_obj(beta_pi):
             # only update the actor parameters given self.betaQ
-            return -self.policy_objective(beta_pi, self.betaQ_tar, base_states, treat_states, actions) # here we use self.betaQ_tar
-        
+            policyloss =  -self.policy_objective(beta_pi, self.betaQ_tar, base_states, treat_states, actions) # here we use self.betaQ_tar
+            if self.Miwaves:
+                actor_ridge_penalty = self.actor_ridge_penalty * jnp.linalg.norm(beta_pi) ** 2
+                return policyloss + actor_ridge_penalty
+            else:
+                return policyloss
 
         ################### [Incremental] Update Critic give the last step's policy
         # close-form solution 
@@ -998,7 +1014,7 @@ class SoftActorCritic:
         if self.constant_ridge:
             betaQ = jnp.linalg.solve(XTX + n_realunits * self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
         else:# classical: decayed ridge penalty
-            betaQ = jnp.linalg.solve(XTX + self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # closed-form solution instead of gradient descent (4,)
+            betaQ = jnp.linalg.solve(XTX + self.ridge_penalty * jnp.eye(XTX.shape[0]), XTY) # recommended version
         residuals = TD_target - current_Q_states @ betaQ # (n,)
         vector_Q = -2* current_Q_states * residuals.reshape(-1,1) # (n, 4) * (n, 1) -> (n, 4)
         if self.constant_ridge:
@@ -1030,7 +1046,6 @@ class SoftActorCritic:
                 break
             if (i+1) % 50 == 0:
                 print(f"DecisionTime {t}, SAC update step {i}/{self.epoch_actor}, actor gradient: {grad_beta_pi}, loss before: {loss_pre:.3f}, loss after: {loss_after:.3f}", 'betapi', self.betapi, 'lr_pi', self.lr_pi_use)
-            
             if i % 200 == 0 and i >0:
                 self.lr_pi_use = self.lr_pi_use * self.decay # decay the learning rate for the actor
         vector_pi = gradient_pi(self.betapi, self.betaQ_tar) # (n, 2)
@@ -1131,6 +1146,7 @@ class SoftActorCritic:
                     self.steepness,
                     self.ridge_penalty,
                     self.constant_ridge,
+                    self.actor_ridge_penalty,
                     self.gamma,
                     self.get_Zids(in_study_user_data), # (1,1)
                     self.beta_init,

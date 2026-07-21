@@ -14,8 +14,8 @@ oralytics_sample_data/Archive/exps/*
 mixed_effects_sample_data/results/*
 *.pyc
 n*_T*/
-Miwaves_TS_n*_T60/*
-Miwaves_sac_n*_T60/
+Miwaves_TS_n*_T*/
+Miwaves_sac_n*_T*/
 src/
 oldcode/
 src/lifejacket

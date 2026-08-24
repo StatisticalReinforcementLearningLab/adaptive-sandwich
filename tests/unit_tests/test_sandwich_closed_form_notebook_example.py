@@ -220,10 +220,10 @@ def package_pipeline_outputs(beta_and_theta_estimates):
         )
 
     # At t=1 no update has happened yet, so the policy is the fixed, non-adaptive
-    # initial one (probability 0.5 for any beta); at t=2 the policy is governed by
-    # beta_hat, so the raw ("denominator") beta placed here must match beta_hat
-    # exactly for the Radon-Nikodym weight to evaluate to 1, as it should whenever
-    # the deployed beta and the beta being differentiated coincide.
+    # initial one (encoded here via beta=0, which yields action probability 0.5 with
+    # synthetic_get_action_1_prob_pure); at t=2 the policy is governed by beta_hat,
+    # so the raw ("denominator") beta placed here must match beta_hat exactly for
+    # the Radon-Nikodym weight to evaluate to 1 when differentiating at beta_hat.
     action_prob_func_args_by_subject_id_by_decision_time = {
         1: {
             1: intercept_action_args(jnp.zeros(2, dtype=jnp.float32)),

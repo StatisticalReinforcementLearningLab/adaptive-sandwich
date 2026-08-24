@@ -31,7 +31,12 @@ from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_sq
 
 from lifejacket import post_deployment_analysis
 from lifejacket.constants import FunctionTypes
-from lifejacket.arg_threading_helpers import replace_tuple_index
+from lifejacket.arg_threading_helpers import (
+    replace_tuple_index,
+    thread_action_prob_func_args,
+    thread_inference_func_args,
+    thread_update_func_args,
+)
 from lifejacket.helper_functions import get_radon_nikodym_weight
 
 
@@ -1938,6 +1943,146 @@ def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_upd
         inference_func_args_by_user_id,
         inference_action_prob_decision_times_by_user_id,
     )
+
+
+def test_batched_and_reference_implementations_agree_per_subject_incremental_recruitment(
+    setup_data_two_loss_functions_no_action_probs_incremental_recruitment,  # pylint: disable=redefined-outer-name
+):
+    """
+    Cross-checks the batched get_avg_weighted_estimating_function_stacks_and_aux_values
+    (ADS-139 Step 4) against the retained, un-batched
+    post_deployment_analysis._reference_single_subject_weighted_estimating_function_stacker
+    (the pre-Step-4 per-subject implementation), row by row, on the same
+    incremental-recruitment fixture used above. This is a strictly finer
+    check than comparing only the averaged stack (test above) or per-subject
+    outer products: a scatter/gather indexing bug in the batched path could
+    still cancel out in an outer product but not in the raw per-subject
+    stack compared here directly.
+    """
+    (
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    ) = setup_data_two_loss_functions_no_action_probs_incremental_recruitment
+
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+        ]
+    )
+    user_ids = jnp.array([1, 2])
+    beta_dim = all_post_update_betas.shape[1]
+
+    batched_result = post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        beta_dim,
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+        True,
+        True,
+    )
+    per_subject_stacks = batched_result[1][4]
+
+    algorithm_estimating_func = jax.grad(alg_update_func, allow_int=True)
+    inference_estimating_func = jax.grad(inference_func, allow_int=True)
+
+    (
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
+        action_prob_func_args_by_decision_time_by_subject_id,
+    ) = thread_action_prob_func_args(
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        all_post_update_betas,
+        beta_index_by_policy_num,
+        action_prob_func_args_beta_index,
+    )
+    threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
+        update_func_args_by_by_user_id_by_policy_num,
+        all_post_update_betas,
+        beta_index_by_policy_num,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
+        action_prob_func,
+    )
+    threaded_inference_func_args_by_subject_id = thread_inference_func_args(
+        inference_func_args_by_user_id,
+        inference_func_args_theta_index,
+        theta,
+        inference_func_args_action_prob_index,
+        threaded_action_prob_func_args_by_decision_time_by_subject_id,
+        inference_action_prob_decision_times_by_user_id,
+        action_prob_func,
+    )
+
+    for i, subject_id in enumerate(user_ids.tolist()):
+        reference_stack = post_deployment_analysis._reference_single_subject_weighted_estimating_function_stacker(
+            beta_dim,
+            subject_id,
+            action_prob_func,
+            algorithm_estimating_func,
+            inference_estimating_func,
+            action_prob_func_args_beta_index,
+            inference_func_args_theta_index,
+            action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+            threaded_action_prob_func_args_by_decision_time_by_subject_id[subject_id],
+            threaded_update_func_args_by_policy_num_by_subject_id[subject_id],
+            threaded_inference_func_args_by_subject_id[subject_id],
+            policy_num_by_decision_time_by_user_id[subject_id],
+            action_by_decision_time_by_user_id[subject_id],
+            beta_index_by_policy_num,
+            include_auxiliary_outputs=False,
+        )
+        np.testing.assert_allclose(
+            per_subject_stacks[i],
+            reference_stack,
+            rtol=1e-6,
+            err_msg=f"Batched and reference implementations disagree for subject {subject_id}.",
+        )
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_multiple_decisions_between_updates(

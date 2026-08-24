@@ -68,3 +68,36 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
         batched_arg_tensors,
         batch_axes,
     )
+
+
+def build_batched_arg_lists_by_subject(
+    group_subject_ids: list[collections.abc.Hashable],
+    args_by_subject_id: dict[collections.abc.Hashable, tuple],
+) -> list[list]:
+    """
+    Stack a dict of {subject_id: args_tuple} (all sharing the same arg count,
+    e.g. one group_user_args_by_shape bucket) into a list of per-position
+    Python lists, in the exact subject order given.
+
+    Deliberately derives the argument count from the data itself
+    (len(args_by_subject_id[...])) rather than function introspection
+    (calculate_derivatives.get_batched_arg_lists_and_involved_user_ids uses
+    func.__code__.co_argcount, which is correct for a raw, undecorated
+    function but wrong for a jax.grad(...)-wrapped one -- its __code__
+    reflects the wrapper's own *args-style signature, not the wrapped
+    function's).
+    """
+    num_args = len(args_by_subject_id[group_subject_ids[0]])
+    return [
+        [args_by_subject_id[subject_id][idx] for subject_id in group_subject_ids]
+        for idx in range(num_args)
+    ]
+
+
+def batch_args_by_subject(
+    group_subject_ids: list[collections.abc.Hashable],
+    args_by_subject_id: dict[collections.abc.Hashable, tuple],
+) -> tuple[list, list[int]]:
+    return stack_batched_arg_lists_into_tensors(
+        build_batched_arg_lists_by_subject(group_subject_ids, args_by_subject_id)
+    )

@@ -482,6 +482,26 @@ def compute_subject_radon_nikodym_weights(
         subject_start_time = min(subject_start_time, decision_time)
         subject_end_time = max(subject_end_time, decision_time)
 
+    # Fail loudly here rather than letting active_index (below) silently
+    # misalign or overrun active_weights on a genuine intra-window gap (this
+    # subject active, then inactive, then active again, within their own
+    # [subject_start_time, subject_end_time]) -- see
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4. This
+    # protects every caller of this shared function identically.
+    gap_times = [
+        decision_time
+        for decision_time in range(int(subject_start_time), int(subject_end_time) + 1)
+        if not action_prob_func_args_by_decision_time.get(decision_time)
+    ]
+    if gap_times:
+        raise ValueError(
+            f"Subject has an intra-window gap (inactive at decision time(s) "
+            f"{gap_times}, strictly between their own first active time "
+            f"{subject_start_time} and last active time {subject_end_time}), "
+            "which violates the 'once active, stays active with no re-entry' "
+            "invariant this Radon-Nikodym weight-window logic assumes."
+        )
+
     active_action_prob_func_args = [
         args for args in action_prob_func_args_by_decision_time.values() if args
     ]

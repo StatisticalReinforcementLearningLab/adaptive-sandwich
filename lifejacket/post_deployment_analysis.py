@@ -19,6 +19,15 @@ from .arg_threading_helpers import (
     thread_inference_func_args,
     thread_update_func_args,
 )
+from .batched_weighted_estimating_function_stack import (
+    build_action_prob_layer_precompute,
+    build_inference_layer_precompute,
+    build_update_layer_precompute,
+    compute_action_prob_layer_outputs,
+    compute_batched_algorithm_component,
+    compute_batched_inference_outputs,
+    compute_windowed_weight_products,
+)
 from .constants import (
     FunctionTypes,
     SandwichFormationMethods,
@@ -975,7 +984,14 @@ def process_inference_func_args(
     )
 
 
-def single_subject_weighted_estimating_function_stacker(
+# Kept only as a slow, obviously-correct oracle for cross-checking the
+# batched implementation in tests (see
+# test_batched_and_reference_implementations_agree_per_subject_incremental_recruitment
+# in tests/unit_tests/test_post_deployment_analysis.py) -- unused by
+# get_avg_weighted_estimating_function_stacks_and_aux_values or any other
+# production code path since ADS-139 Step 4. See
+# docs/adr/0001-adaptive-sandwich-performance-plan.md.
+def _reference_single_subject_weighted_estimating_function_stacker(
     beta_dim: int,
     subject_id: collections.abc.Hashable,
     action_prob_func: callable,
@@ -1366,117 +1382,162 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         beta_dim,
         theta_dim,
     )
+    subject_ids_np = np.asarray(subject_ids.tolist())
 
-    # 2. Thread in the betas and theta in all_post_update_betas_and_theta into the arguments
-    # supplied for the above functions, so that differentiation works correctly.  The existing
-    # values should be the same, but not connected to the parameter we are differentiating
-    # with respect to. Note we will also find it useful below to have the action probability args
-    # nested dict structure flipped to be subject_id -> decision_time -> args, so we do that here too.
-
-    logger.info("Threading in betas to action probability arguments for all subjects.")
-    (
-        threaded_action_prob_func_args_by_decision_time_by_subject_id,
-        action_prob_func_args_by_decision_time_by_subject_id,
-    ) = thread_action_prob_func_args(
+    # 2. One-time, plain-numpy structural precompute (never touches betas/theta
+    # values -- only which cells are active and which policy/action applied).
+    # This replaces the ragged per-subject/per-update Python loops with a
+    # small, fixed number of jax.vmap calls below. See
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4.
+    action_prob_layer = build_action_prob_layer_precompute(
+        subject_ids_np,
         action_prob_func_args_by_subject_id_by_decision_time,
+        action_by_decision_time_by_subject_id,
         policy_num_by_decision_time_by_subject_id,
-        initial_policy_num,
-        betas,
         beta_index_by_policy_num,
+        initial_policy_num,
         action_prob_func_args_beta_index,
     )
-
-    # 3. Thread the central betas into the algorithm update function arguments
-    # and replace any action probabilities with reconstructed ones from the above
-    # arguments with the central betas introduced.
-    logger.info(
-        "Threading in betas and beta-dependent action probabilities to algorithm update "
-        "function args for all subjects"
-    )
-    threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
+    update_layer = build_update_layer_precompute(
+        subject_ids_np,
         update_func_args_by_by_subject_id_by_policy_num,
-        betas,
         beta_index_by_policy_num,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        alg_update_func_args_previous_betas_index,
-        threaded_action_prob_func_args_by_decision_time_by_subject_id,
-        action_prob_func,
+        action_prob_layer,
     )
-
-    # If action probabilites are used in the algorithm estimating function, make
-    # sure that substituting in the reconstructed action probabilities is approximately
-    # equivalent to using the original action probabilities.
-    if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
-        input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
-            algorithm_estimating_func,
-            update_func_args_by_by_subject_id_by_policy_num,
-            threaded_update_func_args_by_policy_num_by_subject_id,
-            suppress_interactive_data_checks,
-        )
-
-    # 4. Thread the central theta into the inference function arguments
-    # and replace any action probabilities with reconstructed ones from the above
-    # arguments with the central betas introduced.
-    logger.info(
-        "Threading in theta and beta-dependent action probabilities to inference update "
-        "function args for all subjects"
+    need_pi_beta_grid = (
+        alg_update_func_args_action_prob_index >= 0
+        or inference_func_args_action_prob_index >= 0
     )
-    threaded_inference_func_args_by_subject_id = thread_inference_func_args(
+    inference_layer = build_inference_layer_precompute(
         inference_func_args_by_subject_id,
-        inference_func_args_theta_index,
-        theta,
         inference_func_args_action_prob_index,
-        threaded_action_prob_func_args_by_decision_time_by_subject_id,
         inference_action_prob_decision_times_by_subject_id,
-        action_prob_func,
+        action_prob_layer,
     )
 
-    # If action probabilites are used in the inference estimating function, make
-    # sure that substituting in the reconstructed action probabilities is approximately
-    # equivalent to using the original action probabilities.
-    if not suppress_all_data_checks and inference_func_args_action_prob_index >= 0:
-        input_checks.require_threaded_inference_estimating_function_args_equivalent(
-            inference_estimating_func,
-            inference_func_args_by_subject_id,
-            threaded_inference_func_args_by_subject_id,
-            suppress_interactive_data_checks,
-        )
-
-    # 5. Now we can compute the weighted estimating function stacks for all subjects
-    # as well as collect related values used to construct the adjusted and classical
-    # sandwich variances.
-    results = [
-        single_subject_weighted_estimating_function_stacker(
-            beta_dim,
-            subject_id,
-            action_prob_func,
-            algorithm_estimating_func,
-            inference_estimating_func,
-            action_prob_func_args_beta_index,
-            inference_func_args_theta_index,
-            action_prob_func_args_by_decision_time_by_subject_id[subject_id],
-            threaded_action_prob_func_args_by_decision_time_by_subject_id[subject_id],
-            threaded_update_func_args_by_policy_num_by_subject_id[subject_id],
-            threaded_inference_func_args_by_subject_id[subject_id],
-            policy_num_by_decision_time_by_subject_id[subject_id],
-            action_by_decision_time_by_subject_id[subject_id],
+    # 3. Data checks: if action probabilities are used in the algorithm or
+    # inference estimating functions, make sure that substituting in the
+    # reconstructed action probabilities (as the batched computation below
+    # does) is approximately equivalent to using the original action
+    # probabilities. This deliberately still runs via the original,
+    # per-subject threading functions -- it is opt-out via
+    # suppress_all_data_checks and is not part of the main computation the
+    # batched path replaces. See the ADR, Step 4, for the residual cost this
+    # retains when checks are not suppressed.
+    if (not suppress_all_data_checks) and (
+        alg_update_func_args_action_prob_index >= 0
+        or inference_func_args_action_prob_index >= 0
+    ):
+        logger.info("Threading in betas to action probability arguments for all subjects.")
+        (
+            threaded_action_prob_func_args_by_decision_time_by_subject_id,
+            _action_prob_func_args_by_decision_time_by_subject_id,
+        ) = thread_action_prob_func_args(
+            action_prob_func_args_by_subject_id_by_decision_time,
+            policy_num_by_decision_time_by_subject_id,
+            initial_policy_num,
+            betas,
             beta_index_by_policy_num,
+            action_prob_func_args_beta_index,
         )
-        for subject_id in subject_ids.tolist()
-    ]
+        if alg_update_func_args_action_prob_index >= 0:
+            logger.info(
+                "Threading in betas and beta-dependent action probabilities to algorithm "
+                "update function args for all subjects"
+            )
+            threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
+                update_func_args_by_by_subject_id_by_policy_num,
+                betas,
+                beta_index_by_policy_num,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
+                threaded_action_prob_func_args_by_decision_time_by_subject_id,
+                action_prob_func,
+            )
+            input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
+                algorithm_estimating_func,
+                update_func_args_by_by_subject_id_by_policy_num,
+                threaded_update_func_args_by_policy_num_by_subject_id,
+                suppress_interactive_data_checks,
+            )
+        if inference_func_args_action_prob_index >= 0:
+            logger.info(
+                "Threading in theta and beta-dependent action probabilities to inference "
+                "update function args for all subjects"
+            )
+            threaded_inference_func_args_by_subject_id = thread_inference_func_args(
+                inference_func_args_by_subject_id,
+                inference_func_args_theta_index,
+                theta,
+                inference_func_args_action_prob_index,
+                threaded_action_prob_func_args_by_decision_time_by_subject_id,
+                inference_action_prob_decision_times_by_subject_id,
+                action_prob_func,
+            )
+            input_checks.require_threaded_inference_estimating_function_args_equivalent(
+                inference_estimating_func,
+                inference_func_args_by_subject_id,
+                threaded_inference_func_args_by_subject_id,
+                suppress_interactive_data_checks,
+            )
 
-    stacks = jnp.array([result[0] for result in results])
+    # 4. Batched forward computation: one jax.vmap call spanning every
+    # subject and every global decision time for the Radon-Nikodym weights,
+    # plus O(updates * shape buckets) jax.vmap calls for the algorithm and
+    # inference estimating functions, instead of one Python-dispatched call
+    # per subject (or per subject per update).
+    raw_weight_grid, pi_beta_grid = compute_action_prob_layer_outputs(
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        action_prob_layer,
+        betas,
+        need_pi_beta_grid,
+    )
+    rl_weight_products, inference_weight_products = compute_windowed_weight_products(
+        raw_weight_grid,
+        action_prob_layer.active_mask,
+        action_prob_layer.lo_idx,
+        update_layer.hi_idx,
+        action_prob_layer.subject_end_idx,
+    )
+
+    algorithm_component = compute_batched_algorithm_component(
+        betas,
+        beta_dim,
+        algorithm_estimating_func,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+        action_prob_layer,
+        update_layer,
+        pi_beta_grid,
+        rl_weight_products,
+    )
+    inference_component, inference_hessians = compute_batched_inference_outputs(
+        theta,
+        theta_dim,
+        inference_estimating_func,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_layer,
+        inference_layer,
+        pi_beta_grid,
+        inference_weight_products,
+        need_hessians=include_auxiliary_outputs,
+    )
+
+    stacks = jnp.concatenate([algorithm_component, inference_component], axis=1)
 
     if not include_auxiliary_outputs:
         return jnp.mean(stacks, axis=0)
 
-    outer_products = jnp.array([result[1] for result in results])
-    inference_only_outer_products = jnp.array([result[2] for result in results])
-    inference_hessians = jnp.array([result[3] for result in results])
+    outer_products = jax.vmap(jnp.outer)(stacks, stacks)
+    inference_only_outer_products = jax.vmap(jnp.outer)(inference_component, inference_component)
 
-    # 6. Note this strange return structure! We will differentiate the first output,
+    # 5. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the estimating functions sum check, per_subject_classical_bread_contributions, and
     # classical meat and inverse read matrices. The raw per-subject stacks are also returned for

@@ -1,7 +1,9 @@
 # 0001. Performance plan for the adjusted sandwich computation
 
 - Status: Accepted (Steps 0-2 and three correctness bugs below are done; Step 3 was attempted and
-  reverted -- see "Step 3 attempted and reverted" below; Steps 4-5 are proposed, not yet implemented)
+  reverted -- see "Step 3 attempted and reverted" below; Step 4 is done -- see "Step 4: padded +
+  masked jax.vmap batching" below; Step 3 is unblocked but not yet re-attempted; Step 5 remains
+  proposed)
 - Date: 2026-08-24
 - Ticket: ADS-139
 
@@ -82,8 +84,8 @@ suite (numerical regression + timing) and the existing test suite:
 | - | Fix correctness bugs found while investigating (below) | **Done** |
 | 1 | Vectorize the eager per-row/per-subject checks in `input_checks.py` (they run by default in real usage, not just diagnostics) | **Done** |
 | 2 | Extract the (currently byte-identical) triplicated Radon-Nikodym weight-computation block into one shared function | **Done** |
-| 3 | Wrap the `jax.jacrev` hot path in `jax.jit` | **Attempted and reverted** -- see below; net regression, not a win |
-| 4 | Convert the ragged per-subject/per-update Python loops to padded + masked `jax.vmap`/`jax.lax.scan` | Proposed, high effort/risk -- now believed to be a **prerequisite for Step 3 to help at all**, not an independent follow-on |
+| 3 | Wrap the `jax.jacrev` hot path in `jax.jit` | **Attempted and reverted** -- see below; net regression, not a win. **Unblocked by Step 4, not yet re-attempted.** |
+| 4 | Convert the ragged per-subject/per-update Python loops to padded + masked `jax.vmap`/`jax.lax.scan` | **Done** -- see "Step 4: padded + masked `jax.vmap` batching" below |
 | 5 | Exploit block-lower-triangular Jacobian sparsity (roughly half the joint bread matrix is analytically zero) | Deferred -- see below |
 
 Steps 1-2 turned out to have a real but small effect at the scales
@@ -164,6 +166,193 @@ entirely, rather than leaving them in place unused -- once `jax.jit` isn't
 applied, `jax.jacrev`'s own forward pass already runs the checks exactly
 once (same as the hoisted version would), so the extra machinery had no
 remaining purpose and would just have been unexercised complexity.
+
+### Step 4: padded + masked `jax.vmap` batching (done)
+
+Implemented in `lifejacket/batched_weighted_estimating_function_stack.py`
+(new module) and wired into
+`get_avg_weighted_estimating_function_stacks_and_aux_values`
+(`post_deployment_analysis.py`), replacing that function's O(subjects) and
+O(subjects x updates) Python loops with:
+
+- A one-time, plain-numpy structural precompute
+  (`build_action_prob_layer_precompute`, `build_update_layer_precompute`,
+  `build_inference_layer_precompute`) that converts the ragged
+  action-prob-args / update-args / inference-args into fixed-size `(N, T,
+  ...)` padded tensors plus boolean validity masks. Every invalid cell is
+  **self-padded**: filled with that same subject's own real data from their
+  nearest active time (forward/backward-filled), never a fabricated
+  constant.
+- A single `jax.vmap` call spanning every subject and every global decision
+  time at once for the Radon-Nikodym weight computation
+  (`compute_action_prob_layer_outputs`), replacing what used to be one
+  small `jax.vmap` dispatched per subject.
+- A **cumulative-product-with-reset** construction for the weight-window
+  product (`compute_windowed_weight_products`): invalid/out-of-window
+  positions are reset to the multiplicative identity `1.0` before one
+  `jnp.cumprod` runs, never a division of prefix products (which would risk
+  a spurious `0/0` from an unrelated clipped weight earlier in time).
+- Shape-bucketed `jax.vmap` (reusing `calculate_derivatives.group_user_args_by_shape`,
+  the same machinery `input_checks.py`'s equivalence checks already used
+  for this identical problem) for the algorithm and inference estimating
+  functions, since subjects at a given update do **not** all share
+  argument shape in general (incremental recruitment means two subjects
+  present at the same update can have different accumulated-row counts,
+  and `alg_update_func`s here reduce over that row axis -- padding it would
+  silently change the answer, so bucketing by shape, not padding, is used
+  for this axis).
+- `previous_post_update_betas` needed no special-case handling: traced
+  directly, this argument's *content* is never actually read by
+  `thread_update_func_args` (only its length is, to slice `betas`), and
+  every `alg_update_func` this repo ships supplies the identical value to
+  every subject at a given update -- so a plain broadcast is correct. This
+  is checked, not assumed: `compute_batched_algorithm_component` raises a
+  clear `ValueError` if two subjects in the same shape bucket ever have
+  non-matching previous-betas content.
+- The intra-window-gap invariant the original code's `active_index`
+  bookkeeping implicitly relied on (a subject, once active, stays active
+  with no drop-out/re-entry) is now an explicit, loud `ValueError` --
+  `assert_no_intra_window_gaps` in the new module (for the batched path)
+  and a matching guard added directly to the shared
+  `compute_subject_radon_nikodym_weights` (`helper_functions.py`, protecting
+  its other two callers too -- see "Known follow-ups" below).
+
+**Scope: this pass touches only `post_deployment_analysis.py`.**
+`deployment_conditioning_monitor.py` and
+`get_datum_for_blowup_supervised_learning.py` still use the original,
+un-batched per-subject implementation (via the same shared
+`compute_subject_radon_nikodym_weights`). This was a deliberate choice, not
+an oversight: `post_deployment_analysis.py` is the only one of the three
+`tests/benchmarks` actually measures, the three files have genuinely
+different shapes (`only_latest_block` filtering, RL-only vs. inference-only,
+differing return-tuple arity), and landing a brand-new vectorization
+pattern once, validated thoroughly, was judged lower total risk than
+repeating it three times in one pass -- especially as the highest-risk step
+in this plan, immediately following Step 3's regression. Porting the same
+pattern to the other two files is the natural next step if their
+performance ever becomes a concern; the shape-bucketed-vmap helpers here
+are not `post_deployment_analysis.py`-specific and should be close to
+directly reusable.
+
+**Result, both benchmark scales** (`tests/benchmarks`, re-measured per this
+ADR's own Step 3 postmortem warning not to trust one scale):
+
+| Scale | `jax.jacrev(...)` before Step 4 | after Step 4 |
+|---|---|---|
+| small (n=20, T=6) | ~5-6s | ~3.3s |
+| medium (n=100, T=10) | ~22-25s | ~8-12s |
+
+A real, meaningful win at both scales, and -- per the whole point of this
+step -- it should now give `jax.jit` a small number of batched, compile-once
+kernels instead of a massive unrolled graph. Re-attempting Step 3 on top of
+this is the natural next step, not yet done.
+
+**Numerical fixtures needed regenerating, and this was verified, not
+assumed.** Batching the weight-window product changes the floating-point
+*order of operations* relative to the original per-subject `jnp.prod`
+(different summation/multiplication order under `jax.vmap`'s SIMD
+execution), producing float32 reassociation noise on the order of `1e-9` to
+`1.5e-5` absolute in the joint bread matrix and downstream sandwich
+matrices -- exceeding the existing `rtol=1e-6`/`atol=1e-5`/`atol=1e-8`
+tolerances in `tests/benchmarks` and all four `tests/integration_tests`
+fixtures. Before regenerating anything, this was confirmed to be noise, not
+a bug: `theta_est` and `classical_sandwich_var_estimate` (quantities the
+batched weight computation does not touch) matched the pre-Step-4 golden
+values **bit-for-bit** in every case; only `adjusted_sandwich_var_estimate`
+and the joint bread matrix (which the batched weight computation *does*
+feed) differed, by exactly the reassociation-scale amount; and the
+independent closed-form regression test
+(`tests/unit_tests/test_sandwich_closed_form_notebook_example.py`, which
+derives its expected values from first principles, not from a golden
+pickle) passed unchanged. `tests/benchmarks/fixtures/{small,medium}/golden_analysis.pkl`
+and all four `tests/integration_tests/*/expected_*.pkl` were then
+regenerated from fresh, deterministic (fixed-seed) runs of the new code.
+Regenerating the integration fixtures also surfaced two pre-existing,
+unrelated legacy key-naming mismatches in `tests/utils.py`'s comparison
+(`joint_bread_inverse_matrix` vs. the current `raw_joint_bread_matrix`;
+`adaptive_sandwich_var_estimate` vs. the current `adjusted_sandwich_var_estimate`)
+-- worked around by preserving the old key names inside the regenerated
+fixtures (not by changing the shared `tests/utils.py` comparison code),
+keeping this fix scoped to data, not test infrastructure.
+
+**Known follow-ups, deliberately not done in this pass** (found by an
+adversarial code review after implementation; the concrete correctness
+regressions it found were fixed immediately -- see below -- these are the
+ones left as documented, lower-priority gaps):
+
+- The intra-window-gap guard added to `compute_subject_radon_nikodym_weights`
+  now also protects `deployment_conditioning_monitor.py` and
+  `get_datum_for_blowup_supervised_learning.py` (both call it), but neither
+  file's own input-check entry point (`perform_alg_only_input_checks`, or no
+  check at all, respectively) validates this invariant *before* reaching it,
+  and neither has a test exercising this path. A subject whose active flag
+  legitimately goes `1 -> 0 -> 1` during live monitoring (e.g. a temporary
+  app outage) will now hard-raise there where it previously silently
+  mis-indexed -- a strict improvement (loud failure over silent corruption),
+  but undocumented and untested at those two call sites.
+- Two independent implementations of the Radon-Nikodym weight-window
+  computation now exist: the original, per-subject one in
+  `compute_subject_radon_nikodym_weights` (`helper_functions.py`, still used
+  by the two un-ported files) and the new batched one in
+  `batched_weighted_estimating_function_stack.py`. This partially undoes
+  Step 2's consolidation for the one caller Step 4 touches. A future
+  numerical edge-case fix to one is not guaranteed to be ported to the
+  other; no test directly diffs their *values* against each other on a
+  shared fixture (the correctness evidence instead comes from the
+  hand-derived expected values in `tests/unit_tests/test_post_deployment_analysis.py`'s
+  seven existing per-subject/per-outer-product fixtures, all of which
+  independently derive their expected numbers rather than trusting either
+  implementation, plus one new direct cross-check --
+  `test_batched_and_reference_implementations_agree_per_subject_incremental_recruitment`).
+- The residual data-check block (`require_threaded_algorithm_estimating_function_args_equivalent`
+  / `require_threaded_inference_estimating_function_args_equivalent`, run
+  whenever `suppress_all_data_checks=False` and action probabilities feed
+  the algorithm/inference estimating function) still re-derives threaded
+  args via the original, un-batched per-subject `jax.vmap` dispatches in
+  `arg_threading_helpers.py`, then re-runs the estimating function again
+  per shape bucket on top of that -- comparable in dispatch-count order to
+  the entire batched path it's double-checking. This is not the ADR's
+  measured dominant cost (the 15x-repeated local-linearization diagnostic
+  suppresses checks entirely and gets the full benefit), but it means Step 4
+  does not fully zero out the diagnosed root cause for a non-suppressed call
+  using action-prob threading. A lower-risk follow-on: reuse the
+  already-computed `pi_beta_grid`/reconstructed-action-prob tensors for this
+  check directly, instead of re-deriving them via the old per-subject path.
+- The one-time structural precompute
+  (`build_action_prob_layer_precompute`/`build_update_layer_precompute`/`build_inference_layer_precompute`)
+  is rebuilt from scratch on every call to
+  `get_avg_weighted_estimating_function_stacks_and_aux_values`, which runs
+  ~16 times per `analyze_dataset` call (once for the real `jax.jacrev` call,
+  15 more for the local-linearization diagnostic's un-jitted forward
+  passes) -- all 16 calls use identical structural data, only the
+  differentiated betas/theta values change. Hoisting the three precompute
+  objects out to the caller and building them once would remove this
+  redundant O(N·T) work from the diagnostic phase this ADR's own Step 0
+  found dominates wall-clock. Not done here to keep this change's surface
+  area to the one function signature already being changed.
+
+**Correctness regressions found by adversarial review and fixed before
+landing:** a safety check meant to catch a malformed `algorithm_estimating_func`/`inference_estimating_func`
+output shape (`... does not have a size that is a multiple of the beta
+dimension`) had become tautologically true against the new pre-allocated
+`(N, U, beta_dim)`/`(N, theta_dim)` output arrays and could never fire --
+silently letting `.at[].set()` broadcast a wrong-shaped-but-broadcastable
+output across every slot instead of raising; replaced with an explicit
+shape check at the point each bucket's output is produced, before the
+scatter. `num_previous = prev_raw_list[0].shape[0]` required an ndarray
+where the original used `len(...)` (accepting a plain list too); switched
+back to `len(...)`. The previous-betas cross-subject consistency check used
+bit-exact `np.array_equal`, which could spuriously reject two subjects
+whose logically-identical values reached the bucket via different
+floating-point paths; loosened to `np.allclose`. `betas[:num_previous]`
+could silently clamp to a shorter-than-requested slice instead of raising
+if a subject's recorded previous-betas length ever exceeded the number of
+available updates; added an explicit length check. `actions_grid` was left
+as a bare zero-fill at invalid cells, the one argument tensor not
+self-padded like the module's own stated invariant -- fixed to self-pad the
+same way as everything else (`action` is masked and non-differentiated
+downstream, so this was not an active bug, but it was a real, silent
+exception to the documented design).
 
 **Step 5 is deferred and re-scoped lower priority than initially expected.**
 The one existing precedent for exploiting this sparsity in this codebase --
@@ -336,3 +525,16 @@ of scope for this ticket:
   `tests/unit_tests/test_input_checks.py` and `test_vmap_helpers.py` are new;
   neither `input_checks.py` nor `vmap_helpers.py` had a dedicated test file
   before this session.
+- A third adversarial code review, run after implementing Step 4, fanned out
+  ten independent finder angles (line-by-line diff scan, removed-behavior
+  audit, cross-file tracer, language-pitfall specialist, wrapper/proxy
+  correctness, reuse, simplification, efficiency, altitude, and CLAUDE.md
+  conventions) plus direct empirical re-verification (running the full test
+  suite, an integration test, and hand-written JAX repros of the specific
+  hazards claimed). The concrete correctness regressions it found are listed
+  under "Step 4," above, and were fixed immediately; the lower-priority,
+  deliberately-deferred gaps (contiguity-guard placement, the two
+  independent weight-window implementations, the residual data-check cost,
+  the repeated structural precompute) are also documented there rather than
+  fixed, so the next person touching this code can tell "considered and
+  deferred" from "not noticed."

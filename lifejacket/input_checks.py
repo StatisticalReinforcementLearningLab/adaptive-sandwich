@@ -16,7 +16,7 @@ from .constants import SmallSampleCorrections
 from .helper_functions import (
     confirm_input_check_result,
 )
-from .vmap_helpers import stack_batched_arg_lists_into_tensors
+from .vmap_helpers import batch_args_by_subject, stack_batched_arg_lists_into_tensors
 
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
@@ -1224,27 +1224,6 @@ def require_joint_bread_inverse_is_true_inverse(
     return diff_abs_max, diff_frobenius_norm
 
 
-def _batch_args_by_subject(group_subject_ids, args_by_subject_id):
-    """
-    Stack a dict of {subject_id: args_tuple} (all sharing the same arg count
-    and per-position shapes, e.g. one group_user_args_by_shape bucket) into
-    batched tensors ready for jax.vmap, in the exact subject order given.
-
-    Deliberately does NOT use get_batched_arg_lists_and_involved_user_ids
-    (calculate_derivatives.py), which infers the argument count from
-    func.__code__.co_argcount -- correct for a raw, undecorated estimating
-    function, but wrong for a jax.grad(...)-wrapped one (its __code__
-    reflects the wrapper's own *args-style signature, not the wrapped
-    function's), which is exactly what callers here may pass in.
-    """
-    num_args = len(args_by_subject_id[group_subject_ids[0]])
-    batched_arg_lists = [
-        [args_by_subject_id[subject_id][idx] for subject_id in group_subject_ids]
-        for idx in range(num_args)
-    ]
-    return stack_batched_arg_lists_into_tensors(batched_arg_lists)
-
-
 def require_threaded_algorithm_estimating_function_args_equivalent(
     algorithm_estimating_func,
     update_func_args_by_by_subject_id_by_policy_num,
@@ -1270,7 +1249,7 @@ def require_threaded_algorithm_estimating_function_args_equivalent(
         for shape_group in group_user_args_by_shape(nontrivial_args_by_subject_id):
             group_subject_ids = sorted(shape_group.keys())
 
-            unthreaded_batched_arg_tensors, batch_axes = _batch_args_by_subject(
+            unthreaded_batched_arg_tensors, batch_axes = batch_args_by_subject(
                 group_subject_ids, shape_group
             )
 
@@ -1280,7 +1259,7 @@ def require_threaded_algorithm_estimating_function_args_equivalent(
                 ][policy_num]
                 for subject_id in group_subject_ids
             }
-            threaded_batched_arg_tensors, _ = _batch_args_by_subject(
+            threaded_batched_arg_tensors, _ = batch_args_by_subject(
                 group_subject_ids, threaded_shape_group
             )
 
@@ -1323,7 +1302,7 @@ def require_threaded_inference_estimating_function_args_equivalent(
     for shape_group in group_user_args_by_shape(nontrivial_args_by_subject_id):
         group_subject_ids = sorted(shape_group.keys())
 
-        unthreaded_batched_arg_tensors, batch_axes = _batch_args_by_subject(
+        unthreaded_batched_arg_tensors, batch_axes = batch_args_by_subject(
             group_subject_ids, shape_group
         )
 
@@ -1331,7 +1310,7 @@ def require_threaded_inference_estimating_function_args_equivalent(
             subject_id: threaded_inference_func_args_by_subject_id[subject_id]
             for subject_id in group_subject_ids
         }
-        threaded_batched_arg_tensors, _ = _batch_args_by_subject(
+        threaded_batched_arg_tensors, _ = batch_args_by_subject(
             group_subject_ids, threaded_shape_group
         )
 

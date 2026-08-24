@@ -15,7 +15,7 @@ Save your standard errors from pooling in online decision-making algorithms.
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 - Install uv (see the [install docs](https://docs.astral.sh/uv/getting-started/installation/))
 - Run `uv sync --extra dev` to create `.venv` and install locked dependencies
-- Prefix commands with `uv run`, e.g. `uv run pytest`, or `source .venv/bin/activate` to activate the environment directly
+- Prefix commands with `uv run`, e.g. `uv run python -m pytest`, or `source .venv/bin/activate` to activate the environment directly
 
 ### Adding a package
 - Runtime dependency: `uv add <package>`
@@ -29,9 +29,9 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 ## Linting/Formatting
 
 ## Testing
-uv run pytest
-uv run pytest tests/unit_tests
-uv run pytest tests/integration_tests
+uv run python -m pytest
+uv run python -m pytest tests/unit_tests
+uv run python -m pytest tests/integration_tests
 
 
 

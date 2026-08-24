@@ -27,7 +27,7 @@ jobs:
 
       - name: Run integration tests
         # continue-on-error: true
-        run: uv run pytest tests/integration_tests
+        run: uv run python -m pytest tests/integration_tests
 
       # - name: Check simulated_data directory contents
       #   run: |

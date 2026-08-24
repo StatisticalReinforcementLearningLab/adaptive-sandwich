@@ -26,4 +26,4 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run unit tests
-        run: uv run pytest tests/unit_tests
+        run: uv run python -m pytest tests/unit_tests

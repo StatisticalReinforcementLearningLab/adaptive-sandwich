@@ -11,10 +11,13 @@ the notebook's hand-derived intermediate numbers, this test recomputes the bread
 meat, and sandwich from first principles with plain numpy/sklearn (closed-form OLS
 and the sigmoid-policy derivative formulas) and compares that independent
 computation against what lifejacket.post_deployment_analysis actually produces for
-the same toy deployment.
+the same toy deployment. A second test additionally pins the package's output
+against the notebook's own recorded (pdb-captured) numbers, as an independent check
+that doesn't rely on this file's own reimplementation of the math being correct.
 """
 
 import numpy as np
+import pytest
 from scipy.special import expit
 from sklearn.linear_model import LinearRegression
 
@@ -48,30 +51,76 @@ CALENDAR_T = np.array([1, 2, 1, 2])
 ACTIONS = np.array([0.0, 1.0, 1.0, 0.0])
 REWARDS = np.array([-0.8565283183, -1.3169794352, -0.1061271784, -0.6967024415])
 
+# Frozen values from the notebook's "Existing Code" section: an actual, independent
+# run of this package on the same toy deployment, captured via pdb at the time the
+# notebook was written. These are copied verbatim (not derived from the formulas
+# below), so agreement with them is a check against the notebook's real historical
+# artifact, not just against this file's own closed-form reimplementation of the
+# math. The near-zero entries in the meat matrix's beta-beta and beta-theta blocks
+# are floating point noise (the beta-side model is exactly identified with 2 users
+# and 2 parameters, so its estimating function is analytically zero at beta_hat);
+# their exact magnitude is not meaningful and is allowed a generous atol below.
+NOTEBOOK_BREAD = np.array(
+    [
+        [2.0, 1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0, 0.0],
+        [0.0, 0.34266952, 4.0, 2.0],
+        [0.0, 0.30271304, 2.0, 2.0],
+    ]
+)
+NOTEBOOK_MEAT = np.array(
+    [
+        [7.1054274e-15, 7.1054274e-15, -8.1698779e-08, -7.2172412e-08],
+        [7.1054274e-15, 7.1054274e-15, -8.1698779e-08, -7.2172412e-08],
+        [-8.1698779e-08, -8.1698779e-08, 1.8787583, 1.6596885],
+        [-7.2172412e-08, -7.2172412e-08, 1.6596885, 1.4661629],
+    ]
+)
+NOTEBOOK_THETA_SANDWICH = np.array(
+    [
+        [0.00319304, 0.02099766],
+        [0.02099766, 0.13808201],
+    ]
+)
 
-def _independent_bread_meat_sandwich():
+
+@pytest.fixture
+def beta_and_theta_estimates():
     """
-    Independently derives the joint bread, joint meat, and theta-only adjusted
-    sandwich for the toy deployment above, using only plain numpy/sklearn.
-
-    This mirrors, but does not call, the actual estimating/loss functions handed
-    to the package below -- it is meant to be a from-first-principles check, not a
-    restatement of the code under test. The formulas follow the notebook's
-    "Conceptual Setting" section: least squares loss on both sides gives an
-    estimating function -2*sum((r - theta.x)*x), its Hessian is 2*sum(x x^T), and
-    the joint bread's lower-left block is the average, over users, of the outer
-    product of each user's inference estimating function value with the gradient
-    (wrt beta) of the Radon-Nikodym weight applied to their post-update data.
+    Beta and theta estimates for the toy deployment, via plain OLS: beta_hat from
+    the single user pair's t=1 data (the only data that fed the one RL update), and
+    theta_hat from the full 4-row history. This matches the notebook's own
+    "Beta Estimate"/"Theta Estimate" sections (the notebook additionally cross-
+    checked these against sklearn, which is what's used directly here).
     """
-    num_subjects = 2
-    t1_mask = CALENDAR_T == 1
-
     design = np.column_stack([np.ones_like(ACTIONS), ACTIONS])
+    t1_mask = CALENDAR_T == 1
 
     beta_hat = LinearRegression(fit_intercept=False).fit(
         design[t1_mask], REWARDS[t1_mask]
     ).coef_
     theta_hat = LinearRegression(fit_intercept=False).fit(design, REWARDS).coef_
+    return beta_hat, theta_hat
+
+
+def _independent_bread_meat_sandwich(beta_hat, theta_hat):
+    """
+    Independently derives the joint bread, joint meat, and theta-only adjusted
+    sandwich for the toy deployment above, using only plain numpy.
+
+    This mirrors, but does not call, the actual estimating/loss functions handed
+    to the package in _run_package_pipeline below -- it is meant to be a
+    from-first-principles check, not a restatement of the code under test. The
+    formulas follow the notebook's "Conceptual Setting" section: least squares loss
+    on both sides gives an estimating function -2*sum((r - theta.x)*x), its Hessian
+    is 2*sum(x x^T), and the joint bread's lower-left block is the average, over
+    users, of the outer product of each user's inference estimating function value
+    with the gradient (wrt beta) of the Radon-Nikodym weight applied to their
+    post-update data.
+    """
+    num_subjects = 2
+    t1_mask = CALENDAR_T == 1
+    design = np.column_stack([np.ones_like(ACTIONS), ACTIONS])
 
     # Action-1 probability governing the (only) post-update decision time, t=2.
     # State is the intercept only (=1), so the action coefficient beta_hat[1] is
@@ -132,14 +181,21 @@ def _independent_bread_meat_sandwich():
     joint_sandwich = bread_inv @ meat @ bread_inv.T / num_subjects
     theta_only_sandwich = joint_sandwich[-2:, -2:]
 
-    return beta_hat, theta_hat, bread, meat, theta_only_sandwich
+    return bread, meat, theta_only_sandwich
 
 
-def test_adaptive_sandwich_matches_independent_closed_form_calculation():
-    beta_hat, theta_hat, expected_bread, expected_meat, expected_theta_sandwich = (
-        _independent_bread_meat_sandwich()
-    )
-
+@pytest.fixture
+def package_pipeline_outputs(beta_and_theta_estimates):
+    """
+    Runs the actual, real lifejacket pipeline on the toy deployment: builds the
+    minimal per-subject argument dictionaries construct_classical_and_adjusted_
+    sandwiches needs, reusing the package's own real contract functions
+    (synthetic_get_action_1_prob_pure, synthetic_get_least_squares_loss_rl -- the
+    latter is generic enough to serve as both the RL loss and the inference loss
+    here, since both sides use only the intercept as state), and returns the raw
+    joint bread, joint meat, and theta-only adjusted sandwich it computes.
+    """
+    beta_hat, theta_hat = beta_and_theta_estimates
     beta_hat_jnp = jnp.array(beta_hat, dtype=jnp.float32)
     theta_hat_jnp = jnp.array(theta_hat, dtype=jnp.float32)
     all_post_update_betas = jnp.stack([beta_hat_jnp])
@@ -148,7 +204,7 @@ def test_adaptive_sandwich_matches_independent_closed_form_calculation():
     updated_policy_num = 2
     beta_index_by_policy_num = {updated_policy_num: 0}
 
-    def intercept_action_args(user_id, calendar_t, beta_for_denominator):
+    def intercept_action_args(beta_for_denominator):
         return (
             beta_for_denominator,
             LOWER_CLIP,
@@ -164,12 +220,12 @@ def test_adaptive_sandwich_matches_independent_closed_form_calculation():
     # the deployed beta and the beta being differentiated coincide.
     action_prob_func_args_by_subject_id_by_decision_time = {
         1: {
-            1: intercept_action_args(1, 1, jnp.zeros(2, dtype=jnp.float32)),
-            2: intercept_action_args(2, 1, jnp.zeros(2, dtype=jnp.float32)),
+            1: intercept_action_args(jnp.zeros(2, dtype=jnp.float32)),
+            2: intercept_action_args(jnp.zeros(2, dtype=jnp.float32)),
         },
         2: {
-            1: intercept_action_args(1, 2, beta_hat_jnp),
-            2: intercept_action_args(2, 2, beta_hat_jnp),
+            1: intercept_action_args(beta_hat_jnp),
+            2: intercept_action_args(beta_hat_jnp),
         },
     }
     policy_num_by_decision_time_by_subject_id = {
@@ -272,11 +328,39 @@ def test_adaptive_sandwich_matches_independent_closed_form_calculation():
     )
 
     theta_only_adjusted_sandwich = joint_sandwich_matrix[-2:, -2:]
+    return raw_joint_bread_matrix, joint_adjusted_meat_matrix, theta_only_adjusted_sandwich
 
-    np.testing.assert_allclose(raw_joint_bread_matrix, expected_bread, rtol=1e-4, atol=1e-6)
-    np.testing.assert_allclose(
-        joint_adjusted_meat_matrix, expected_meat, rtol=1e-4, atol=1e-6
+
+def test_adaptive_sandwich_matches_independent_closed_form_calculation(
+    package_pipeline_outputs, beta_and_theta_estimates
+):
+    """
+    The package's bread/meat/theta-sandwich for the toy deployment should match a
+    from-scratch, plain-numpy closed-form derivation of the same quantities.
+    """
+    bread, meat, theta_sandwich = package_pipeline_outputs
+    expected_bread, expected_meat, expected_theta_sandwich = (
+        _independent_bread_meat_sandwich(*beta_and_theta_estimates)
     )
+
+    np.testing.assert_allclose(bread, expected_bread, rtol=1e-4, atol=1e-6)
+    np.testing.assert_allclose(meat, expected_meat, rtol=1e-4, atol=1e-6)
     np.testing.assert_allclose(
-        theta_only_adjusted_sandwich, expected_theta_sandwich, rtol=1e-3, atol=1e-6
+        theta_sandwich, expected_theta_sandwich, rtol=1e-3, atol=1e-6
+    )
+
+
+def test_adaptive_sandwich_matches_notebook_recorded_values(package_pipeline_outputs):
+    """
+    The package's bread/meat/theta-sandwich for the toy deployment should also
+    match the notebook's own recorded, pdb-captured numbers from an actual
+    historical run -- an independent check that doesn't depend on this file's
+    closed-form reimplementation of the math (see the test above) being correct.
+    """
+    bread, meat, theta_sandwich = package_pipeline_outputs
+
+    np.testing.assert_allclose(bread, NOTEBOOK_BREAD, rtol=1e-4, atol=1e-6)
+    np.testing.assert_allclose(meat, NOTEBOOK_MEAT, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(
+        theta_sandwich, NOTEBOOK_THETA_SANDWICH, rtol=1e-4, atol=1e-6
     )

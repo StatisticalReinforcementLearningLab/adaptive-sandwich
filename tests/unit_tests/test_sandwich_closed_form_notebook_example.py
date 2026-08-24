@@ -6,14 +6,20 @@ computation for a small, fully-specified deployment (2 users, T=2 decision point
 one RL update, a Boltzmann/sigmoid policy with steepness > 0, least squares on both
 the RL and inference sides, and no action-centering on either side) after observing
 that the average adaptive sandwich variance was not sufficiently close to the
-empirical variance in larger simulations with these settings. Rather than typing in
-the notebook's hand-derived intermediate numbers, this test recomputes the bread,
-meat, and sandwich from first principles with plain numpy/sklearn (closed-form OLS
-and the sigmoid-policy derivative formulas) and compares that independent
-computation against what lifejacket.post_deployment_analysis actually produces for
-the same toy deployment. A second test additionally pins the package's output
-against the notebook's own recorded (pdb-captured) numbers, as an independent check
-that doesn't rely on this file's own reimplementation of the math being correct.
+empirical variance in larger simulations with these settings.
+
+Two independent checks are made against the same real lifejacket pipeline, run on
+this toy deployment:
+
+1. Rather than typing in the notebook's hand-derived intermediate numbers, the
+   first test recomputes the bread, meat, and sandwich from first principles with
+   plain numpy/sklearn (closed-form OLS and the sigmoid-policy derivative
+   formulas) and compares that independent computation against what
+   lifejacket.post_deployment_analysis actually produces.
+2. The second test does type in literal numbers: the notebook's own recorded
+   (pdb-captured) values from an actual historical run, used as an independent
+   check that doesn't rely on this file's closed-form reimplementation of the
+   math (test 1) being correct.
 """
 
 import numpy as np

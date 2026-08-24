@@ -8,10 +8,15 @@ from jax import numpy as jnp
 import pandas as pd
 import plotext as plt
 
+from .calculate_derivatives import (
+    get_batched_arg_lists_and_involved_user_ids,
+    group_user_args_by_shape,
+)
 from .constants import SmallSampleCorrections
 from .helper_functions import (
     confirm_input_check_result,
 )
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
@@ -291,16 +296,103 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
     logger.info("Reconstructing action probabilities from function and arguments.")
 
     active_df = analysis_df[analysis_df[active_col_name] == 1]
-    reconstructed_action_probs = active_df.apply(
-        lambda row: action_prob_func(
-            *action_prob_func_args[row[calendar_t_col_name]][row[subject_id_col_name]]
-        ),
-        axis=1,
+
+    # Keyed by (decision_time, subject_id) so the "actual" value gathered for
+    # comparison always lines up with the exact same key used to build the
+    # "reconstructed" one below -- never relying on two different iteration
+    # orders (a pandas row order vs. a dict's) coincidentally matching, which
+    # could otherwise let a subtle reordering bug silently defang this check
+    # instead of correctly failing it. Built via zip over numpy columns
+    # rather than DataFrame.iterrows(), which is much slower for a check
+    # whose whole point is to replace a slow per-row loop.
+    actual_action_prob_by_key = dict(
+        zip(
+            zip(
+                active_df[calendar_t_col_name].to_numpy(),
+                active_df[subject_id_col_name].to_numpy(),
+            ),
+            active_df[action_prob_col_name].to_numpy(),
+        )
+    )
+
+    reconstructed_chunks = []
+    actual_chunks = []
+    visited_keys = []
+    unexpected_keys = []
+    for decision_time, args_by_subject_id in action_prob_func_args.items():
+        nontrivial_args_by_subject_id = {
+            subject_id: args
+            for subject_id, args in args_by_subject_id.items()
+            if args
+        }
+        if not nontrivial_args_by_subject_id:
+            continue
+        for shape_group in group_user_args_by_shape(nontrivial_args_by_subject_id):
+            group_subject_ids = sorted(shape_group.keys())
+            batched_arg_lists, _ = get_batched_arg_lists_and_involved_user_ids(
+                action_prob_func, group_subject_ids, shape_group
+            )
+            batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
+                batched_arg_lists
+            )
+            reconstructed_chunks.append(
+                jax.vmap(action_prob_func, in_axes=batch_axes)(*batched_arg_tensors)
+            )
+            # Use .get with a placeholder rather than indexing directly, so a
+            # malformed input (non-blank args for a decision_time/subject_id
+            # analysis_df doesn't mark active) collects into a clear error
+            # below instead of crashing here with a bare KeyError -- which
+            # would preempt require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times,
+            # the check purpose-built to report exactly this mismatch clearly.
+            for subject_id in group_subject_ids:
+                key = (decision_time, subject_id)
+                if key not in actual_action_prob_by_key:
+                    unexpected_keys.append(key)
+                visited_keys.append(key)
+            actual_chunks.append(
+                jnp.array(
+                    [
+                        actual_action_prob_by_key.get((decision_time, subject_id), jnp.nan)
+                        for subject_id in group_subject_ids
+                    ]
+                )
+            )
+
+    if unexpected_keys:
+        raise ValueError(
+            "require_action_probabilities_in_analysis_df_can_be_reconstructed found "
+            f"non-blank action_prob_func_args for {len(unexpected_keys)} "
+            "(decision_time, subject_id) pair(s) the analysis DataFrame does not mark "
+            f"active, e.g. {sorted(unexpected_keys)[:5]}. This means action_prob_func_args "
+            "has real (non-empty-tuple) entries for times/subjects the analysis DataFrame "
+            "marks inactive. Please see the contract for details."
+        )
+
+    # Every active (decision_time, subject_id) pair must have been visited --
+    # otherwise this check would silently validate a strict subset of
+    # active_df's rows instead of failing loudly, the way the original
+    # per-row implementation would (it would raise on any active row whose
+    # args were an empty tuple, since calling action_prob_func(*()) fails).
+    missing_keys = set(actual_action_prob_by_key.keys()) - set(visited_keys)
+    if missing_keys:
+        raise ValueError(
+            "require_action_probabilities_in_analysis_df_can_be_reconstructed could not "
+            f"reconstruct a prediction for {len(missing_keys)} active (decision_time, "
+            f"subject_id) row(s), e.g. {sorted(missing_keys)[:5]}. This means "
+            "action_prob_func_args has blank (empty-tuple) entries for times/subjects "
+            "the analysis DataFrame marks as active. Please see the contract for details."
+        )
+
+    reconstructed_action_probs = (
+        jnp.concatenate(reconstructed_chunks) if reconstructed_chunks else jnp.array([])
+    )
+    actual_action_probs = (
+        jnp.concatenate(actual_chunks) if actual_chunks else jnp.array([])
     )
 
     np.testing.assert_allclose(
-        active_df[action_prob_col_name].to_numpy(dtype="float64"),
-        reconstructed_action_probs.to_numpy(dtype="float64"),
+        np.asarray(actual_action_probs, dtype="float64"),
+        np.asarray(reconstructed_action_probs, dtype="float64"),
         atol=1e-6,
     )
 
@@ -1132,6 +1224,27 @@ def require_joint_bread_inverse_is_true_inverse(
     return diff_abs_max, diff_frobenius_norm
 
 
+def _batch_args_by_subject(group_subject_ids, args_by_subject_id):
+    """
+    Stack a dict of {subject_id: args_tuple} (all sharing the same arg count
+    and per-position shapes, e.g. one group_user_args_by_shape bucket) into
+    batched tensors ready for jax.vmap, in the exact subject order given.
+
+    Deliberately does NOT use get_batched_arg_lists_and_involved_user_ids
+    (calculate_derivatives.py), which infers the argument count from
+    func.__code__.co_argcount -- correct for a raw, undecorated estimating
+    function, but wrong for a jax.grad(...)-wrapped one (its __code__
+    reflects the wrapper's own *args-style signature, not the wrapped
+    function's), which is exactly what callers here may pass in.
+    """
+    num_args = len(args_by_subject_id[group_subject_ids[0]])
+    batched_arg_lists = [
+        [args_by_subject_id[subject_id][idx] for subject_id in group_subject_ids]
+        for idx in range(num_args)
+    ]
+    return stack_batched_arg_lists_into_tensors(batched_arg_lists)
+
+
 def require_threaded_algorithm_estimating_function_args_equivalent(
     algorithm_estimating_func,
     update_func_args_by_by_subject_id_by_policy_num,
@@ -1147,22 +1260,43 @@ def require_threaded_algorithm_estimating_function_args_equivalent(
         policy_num,
         update_func_args_by_subject_id,
     ) in update_func_args_by_by_subject_id_by_policy_num.items():
-        for (
-            subject_id,
-            unthreaded_args,
-        ) in update_func_args_by_subject_id.items():
-            if not unthreaded_args:
-                continue
+        nontrivial_args_by_subject_id = {
+            subject_id: args
+            for subject_id, args in update_func_args_by_subject_id.items()
+            if args
+        }
+        if not nontrivial_args_by_subject_id:
+            continue
+        for shape_group in group_user_args_by_shape(nontrivial_args_by_subject_id):
+            group_subject_ids = sorted(shape_group.keys())
+
+            unthreaded_batched_arg_tensors, batch_axes = _batch_args_by_subject(
+                group_subject_ids, shape_group
+            )
+
+            threaded_shape_group = {
+                subject_id: threaded_update_func_args_by_policy_num_by_subject_id[
+                    subject_id
+                ][policy_num]
+                for subject_id in group_subject_ids
+            }
+            threaded_batched_arg_tensors, _ = _batch_args_by_subject(
+                group_subject_ids, threaded_shape_group
+            )
+
+            unthreaded_result = jax.vmap(algorithm_estimating_func, in_axes=batch_axes)(
+                *unthreaded_batched_arg_tensors
+            )
+            # Need to stop gradient here because we can't convert a traced value to np array
+            threaded_result = jax.lax.stop_gradient(
+                jax.vmap(algorithm_estimating_func, in_axes=batch_axes)(
+                    *threaded_batched_arg_tensors
+                )
+            )
+
             np.testing.assert_allclose(
-                algorithm_estimating_func(*unthreaded_args),
-                # Need to stop gradient here because we can't convert a traced value to np array
-                jax.lax.stop_gradient(
-                    algorithm_estimating_func(
-                        *threaded_update_func_args_by_policy_num_by_subject_id[
-                            subject_id
-                        ][policy_num]
-                    )
-                ),
+                np.asarray(unthreaded_result),
+                np.asarray(threaded_result),
                 atol=1e-7,
                 rtol=1e-3,
             )
@@ -1179,16 +1313,40 @@ def require_threaded_inference_estimating_function_args_equivalent(
     when called with the original arguments and when called with the
     reconstructed action probabilities substituted in.
     """
-    for subject_id, unthreaded_args in inference_func_args_by_subject_id.items():
-        if not unthreaded_args:
-            continue
+    nontrivial_args_by_subject_id = {
+        subject_id: args
+        for subject_id, args in inference_func_args_by_subject_id.items()
+        if args
+    }
+    if not nontrivial_args_by_subject_id:
+        return
+    for shape_group in group_user_args_by_shape(nontrivial_args_by_subject_id):
+        group_subject_ids = sorted(shape_group.keys())
+
+        unthreaded_batched_arg_tensors, batch_axes = _batch_args_by_subject(
+            group_subject_ids, shape_group
+        )
+
+        threaded_shape_group = {
+            subject_id: threaded_inference_func_args_by_subject_id[subject_id]
+            for subject_id in group_subject_ids
+        }
+        threaded_batched_arg_tensors, _ = _batch_args_by_subject(
+            group_subject_ids, threaded_shape_group
+        )
+
+        unthreaded_result = jax.vmap(inference_estimating_func, in_axes=batch_axes)(
+            *unthreaded_batched_arg_tensors
+        )
+        # Need to stop gradient here because we can't convert a traced value to np array
+        threaded_result = jax.lax.stop_gradient(
+            jax.vmap(inference_estimating_func, in_axes=batch_axes)(
+                *threaded_batched_arg_tensors
+            )
+        )
+
         np.testing.assert_allclose(
-            inference_estimating_func(*unthreaded_args),
-            # Need to stop gradient here because we can't convert a traced value to np array
-            jax.lax.stop_gradient(
-                inference_estimating_func(
-                    *threaded_inference_func_args_by_subject_id[subject_id]
-                )
-            ),
+            np.asarray(unthreaded_result),
+            np.asarray(threaded_result),
             rtol=1e-2,
         )

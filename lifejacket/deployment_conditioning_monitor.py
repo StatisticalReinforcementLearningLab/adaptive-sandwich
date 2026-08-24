@@ -13,17 +13,16 @@ import pandas as pd
 from .arg_threading_helpers import thread_action_prob_func_args, thread_update_func_args
 from .constants import FunctionTypes
 from .helper_functions import (
+    append_new_block_row_to_block_lower_triangular_matrix,
     calculate_beta_dim,
     collect_all_post_update_betas,
+    compute_subject_radon_nikodym_weights,
     construct_beta_index_by_policy_num_map,
     extract_action_and_policy_by_decision_time_by_subject_id,
     flatten_params,
-    get_min_time_by_policy_num,
-    get_radon_nikodym_weight,
     unflatten_params,
 )
 from . import input_checks
-from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 
 logger = logging.getLogger(__name__)
@@ -397,14 +396,12 @@ class DeploymentConditioningMonitor:
                 only_latest_block=True,
             )
 
-            # Now we can just augment the cached previous phi-dot-bar with zeros
-            # and the latest block row.
-            phi_dot_bar = jnp.block(
-                [
-                    self.latest_phi_dot_bar,
-                    jnp.zeros((beta_dim, beta_dim)),
-                    phi_dot_bar_latest_block[-beta_dim:, :],
-                ]
+            # Augment the cached previous phi-dot-bar with the latest block
+            # row (block lower-triangular structure means no new rows are
+            # needed above the diagonal).
+            phi_dot_bar = append_new_block_row_to_block_lower_triangular_matrix(
+                self.latest_phi_dot_bar,
+                phi_dot_bar_latest_block[-beta_dim:, :],
             )
         else:
 
@@ -740,106 +737,27 @@ class DeploymentConditioningMonitor:
 
         # First, reformat the supplied data into more convenient structures.
 
-        # 1. Form a dictionary mapping policy numbers to the first time they were
-        # applicable (for this subject). Note that this includes ALL policies, initial
-        # fallbacks included.
-        # Collect the first time after the first update separately for convenience.
-        # These are both used to form the Radon-Nikodym weights for the right times.
-        min_time_by_policy_num, first_time_after_first_update = (
-            get_min_time_by_policy_num(
-                policy_num_by_decision_time,
-                beta_index_by_policy_num,
-            )
-        )
-
-        # 2. Get the start and end times for this subject.
-        subject_start_time = math.inf
-        subject_end_time = -math.inf
-        for decision_time in action_by_decision_time:
-            subject_start_time = min(subject_start_time, decision_time)
-            subject_end_time = max(subject_end_time, decision_time)
-
-        # 3. Form a stack of weighted estimating equations, one for each update of the algorithm.
         logger.info(
             "Computing the algorithm component of the weighted estimating function stack for subject %s.",
             subject_id,
         )
 
-        in_study_action_prob_func_args = [
-            args for args in action_prob_func_args_by_decision_time.values() if args
-        ]
-        in_study_betas_list_by_decision_time_index = jnp.array(
-            [
-                action_prob_func_args[action_prob_func_args_beta_index]
-                for action_prob_func_args in in_study_action_prob_func_args
-            ]
-        )
-        in_study_actions_list_by_decision_time_index = jnp.array(
-            list(action_by_decision_time.values())
-        )
-
-        # Sort the threaded args by decision time to be cautious. We check if the
-        # subject id is present in the subject args dict because we may call this on a
-        # subset of the subject arg dict when we are batching arguments by shape
-        sorted_threaded_action_prob_args_by_decision_time = {
-            decision_time: threaded_action_prob_func_args_by_decision_time[
-                decision_time
-            ]
-            for decision_time in range(subject_start_time, subject_end_time + 1)
-            if decision_time in threaded_action_prob_func_args_by_decision_time
-        }
-
-        num_args = None
-        for args in sorted_threaded_action_prob_args_by_decision_time.values():
-            if args:
-                num_args = len(args)
-                break
-
-        # NOTE: Cannot do [[]] * num_args here! Then all lists point
-        # same object...
-        batched_threaded_arg_lists = [[] for _ in range(num_args)]
-        for (
-            decision_time,
-            args,
-        ) in sorted_threaded_action_prob_args_by_decision_time.items():
-            if not args:
-                continue
-            for idx, arg in enumerate(args):
-                batched_threaded_arg_lists[idx].append(arg)
-
-        batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
-            batched_threaded_arg_lists
-        )
-
-        # Note that we do NOT use the shared betas in the first arg to the weight function,
-        # since we don't want differentiation to happen with respect to them.
-        # Just grab the original beta from the update function arguments. This is the same
-        # value, but impervious to differentiation with respect to all_post_update_betas. The
-        # args, on the other hand, are a function of all_post_update_betas.
-        in_study_weights = jax.vmap(
-            fun=get_radon_nikodym_weight,
-            in_axes=[0, None, None, 0] + batch_axes,
-            out_axes=0,
-        )(
-            in_study_betas_list_by_decision_time_index,
+        (
+            all_weights,
+            decision_time_to_all_weights_index_offset,
+            first_time_after_first_update,
+            min_time_by_policy_num,
+            subject_start_time,
+            subject_end_time,
+        ) = compute_subject_radon_nikodym_weights(
             action_prob_func,
             action_prob_func_args_beta_index,
-            in_study_actions_list_by_decision_time_index,
-            *batched_threaded_arg_tensors,
+            action_prob_func_args_by_decision_time,
+            threaded_action_prob_func_args_by_decision_time,
+            policy_num_by_decision_time,
+            action_by_decision_time,
+            beta_index_by_policy_num,
         )
-
-        in_study_index = 0
-        decision_time_to_all_weights_index_offset = min(
-            sorted_threaded_action_prob_args_by_decision_time
-        )
-        all_weights_raw = []
-        for (
-            decision_time,
-            args,
-        ) in sorted_threaded_action_prob_args_by_decision_time.items():
-            all_weights_raw.append(in_study_weights[in_study_index] if args else 1.0)
-            in_study_index += 1
-        all_weights = jnp.array(all_weights_raw)
 
         algorithm_component = jnp.concatenate(
             [

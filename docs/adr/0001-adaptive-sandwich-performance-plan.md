@@ -1,9 +1,11 @@
 # 0001. Performance plan for the adjusted sandwich computation
 
-- Status: Accepted (Steps 0-2 and three correctness bugs below are done; Step 3 was attempted and
-  reverted -- see "Step 3 attempted and reverted" below; Step 4 is done -- see "Step 4: padded +
-  masked jax.vmap batching" below; Step 3 is unblocked but not yet re-attempted; Step 5 remains
-  proposed)
+- Status: Accepted (Steps 0-2 and three correctness bugs below are done; Step 4 is done -- see
+  "Step 4: padded + masked jax.vmap batching" below; Step 3 has been attempted twice -- once
+  before Step 4 (reverted in full) and once after (partially kept: the local-linearization
+  diagnostic's forward-pass closure is now jitted, a clear win; jitting the main differentiated
+  call was tried and reverted again, a clear regression even post-Step-4 -- see "Step 3, second
+  attempt: jit after Step 4" below); Step 5 remains proposed)
 - Date: 2026-08-24
 - Ticket: ADS-139
 
@@ -84,7 +86,7 @@ suite (numerical regression + timing) and the existing test suite:
 | - | Fix correctness bugs found while investigating (below) | **Done** |
 | 1 | Vectorize the eager per-row/per-subject checks in `input_checks.py` (they run by default in real usage, not just diagnostics) | **Done** |
 | 2 | Extract the (currently byte-identical) triplicated Radon-Nikodym weight-computation block into one shared function | **Done** |
-| 3 | Wrap the `jax.jacrev` hot path in `jax.jit` | **Attempted and reverted** -- see below; net regression, not a win. **Unblocked by Step 4, not yet re-attempted.** |
+| 3 | Wrap the `jax.jacrev` hot path in `jax.jit` | **Partially done.** The local-linearization diagnostic's forward-pass closure is jitted (real win, both scales). Jitting the main differentiated call was tried again post-Step-4 and reverted again (regression at medium scale). See "Step 3, second attempt" below. |
 | 4 | Convert the ragged per-subject/per-update Python loops to padded + masked `jax.vmap`/`jax.lax.scan` | **Done** -- see "Step 4: padded + masked `jax.vmap` batching" below |
 | 5 | Exploit block-lower-triangular Jacobian sparsity (roughly half the joint bread matrix is analytically zero) | Deferred -- see below |
 
@@ -304,32 +306,132 @@ ones left as documented, lower-priority gaps):
   independently derive their expected numbers rather than trusting either
   implementation, plus one new direct cross-check --
   `test_batched_and_reference_implementations_agree_per_subject_incremental_recruitment`).
-- The residual data-check block (`require_threaded_algorithm_estimating_function_args_equivalent`
-  / `require_threaded_inference_estimating_function_args_equivalent`, run
+- **Fixed** (post Step-4/Step-3 work, same session): the residual data-check
+  block (`require_threaded_algorithm_estimating_function_args_equivalent` /
+  `require_threaded_inference_estimating_function_args_equivalent`, run
   whenever `suppress_all_data_checks=False` and action probabilities feed
-  the algorithm/inference estimating function) still re-derives threaded
+  the algorithm/inference estimating function) used to re-derive threaded
   args via the original, un-batched per-subject `jax.vmap` dispatches in
-  `arg_threading_helpers.py`, then re-runs the estimating function again
-  per shape bucket on top of that -- comparable in dispatch-count order to
-  the entire batched path it's double-checking. This is not the ADR's
-  measured dominant cost (the 15x-repeated local-linearization diagnostic
-  suppresses checks entirely and gets the full benefit), but it means Step 4
-  does not fully zero out the diagnosed root cause for a non-suppressed call
-  using action-prob threading. A lower-risk follow-on: reuse the
-  already-computed `pi_beta_grid`/reconstructed-action-prob tensors for this
-  check directly, instead of re-deriving them via the old per-subject path.
+  `arg_threading_helpers.py`, then re-run the estimating function again per
+  shape bucket on top of that -- comparable in dispatch-count order to the
+  entire batched path it was double-checking. Replaced with
+  `check_batched_algorithm_estimating_function_args_equivalent` /
+  `check_batched_inference_estimating_function_args_equivalent`
+  (`batched_weighted_estimating_function_stack.py`), which reuse the
+  already-computed `pi_beta_grid`/`action_prob_layer`/`update_layer` instead
+  of re-deriving anything via `arg_threading_helpers`, and share the exact
+  same bucket-override construction (`_build_algorithm_bucket_overrides` /
+  `_build_inference_bucket_overrides`, extracted from
+  `compute_batched_algorithm_component` / `compute_batched_inference_outputs`
+  for this purpose, closing a duplication gap the earlier adversarial review
+  had flagged) as the main computation, so the "threaded" values being
+  checked are guaranteed identical to what the main computation actually
+  uses. `get_avg_weighted_estimating_function_stacks_and_aux_values` was
+  reordered so the batched forward pass (which produces `pi_beta_grid`) runs
+  *before* the data-check block, not after. Measured at medium scale
+  (n=100): the gap between checks-suppressed and checks-enabled `jax.jacrev`
+  time, previously several seconds (checks-enabled always slower), is now
+  within this session's measurement noise -- the two are indistinguishable.
+  `arg_threading_helpers.thread_action_prob_func_args`/`thread_update_func_args`/`thread_inference_func_args`
+  and `input_checks.require_threaded_*_equivalent` are all still imported/used
+  elsewhere (`get_datum_for_blowup_supervised_learning.py` and
+  `deployment_conditioning_monitor.py` respectively) and were deliberately
+  left untouched.
+
+  Writing a unit test for this surfaced a genuine surprise, not a bug:
+  `tests/unit_tests/test_post_deployment_analysis.py`'s
+  `setup_data_two_loss_functions_use_action_probs_both_sides` fixture
+  deliberately uses a different beta in `update_func_args` than in
+  `all_post_update_betas` (to test that the shared beta gets substituted in
+  for differentiation) -- which is *exactly* the inconsistency this data
+  check exists to catch. No existing test had ever run this fixture with
+  `suppress_all_data_checks=False`, so this had never been exercised before.
+  Confirmed directly that the original, un-batched
+  `require_threaded_algorithm_estimating_function_args_equivalent` also
+  raises on this exact fixture -- the new check is behaviorally faithful,
+  not a new bug -- and added both this as a named regression test
+  (`test_batched_algorithm_data_check_detects_the_same_inconsistency_as_the_original`)
+  and a separate, hand-built, genuinely self-consistent fixture proving the
+  check passes silently on well-formed data
+  (`test_check_batched_algorithm_estimating_function_args_equivalent_passes_on_consistent_data`,
+  `tests/unit_tests/test_batched_weighted_estimating_function_stack.py`).
+
+  A second adversarial review of this same change (10 parallel angles) found
+  and fixed one real, higher-severity bug and two lower-severity gaps, all
+  independently confirmed by multiple review angles: (a)
+  `check_batched_inference_estimating_function_args_equivalent` used the
+  algorithm check's tolerance (`atol=1e-7, rtol=1e-3`) instead of the
+  inference check's own, deliberately looser original tolerance
+  (`input_checks.require_threaded_inference_estimating_function_args_equivalent`
+  uses `rtol=1e-2`, no `atol`) -- an unintentional copy-paste that would have
+  made real production data fail this check spuriously. Fixed by extracting
+  a shared `_assert_original_and_threaded_bucket_results_agree(estimating_func,
+  bucket, threaded_overrides, atol, rtol)` helper used by both check
+  functions, each now passing its own correct, original tolerance explicitly
+  -- this also closes the duplication gap that let the two drift apart in
+  the first place. (b) `_stack_grid_to_tensor`'s "arrays with dimension > 2
+  are not supported" guard only inspected the first flattened cell, not
+  every cell -- fixed to check all of them. (c)
+  `check_batched_inference_estimating_function_args_equivalent` had zero
+  test coverage anywhere in the suite (the one fixture exercising both
+  checks together is deliberately inconsistent on the *algorithm* side, so
+  it raises before the inference check ever runs) -- added
+  `test_check_batched_inference_estimating_function_args_equivalent_passes_on_consistent_data`
+  (a hand-built, self-consistent, updates-free fixture isolating the
+  inference side). A duplicated ~8-line "gather the reconstructed
+  action-probability override" block between `_build_algorithm_bucket_overrides`
+  and `_build_inference_bucket_overrides` was also extracted into
+  `_add_action_prob_override_if_used`.
+
+  Two more findings were investigated and did **not** need a code fix: one
+  reviewer flagged that the new checks no longer independently re-derive
+  their own subject grouping/bucketing the way the old per-subject checks
+  did (they now reuse `update_layer`/`inference_layer`, the same objects the
+  main computation uses) -- raised as a loss of independent verification
+  power for a bug in the precompute itself, but this is an accepted,
+  deliberate tradeoff (re-deriving independent bucketing here would
+  reintroduce the exact O(subjects) cost this change removes; the
+  precompute's own correctness is independently established by Step 4's
+  test suite, including a cross-check against the retained
+  `_reference_single_subject_weighted_estimating_function_stacker`).
+  Another flagged that dropping the OLD checks (which iterated
+  `update_func_args_by_by_subject_id_by_policy_num`'s own keys directly) in
+  favor of the new checks (which only walk `beta_index_by_policy_num`'s
+  keys via `update_layer`) loses an incidental KeyError guard against an
+  unexpected policy_num with real data -- confirmed this exact scenario is
+  already caught earlier and independently, under the same
+  `suppress_all_data_checks` gate, by
+  `input_checks.perform_first_wave_input_checks`'s
+  `require_no_policy_numbers_present_in_alg_update_args_but_not_analysis_df`,
+  so this is not a net loss of protection.
+
+  One efficiency finding was left as a documented, lower-priority follow-on:
+  each check computes the "threaded" bucket value via `jax.vmap`, uses it
+  only for the `assert_allclose` comparison, then discards it -- the main
+  computation (`compute_batched_algorithm_component`/`compute_batched_inference_outputs`)
+  recomputes the identical value moments later for real use. This doubles
+  the estimating-function evaluation cost specifically when checks are
+  enabled, bounded by O(updates x shape-buckets), not O(subjects) -- a much
+  smaller cost than what this change already removed, and not distinguishable
+  from noise in this session's measurements, but a real, avoidable
+  redundancy if a future profile shows otherwise (thread the check's already-computed
+  threaded value through to the main computation instead of recomputing it).
 - The one-time structural precompute
   (`build_action_prob_layer_precompute`/`build_update_layer_precompute`/`build_inference_layer_precompute`)
   is rebuilt from scratch on every call to
-  `get_avg_weighted_estimating_function_stacks_and_aux_values`, which runs
-  ~16 times per `analyze_dataset` call (once for the real `jax.jacrev` call,
-  15 more for the local-linearization diagnostic's un-jitted forward
-  passes) -- all 16 calls use identical structural data, only the
-  differentiated betas/theta values change. Hoisting the three precompute
-  objects out to the caller and building them once would remove this
-  redundant O(N·T) work from the diagnostic phase this ADR's own Step 0
-  found dominates wall-clock. Not done here to keep this change's surface
-  area to the one function signature already being changed.
+  `get_avg_weighted_estimating_function_stacks_and_aux_values`. This function
+  runs ~16 times per `analyze_dataset` call (once for the real `jax.jacrev`
+  call, 15 more for the local-linearization diagnostic's forward passes),
+  all using identical structural data -- only the differentiated betas/theta
+  values change. **Update (Step 3, second attempt, below): this is now fixed
+  for 15 of those 16 calls** -- jitting the diagnostic's forward-pass closure
+  means its precompute only actually executes once, at trace/compile time,
+  with the (numpy) result baked into the compiled program as a constant for
+  all 15 evaluations. It is **still true for the 1 real `jax.jacrev` call**,
+  since that call was not jitted (see "Step 3, second attempt" below for why)
+  -- hoisting the three precompute objects out to that one remaining caller
+  would remove the redundant O(N·T) work there too, but was not done here to
+  keep this change's surface area small.
 
 **Correctness regressions found by adversarial review and fixed before
 landing:** a safety check meant to catch a malformed `algorithm_estimating_func`/`inference_estimating_func`
@@ -353,6 +455,159 @@ self-padded like the module's own stated invariant -- fixed to self-pad the
 same way as everything else (`action` is masked and non-differentiated
 downstream, so this was not an active bug, but it was a real, silent
 exception to the documented design).
+
+### Step 3, second attempt: `jax.jit` after Step 4
+
+With Step 4's `jax.vmap` batching in place, Step 3 was re-attempted, split
+into two independent pieces since they have very different reuse
+characteristics.
+
+**Jitting the local-linearization diagnostic's forward-pass closure: kept, a
+clear win.** `_compute_local_linearization_error_ratio` (nested inside
+`analyze_dataset`) already had its own closure,
+`_eval_avg_stack_jit` -- a per-perturbation forward evaluator, already
+hardcoding `suppress_all_data_checks=True` and
+`include_auxiliary_outputs=False`, so none of the data-check
+concretization hazards from the first Step 3 attempt applied to it. This
+closure is called `J=15` times per `analyze_dataset` call (once per
+perturbation), so compiling it once and reusing the compiled artifact for
+all 15 evaluations is exactly the scenario `jax.jit` is built for.
+Decorating it with `@jax.jit` (a one-line change) is what it took:
+
+| Scale | eager (Step 4 only) | jitted |
+|---|---|---|
+| small (n=20, T=6) | ~2.2-2.9s | ~0.4-1.3s |
+| medium (n=100, T=10) | ~7.5-8.9s | ~0.2-3.8s |
+
+(The medium-scale jitted range reflects system-load variance across this
+session's many benchmark runs on a shared machine, not code changes --
+every measurement in this range was still a clear win over the eager
+baseline, confirmed by direct back-to-back A/B comparisons at a fixed point
+in time, not by comparing absolute numbers taken minutes apart.) This also
+incidentally fixes part of Step 4's "structural precompute rebuilt ~16
+times" known follow-up for this specific call path: `build_action_prob_layer_precompute`/`build_update_layer_precompute`/`build_inference_layer_precompute`
+only ever touch static, non-differentiated data, so under `jax.jit` they
+execute once at trace/compile time and their (numpy) results get baked into
+the compiled program as constants, rather than being recomputed in Python
+on every one of the 15 calls.
+
+This surfaced one real, latent bug in the Step 4 module, now fixed:
+`_stack_grid_to_tensor` (used only by the one-time structural precompute)
+called the `jax.numpy`-based `stack_batched_arg_lists_into_tensors`
+(`vmap_helpers.py`) and then `np.asarray(...)`'d the result. This worked by
+accident in eager mode (a concrete `jnp` array converts fine via
+`__array__`), but under `jax.jit` tracing, every `jnp` operation inside the
+trace produces an abstract tracer regardless of whether its inputs are
+literal constants -- so the subsequent `np.asarray(...)` raised
+`TracerArrayConversionError`. Fixed by making `_stack_grid_to_tensor`
+strictly `numpy`-only (`np.stack`/`np.asarray`, never `jnp`), matching what
+it always should have been given its role. Every other function in the
+structural-precompute path was audited for the same class of leak and found
+clean.
+
+An adversarial review of this fix caught two behavior changes it introduced
+relative to the old `jnp`-based version, both now fixed: (a) it silently
+turned a `None`-valued `action_prob_func_args` cell into a `dtype=object`
+array (previously a silent float32 NaN-fill), which crashed confusingly
+deep inside `jax.vmap` instead -- fixed with an explicit check that raises a
+clear `ValueError` naming the offending `(subject, time)` cell, since
+`action_prob_func_args` positions (unlike `alg_update_func_args`/`inference_func_args`
+override positions) are never legitimately `None` in the first place; (b) it
+silently dropped the old code's explicit `TypeError` guard against >2D
+argument values -- restored. A third finding (the new numpy path defaults to
+float64/int64 where the old `jnp` path defaulted to float32/int32) was
+reviewed and left as-is: this repo never sets `jax_enable_x64`, so every one
+of these tensors gets silently downcast back to float32/int32 the moment it
+crosses into any `jnp` operation downstream, same as before -- the only
+actual cost is a temporarily wider *host-memory* footprint for these small
+(N, T, ...) precompute tensors before that conversion happens, negligible at
+this codebase's scale.
+
+**Jitting the main differentiated call (`construct_classical_and_adjusted_sandwiches`'s
+`jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True)`):
+tried, reverted again.** Implemented as a closure baking in all static
+config (mirroring the first attempt and the diagnostic's own closure),
+`jax.jit(jax.jacrev(closure, has_aux=True))`, applied only when
+`suppress_all_data_checks=True` (the data-check block's
+`np.testing.assert_allclose`/`.tolist()`/`int()` calls have the same
+concretization problem as before and were not addressed this time -- see
+"known follow-ups" below). Unlike the diagnostic, this call runs only
+**once** per `analyze_dataset` invocation, so there is no
+compile-once-reuse-many-times amortization available to offset compile
+cost. Measured, reproducibly (two independent runs, nearly identical
+numbers each time):
+
+| Scale | eager (Step 4 + diagnostic jit) | jacrev also jitted |
+|---|---|---|
+| small (n=20, T=6) | ~3.3-3.6s | ~2.2s |
+| medium (n=100, T=10) | ~6.2-6.9s | ~12.1-12.3s |
+
+Small scale looked like a modest win in isolation, but **medium scale was a
+clear regression, and it also degraded the separate, already-jitted
+diagnostic closure running later in the same process** (its own time going
+from ~0.45s to ~3.6s, despite that closure itself being completely
+unchanged) -- some interaction between two concurrent `jax.jit`
+compilations competing for resources within one process, not fully
+root-caused, but reproduced identically twice. Net effect at n=100: total
+`analyze_dataset` wall-clock roughly doubled (~7.1s -> ~16.3-16.5s). This
+is far short of the first attempt's catastrophic (minutes-scale) blowup --
+Step 4's batching clearly did fix the "nothing for XLA to compile once"
+root cause -- but it is still a real, reproducible net loss at the scale
+that matters, so it was reverted. **Do not re-add `jax.jit` to this
+specific call without re-measuring at both benchmark scales and checking
+for cross-jit interaction effects if any other `jax.jit` call exists in the
+same code path.**
+
+### Shape-bucket scaling: `jax.jit`/`jax.vmap` internals research
+
+The per-update shape-bucketing in `compute_batched_algorithm_component` (see
+Step 4) exists because subjects don't share argument shape at a given update
+in general under incremental/staggered recruitment. A natural worry: how
+many distinct buckets could a real trial actually produce, and does
+`jax.jit` offer any way to tame that? Researched JAX's own documentation and
+maintainer discussions directly (rather than working from priors) to answer
+this precisely:
+
+- **Padding + shape-bucketing is JAX's own recommended pattern for ragged
+  data**, not a workaround specific to this codebase: "JAX does not
+  currently have any facility for computation on ragged arrays, and `vmap`
+  is built with homogeneous batches in mind... the best option is to pad all
+  batches to the same length, and then use `vmap` on the padded version,"
+  and for reducing bucket count specifically: "bucket your data by size...
+  and pad to the maximum size of the bucket." This matches the two-level
+  structure already in place (pad the time axis fully; bucket-then-exact-shape
+  the per-update row axis).
+- **`jax.jit`'s compilation cache keys on shape/dtype/pytree-treedef**, and
+  a Python `for` loop over shape-buckets, when traced under `jit`, is fully
+  unrolled into the compiled graph: "if you need many loop iterations, XLA
+  must optimize thousands of unrolled HLO instructions." This is the
+  root-cause explanation for the Step 3 second-attempt regression above
+  (more subjects -> more likely more distinct buckets -> a bigger single
+  compiled program) and means **`jax.jit` would make a "many shape buckets"
+  scenario strictly worse, not better** -- the eager per-bucket dispatch
+  path already in place is the right one for this axis regardless of jit.
+- **Measured, not assumed, how many buckets the existing benchmark fixtures
+  actually produce**, via a new always-on diagnostic log line
+  ("`Algorithm shape-bucket fan-out: ...`", added at the same point
+  `update_layer` is built): small scale (n=20, 6 updates) produces 11 total
+  buckets, max 2 in any single update; medium scale (n=100, 13 updates)
+  produces 49 total, max 5 in any single update -- both far from the
+  pathological one-bucket-per-subject case. These are synthetic fixtures
+  with a specific recruitment pattern (an initial cohort + a staggered
+  trickle), not necessarily representative of real trials -- the logging is
+  there so this can be checked directly against real data before assuming
+  either way.
+- **If real trials do show large bucket counts**, the only general fix
+  found is a real interface change, not a quick one: the row axis being
+  bucketed can't be padded the way the time axis was, because
+  `alg_update_func`s like `RL_least_squares_loss_regularized` **sum over
+  it** -- padding would silently change the answer unless padded rows are
+  guaranteed to contribute exactly zero to that sum, which isn't
+  determinable in general for an arbitrary user-supplied function without
+  adding an explicit mask argument to the estimating-function contract
+  (affecting every shipped `alg_update_func`/`inference_func`). Not started;
+  this is a scope/risk judgment call, worth pursuing only if the new logging
+  shows bucket counts actually approaching subject counts in practice.
 
 **Step 5 is deferred and re-scoped lower priority than initially expected.**
 The one existing precedent for exploiting this sparsity in this codebase --

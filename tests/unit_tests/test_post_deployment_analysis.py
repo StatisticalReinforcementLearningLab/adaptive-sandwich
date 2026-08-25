@@ -3105,6 +3105,102 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     )
 
 
+def test_batched_algorithm_data_check_detects_the_same_inconsistency_as_the_original(
+    setup_data_two_loss_functions_use_action_probs_both_sides,  # pylint: disable=redefined-outer-name
+):
+    """
+    Fast, unit-level exercise of check_batched_algorithm_estimating_function_args_equivalent
+    (the ADS-139 batched replacement for
+    input_checks.require_threaded_algorithm_estimating_function_args_equivalent).
+    Every other test in this file passes suppress_all_data_checks=True, so
+    without a test like this, the new check function is only ever exercised
+    by the slower tests/benchmarks and tests/integration_tests suites.
+
+    Uses the same fixture as
+    test_construct_single_user_weighted_estimating_function_stacker_use_action_probs_both_sides,
+    which -- per its own docstring -- "intentionally breaks the assumption
+    that the betas in the action probability function args match those in
+    all_post_update_betas". That is exactly the inconsistency this data
+    check exists to catch, so with suppress_all_data_checks=False this call
+    is EXPECTED to raise. Confirmed directly (see the investigation in this
+    change) that the original, un-batched
+    input_checks.require_threaded_algorithm_estimating_function_args_equivalent
+    raises on this exact fixture too -- this test proves the new batched
+    check reproduces that same detection, not a new bug.
+    """
+    (
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_by_decision_time_by_user_id,
+        policy_num_by_decision_time_by_user_id,
+        action_prob_func_args_by_user_id_by_decision_time,
+        update_func_args_by_by_user_id_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+    ) = setup_data_two_loss_functions_use_action_probs_both_sides
+
+    theta = jnp.array([1.0, 2.0, 3.0, 4.0], dtype="float32")
+    all_post_update_betas = jnp.array(
+        [
+            jnp.array([-2, 2, 2, 4], dtype="float32"),
+            jnp.array([-3, 2, 3, 4], dtype="float32"),
+            jnp.array([-4, 2, 4, 4], dtype="float32"),
+            jnp.array([-5, 2, 0.5, 4], dtype="float32"),
+        ]
+    )
+    user_ids = jnp.array([1, 2])
+
+    common_args = (
+        post_deployment_analysis.flatten_params(all_post_update_betas, theta),
+        all_post_update_betas.shape[1],
+        theta.shape[0],
+        user_ids,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        alg_update_func,
+        alg_update_func_type,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index,
+        inference_func,
+        inference_func_type,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_user_id_by_decision_time,
+        policy_num_by_decision_time_by_user_id,
+        initial_policy_num,
+        beta_index_by_policy_num,
+        inference_func_args_by_user_id,
+        inference_action_prob_decision_times_by_user_id,
+        update_func_args_by_by_user_id_by_policy_num,
+        action_by_decision_time_by_user_id,
+    )
+
+    # Sanity: checks-suppressed still computes fine (the inconsistency only
+    # matters to the check itself, not to the main computation).
+    post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+        *common_args, True, True
+    )
+
+    with pytest.raises(AssertionError):
+        post_deployment_analysis.get_avg_weighted_estimating_function_stacks_and_aux_values(
+            *common_args, False, True
+        )
+
+
 @pytest.fixture
 def setup_data_two_loss_functions_use_action_probs_from_betas_RL_action_probs_inference():
     action_prob_func_args_beta_index = 0

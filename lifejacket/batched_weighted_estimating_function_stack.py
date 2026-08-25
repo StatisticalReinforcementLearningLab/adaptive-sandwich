@@ -139,10 +139,47 @@ def assert_no_intra_window_gaps(precompute: ActionProbLayerPrecompute) -> None:
 
 
 def _stack_grid_to_tensor(value_grid: list[list[Any]], N: int, T: int) -> np.ndarray:
-    flat = [value_grid[n][t] for n in range(N) for t in range(T)]
-    (flat_tensor,), _ = stack_batched_arg_lists_into_tensors([flat])
-    flat_tensor = np.asarray(flat_tensor)
-    return flat_tensor.reshape((N, T) + flat_tensor.shape[1:])
+    """
+    Pure-numpy stacking -- deliberately never jax.numpy. This always runs
+    against static, never-differentiated data (the one-time structural
+    precompute), which must stay concrete even when this whole module is
+    called from inside a jax.jit trace (e.g. ADS-139 Step 3): under tracing,
+    every jnp op inside the trace produces an abstract tracer regardless of
+    whether its inputs are literal constants, which would make a later
+    np.asarray(...) on the result raise TracerArrayConversionError -- as it
+    did here when this used to call the jax.numpy-based
+    stack_batched_arg_lists_into_tensors (vmap_helpers.py), which exists for
+    the opposite case: building tensors that ARE meant to flow into a traced
+    jax.vmap call.
+
+    Unlike alg_update_func_args/inference_func_args (which may legitimately
+    hold None at an unused, override-only argument position -- see
+    _stackable_positions), every action_prob_func_args position here is
+    REQUIRED: it always flows into a real call to action_prob_func, so None
+    is never a valid value at this layer. Check for it explicitly (a clear
+    ValueError naming the offending cell) rather than silently building an
+    object-dtype array that would otherwise surface, confusingly, as a dtype
+    error much later inside jax.vmap.
+    """
+    flat = []
+    for n in range(N):
+        for t in range(T):
+            value = value_grid[n][t]
+            if value is None:
+                raise ValueError(
+                    f"action_prob_func_args has a None value at subject index {n}, "
+                    f"time index {t} -- every action_prob_func_args position must be a "
+                    "real value, since it always flows into a call to action_prob_func "
+                    "(unlike alg_update_func_args/inference_func_args, which may use "
+                    "None for an unused, override-only argument position)."
+                )
+            flat.append(np.asarray(value))
+    # Checked across every cell, not just flat[0]: recorded arg shapes could
+    # in principle vary by decision time even for the same argument position.
+    if any(v.ndim > 2 for v in flat):
+        raise TypeError("Arrays with dimension greater than 2 are not supported.")
+    stacked = np.stack(flat, axis=0)
+    return stacked.reshape((N, T) + stacked.shape[1:])
 
 
 def build_action_prob_layer_precompute(
@@ -601,6 +638,178 @@ def _stackable_positions(raw_arg_lists: list[list], positions: list[int]) -> lis
     return [pos for pos in positions if not all(v is None for v in raw_arg_lists[pos])]
 
 
+def _assemble_call_args_and_in_axes(
+    raw_arg_lists: list[list],
+    override_position_values: dict[int, tuple[Any, int | None]],
+) -> tuple[list[Any], list[Any]]:
+    """
+    Builds the (call_args, in_axes) pair for one jax.vmap(estimating_func, ...)
+    call over one shape bucket: every position not in
+    override_position_values gets its raw per-subject values stacked into a
+    batched tensor (in_axes=0, skipping all-None positions per
+    _stackable_positions); every position in override_position_values uses
+    the given (value, axis) directly (e.g. a shared beta with axis=None, or a
+    per-subject reconstructed-action-prob tensor with axis=0).
+    """
+    num_args = len(raw_arg_lists)
+    remaining_positions = [k for k in range(num_args) if k not in override_position_values]
+    stack_positions = _stackable_positions(raw_arg_lists, remaining_positions)
+    remaining_tensors, _ = stack_batched_arg_lists_into_tensors(
+        [raw_arg_lists[k] for k in stack_positions]
+    )
+    call_args: list[Any] = [None] * num_args
+    in_axes: list[Any] = [None] * num_args
+    for pos, tensor in zip(stack_positions, remaining_tensors):
+        call_args[pos] = tensor
+        in_axes[pos] = 0
+    for pos, (value, axis) in override_position_values.items():
+        call_args[pos] = value
+        in_axes[pos] = axis
+    return call_args, in_axes
+
+
+def _add_action_prob_override_if_used(
+    override_position_values: dict[int, tuple[Any, int | None]],
+    action_prob_index: int,
+    bucket: UpdateArgBucket,
+    action_prob_layer: ActionProbLayerPrecompute,
+    pi_beta_grid: jnp.ndarray | None,
+) -> None:
+    """
+    Shared by _build_algorithm_bucket_overrides and
+    _build_inference_bucket_overrides: if this estimating function takes a
+    reconstructed-action-probability argument, gather it from the
+    already-computed pi_beta_grid and add it to override_position_values
+    in place. No-op if action_prob_index < 0.
+    """
+    if action_prob_index < 0:
+        return
+    target_shape = bucket.raw_arg_lists[action_prob_index][0].shape
+    reconstructed = _gather_reconstructed_action_prob(
+        pi_beta_grid,
+        action_prob_layer.time_to_col,
+        bucket.subject_positions,
+        bucket.action_prob_times_by_subject,
+        bucket.subject_ids_in_order,
+        target_shape,
+    )
+    override_position_values[action_prob_index] = (reconstructed, 0)
+
+
+def _build_algorithm_bucket_overrides(
+    betas: jnp.ndarray,
+    beta_u: jnp.ndarray,
+    policy_num: int | float,
+    bucket: UpdateArgBucket,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+    action_prob_layer: ActionProbLayerPrecompute,
+    pi_beta_grid: jnp.ndarray | None,
+) -> dict[int, tuple[Any, int | None]]:
+    """
+    The beta/previous-betas/action-prob override construction for one
+    (update, shape-bucket) pair -- shared by compute_batched_algorithm_component
+    (the main computation) and check_batched_algorithm_estimating_function_args_equivalent
+    (the data-check), so the "threaded" arguments used by the check are
+    guaranteed identical to what the main computation actually uses.
+    """
+    bucket_size = len(bucket.subject_ids_in_order)
+    raw_arg_lists = bucket.raw_arg_lists
+    override_position_values: dict[int, tuple[jnp.ndarray, int | None]] = {
+        alg_update_func_args_beta_index: (beta_u, None)
+    }
+
+    if alg_update_func_args_previous_betas_index >= 0:
+        prev_raw_list = raw_arg_lists[alg_update_func_args_previous_betas_index]
+        # len(), not .shape[0]: the original thread_update_func_args used
+        # len(...) on this argument (arg_threading_helpers.py), which
+        # accepts a plain Python list/tuple as well as an ndarray --
+        # calculate_derivatives.get_shape's own len()-fallback anticipates
+        # exactly this for shape-bucketing, so this stays consistent.
+        num_previous = len(prev_raw_list[0])
+        if num_previous > betas.shape[0]:
+            raise ValueError(
+                f"A subject's previous_post_update_betas has length "
+                f"{num_previous} at policy_num={policy_num!r}, but only "
+                f"{betas.shape[0]} update(s) worth of betas are available -- "
+                "betas[:num_previous] would otherwise silently clamp to a "
+                "shorter-than-requested slice instead of raising."
+            )
+
+        # The broadcast below is only correct if every subject in this
+        # bucket was actually supplied the same previous-betas content
+        # by the caller (true today for every alg_update_func and
+        # data-collection function this repo ships, but not a
+        # contract lifejacket enforces on
+        # alg_update_func_args_previous_betas_index in general).
+        # Check it explicitly, once per bucket, rather than assuming
+        # it: this is O(bucket_size) numpy array comparisons,
+        # negligible next to the vmap call itself, and turns a
+        # possible silent wrong-number failure mode into a loud one.
+        # np.allclose (not array_equal): only the CONTENT identity
+        # across subjects matters here, and different floating-point
+        # paths to the same logical value shouldn't spuriously trip
+        # this check.
+        if bucket_size > 1:
+            first_val = np.asarray(prev_raw_list[0])
+            for other in prev_raw_list[1:]:
+                if not np.allclose(np.asarray(other), first_val):
+                    raise ValueError(
+                        "alg_update_func_args_previous_betas_index does not have "
+                        "identical raw values across every subject sharing this "
+                        f"shape bucket at policy_num={policy_num!r}. The batched "
+                        "implementation broadcasts ONE previous-betas value per "
+                        "update across a whole bucket, which is only correct when "
+                        "every subject at a given update was supplied the same "
+                        "previous_post_update_betas content. If this fires, either "
+                        "the calling code is supplying genuinely subject-specific "
+                        "previous betas (fix the caller), or this bucket handling "
+                        "needs a real per-subject gather instead of a broadcast."
+                    )
+
+        override_position_values[alg_update_func_args_previous_betas_index] = (
+            betas[:num_previous],
+            None,
+        )
+
+    _add_action_prob_override_if_used(
+        override_position_values,
+        alg_update_func_args_action_prob_index,
+        bucket,
+        action_prob_layer,
+        pi_beta_grid,
+    )
+    return override_position_values
+
+
+def _build_inference_bucket_overrides(
+    theta: jnp.ndarray,
+    bucket: UpdateArgBucket,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+    action_prob_layer: ActionProbLayerPrecompute,
+    pi_beta_grid: jnp.ndarray | None,
+) -> dict[int, tuple[Any, int | None]]:
+    """
+    The theta/action-prob override construction for one inference shape
+    bucket -- shared by compute_batched_inference_outputs (the main
+    computation) and check_batched_inference_estimating_function_args_equivalent
+    (the data-check).
+    """
+    override_position_values: dict[int, tuple[jnp.ndarray, int | None]] = {
+        inference_func_args_theta_index: (theta, None)
+    }
+    _add_action_prob_override_if_used(
+        override_position_values,
+        inference_func_args_action_prob_index,
+        bucket,
+        action_prob_layer,
+        pi_beta_grid,
+    )
+    return override_position_values
+
+
 def compute_batched_algorithm_component(
     betas: jnp.ndarray,
     beta_dim: int,
@@ -631,94 +840,21 @@ def compute_batched_algorithm_component(
             bucket_size = len(bucket.subject_ids_in_order)
             if bucket_size == 0:
                 continue
-            raw_arg_lists = list(bucket.raw_arg_lists)  # copy: about to override some positions
 
-            override_position_values: dict[int, tuple[jnp.ndarray, int | None]] = {
-                alg_update_func_args_beta_index: (beta_u, None)
-            }
-
-            if alg_update_func_args_previous_betas_index >= 0:
-                prev_raw_list = raw_arg_lists[alg_update_func_args_previous_betas_index]
-                # len(), not .shape[0]: the original thread_update_func_args used
-                # len(...) on this argument (arg_threading_helpers.py), which
-                # accepts a plain Python list/tuple as well as an ndarray --
-                # calculate_derivatives.get_shape's own len()-fallback anticipates
-                # exactly this for shape-bucketing, so this stays consistent.
-                num_previous = len(prev_raw_list[0])
-                if num_previous > betas.shape[0]:
-                    raise ValueError(
-                        f"A subject's previous_post_update_betas has length "
-                        f"{num_previous} at policy_num={policy_num!r}, but only "
-                        f"{betas.shape[0]} update(s) worth of betas are available -- "
-                        "betas[:num_previous] would otherwise silently clamp to a "
-                        "shorter-than-requested slice instead of raising."
-                    )
-
-                # The broadcast below is only correct if every subject in this
-                # bucket was actually supplied the same previous-betas content
-                # by the caller (true today for every alg_update_func and
-                # data-collection function this repo ships, but not a
-                # contract lifejacket enforces on
-                # alg_update_func_args_previous_betas_index in general).
-                # Check it explicitly, once per bucket, rather than assuming
-                # it: this is O(bucket_size) numpy array comparisons,
-                # negligible next to the vmap call itself, and turns a
-                # possible silent wrong-number failure mode into a loud one.
-                # np.allclose (not array_equal): only the CONTENT identity
-                # across subjects matters here, and different floating-point
-                # paths to the same logical value shouldn't spuriously trip
-                # this check.
-                if bucket_size > 1:
-                    first_val = np.asarray(prev_raw_list[0])
-                    for other in prev_raw_list[1:]:
-                        if not np.allclose(np.asarray(other), first_val):
-                            raise ValueError(
-                                "alg_update_func_args_previous_betas_index does not have "
-                                "identical raw values across every subject sharing this "
-                                f"shape bucket at policy_num={policy_num!r}. The batched "
-                                "implementation broadcasts ONE previous-betas value per "
-                                "update across a whole bucket, which is only correct when "
-                                "every subject at a given update was supplied the same "
-                                "previous_post_update_betas content. If this fires, either "
-                                "the calling code is supplying genuinely subject-specific "
-                                "previous betas (fix the caller), or this bucket handling "
-                                "needs a real per-subject gather instead of a broadcast."
-                            )
-
-                override_position_values[alg_update_func_args_previous_betas_index] = (
-                    betas[:num_previous],
-                    None,
-                )
-
-            if alg_update_func_args_action_prob_index >= 0:
-                target_shape = raw_arg_lists[alg_update_func_args_action_prob_index][0].shape
-                reconstructed = _gather_reconstructed_action_prob(
-                    pi_beta_grid,
-                    action_prob_layer.time_to_col,
-                    bucket.subject_positions,
-                    bucket.action_prob_times_by_subject,
-                    bucket.subject_ids_in_order,
-                    target_shape,
-                )
-                override_position_values[alg_update_func_args_action_prob_index] = (
-                    reconstructed,
-                    0,
-                )
-
-            num_args = len(raw_arg_lists)
-            remaining_positions = [k for k in range(num_args) if k not in override_position_values]
-            stack_positions = _stackable_positions(raw_arg_lists, remaining_positions)
-            remaining_tensors, _ = stack_batched_arg_lists_into_tensors(
-                [raw_arg_lists[k] for k in stack_positions]
+            override_position_values = _build_algorithm_bucket_overrides(
+                betas,
+                beta_u,
+                policy_num,
+                bucket,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                action_prob_layer,
+                pi_beta_grid,
             )
-            call_args: list[Any] = [None] * num_args
-            in_axes: list[Any] = [None] * num_args
-            for pos, tensor in zip(stack_positions, remaining_tensors):
-                call_args[pos] = tensor
-                in_axes[pos] = 0
-            for pos, (value, axis) in override_position_values.items():
-                call_args[pos] = value
-                in_axes[pos] = axis
+            call_args, in_axes = _assemble_call_args_and_in_axes(
+                bucket.raw_arg_lists, override_position_values
+            )
 
             bucket_output = jax.vmap(algorithm_estimating_func, in_axes=in_axes)(*call_args)
             if bucket_output.shape != (bucket_size, beta_dim):
@@ -772,36 +908,18 @@ def compute_batched_inference_outputs(
 
     for bucket in inference_layer.buckets:
         bucket_size = len(bucket.subject_ids_in_order)
-        raw_arg_lists = list(bucket.raw_arg_lists)
-        override_position_values: dict[int, tuple[jnp.ndarray, int | None]] = {
-            inference_func_args_theta_index: (theta, None)
-        }
-        if inference_func_args_action_prob_index >= 0:
-            target_shape = raw_arg_lists[inference_func_args_action_prob_index][0].shape
-            reconstructed = _gather_reconstructed_action_prob(
-                pi_beta_grid,
-                action_prob_layer.time_to_col,
-                bucket.subject_positions,
-                bucket.action_prob_times_by_subject,
-                bucket.subject_ids_in_order,
-                target_shape,
-            )
-            override_position_values[inference_func_args_action_prob_index] = (reconstructed, 0)
 
-        num_args = len(raw_arg_lists)
-        remaining_positions = [k for k in range(num_args) if k not in override_position_values]
-        stack_positions = _stackable_positions(raw_arg_lists, remaining_positions)
-        remaining_tensors, _ = stack_batched_arg_lists_into_tensors(
-            [raw_arg_lists[k] for k in stack_positions]
+        override_position_values = _build_inference_bucket_overrides(
+            theta,
+            bucket,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_layer,
+            pi_beta_grid,
         )
-        call_args: list[Any] = [None] * num_args
-        in_axes: list[Any] = [None] * num_args
-        for pos, tensor in zip(stack_positions, remaining_tensors):
-            call_args[pos] = tensor
-            in_axes[pos] = 0
-        for pos, (value, axis) in override_position_values.items():
-            call_args[pos] = value
-            in_axes[pos] = axis
+        call_args, in_axes = _assemble_call_args_and_in_axes(
+            bucket.raw_arg_lists, override_position_values
+        )
 
         bucket_component = jax.vmap(inference_estimating_func, in_axes=in_axes)(*call_args)
         if bucket_component.shape != (bucket_size, theta_dim):
@@ -830,3 +948,138 @@ def compute_batched_inference_outputs(
 
     weighted_component = component * inference_weight_products[:, None]
     return weighted_component, hessians
+
+
+def _assert_original_and_threaded_bucket_results_agree(
+    estimating_func: collections.abc.Callable,
+    bucket: UpdateArgBucket,
+    threaded_overrides: dict[int, tuple[Any, int | None]],
+    atol: float,
+    rtol: float,
+) -> None:
+    """
+    Shared comparison step for both check_batched_*_equivalent functions:
+    calls estimating_func over one bucket with (a) the original, entirely
+    un-substituted arguments and (b) the given threaded overrides, and
+    asserts they agree within tolerance. Factored out specifically so the
+    two callers' tolerances share one definition instead of two literal
+    copies that can silently drift apart (as happened once already: the
+    inference side had been copied from the algorithm side's atol=1e-7,
+    rtol=1e-3 instead of matching its own original,
+    input_checks.require_threaded_inference_estimating_function_args_equivalent's
+    looser rtol=1e-2, no-atol tolerance).
+    """
+    threaded_call_args, threaded_in_axes = _assemble_call_args_and_in_axes(
+        bucket.raw_arg_lists, threaded_overrides
+    )
+    original_call_args, original_in_axes = _assemble_call_args_and_in_axes(
+        bucket.raw_arg_lists, {}
+    )
+
+    original_result = jax.vmap(estimating_func, in_axes=original_in_axes)(*original_call_args)
+    # Need to stop gradient here: the threaded args trace back to betas/theta,
+    # which are being differentiated in the real jax.jacrev call this check
+    # runs alongside, and np.asarray can't convert a traced value.
+    threaded_result = jax.lax.stop_gradient(
+        jax.vmap(estimating_func, in_axes=threaded_in_axes)(*threaded_call_args)
+    )
+    np.testing.assert_allclose(
+        np.asarray(original_result),
+        np.asarray(threaded_result),
+        atol=atol,
+        rtol=rtol,
+    )
+
+
+def check_batched_algorithm_estimating_function_args_equivalent(
+    algorithm_estimating_func: collections.abc.Callable,
+    betas: jnp.ndarray,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+    action_prob_layer: ActionProbLayerPrecompute,
+    update_layer: UpdateLayerPrecompute,
+    pi_beta_grid: jnp.ndarray | None,
+) -> None:
+    """
+    Batched equivalent of
+    input_checks.require_threaded_algorithm_estimating_function_args_equivalent:
+    for every (update, shape-bucket), checks that substituting the shared
+    betas and RECONSTRUCTED action probabilities (exactly what
+    compute_batched_algorithm_component uses, via the same
+    _build_algorithm_bucket_overrides helper) into algorithm_estimating_func
+    produces the same result as the ORIGINAL, un-substituted arguments.
+
+    Reuses the already-computed pi_beta_grid instead of re-deriving
+    reconstructed action probabilities via a second, per-subject/per-update
+    dispatched pass through arg_threading_helpers.thread_update_func_args --
+    that old path was itself exactly the O(subjects) individually-dispatched
+    pattern the rest of this module exists to eliminate, just relocated to
+    feed this check instead of the main computation. No-op if action
+    probabilities are not used in the algorithm estimating function.
+    """
+    if alg_update_func_args_action_prob_index < 0:
+        return
+    for u, policy_num in enumerate(update_layer.policy_nums_by_update_index):
+        beta_u = betas[u]
+        for bucket in update_layer.buckets_by_update_index[u]:
+            if len(bucket.subject_ids_in_order) == 0:
+                continue
+
+            threaded_overrides = _build_algorithm_bucket_overrides(
+                betas,
+                beta_u,
+                policy_num,
+                bucket,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                action_prob_layer,
+                pi_beta_grid,
+            )
+            # Tolerance matches
+            # input_checks.require_threaded_algorithm_estimating_function_args_equivalent
+            # exactly -- see _assert_original_and_threaded_bucket_results_agree.
+            _assert_original_and_threaded_bucket_results_agree(
+                algorithm_estimating_func, bucket, threaded_overrides, atol=1e-7, rtol=1e-3
+            )
+
+
+def check_batched_inference_estimating_function_args_equivalent(
+    inference_estimating_func: collections.abc.Callable,
+    theta: jnp.ndarray,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+    action_prob_layer: ActionProbLayerPrecompute,
+    inference_layer: InferenceLayerPrecompute,
+    pi_beta_grid: jnp.ndarray | None,
+) -> None:
+    """
+    Batched equivalent of
+    input_checks.require_threaded_inference_estimating_function_args_equivalent
+    -- see check_batched_algorithm_estimating_function_args_equivalent's
+    docstring for the shared rationale. No-op if action probabilities are not
+    used in the inference estimating function.
+    """
+    if inference_func_args_action_prob_index < 0:
+        return
+    for bucket in inference_layer.buckets:
+        if len(bucket.subject_ids_in_order) == 0:
+            continue
+
+        threaded_overrides = _build_inference_bucket_overrides(
+            theta,
+            bucket,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_layer,
+            pi_beta_grid,
+        )
+        # Tolerance matches
+        # input_checks.require_threaded_inference_estimating_function_args_equivalent
+        # exactly (a looser rtol, no atol, than the algorithm-side check
+        # above -- NOT the same value, and previously copy-pasted wrong; see
+        # _assert_original_and_threaded_bucket_results_agree).
+        _assert_original_and_threaded_bucket_results_agree(
+            inference_estimating_func, bucket, threaded_overrides, atol=0.0, rtol=1e-2
+        )

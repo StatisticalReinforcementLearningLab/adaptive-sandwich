@@ -5,6 +5,10 @@ import pytest
 
 from lifejacket.batched_weighted_estimating_function_stack import (
     build_action_prob_layer_precompute,
+    build_inference_layer_precompute,
+    build_update_layer_precompute,
+    check_batched_algorithm_estimating_function_args_equivalent,
+    check_batched_inference_estimating_function_args_equivalent,
     compute_action_prob_layer_outputs,
 )
 from lifejacket.helper_functions import compute_subject_radon_nikodym_weights
@@ -183,4 +187,199 @@ def test_compute_subject_radon_nikodym_weights_accepts_contiguous_data():
         policy_num_by_decision_time,
         action_by_decision_time,
         {},
+    )
+
+
+def test_build_action_prob_layer_precompute_raises_clearly_on_none_arg_value():
+    """
+    action_prob_func_args positions are always required (they always flow
+    into a real call to action_prob_func), unlike alg_update_func_args'/
+    inference_func_args' override-only positions, which may legitimately be
+    None. A None value here must fail loudly and clearly at precompute time,
+    not silently become a dtype=object array that later crashes confusingly
+    deep inside jax.vmap.
+    """
+    subject_ids = np.array([1, 2])
+    action_prob_func_args_by_subject_id_by_decision_time = {
+        1: {1: (jnp.array([1.0]), None), 2: (jnp.array([1.0]), 1.0)},
+        2: {1: (jnp.array([1.0]), 2.0), 2: (jnp.array([1.0]), -1.0)},
+    }
+    action_by_decision_time_by_subject_id = {1: {1: 0, 2: 1}, 2: {1: 1, 2: 0}}
+    policy_num_by_decision_time_by_subject_id = {1: {1: 1, 2: 1}, 2: {1: 1, 2: 1}}
+
+    with pytest.raises(ValueError, match="None value"):
+        build_action_prob_layer_precompute(
+            subject_ids,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            action_by_decision_time_by_subject_id,
+            policy_num_by_decision_time_by_subject_id,
+            {},
+            1,
+            0,
+        )
+
+
+def _linear_action_prob_func(beta, treat_state):
+    return jnp.clip(beta[0] * treat_state, 0.01, 0.99)
+
+
+def _algorithm_estimating_func_using_action_prob(beta, action_prob, action_prob_times):
+    del action_prob_times  # only needed for reconstruction indexing, not the math
+    return beta * action_prob
+
+
+def test_check_batched_algorithm_estimating_function_args_equivalent_passes_on_consistent_data():
+    """
+    Positive counterpart to
+    test_batched_algorithm_data_check_detects_the_same_inconsistency_as_the_original
+    (tests/unit_tests/test_post_deployment_analysis.py), which only exercises
+    the raise path (that fixture is deliberately inconsistent for other
+    testing purposes). This one hand-builds a single-subject, single-update
+    fixture where the recorded action_prob_func_args beta and the recorded
+    "original" action probability in update_func_args are BOTH self-
+    consistent with all_post_update_betas and action_prob_func -- i.e. real,
+    well-formed data -- and confirms the check passes silently.
+    """
+    subject_ids = np.array([1])
+    beta_index_by_policy_num = {2: 0}
+    initial_policy_num = 1
+    action_prob_func_args_beta_index = 0
+    all_post_update_betas = jnp.array([[2.0]])
+
+    action_prob_func_args_by_subject_id_by_decision_time = {
+        1: {1: (jnp.array([1.0]), 0.5)},
+        # Decision time 2 is under the update (policy_num=2); its recorded
+        # beta already matches all_post_update_betas[0] -- real,
+        # self-consistent data, not a fabricated placeholder.
+        2: {1: (jnp.array([2.0]), 0.5)},
+    }
+    action_by_decision_time_by_subject_id = {1: {1: 0, 2: 1}}
+    policy_num_by_decision_time_by_subject_id = {1: {1: 1, 2: 2}}
+
+    action_prob_layer = build_action_prob_layer_precompute(
+        subject_ids,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        action_by_decision_time_by_subject_id,
+        policy_num_by_decision_time_by_subject_id,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_prob_func_args_beta_index,
+    )
+
+    # The "original" recorded action probability must be computed the same
+    # way action_prob_func would compute it, for this fixture to actually be
+    # self-consistent (this is what a real, correctly-collected dataset
+    # looks like -- not something the check itself should ever have to
+    # fabricate).
+    recorded_action_prob = jnp.array([_linear_action_prob_func(jnp.array([2.0]), 0.5)])
+    update_func_args_by_by_subject_id_by_policy_num = {
+        2: {1: (jnp.array([2.0]), recorded_action_prob, jnp.array([2]))}
+    }
+    update_layer = build_update_layer_precompute(
+        subject_ids,
+        update_func_args_by_by_subject_id_by_policy_num,
+        beta_index_by_policy_num,
+        2,  # alg_update_func_args_action_prob_times_index
+        action_prob_layer,
+    )
+
+    betas = all_post_update_betas
+    _, pi_beta_grid = compute_action_prob_layer_outputs(
+        _linear_action_prob_func,
+        action_prob_func_args_beta_index,
+        action_prob_layer,
+        betas,
+        True,
+    )
+
+    # Must not raise.
+    check_batched_algorithm_estimating_function_args_equivalent(
+        _algorithm_estimating_func_using_action_prob,
+        betas,
+        0,  # alg_update_func_args_beta_index
+        -1,  # alg_update_func_args_previous_betas_index
+        1,  # alg_update_func_args_action_prob_index
+        action_prob_layer,
+        update_layer,
+        pi_beta_grid,
+    )
+
+
+def _inference_estimating_func_using_action_prob(theta, action_prob):
+    return theta * action_prob
+
+
+def test_check_batched_inference_estimating_function_args_equivalent_passes_on_consistent_data():
+    """
+    check_batched_inference_estimating_function_args_equivalent had no test
+    anywhere in the suite before this: the one fixture that exercises it
+    end-to-end (setup_data_two_loss_functions_use_action_probs_both_sides in
+    test_post_deployment_analysis.py) is deliberately inconsistent on the
+    ALGORITHM side, so that check raises first and the inference check never
+    actually runs. This hand-builds a minimal, genuinely self-consistent
+    fixture (no policy updates at all, to isolate the inference side) and
+    confirms the check passes silently on well-formed data -- the inference
+    counterpart to
+    test_check_batched_algorithm_estimating_function_args_equivalent_passes_on_consistent_data
+    above.
+    """
+    subject_ids = np.array([1])
+    action_prob_func_args_beta_index = 0
+
+    # No policy updates at all (everything stays on the initial policy) --
+    # isolates the inference side from the algorithm-side override logic
+    # exercised by the test above.
+    action_prob_func_args_by_subject_id_by_decision_time = {1: {1: (jnp.array([2.0]), 0.5)}}
+    action_by_decision_time_by_subject_id = {1: {1: 0}}
+    policy_num_by_decision_time_by_subject_id = {1: {1: 1}}
+
+    action_prob_layer = build_action_prob_layer_precompute(
+        subject_ids,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        action_by_decision_time_by_subject_id,
+        policy_num_by_decision_time_by_subject_id,
+        {},  # beta_index_by_policy_num -- no updates
+        1,  # initial_policy_num
+        action_prob_func_args_beta_index,
+    )
+    inference_action_prob_decision_times_by_subject_id = {1: np.array([1])}
+    inference_func_args_action_prob_index = 1
+    # Self-consistent: computed the same way pi_beta_grid will compute it
+    # (beta_row_index is -1 everywhere here since there are no updates, so
+    # the raw recorded beta [2.0] is what's actually used either way).
+    recorded_action_prob = jnp.array([_linear_action_prob_func(jnp.array([2.0]), 0.5)])
+    theta = jnp.array([3.0])
+    inference_func_args_by_subject_id = {1: (theta, recorded_action_prob)}
+
+    inference_layer = build_inference_layer_precompute(
+        inference_func_args_by_subject_id,
+        inference_func_args_action_prob_index,
+        inference_action_prob_decision_times_by_subject_id,
+        action_prob_layer,
+    )
+
+    # A single, never-substituted row: beta_row_index is -1 everywhere in
+    # this fixture (no updates), so this value is never actually gathered --
+    # it just needs to exist with a valid shape (a genuinely empty (0, 1)
+    # betas array hits an unrelated, pre-existing edge case in
+    # build_threaded_action_prob_beta_tensor's clamping for zero-update
+    # studies, out of scope for this test).
+    betas = jnp.zeros((1, 1))
+    _, pi_beta_grid = compute_action_prob_layer_outputs(
+        _linear_action_prob_func,
+        action_prob_func_args_beta_index,
+        action_prob_layer,
+        betas,
+        True,
+    )
+
+    # Must not raise.
+    check_batched_inference_estimating_function_args_equivalent(
+        _inference_estimating_func_using_action_prob,
+        theta,
+        0,  # inference_func_args_theta_index
+        inference_func_args_action_prob_index,
+        action_prob_layer,
+        inference_layer,
+        pi_beta_grid,
     )

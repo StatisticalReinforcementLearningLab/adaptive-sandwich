@@ -23,6 +23,8 @@ from .batched_weighted_estimating_function_stack import (
     build_action_prob_layer_precompute,
     build_inference_layer_precompute,
     build_update_layer_precompute,
+    check_batched_algorithm_estimating_function_args_equivalent,
+    check_batched_inference_estimating_function_args_equivalent,
     compute_action_prob_layer_outputs,
     compute_batched_algorithm_component,
     compute_batched_inference_outputs,
@@ -701,6 +703,28 @@ def analyze_dataset(
 
         num_subjects = stacks_float64.shape[0]
 
+        # This closure is jit-friendly by construction: suppress_all_data_checks and
+        # include_auxiliary_outputs are hardcoded below (never traced), so the
+        # np.testing.assert_allclose/.tolist()/int() concretization hazards that
+        # broke the earlier, ADR-documented jax.jit attempt on the differentiated
+        # call never enter this trace. Since ADS-139 Step 4 replaced the ragged
+        # per-subject/per-update Python loops with jax.vmap batching, this now
+        # traces to a small, compile-once graph -- worth jitting since this
+        # closure is called J=15 times below (this diagnostic previously
+        # dominated wall-clock, per this ADR's Step 0 benchmark).
+        #
+        # LANDMINE: do not change suppress_all_data_checks to a real,
+        # non-hardcoded value here. check_batched_algorithm_estimating_function_args_equivalent
+        # / check_batched_inference_estimating_function_args_equivalent (called
+        # when suppress_all_data_checks is False) call np.asarray() on their
+        # results -- fine under jax.jacrev's concrete-valued autodiff tracing
+        # (which is all they run under elsewhere), but under jax.jit's abstract
+        # tracing every value in the trace becomes a non-concrete tracer
+        # (confirmed empirically: even a jax.lax.stop_gradient'd value raises
+        # TracerArrayConversionError here, unlike under jacrev alone), so those
+        # checks would hard-crash the moment this closure ever traced with
+        # checks enabled.
+        @jax.jit
         def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
             return jnp.asarray(
                 get_avg_weighted_estimating_function_stacks_and_aux_values(
@@ -1415,80 +1439,32 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_action_prob_decision_times_by_subject_id,
         action_prob_layer,
     )
+    # Cheap visibility into shape-bucket fan-out: each distinct shape bucket
+    # at a given update becomes its own jax.vmap dispatch in
+    # compute_batched_algorithm_component below (see
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4 -- padding
+    # instead of bucketing this axis would silently corrupt any
+    # alg_update_func that reduces over accumulated per-subject rows, e.g.
+    # under incremental/staggered recruitment). Logged unconditionally since
+    # it's O(updates), not O(subjects); watch this if it ever grows close to
+    # the subject count, since that means bucketing isn't actually reducing
+    # dispatch count much for this study's enrollment pattern.
+    bucket_counts_by_update = [len(b) for b in update_layer.buckets_by_update_index]
+    logger.info(
+        "Algorithm shape-bucket fan-out: %d update(s), %d subject(s), "
+        "%d total bucket(s) (max %d in a single update).",
+        len(bucket_counts_by_update),
+        len(subject_ids_np),
+        sum(bucket_counts_by_update),
+        max(bucket_counts_by_update, default=0),
+    )
 
-    # 3. Data checks: if action probabilities are used in the algorithm or
-    # inference estimating functions, make sure that substituting in the
-    # reconstructed action probabilities (as the batched computation below
-    # does) is approximately equivalent to using the original action
-    # probabilities. This deliberately still runs via the original,
-    # per-subject threading functions -- it is opt-out via
-    # suppress_all_data_checks and is not part of the main computation the
-    # batched path replaces. See the ADR, Step 4, for the residual cost this
-    # retains when checks are not suppressed.
-    if (not suppress_all_data_checks) and (
-        alg_update_func_args_action_prob_index >= 0
-        or inference_func_args_action_prob_index >= 0
-    ):
-        logger.info("Threading in betas to action probability arguments for all subjects.")
-        (
-            threaded_action_prob_func_args_by_decision_time_by_subject_id,
-            _action_prob_func_args_by_decision_time_by_subject_id,
-        ) = thread_action_prob_func_args(
-            action_prob_func_args_by_subject_id_by_decision_time,
-            policy_num_by_decision_time_by_subject_id,
-            initial_policy_num,
-            betas,
-            beta_index_by_policy_num,
-            action_prob_func_args_beta_index,
-        )
-        if alg_update_func_args_action_prob_index >= 0:
-            logger.info(
-                "Threading in betas and beta-dependent action probabilities to algorithm "
-                "update function args for all subjects"
-            )
-            threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
-                update_func_args_by_by_subject_id_by_policy_num,
-                betas,
-                beta_index_by_policy_num,
-                alg_update_func_args_beta_index,
-                alg_update_func_args_action_prob_index,
-                alg_update_func_args_action_prob_times_index,
-                alg_update_func_args_previous_betas_index,
-                threaded_action_prob_func_args_by_decision_time_by_subject_id,
-                action_prob_func,
-            )
-            input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
-                algorithm_estimating_func,
-                update_func_args_by_by_subject_id_by_policy_num,
-                threaded_update_func_args_by_policy_num_by_subject_id,
-                suppress_interactive_data_checks,
-            )
-        if inference_func_args_action_prob_index >= 0:
-            logger.info(
-                "Threading in theta and beta-dependent action probabilities to inference "
-                "update function args for all subjects"
-            )
-            threaded_inference_func_args_by_subject_id = thread_inference_func_args(
-                inference_func_args_by_subject_id,
-                inference_func_args_theta_index,
-                theta,
-                inference_func_args_action_prob_index,
-                threaded_action_prob_func_args_by_decision_time_by_subject_id,
-                inference_action_prob_decision_times_by_subject_id,
-                action_prob_func,
-            )
-            input_checks.require_threaded_inference_estimating_function_args_equivalent(
-                inference_estimating_func,
-                inference_func_args_by_subject_id,
-                threaded_inference_func_args_by_subject_id,
-                suppress_interactive_data_checks,
-            )
-
-    # 4. Batched forward computation: one jax.vmap call spanning every
+    # 3. Batched forward computation: one jax.vmap call spanning every
     # subject and every global decision time for the Radon-Nikodym weights,
     # plus O(updates * shape buckets) jax.vmap calls for the algorithm and
     # inference estimating functions, instead of one Python-dispatched call
-    # per subject (or per subject per update).
+    # per subject (or per subject per update). Computed before the data
+    # checks below so pi_beta_grid is available for them to reuse.
     raw_weight_grid, pi_beta_grid = compute_action_prob_layer_outputs(
         action_prob_func,
         action_prob_func_args_beta_index,
@@ -1503,6 +1479,46 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         update_layer.hi_idx,
         action_prob_layer.subject_end_idx,
     )
+
+    # 4. Data checks: if action probabilities are used in the algorithm or
+    # inference estimating functions, make sure that substituting in the
+    # reconstructed action probabilities (as the batched computation above
+    # does) is approximately equivalent to using the original action
+    # probabilities. Reuses pi_beta_grid (already computed above) instead of
+    # re-deriving reconstructed action probabilities via a second,
+    # per-subject/per-update dispatched pass through
+    # arg_threading_helpers.thread_update_func_args/thread_inference_func_args
+    # -- opt-out via suppress_all_data_checks.
+    if not suppress_all_data_checks:
+        if alg_update_func_args_action_prob_index >= 0:
+            logger.info(
+                "Checking that reconstructed action probabilities are consistent with "
+                "recorded ones in the algorithm update function args for all subjects."
+            )
+        check_batched_algorithm_estimating_function_args_equivalent(
+            algorithm_estimating_func,
+            betas,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_previous_betas_index,
+            alg_update_func_args_action_prob_index,
+            action_prob_layer,
+            update_layer,
+            pi_beta_grid,
+        )
+        if inference_func_args_action_prob_index >= 0:
+            logger.info(
+                "Checking that reconstructed action probabilities are consistent with "
+                "recorded ones in the inference function args for all subjects."
+            )
+        check_batched_inference_estimating_function_args_equivalent(
+            inference_estimating_func,
+            theta,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_layer,
+            inference_layer,
+            pi_beta_grid,
+        )
 
     algorithm_component = compute_batched_algorithm_component(
         betas,
@@ -1733,14 +1749,23 @@ def construct_classical_and_adjusted_sandwiches(
     )
     theta_dim = theta_est.shape[0]
     beta_dim = all_post_update_betas.shape[1]
-    # NOTE: wrapping this call in jax.jit was tried and reverted -- see
-    # docs/adr/0001-adaptive-sandwich-performance-plan.md's "Step 3" section. Compiling this
-    # fully Python-unrolled, non-vmapped per-subject/per-update graph costs far more than the
-    # eager dispatch overhead it was meant to replace (measured ~77s of compile time at n=20
-    # subjects vs. ~5s eager, and growing much worse than linearly at n=100), because there is no
-    # shared/batched structure for XLA to compile once and reuse. jax.jit only pays off here once
-    # the per-subject and per-update Python loops are actually replaced with jax.vmap (see Step 4).
-    # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
+    # NOTE: wrapping this call in jax.jit was tried and reverted -- twice now.
+    # See docs/adr/0001-adaptive-sandwich-performance-plan.md's "Step 3" section
+    # for both attempts. The first (before ADS-139 Step 4) failed because the
+    # per-subject/per-update graph was fully Python-unrolled, giving XLA
+    # nothing batched to compile once. The second (after Step 4's jax.vmap
+    # batching) compiled fine on its own, but wrapping THIS call specifically
+    # in jax.jit was a net regression at medium scale even so: this call runs
+    # only once per analyze_dataset invocation (unlike the local-linearization
+    # diagnostic below, which now IS jitted and calls the same underlying
+    # function 15 times -- see that closure's own comment), so there is no
+    # compile-once-reuse-many-times amortization here, and compiling this
+    # larger, differentiated graph measurably slowed down even the separate,
+    # already-jitted diagnostic closure running later in the same process
+    # (0.45s -> 3.6s, reproducible) -- some interaction between the two
+    # concurrent jax.jit compilations, not fully root-caused. Net effect at
+    # n=100: ~7.1s -> ~16.3-16.5s total wall-clock. Reverted; do not re-add
+    # jax.jit here without re-measuring at both benchmark scales.
     with log_phase_duration("jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"):
         raw_joint_bread_matrix, (
             avg_estimating_function_stack,

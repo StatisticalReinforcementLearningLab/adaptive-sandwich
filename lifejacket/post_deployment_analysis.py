@@ -593,142 +593,31 @@ def analyze_dataset(
         )
 
     with log_phase_duration("eigenvalue_and_condition_diagnostics"):
-        joint_bread_cond = jnp.linalg.cond(raw_joint_bread_matrix)
-        logger.info(
-            "Joint bread condition number: %f",
+        (
             joint_bread_cond,
-        )
-
-        # calculate the max eigenvalue of the theta-only adjusted sandwich
-        max_eigenvalue_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
-            adjusted_sandwich_var_estimate
-        ).max()
-        logger.info(
-            "Max eigenvalue of theta-only adjusted sandwich matrix: %f",
-            max_eigenvalue_theta_only_adjusted_sandwich,
-        )
-
-        # Compute ratios: max eigenvalue / median eigenvalue among those >= 1e-8 * max.
-        eigvals_joint_sandwich = scipy.linalg.eigvalsh(joint_sandwich_matrix)
-        max_eig_joint = float(eigvals_joint_sandwich.max())
-        logger.info(
-            "Max eigenvalue of joint adjusted sandwich matrix: %f",
             max_eig_joint,
-        )
-
-        joint_keep = eigvals_joint_sandwich >= (1e-8 * max_eig_joint)
-        joint_median_kept = (
-            float(np.median(eigvals_joint_sandwich[joint_keep]))
-            if np.any(joint_keep)
-            else math.nan
-        )
-        max_to_median_ratio_joint_sandwich = (
-            (max_eig_joint / joint_median_kept)
-            if (not math.isnan(joint_median_kept) and joint_median_kept > 0)
-            else (
-                math.inf
-                if (not math.isnan(joint_median_kept) and joint_median_kept == 0)
-                else math.nan
-            )
-        )
-        logger.info(
-            "Max/median eigenvalue ratio (joint sandwich; median over eigvals >= 1e-8*max): %f",
+            eigvals_joint_sandwich,
             max_to_median_ratio_joint_sandwich,
-        )
-
-        eigvals_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
-            adjusted_sandwich_var_estimate
-        )
-        max_eig_theta = float(eigvals_theta_only_adjusted_sandwich.max())
-        theta_keep = eigvals_theta_only_adjusted_sandwich >= (1e-8 * max_eig_theta)
-        theta_median_kept = (
-            float(np.median(eigvals_theta_only_adjusted_sandwich[theta_keep]))
-            if np.any(theta_keep)
-            else math.nan
-        )
-        max_to_median_ratio_theta_only_adjusted_sandwich = (
-            (max_eig_theta / theta_median_kept)
-            if (not math.isnan(theta_median_kept) and theta_median_kept > 0)
-            else (
-                math.inf
-                if (not math.isnan(theta_median_kept) and theta_median_kept == 0)
-                else math.nan
-            )
-        )
-        logger.info(
-            "Max/median eigenvalue ratio (theta-only adjusted sandwich; median over eigvals >= 1e-8*max): %f",
+            max_eig_theta,
+            eigvals_theta_only_adjusted_sandwich,
             max_to_median_ratio_theta_only_adjusted_sandwich,
+        ) = compute_eigenvalue_and_condition_diagnostics(
+            raw_joint_bread_matrix,
+            joint_sandwich_matrix,
+            adjusted_sandwich_var_estimate,
         )
 
-    # --- Local linearization validity diagnostic (single-run) ---
-    # We compare the nonlinear Taylor remainder of the joint estimating-function map to the
-    # retained linear term, at perturbations on the O(1/sqrt(n)) scale.
-    #
-    # Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
-    # where g(eta) is the avg per-subject weighted estimating-function stack and B is the
-    # joint bread (Jacobian of g w.r.t. flattened betas+theta).
-    #
-    # This ratio is dimensionless and can be used as a necessary/sanity diagnostic that the
-    # first-order linearization is locally accurate at the estimation scale.
-
-    def _compute_local_linearization_error_ratio() -> tuple[float, float]:
-        # Ensure float64 for diagnostics even if upstream ran in float32.
-        joint_bread_float64 = jnp.asarray(
-            stabilized_joint_bread_matrix, dtype=jnp.float64
-        )
-        g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
-        stacks_float64 = jnp.asarray(
-            per_subject_estimating_function_stacks, dtype=jnp.float64
-        )
-
-        # Add a small ridge to improve numerical stability for ill-conditioned bread.
-        ridge_scale = 1e-8
-
-        # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
-        cond_threshold = 1e12
-        bread_cond = float(jnp.linalg.cond(joint_bread_float64))
-
-        if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
-            diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
-            ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
-            joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
-                joint_bread_float64.shape[0], dtype=jnp.float64
-            )
-            logger.info(
-                "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
-                float(ridge),
-                bread_cond,
-                cond_threshold,
-            )
-
-        num_subjects = stacks_float64.shape[0]
-
-        # This closure is jit-friendly by construction: suppress_all_data_checks and
-        # include_auxiliary_outputs are hardcoded below (never traced), so the
-        # np.testing.assert_allclose/.tolist()/int() concretization hazards that
-        # broke the earlier, ADR-documented jax.jit attempt on the differentiated
-        # call never enter this trace. Since ADS-139 Step 4 replaced the ragged
-        # per-subject/per-update Python loops with jax.vmap batching, this now
-        # traces to a small, compile-once graph -- worth jitting since this
-        # closure is called J=15 times below (this diagnostic previously
-        # dominated wall-clock, per this ADR's Step 0 benchmark).
-        #
-        # LANDMINE: do not change suppress_all_data_checks to a real,
-        # non-hardcoded value here. check_batched_algorithm_estimating_function_args_equivalent
-        # / check_batched_inference_estimating_function_args_equivalent (called
-        # when suppress_all_data_checks is False) call np.asarray() on their
-        # results -- fine under jax.jacrev's concrete-valued autodiff tracing
-        # (which is all they run under elsewhere), but under jax.jit's abstract
-        # tracing every value in the trace becomes a non-concrete tracer
-        # (confirmed empirically: even a jax.lax.stop_gradient'd value raises
-        # TracerArrayConversionError here, unlike under jacrev alone), so those
-        # checks would hard-crash the moment this closure ever traced with
-        # checks enabled.
-        @jax.jit
-        def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
-            return jnp.asarray(
-                get_avg_weighted_estimating_function_stacks_and_aux_values(
-                    flattened_betas_and_theta,
+    # Local linearization validity diagnostic (single-run) -- see
+    # compute_local_linearization_error_ratio's docstring for the full explanation.
+    with log_phase_duration("local_linearization_diagnostic"):
+        try:
+            local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
+                compute_local_linearization_error_ratio(
+                    stabilized_joint_bread_matrix,
+                    avg_estimating_function_stack,
+                    per_subject_estimating_function_stacks,
+                    all_post_update_betas,
+                    theta_est,
                     beta_dim,
                     theta_dim,
                     subject_ids,
@@ -752,92 +641,7 @@ def analyze_dataset(
                     inference_action_prob_decision_times_by_subject_id,
                     alg_update_func_args,
                     action_by_decision_time_by_subject_id,
-                    True,  # suppress_all_data_checks
-                    True,  # suppress_interactive_data_checks
-                    False,  # include_auxiliary_outputs
-                ),
-                dtype=jnp.float64,
-            )
-
-        # Evaluate at the final estimate.
-        eta_hat = jnp.asarray(
-            flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
-        )
-
-        # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
-        # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
-        # square-root. If G is the (n x d) matrix of per-subject stacks, then (1/n) G^T G is the
-        # empirical covariance in joint estimating function stack space. Sampling u = (G^T w)/sqrt(n) with w~N(0, I_n) gives
-        # u ~ N(0, empirical joint estimating function stack covariance G^T G/n ) in joint estimating function stack space.
-        key = jax.random.PRNGKey(0)
-
-        # The number of perturbations we will probe
-        J = 15
-        # Chunk size to reduce peak memory
-        chunk_size = 1
-
-        ratios_list = []
-        num_chunks = (J + chunk_size - 1) // chunk_size
-
-        for chunk_idx in range(num_chunks):
-            start = chunk_idx * chunk_size
-            end = min(start + chunk_size, J)
-            cur_size = end - start
-            if cur_size <= 0:
-                continue
-
-            subkey = jax.random.fold_in(key, chunk_idx)
-            W = jax.random.normal(
-                subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
-            )
-
-            U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
-
-            c = 1.0
-            # TODO: Consider QR decomposition
-            delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
-                joint_bread_float64, U.T
-            ).T
-
-            B_delta = (joint_bread_float64 @ delta.T).T
-            g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
-            remainder = g_plus - g_hat - B_delta
-
-            denom = jnp.linalg.norm(B_delta, axis=1)
-            numer = jnp.linalg.norm(remainder, axis=1)
-            ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
-
-            ratios_list.append(ratios)
-
-        ratios = jnp.concatenate(ratios_list, axis=0)
-
-        local_error_ratio_median = float(jnp.median(ratios))
-        local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))
-        local_error_ratio_max = float(jnp.max(ratios))
-
-        logger.info(
-            "Local linearization error ratio (median over %d draws): %.6f",
-            J,
-            local_error_ratio_median,
-        )
-        logger.info(
-            "Local linearization error ratio (90th pct over %d draws): %.6f",
-            J,
-            local_error_ratio_p90,
-        )
-
-        logger.info(
-            "Local linearization error ratio (max over %d draws): %.6f",
-            J,
-            local_error_ratio_max,
-        )
-
-        return local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max
-
-    with log_phase_duration("local_linearization_diagnostic"):
-        try:
-            local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
-                _compute_local_linearization_error_ratio()
+                )
             )
         except Exception as e:
             # This diagnostic is best-effort; failure should not break analysis.
@@ -2172,6 +1976,365 @@ def form_sandwich_from_bread_and_meat(
         raise ValueError(
             f"Unknown sandwich method: {method}. Please use 'bread_t_qr' or 'meat_decomposition_solve'."
         )
+
+
+def compute_eigenvalue_and_condition_diagnostics(
+    raw_joint_bread_matrix: jnp.ndarray,
+    joint_sandwich_matrix: jnp.ndarray,
+    adjusted_sandwich_var_estimate: jnp.ndarray,
+) -> tuple[float, float, np.ndarray, float, float, np.ndarray, float]:
+    """
+    Computes condition-number and eigenvalue-spread diagnostics for the joint
+    bread matrix and both the joint and theta-only adjusted sandwich matrices.
+
+    Args:
+        raw_joint_bread_matrix (jnp.ndarray):
+            The (unstabilized) joint bread matrix.
+        joint_sandwich_matrix (jnp.ndarray):
+            The joint (betas and theta) sandwich variance matrix.
+        adjusted_sandwich_var_estimate (jnp.ndarray):
+            The theta-only slice of the adjusted sandwich variance matrix.
+
+    Returns:
+        tuple:
+            - joint_bread_cond (float): condition number of the raw joint bread matrix.
+            - max_eig_joint (float): max eigenvalue of the joint sandwich matrix.
+            - eigvals_joint_sandwich (np.ndarray): all eigenvalues of the joint
+              sandwich matrix.
+            - max_to_median_ratio_joint_sandwich (float): max/median eigenvalue ratio
+              for the joint sandwich matrix, over eigenvalues >= 1e-8 * max.
+            - max_eig_theta (float): max eigenvalue of the theta-only adjusted
+              sandwich matrix.
+            - eigvals_theta_only_adjusted_sandwich (np.ndarray): all eigenvalues of
+              the theta-only adjusted sandwich matrix.
+            - max_to_median_ratio_theta_only_adjusted_sandwich (float): max/median
+              eigenvalue ratio for the theta-only adjusted sandwich matrix, over
+              eigenvalues >= 1e-8 * max.
+    """
+    joint_bread_cond = jnp.linalg.cond(raw_joint_bread_matrix)
+    logger.info(
+        "Joint bread condition number: %f",
+        joint_bread_cond,
+    )
+
+    # calculate the max eigenvalue of the theta-only adjusted sandwich
+    eigvals_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
+        adjusted_sandwich_var_estimate
+    )
+    max_eig_theta = float(eigvals_theta_only_adjusted_sandwich.max())
+    logger.info(
+        "Max eigenvalue of theta-only adjusted sandwich matrix: %f",
+        max_eig_theta,
+    )
+
+    # Compute ratios: max eigenvalue / median eigenvalue among those >= 1e-8 * max.
+    eigvals_joint_sandwich = scipy.linalg.eigvalsh(joint_sandwich_matrix)
+    max_eig_joint = float(eigvals_joint_sandwich.max())
+    logger.info(
+        "Max eigenvalue of joint adjusted sandwich matrix: %f",
+        max_eig_joint,
+    )
+
+    joint_keep = eigvals_joint_sandwich >= (1e-8 * max_eig_joint)
+    joint_median_kept = (
+        float(np.median(eigvals_joint_sandwich[joint_keep]))
+        if np.any(joint_keep)
+        else math.nan
+    )
+    max_to_median_ratio_joint_sandwich = (
+        (max_eig_joint / joint_median_kept)
+        if (not math.isnan(joint_median_kept) and joint_median_kept > 0)
+        else (
+            math.inf
+            if (not math.isnan(joint_median_kept) and joint_median_kept == 0)
+            else math.nan
+        )
+    )
+    logger.info(
+        "Max/median eigenvalue ratio (joint sandwich; median over eigvals >= 1e-8*max): %f",
+        max_to_median_ratio_joint_sandwich,
+    )
+
+    theta_keep = eigvals_theta_only_adjusted_sandwich >= (1e-8 * max_eig_theta)
+    theta_median_kept = (
+        float(np.median(eigvals_theta_only_adjusted_sandwich[theta_keep]))
+        if np.any(theta_keep)
+        else math.nan
+    )
+    max_to_median_ratio_theta_only_adjusted_sandwich = (
+        (max_eig_theta / theta_median_kept)
+        if (not math.isnan(theta_median_kept) and theta_median_kept > 0)
+        else (
+            math.inf
+            if (not math.isnan(theta_median_kept) and theta_median_kept == 0)
+            else math.nan
+        )
+    )
+    logger.info(
+        "Max/median eigenvalue ratio (theta-only adjusted sandwich; median over eigvals >= 1e-8*max): %f",
+        max_to_median_ratio_theta_only_adjusted_sandwich,
+    )
+
+    return (
+        joint_bread_cond,
+        max_eig_joint,
+        eigvals_joint_sandwich,
+        max_to_median_ratio_joint_sandwich,
+        max_eig_theta,
+        eigvals_theta_only_adjusted_sandwich,
+        max_to_median_ratio_theta_only_adjusted_sandwich,
+    )
+
+
+def compute_local_linearization_error_ratio(
+    stabilized_joint_bread_matrix: jnp.ndarray,
+    avg_estimating_function_stack: jnp.ndarray,
+    per_subject_estimating_function_stacks: jnp.ndarray,
+    all_post_update_betas: jnp.ndarray,
+    theta_est: jnp.ndarray,
+    beta_dim: int,
+    theta_dim: int,
+    subject_ids: jnp.ndarray,
+    action_prob_func: Callable,
+    action_prob_func_args_beta_index: int,
+    alg_update_func: Callable,
+    alg_update_func_type: str,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_action_prob_index: int,
+    alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    inference_func: Callable,
+    inference_func_type: str,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
+        collections.abc.Hashable, dict[int, tuple[Any, ...]]
+    ],
+    policy_num_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int | float]
+    ],
+    initial_policy_num: int | float,
+    beta_index_by_policy_num: dict[int | float, int],
+    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_subject_id: dict[
+        collections.abc.Hashable, list[int]
+    ],
+    update_func_args_by_by_subject_id_by_policy_num: dict[
+        collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
+    ],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
+) -> tuple[float, float, float]:
+    """
+    Compares the nonlinear Taylor remainder of the joint estimating-function map to
+    the retained linear term, at perturbations on the O(1/sqrt(n)) scale, as a
+    necessary/sanity diagnostic that the first-order linearization the sandwich
+    variance relies on is locally accurate at the estimation scale.
+
+    Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
+    where g(eta) is the avg per-subject weighted estimating-function stack and B is
+    the joint bread (Jacobian of g w.r.t. flattened betas+theta). This ratio is
+    dimensionless.
+
+    Args:
+        stabilized_joint_bread_matrix (jnp.ndarray):
+            The (possibly) stabilized joint bread matrix, B above.
+        avg_estimating_function_stack (jnp.ndarray):
+            g(eta) above, evaluated at the final estimate.
+        per_subject_estimating_function_stacks (jnp.ndarray):
+            Per-subject estimating function stacks, used to align perturbation draws
+            with the empirical joint estimating-function stack covariance.
+        all_post_update_betas (jnp.ndarray):
+            All parameter estimates for the algorithm updates.
+        theta_est (jnp.ndarray):
+            The parameter estimate for inference.
+        beta_dim, theta_dim, subject_ids, action_prob_func,
+        action_prob_func_args_beta_index, alg_update_func, alg_update_func_type,
+        alg_update_func_args_beta_index, alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index, inference_func,
+        inference_func_type, inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        policy_num_by_decision_time_by_subject_id, initial_policy_num,
+        beta_index_by_policy_num, inference_func_args_by_subject_id,
+        inference_action_prob_decision_times_by_subject_id,
+        update_func_args_by_by_subject_id_by_policy_num,
+        action_by_decision_time_by_subject_id:
+            Passed straight through to get_avg_weighted_estimating_function_stacks_and_aux_values;
+            see that function's own docstring.
+
+    Returns:
+        tuple[float, float, float]:
+            The median, 90th percentile, and max local linearization error ratio
+            over the sampled perturbations.
+    """
+    # Ensure float64 for diagnostics even if upstream ran in float32.
+    joint_bread_float64 = jnp.asarray(stabilized_joint_bread_matrix, dtype=jnp.float64)
+    g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
+    stacks_float64 = jnp.asarray(
+        per_subject_estimating_function_stacks, dtype=jnp.float64
+    )
+
+    # Add a small ridge to improve numerical stability for ill-conditioned bread.
+    ridge_scale = 1e-8
+
+    # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
+    cond_threshold = 1e12
+    bread_cond = float(jnp.linalg.cond(joint_bread_float64))
+
+    if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
+        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
+        ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
+        joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
+            joint_bread_float64.shape[0], dtype=jnp.float64
+        )
+        logger.info(
+            "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
+            float(ridge),
+            bread_cond,
+            cond_threshold,
+        )
+
+    num_subjects = stacks_float64.shape[0]
+
+    # This closure is jit-friendly by construction: suppress_all_data_checks and
+    # include_auxiliary_outputs are hardcoded below (never traced), so the
+    # np.testing.assert_allclose/.tolist()/int() concretization hazards that
+    # broke the earlier, ADR-documented jax.jit attempt on the differentiated
+    # call never enter this trace. Since ADS-139 Step 4 replaced the ragged
+    # per-subject/per-update Python loops with jax.vmap batching, this now
+    # traces to a small, compile-once graph -- worth jitting since this
+    # closure is called J=15 times below (this diagnostic previously
+    # dominated wall-clock, per this ADR's Step 0 benchmark).
+    #
+    # LANDMINE: do not change suppress_all_data_checks to a real,
+    # non-hardcoded value here. check_batched_algorithm_estimating_function_args_equivalent
+    # / check_batched_inference_estimating_function_args_equivalent (called
+    # when suppress_all_data_checks is False) call np.asarray() on their
+    # results -- fine under jax.jacrev's concrete-valued autodiff tracing
+    # (which is all they run under elsewhere), but under jax.jit's abstract
+    # tracing every value in the trace becomes a non-concrete tracer
+    # (confirmed empirically: even a jax.lax.stop_gradient'd value raises
+    # TracerArrayConversionError here, unlike under jacrev alone), so those
+    # checks would hard-crash the moment this closure ever traced with
+    # checks enabled.
+    #
+    # This closure must stay nested here (rather than hoisted to module level like
+    # the outer function around it) because it closes over the static config above
+    # and below: jax.jit needs those values fixed at trace time, and several of
+    # them (the dict-typed args) are unhashable, so they can't be passed as jit
+    # static_argnums/static_argnames to a module-level function instead.
+    @jax.jit
+    def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
+        return jnp.asarray(
+            get_avg_weighted_estimating_function_stacks_and_aux_values(
+                flattened_betas_and_theta,
+                beta_dim,
+                theta_dim,
+                subject_ids,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                alg_update_func,
+                alg_update_func_type,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
+                inference_func,
+                inference_func_type,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_func_args_by_subject_id_by_decision_time,
+                policy_num_by_decision_time_by_subject_id,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                inference_func_args_by_subject_id,
+                inference_action_prob_decision_times_by_subject_id,
+                update_func_args_by_by_subject_id_by_policy_num,
+                action_by_decision_time_by_subject_id,
+                True,  # suppress_all_data_checks
+                True,  # suppress_interactive_data_checks
+                False,  # include_auxiliary_outputs
+            ),
+            dtype=jnp.float64,
+        )
+
+    # Evaluate at the final estimate.
+    eta_hat = jnp.asarray(
+        flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
+    )
+
+    # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
+    # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
+    # square-root. If G is the (n x d) matrix of per-subject stacks, then (1/n) G^T G is the
+    # empirical covariance in joint estimating function stack space. Sampling u = (G^T w)/sqrt(n) with w~N(0, I_n) gives
+    # u ~ N(0, empirical joint estimating function stack covariance G^T G/n ) in joint estimating function stack space.
+    key = jax.random.PRNGKey(0)
+
+    # The number of perturbations we will probe
+    J = 15
+    # Chunk size to reduce peak memory
+    chunk_size = 1
+
+    ratios_list = []
+    num_chunks = (J + chunk_size - 1) // chunk_size
+
+    for chunk_idx in range(num_chunks):
+        start = chunk_idx * chunk_size
+        end = min(start + chunk_size, J)
+        cur_size = end - start
+        if cur_size <= 0:
+            continue
+
+        subkey = jax.random.fold_in(key, chunk_idx)
+        W = jax.random.normal(
+            subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
+        )
+
+        U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
+
+        c = 1.0
+        # TODO: Consider QR decomposition
+        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
+            joint_bread_float64, U.T
+        ).T
+
+        B_delta = (joint_bread_float64 @ delta.T).T
+        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
+        remainder = g_plus - g_hat - B_delta
+
+        denom = jnp.linalg.norm(B_delta, axis=1)
+        numer = jnp.linalg.norm(remainder, axis=1)
+        ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
+
+        ratios_list.append(ratios)
+
+    ratios = jnp.concatenate(ratios_list, axis=0)
+
+    local_error_ratio_median = float(jnp.median(ratios))
+    local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))
+    local_error_ratio_max = float(jnp.max(ratios))
+
+    logger.info(
+        "Local linearization error ratio (median over %d draws): %.6f",
+        J,
+        local_error_ratio_median,
+    )
+    logger.info(
+        "Local linearization error ratio (90th pct over %d draws): %.6f",
+        J,
+        local_error_ratio_p90,
+    )
+
+    logger.info(
+        "Local linearization error ratio (max over %d draws): %.6f",
+        J,
+        local_error_ratio_max,
+    )
+
+    return local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max
 
 
 if __name__ == "__main__":

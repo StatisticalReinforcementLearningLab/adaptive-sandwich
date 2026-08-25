@@ -180,7 +180,7 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
 
         # Compare with the incremental phi_dot_bar
         assert phi_dot_bar.shape == expected_prefix.shape, (
-            f"Shape mismatch at update {i+1}: got {phi_dot_bar.shape}, "
+            f"Shape mismatch at update {i + 1}: got {phi_dot_bar.shape}, "
             f"expected {expected_prefix.shape}"
         )
 
@@ -189,7 +189,7 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
             expected_prefix,
             rtol=1e-10,
             atol=1e-10,
-            err_msg=f"Phi dot bar mismatch at update {i+1}",
+            err_msg=f"Phi dot bar mismatch at update {i + 1}",
         )
 
 
@@ -263,16 +263,13 @@ def test_incremental_phi_dot_bar_consistency_with_non_incremental():
 
     # Run both incremental and non-incremental versions
     for proposed_policy_num in range(1, n_policies):
-
         # Filter study_df to only include data available before this policy
         # took effect.
         filtered_df = study_df[study_df["policy_num"] < proposed_policy_num].copy()
         available_times = set(filtered_df["calendar_t"].unique())
 
         truncated_action_prob_func_args = {
-            t: args
-            for t, args in action_prob_func_args.items()
-            if t in available_times
+            t: args for t, args in action_prob_func_args.items() if t in available_times
         }
         # Includes the args for the update that PRODUCES proposed_policy_num
         # itself, not just prior updates -- alg_update_func_args[k] holds the

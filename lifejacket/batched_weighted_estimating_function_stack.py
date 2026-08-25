@@ -163,12 +163,16 @@ class ActionProbLayerPrecompute:
     active_mask: np.ndarray  # (N, T) bool
     fill_col_index: np.ndarray  # (N, T) int; nearest active column, per subject
     raw_arg_tensors: tuple[np.ndarray, ...]  # each (N, T, *shape_k), self-padded
-    beta_row_index: np.ndarray  # (N, T) int; -1 = no substitution (initial policy / inactive)
+    beta_row_index: (
+        np.ndarray
+    )  # (N, T) int; -1 = no substitution (initial policy / inactive)
     actions_grid: np.ndarray  # (N, T) int
     subject_start_idx: np.ndarray  # (N,)
     subject_end_idx: np.ndarray  # (N,)
     lo_idx: np.ndarray  # (N,); T sentinel == "first_time_after_first_update is None"
-    min_time_by_policy_num: list[dict]  # per subject, passed through from get_min_time_by_policy_num
+    min_time_by_policy_num: list[
+        dict
+    ]  # per subject, passed through from get_min_time_by_policy_num
     subject_id_to_pos: dict[Any, int]
     T: int
 
@@ -185,7 +189,10 @@ def assert_no_intra_window_gaps(precompute: ActionProbLayerPrecompute) -> None:
     N, _T = precompute.active_mask.shape
     violations = []
     for n in range(N):
-        lo, hi = int(precompute.subject_start_idx[n]), int(precompute.subject_end_idx[n])
+        lo, hi = (
+            int(precompute.subject_start_idx[n]),
+            int(precompute.subject_end_idx[n]),
+        )
         window = precompute.active_mask[n, lo : hi + 1]
         if not window.all():
             gap_cols = np.nonzero(~window)[0] + lo
@@ -201,7 +208,9 @@ def assert_no_intra_window_gaps(precompute: ActionProbLayerPrecompute) -> None:
             "time strictly between their own first and last active time), which "
             "violates the 'once active, stays active with no re-entry' invariant "
             "the Radon-Nikodym weight-window logic assumes: "
-            + "; ".join(f"subject {sid} inactive at {times}" for sid, times in violations)
+            + "; ".join(
+                f"subject {sid} inactive at {times}" for sid, times in violations
+            )
         )
 
 
@@ -254,7 +263,9 @@ def build_action_prob_layer_precompute(
     action_prob_func_args_by_subject_id_by_decision_time: dict[
         int, dict[collections.abc.Hashable, tuple[Any, ...]]
     ],
-    action_by_decision_time_by_subject_id: dict[collections.abc.Hashable, dict[int, int]],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
     policy_num_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int | float]
     ],
@@ -270,7 +281,9 @@ def build_action_prob_layer_precompute(
     subject_ids = np.asarray(subject_ids)
     N = len(subject_ids)
     subject_id_to_pos = {sid: n for n, sid in enumerate(subject_ids.tolist())}
-    time_values = get_global_time_axis(action_prob_func_args_by_subject_id_by_decision_time)
+    time_values = get_global_time_axis(
+        action_prob_func_args_by_subject_id_by_decision_time
+    )
     T = len(time_values)
     time_to_col = {int(t): i for i, t in enumerate(time_values)}
 
@@ -284,7 +297,10 @@ def build_action_prob_layer_precompute(
     for n, subject_id in enumerate(subject_ids.tolist()):
         subj_actions = action_by_decision_time_by_subject_id[subject_id]
         subj_policy_by_t = policy_num_by_decision_time_by_subject_id[subject_id]
-        for decision_time, args_by_subject in action_prob_func_args_by_subject_id_by_decision_time.items():
+        for (
+            decision_time,
+            args_by_subject,
+        ) in action_prob_func_args_by_subject_id_by_decision_time.items():
             args = args_by_subject.get(subject_id, ())
             if not args:
                 continue
@@ -335,9 +351,9 @@ def build_action_prob_layer_precompute(
     for n, subject_id in enumerate(subject_ids.tolist()):
         for t_col in range(T):
             decision_time = int(time_values[t_col])
-            args = action_prob_func_args_by_subject_id_by_decision_time[decision_time].get(
-                subject_id, ()
-            )
+            args = action_prob_func_args_by_subject_id_by_decision_time[
+                decision_time
+            ].get(subject_id, ())
             if not args:
                 # Self-pad directly here: fill_col_index[n, t_col] is this
                 # subject's own nearest active column, so grabbing that
@@ -368,9 +384,11 @@ def build_action_prob_layer_precompute(
         subject_start_idx[n] = time_to_col[subject_start_time]
         subject_end_idx[n] = time_to_col[subject_end_time]
 
-        min_time_by_policy_num_n, first_time_after_first_update_n = get_min_time_by_policy_num(
-            policy_num_by_decision_time_by_subject_id[subject_id],
-            beta_index_by_policy_num,
+        min_time_by_policy_num_n, first_time_after_first_update_n = (
+            get_min_time_by_policy_num(
+                policy_num_by_decision_time_by_subject_id[subject_id],
+                beta_index_by_policy_num,
+            )
         )
         min_time_by_policy_num_list.append(min_time_by_policy_num_n)
         if first_time_after_first_update_n is not None:
@@ -393,7 +411,9 @@ def build_action_prob_layer_precompute(
         subject_id_to_pos=subject_id_to_pos,
         T=T,
     )
-    assert_no_intra_window_gaps(precompute)  # fails fast, before any expensive work below
+    assert_no_intra_window_gaps(
+        precompute
+    )  # fails fast, before any expensive work below
     return precompute
 
 
@@ -423,7 +443,9 @@ class UpdateLayerPrecompute:
 
 def build_update_layer_precompute(
     subject_ids: np.ndarray,
-    update_func_args_by_by_subject_id_by_policy_num: dict[int | float, dict[Any, tuple]],
+    update_func_args_by_by_subject_id_by_policy_num: dict[
+        int | float, dict[Any, tuple]
+    ],
     beta_index_by_policy_num: dict[int | float, int],
     alg_update_func_args_action_prob_times_index: int,
     action_prob_layer: ActionProbLayerPrecompute,
@@ -444,7 +466,9 @@ def build_update_layer_precompute(
     subject_id_to_pos = action_prob_layer.subject_id_to_pos
     policy_nums_by_update_index = [
         policy_num
-        for policy_num, _ in sorted(beta_index_by_policy_num.items(), key=lambda kv: kv[1])
+        for policy_num, _ in sorted(
+            beta_index_by_policy_num.items(), key=lambda kv: kv[1]
+        )
     ]
     U = len(policy_nums_by_update_index)
 
@@ -458,7 +482,9 @@ def build_update_layer_precompute(
         for n, subject_id in enumerate(subject_ids.tolist()):
             args = args_by_subject_id.get(subject_id, ())
             valid_update[n, u] = bool(args)
-            min_time = action_prob_layer.min_time_by_policy_num[n].get(policy_num, math.inf)
+            min_time = action_prob_layer.min_time_by_policy_num[n].get(
+                policy_num, math.inf
+            )
             subj_end_plus_1 = int(action_prob_layer.subject_end_idx[n]) + 1
             if math.isfinite(min_time):
                 idx_candidate = action_prob_layer.time_to_col[int(min_time)]
@@ -469,7 +495,9 @@ def build_update_layer_precompute(
         nontrivial = {sid: a for sid, a in args_by_subject_id.items() if a}
         buckets: list[UpdateArgBucket] = []
         for shape_group in group_user_args_by_shape(nontrivial):
-            sorted_ids = sorted(shape_group.keys(), key=lambda sid: subject_id_to_pos[sid])
+            sorted_ids = sorted(
+                shape_group.keys(), key=lambda sid: subject_id_to_pos[sid]
+            )
             raw_arg_lists = build_batched_arg_lists_by_subject(sorted_ids, shape_group)
             subject_positions = np.array(
                 [subject_id_to_pos[sid] for sid in sorted_ids], dtype=np.int64
@@ -478,7 +506,9 @@ def build_update_layer_precompute(
             action_prob_times_by_subject = None
             if alg_update_func_args_action_prob_times_index >= 0:
                 action_prob_times_by_subject = {
-                    sid: np.asarray(shape_group[sid][alg_update_func_args_action_prob_times_index])
+                    sid: np.asarray(
+                        shape_group[sid][alg_update_func_args_action_prob_times_index]
+                    )
                     for sid in sorted_ids
                 }
 
@@ -556,7 +586,9 @@ def build_threaded_action_prob_beta_tensor(
     clamped = jnp.clip(precompute.beta_row_index, 0, max(betas.shape[0] - 1, 0))
     gathered = betas[clamped]  # (N, T, beta_dim), fancy-indexed
     needs_substitution = precompute.beta_row_index >= 0  # (N, T)
-    raw_beta_tensor = precompute.raw_arg_tensors[action_prob_func_args_beta_index]  # self-padded, real
+    raw_beta_tensor = precompute.raw_arg_tensors[
+        action_prob_func_args_beta_index
+    ]  # self-padded, real
     return jnp.where(needs_substitution[..., None], gathered, raw_beta_tensor)
 
 
@@ -581,10 +613,14 @@ def compute_action_prob_layer_outputs(
         precompute, betas, action_prob_func_args_beta_index
     )
     threaded_arg_tensors = tuple(
-        threaded_beta_tensor if k == action_prob_func_args_beta_index else precompute.raw_arg_tensors[k]
+        threaded_beta_tensor
+        if k == action_prob_func_args_beta_index
+        else precompute.raw_arg_tensors[k]
         for k in range(len(precompute.raw_arg_tensors))
     )
-    threaded_args_flat = tuple(t.reshape((NT,) + t.shape[2:]) for t in threaded_arg_tensors)
+    threaded_args_flat = tuple(
+        t.reshape((NT,) + t.shape[2:]) for t in threaded_arg_tensors
+    )
 
     beta_target_tensor = precompute.raw_arg_tensors[action_prob_func_args_beta_index]
     beta_target_flat = beta_target_tensor.reshape((NT,) + beta_target_tensor.shape[2:])
@@ -605,9 +641,9 @@ def compute_action_prob_layer_outputs(
 
     pi_beta_grid = None
     if need_pi_beta_grid:
-        pi_beta_flat = jax.vmap(fun=action_prob_func, in_axes=[0] * len(threaded_args_flat))(
-            *threaded_args_flat
-        )
+        pi_beta_flat = jax.vmap(
+            fun=action_prob_func, in_axes=[0] * len(threaded_args_flat)
+        )(*threaded_args_flat)
         pi_beta_grid = jnp.reshape(pi_beta_flat, (N, T))
 
     return raw_weight_grid, pi_beta_grid
@@ -653,11 +689,15 @@ def compute_windowed_weight_products(
     reset_weights = jnp.where(is_on_or_after_lo, masked_weights, 1.0)
 
     cum = jnp.cumprod(reset_weights, axis=1)
-    cum_ext = jnp.concatenate([jnp.ones((N, 1), dtype=cum.dtype), cum], axis=1)  # (N, T+1)
+    cum_ext = jnp.concatenate(
+        [jnp.ones((N, 1), dtype=cum.dtype), cum], axis=1
+    )  # (N, T+1)
 
     rl_weight_products = jnp.take_along_axis(cum_ext, jnp.asarray(hi_idx), axis=1)
     inference_hi_idx = (jnp.asarray(subject_end_idx) + 1)[:, None]
-    inference_weight_products = jnp.take_along_axis(cum_ext, inference_hi_idx, axis=1)[:, 0]
+    inference_weight_products = jnp.take_along_axis(cum_ext, inference_hi_idx, axis=1)[
+        :, 0
+    ]
 
     return rl_weight_products, inference_weight_products
 
@@ -679,7 +719,9 @@ def _gather_reconstructed_action_prob(
     """
     col_idx_matrix = np.stack(
         [
-            np.array([time_to_col[int(t)] for t in times_by_subject[sid].flatten().tolist()])
+            np.array(
+                [time_to_col[int(t)] for t in times_by_subject[sid].flatten().tolist()]
+            )
             for sid in subject_ids_in_order
         ]
     )
@@ -719,14 +761,16 @@ def _assemble_call_args_and_in_axes(
     per-subject reconstructed-action-prob tensor with axis=0).
     """
     num_args = len(raw_arg_lists)
-    remaining_positions = [k for k in range(num_args) if k not in override_position_values]
+    remaining_positions = [
+        k for k in range(num_args) if k not in override_position_values
+    ]
     stack_positions = _stackable_positions(raw_arg_lists, remaining_positions)
     remaining_tensors, _ = stack_batched_arg_lists_into_tensors(
         [raw_arg_lists[k] for k in stack_positions]
     )
     call_args: list[Any] = [None] * num_args
     in_axes: list[Any] = [None] * num_args
-    for pos, tensor in zip(stack_positions, remaining_tensors):
+    for pos, tensor in zip(stack_positions, remaining_tensors, strict=False):
         call_args[pos] = tensor
         in_axes[pos] = 0
     for pos, (value, axis) in override_position_values.items():
@@ -923,7 +967,9 @@ def compute_batched_algorithm_component(
                 bucket.raw_arg_lists, override_position_values
             )
 
-            bucket_output = jax.vmap(algorithm_estimating_func, in_axes=in_axes)(*call_args)
+            bucket_output = jax.vmap(algorithm_estimating_func, in_axes=in_axes)(
+                *call_args
+            )
             if bucket_output.shape != (bucket_size, beta_dim):
                 # per_update_components is pre-allocated at (N, U, beta_dim), so
                 # .at[].set() below would otherwise silently BROADCAST a
@@ -937,9 +983,9 @@ def compute_batched_algorithm_component(
                     f"for {bucket_size} subject(s) at policy_num={policy_num!r}; "
                     f"expected ({bucket_size}, {beta_dim})."
                 )
-            per_update_components = per_update_components.at[bucket.subject_positions, u].set(
-                bucket_output
-            )
+            per_update_components = per_update_components.at[
+                bucket.subject_positions, u
+            ].set(bucket_output)
 
     weighted = (
         per_update_components
@@ -971,7 +1017,11 @@ def compute_batched_inference_outputs(
     """
     N = action_prob_layer.subject_ids.shape[0]
     component = jnp.zeros((N, theta_dim), dtype=theta.dtype)
-    hessians = jnp.zeros((N, theta_dim, theta_dim), dtype=theta.dtype) if need_hessians else None
+    hessians = (
+        jnp.zeros((N, theta_dim, theta_dim), dtype=theta.dtype)
+        if need_hessians
+        else None
+    )
 
     for bucket in inference_layer.buckets:
         bucket_size = len(bucket.subject_ids_in_order)
@@ -988,7 +1038,9 @@ def compute_batched_inference_outputs(
             bucket.raw_arg_lists, override_position_values
         )
 
-        bucket_component = jax.vmap(inference_estimating_func, in_axes=in_axes)(*call_args)
+        bucket_component = jax.vmap(inference_estimating_func, in_axes=in_axes)(
+            *call_args
+        )
         if bucket_component.shape != (bucket_size, theta_dim):
             # See the analogous check in compute_batched_algorithm_component --
             # component is pre-allocated at (N, theta_dim), so .at[].set() would
@@ -1002,7 +1054,9 @@ def compute_batched_inference_outputs(
 
         if need_hessians:
             bucket_hessians = jax.vmap(
-                jax.jacrev(inference_estimating_func, argnums=inference_func_args_theta_index),
+                jax.jacrev(
+                    inference_estimating_func, argnums=inference_func_args_theta_index
+                ),
                 in_axes=in_axes,
             )(*call_args)
             if bucket_hessians.shape != (bucket_size, theta_dim, theta_dim):
@@ -1043,7 +1097,9 @@ def _assert_original_and_threaded_bucket_results_agree(
         bucket.raw_arg_lists, {}
     )
 
-    original_result = jax.vmap(estimating_func, in_axes=original_in_axes)(*original_call_args)
+    original_result = jax.vmap(estimating_func, in_axes=original_in_axes)(
+        *original_call_args
+    )
     # Need to stop gradient here: the threaded args trace back to betas/theta,
     # which are being differentiated in the real jax.jacrev call this check
     # runs alongside, and np.asarray can't convert a traced value.
@@ -1108,7 +1164,11 @@ def check_batched_algorithm_estimating_function_args_equivalent(
             # input_checks.require_threaded_algorithm_estimating_function_args_equivalent
             # exactly -- see _assert_original_and_threaded_bucket_results_agree.
             _assert_original_and_threaded_bucket_results_agree(
-                algorithm_estimating_func, bucket, threaded_overrides, atol=1e-7, rtol=1e-3
+                algorithm_estimating_func,
+                bucket,
+                threaded_overrides,
+                atol=1e-7,
+                rtol=1e-3,
             )
 
 

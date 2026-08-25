@@ -6,20 +6,19 @@ import logging
 
 import jax
 import numpy as np
-from jax import numpy as jnp
-
 from functions_to_pass_to_analysis.RL_least_squares_loss_regularized import (
     RL_least_squares_loss_regularized,
 )
 from functions_to_pass_to_analysis.smooth_thompson_sampling_act_prob_function_no_action_centering import (
     smooth_thompson_sampling_act_prob_function_no_action_centering,
 )
-from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
-    synthetic_get_action_1_prob_pure,
-)
 from functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
     synthetic_get_action_1_prob_generalized_logistic,
 )
+from functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
+    synthetic_get_action_1_prob_pure,
+)
+from jax import numpy as jnp
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(

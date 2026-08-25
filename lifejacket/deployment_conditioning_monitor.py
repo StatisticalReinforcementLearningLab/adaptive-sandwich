@@ -5,11 +5,12 @@ import logging
 import math
 from typing import Any
 
-from jax import numpy as jnp
 import jax
 import numpy as np
 import pandas as pd
+from jax import numpy as jnp
 
+from . import input_checks
 from .arg_threading_helpers import thread_action_prob_func_args, thread_update_func_args
 from .constants import FunctionTypes
 from .helper_functions import (
@@ -22,8 +23,6 @@ from .helper_functions import (
     flatten_params,
     unflatten_params,
 )
-from . import input_checks
-
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -404,7 +403,6 @@ class DeploymentConditioningMonitor:
                 phi_dot_bar_latest_block[-beta_dim:, :],
             )
         else:
-
             (
                 phi_dot_bar,
                 avg_RL_estimating_function_stack,
@@ -773,11 +771,11 @@ class DeploymentConditioningMonitor:
                                 first_time_after_first_update,
                                 subject_start_time,
                             )
-                            - decision_time_to_all_weights_index_offset :
+                            - decision_time_to_all_weights_index_offset
                             # One more than the latest time the subject was in the study before the time
                             # the update under consideration first applied. Note the + 1 because range
                             # does not include the right endpoint.
-                            min(
+                             : min(
                                 min_time_by_policy_num.get(policy_num, math.inf),
                                 subject_end_time + 1,
                             )

@@ -84,7 +84,7 @@ def load_synthetic_env_params(paramf_path="./synthetic_env_params/delayed_effect
     """
 
     # Load Model Parameters ###############################################
-    with open(paramf_path, "r", encoding="utf-8") as f:
+    with open(paramf_path, encoding="utf-8") as f:
         params = f.readlines()
 
     all_env_params = []

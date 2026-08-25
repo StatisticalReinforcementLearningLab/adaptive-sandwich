@@ -10,7 +10,9 @@ def _action_prob_func(beta, features):
     return jnp.dot(beta, features)
 
 
-def _build_reconstruction_fixture(*, blank_active_cell=False, nonblank_inactive_cell=False):
+def _build_reconstruction_fixture(
+    *, blank_active_cell=False, nonblank_inactive_cell=False
+):
     """
     Two decision times (0, 1), two subjects (0, 1). analysis_df marks every
     (t, subject) active except (1, 1). action_prob_func_args are exactly the
@@ -47,7 +49,12 @@ def _build_reconstruction_fixture(*, blank_active_cell=False, nonblank_inactive_
             action_prob_func_args[t][subject_id] = (beta, features)
         else:
             rows.append(
-                {"calendar_t": t, "user_id": subject_id, "active": 0, "action_prob": np.nan}
+                {
+                    "calendar_t": t,
+                    "user_id": subject_id,
+                    "active": 0,
+                    "action_prob": np.nan,
+                }
             )
             action_prob_func_args[t][subject_id] = (
                 (beta, features) if nonblank_inactive_cell else ()
@@ -163,7 +170,10 @@ def test_require_threaded_algorithm_estimating_function_args_equivalent_passes()
     beta = jnp.array([1.0, 2.0])
     features_by_subject = {0: jnp.array([0.1, 0.2]), 1: jnp.array([0.3, 0.4])}
     update_func_args_by_by_subject_id_by_policy_num = {
-        1: {subject_id: (beta, features) for subject_id, features in features_by_subject.items()}
+        1: {
+            subject_id: (beta, features)
+            for subject_id, features in features_by_subject.items()
+        }
     }
     # "Threaded" args carry the exact same values, just as a separate object --
     # matching how threading re-derives an equal (not necessarily identical) beta.
@@ -184,7 +194,10 @@ def test_require_threaded_algorithm_estimating_function_args_equivalent_mismatch
     beta = jnp.array([1.0, 2.0])
     features_by_subject = {0: jnp.array([0.1, 0.2]), 1: jnp.array([0.3, 0.4])}
     update_func_args_by_by_subject_id_by_policy_num = {
-        1: {subject_id: (beta, features) for subject_id, features in features_by_subject.items()}
+        1: {
+            subject_id: (beta, features)
+            for subject_id, features in features_by_subject.items()
+        }
     }
     threaded_update_func_args_by_policy_num_by_subject_id = {
         0: {1: (jnp.array(beta), jnp.array([0.1, 0.2]))},

@@ -132,9 +132,9 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         observed_keys = list(observed_debug_pieces_dict.keys())
 
         def _check_debug_keys():
-            assert (
-                observed_keys == expected_debug_keys
-            ), f"The observed debug pieces dict does not have the expected keys: {observed_keys} vs. {expected_debug_keys}"
+            assert observed_keys == expected_debug_keys, (
+                f"The observed debug pieces dict does not have the expected keys: {observed_keys} vs. {expected_debug_keys}"
+            )
 
         _check("debug_keys", _check_debug_keys)
 
@@ -238,11 +238,11 @@ def finite_difference_jacobian(f, x, h=None):
     n = len(x)
     m = len(f(x))
     J = np.zeros((m, n))
-    I = np.eye(n)  # Identity matrix to get unit vectors
+    identity = np.eye(n)  # Identity matrix to get unit vectors
 
     for i in range(n):
         # This handles the cases in which x is a row OR column vector
-        perturbation = h * I[i].reshape(x.shape)
+        perturbation = h * identity[i].reshape(x.shape)
         J[:, i] = (f(x + perturbation) - f(x - perturbation)) / (2 * h)
     return J
 
@@ -264,13 +264,13 @@ def finite_difference_hessian(f, x, h=None):
         h = np.linalg.norm(x) * 1.66e-2
     n = len(x)
     H = np.zeros((n, n))
-    I = np.eye(n)  # Identity matrix to get unit vectors
+    identity = np.eye(n)  # Identity matrix to get unit vectors
 
     # Handles the cases where x is a row OR column vector
     for i in range(n):
-        perturbation_i = h * I[i].reshape(x.shape)
+        perturbation_i = h * identity[i].reshape(x.shape)
         for j in range(i, n):  # Compute only upper triangle, exploit symmetry
-            perturbation_j = h * I[j].reshape(x.shape)
+            perturbation_j = h * identity[j].reshape(x.shape)
             if i == j:
                 # Second derivative wrt x_i^2
                 H[i, i] = (

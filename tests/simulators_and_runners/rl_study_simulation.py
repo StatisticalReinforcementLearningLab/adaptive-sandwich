@@ -1,23 +1,23 @@
 import argparse
-import time
-import json
-import os
 import cProfile
-from pstats import Stats
+import json
 import logging
+import os
+import time
+from pstats import Stats
 
+import cloudpickle as pickle
 import numpy as np
 import pandas as pd
-import cloudpickle as pickle
-
-from synthetic_env import (
-    load_synthetic_env_params,
-    SyntheticEnv,
-)
 from basic_RL_algorithms import (
     SigmoidLS,
     SmoothPosteriorSampling,
 )
+from synthetic_env import (
+    SyntheticEnv,
+    load_synthetic_env_params,
+)
+
 from constants import RLStudyArgs
 
 logger = logging.getLogger(__name__)

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import collections
 import logging
 from typing import Any
-import collections
 
-import numpy as np
-from scipy.special import logit
-import plotext as plt
 import jax
-from jax import numpy as jnp
+import numpy as np
 import pandas as pd
+import plotext as plt
+from jax import numpy as jnp
+from scipy.special import logit
 
 from . import post_deployment_analysis
 from .constants import FunctionTypes
@@ -841,11 +841,14 @@ def construct_premature_classical_and_adjusted_sandwiches(
     # jax.jacobian may perform worse here--seemed to hang indefinitely while jacrev is merely very
     # slow.
     # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
-    new_inference_block_row, (
-        per_subject_inference_estimating_functions,
-        avg_inference_estimating_function,
-        per_subject_classical_meat_contributions,
-        per_subject_classical_bread_contributions,
+    (
+        new_inference_block_row,
+        (
+            per_subject_inference_estimating_functions,
+            avg_inference_estimating_function,
+            per_subject_classical_meat_contributions,
+            per_subject_classical_bread_contributions,
+        ),
     ) = jax.jacrev(get_weighted_inference_estimating_functions_only, has_aux=True)(
         # While JAX can technically differentiate with respect to a list of JAX arrays,
         # it is more efficient to flatten them into a single array. This is done

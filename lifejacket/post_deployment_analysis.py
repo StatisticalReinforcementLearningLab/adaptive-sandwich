@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 import collections
-import pathlib
-import pickle
 import logging
 import math
-from typing import Any, Callable
+import pathlib
+import pickle
+from collections.abc import Callable
+from typing import Any
 
 import click
 import jax
 import numpy as np
-from jax import numpy as jnp
-import scipy
 import pandas as pd
+import scipy
+from jax import numpy as jnp
 
-from .arg_threading_helpers import (
-    thread_action_prob_func_args,
-    thread_inference_func_args,
-    thread_update_func_args,
-)
+from . import get_datum_for_blowup_supervised_learning, input_checks
 from .batched_weighted_estimating_function_stack import (
     build_action_prob_layer_precompute,
     build_inference_layer_precompute,
@@ -38,11 +35,6 @@ from .constants import (
 from .form_adjusted_meat_adjustments_directly import (
     form_adjusted_meat_adjustments_directly,
 )
-from . import input_checks
-from . import get_datum_for_blowup_supervised_learning
-from .small_sample_corrections import perform_desired_small_sample_correction
-
-
 from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
@@ -55,6 +47,7 @@ from .helper_functions import (
     log_phase_duration,
     unflatten_params,
 )
+from .small_sample_corrections import perform_desired_small_sample_correction
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -450,7 +443,9 @@ def analyze_dataset(
             )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
-    with log_phase_duration("data_structure_prep.construct_beta_index_by_policy_num_map"):
+    with log_phase_duration(
+        "data_structure_prep.construct_beta_index_by_policy_num_map"
+    ):
         beta_index_by_policy_num, initial_policy_num = (
             construct_beta_index_by_policy_num_map(
                 analysis_df, policy_num_col_name, active_col_name
@@ -685,7 +680,9 @@ def analyze_dataset(
         )
 
     if collect_data_for_blowup_supervised_learning:
-        with log_phase_duration("get_datum_for_blowup_supervised_learning (diagnostic)"):
+        with log_phase_duration(
+            "get_datum_for_blowup_supervised_learning (diagnostic)"
+        ):
             datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
                 raw_joint_bread_matrix,
                 joint_bread_cond,
@@ -718,7 +715,9 @@ def analyze_dataset(
                 action_by_decision_time_by_subject_id,
             )
 
-            with open(output_folder_abs_path / "supervised_learning_datum.pkl", "wb") as f:
+            with open(
+                output_folder_abs_path / "supervised_learning_datum.pkl", "wb"
+            ) as f:
                 pickle.dump(datum_and_label_dict, f)
 
     print(f"\nParameter estimate:\n {theta_est}")
@@ -974,11 +973,11 @@ def _reference_single_subject_weighted_estimating_function_stacker(
                             first_time_after_first_update,
                             subject_start_time,
                         )
-                        - decision_time_to_all_weights_index_offset :
+                        - decision_time_to_all_weights_index_offset
                         # One more than the latest time the subject was in the deployment before the time
                         # the update under consideration first applied. Note the + 1 because range
                         # does not include the right endpoint.
-                        min(
+                         : min(
                             min_time_by_policy_num.get(policy_num, math.inf),
                             subject_end_time + 1,
                         )
@@ -1355,7 +1354,9 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         return jnp.mean(stacks, axis=0)
 
     outer_products = jax.vmap(jnp.outer)(stacks, stacks)
-    inference_only_outer_products = jax.vmap(jnp.outer)(inference_component, inference_component)
+    inference_only_outer_products = jax.vmap(jnp.outer)(
+        inference_component, inference_component
+    )
 
     # 5. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
@@ -1373,7 +1374,6 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_hessians,
         stacks,
     )
-
 
 
 def construct_classical_and_adjusted_sandwiches(
@@ -1570,13 +1570,18 @@ def construct_classical_and_adjusted_sandwiches(
     # concurrent jax.jit compilations, not fully root-caused. Net effect at
     # n=100: ~7.1s -> ~16.3-16.5s total wall-clock. Reverted; do not re-add
     # jax.jit here without re-measuring at both benchmark scales.
-    with log_phase_duration("jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"):
-        raw_joint_bread_matrix, (
-            avg_estimating_function_stack,
-            per_subject_joint_adjusted_meat_contributions,
-            per_subject_classical_meat_contributions,
-            per_subject_classical_bread_contributions,
-            per_subject_estimating_function_stacks,
+    with log_phase_duration(
+        "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"
+    ):
+        (
+            raw_joint_bread_matrix,
+            (
+                avg_estimating_function_stack,
+                per_subject_joint_adjusted_meat_contributions,
+                per_subject_classical_meat_contributions,
+                per_subject_classical_bread_contributions,
+                per_subject_estimating_function_stacks,
+            ),
         ) = jax.jacrev(
             get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
         )(
@@ -1780,7 +1785,6 @@ def stabilize_joint_bread_if_necessary(
     )
     num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
     for i in range(1, num_updates + 1):
-
         # Add ridge penalty to diagonal block to control its condition number if necessary.
         # Define the slice for the current diagonal block
         diagonal_block_slice = slice((i - 1) * beta_dim, i * beta_dim)
@@ -1836,9 +1840,9 @@ def stabilize_joint_bread_if_necessary(
                 break
 
             damping_applied *= incremental_damping_factor
-            RL_stack_beta_derivatives_block[
-                off_diagonal_block_row_slices
-            ] *= incremental_damping_factor
+            RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= (
+                incremental_damping_factor
+            )
         else:
             damping_applied = 0
             RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= 0
@@ -2289,9 +2293,7 @@ def compute_local_linearization_error_ratio(
             continue
 
         subkey = jax.random.fold_in(key, chunk_idx)
-        W = jax.random.normal(
-            subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
-        )
+        W = jax.random.normal(subkey, shape=(cur_size, num_subjects), dtype=jnp.float64)
 
         U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
 

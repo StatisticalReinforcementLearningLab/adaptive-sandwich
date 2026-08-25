@@ -1,44 +1,42 @@
 import jax
 import jax.numpy as jnp
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pytest
 
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
-    synthetic_get_action_1_prob_generalized_logistic,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.RL_least_squares_loss_regularized_previous_betas_as_args import (
-    RL_least_squares_loss_regularized_previous_betas_as_args,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering import (
-    synthetic_get_least_squares_loss_inference_action_centering,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
-    synthetic_get_action_1_prob_pure,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl import (
-    synthetic_get_least_squares_loss_rl,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_rl import (
-    synthetic_get_least_squares_estimating_function_rl,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_no_action_centering import (
-    synthetic_get_least_squares_loss_inference_no_action_centering,
-)
-from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_inference_no_action_centering import (
-    synthetic_get_least_squares_estimating_function_inference_no_action_centering,
-)
-
 from lifejacket import post_deployment_analysis
-from lifejacket.constants import FunctionTypes
 from lifejacket.arg_threading_helpers import (
     replace_tuple_index,
     thread_action_prob_func_args,
     thread_inference_func_args,
     thread_update_func_args,
 )
+from lifejacket.constants import FunctionTypes
 from lifejacket.helper_functions import get_radon_nikodym_weight
-
+from simulators_and_runners.functions_to_pass_to_analysis.RL_least_squares_loss_regularized_previous_betas_as_args import (
+    RL_least_squares_loss_regularized_previous_betas_as_args,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_generalized_logistic import (
+    synthetic_get_action_1_prob_generalized_logistic,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
+    synthetic_get_action_1_prob_pure,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_inference_no_action_centering import (
+    synthetic_get_least_squares_estimating_function_inference_no_action_centering,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_estimating_function_rl import (
+    synthetic_get_least_squares_estimating_function_rl,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_action_centering import (
+    synthetic_get_least_squares_loss_inference_action_centering,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_inference_no_action_centering import (
+    synthetic_get_least_squares_loss_inference_no_action_centering,
+)
+from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl import (
+    synthetic_get_least_squares_loss_rl,
+)
 
 # TODO: Add checking of all aux values.
 
@@ -171,7 +169,7 @@ def setup_data_two_loss_functions_no_action_probs():
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_simplest(
-    setup_data_two_loss_functions_no_action_probs,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_no_action_probs,
 ):
     """
     Test that the stacking function correctly computes a weighted estimating
@@ -512,7 +510,7 @@ def setup_data_two_estimating_functions_no_action_probs():
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_estimating_functions_given(
-    setup_data_two_estimating_functions_no_action_probs,  # pylint: disable=redefined-outer-name
+    setup_data_two_estimating_functions_no_action_probs,
 ):
     """
     Just like the above test, but I give two estimating functions instead of
@@ -827,7 +825,7 @@ def setup_data_two_loss_functions_no_action_probs_different_betas():
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_different_betas(
-    setup_data_two_loss_functions_no_action_probs_different_betas,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_no_action_probs_different_betas,
 ):
     """
     Test that the stacking function correctly computes a weighted estimating
@@ -1430,7 +1428,7 @@ def setup_data_two_loss_functions_no_action_probs_incremental_recruitment():
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_incremental_recruitment(
-    setup_data_two_loss_functions_no_action_probs_incremental_recruitment,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_no_action_probs_incremental_recruitment,
 ):
     """
     Test that the stacking function correctly computes a weighted estimating
@@ -1946,7 +1944,7 @@ def setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_upd
 
 
 def test_batched_and_reference_implementations_agree_per_subject_incremental_recruitment(
-    setup_data_two_loss_functions_no_action_probs_incremental_recruitment,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_no_action_probs_incremental_recruitment,
 ):
     """
     Cross-checks the batched get_avg_weighted_estimating_function_stacks_and_aux_values
@@ -2086,7 +2084,7 @@ def test_batched_and_reference_implementations_agree_per_subject_incremental_rec
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_multiple_decisions_between_updates(
-    setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_no_action_probs_multiple_decisions_between_updates,
 ):
     """
     Test that the stacking function correctly computes a weighted estimating
@@ -2538,7 +2536,7 @@ def setup_data_two_loss_functions_use_action_probs_both_sides():
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_use_action_probs_both_sides(
-    setup_data_two_loss_functions_use_action_probs_both_sides,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_use_action_probs_both_sides,
 ):
     """
     Test that the stacking function correctly computes a weighted estimating
@@ -3106,7 +3104,7 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
 
 
 def test_batched_algorithm_data_check_detects_the_same_inconsistency_as_the_original(
-    setup_data_two_loss_functions_use_action_probs_both_sides,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_use_action_probs_both_sides,
 ):
     """
     Fast, unit-level exercise of check_batched_algorithm_estimating_function_args_equivalent
@@ -3292,9 +3290,7 @@ def setup_data_two_loss_functions_use_action_probs_from_betas_RL_action_probs_in
                     1.0,
                     0.9,
                     jnp.array([user_id, -1.0], dtype="float32"),
-                ).reshape(
-                    -1, 1
-                ),  # pre update action 1 probs
+                ).reshape(-1, 1),  # pre update action 1 probs
                 # NOTE: we want these to be replaced in the eventual estimating function
                 # args, hence the crazy values to stick out if they are used.
                 jnp.array(
@@ -3374,7 +3370,7 @@ def setup_data_two_loss_functions_use_action_probs_from_betas_RL_action_probs_in
 
 
 def test_construct_single_user_weighted_estimating_function_stacker_use_action_probs_from_betas_RL_action_probs_inference(
-    setup_data_two_loss_functions_use_action_probs_from_betas_RL_action_probs_inference,  # pylint: disable=redefined-outer-name
+    setup_data_two_loss_functions_use_action_probs_from_betas_RL_action_probs_inference,
 ):
     """
     Test that the stacking function correctly computes a weighted estimating
@@ -3953,11 +3949,7 @@ def test_get_radon_nikodym_weight():
     expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
     expected_denominator_args = list(action_prob_func_args_single_user)
     expected_denominator_args[action_prob_func_args_beta_index] = beta_target
-    expected_denominator = (
-        mock_action_prob_func(  # pylint: disable=no-value-for-parameter
-            *expected_denominator_args
-        )
-    )
+    expected_denominator = mock_action_prob_func(*expected_denominator_args)
 
     expected_result = expected_numerator / expected_denominator
 
@@ -3984,11 +3976,7 @@ def test_get_radon_nikodym_weight_action_0():
     expected_numerator = mock_action_prob_func(*action_prob_func_args_single_user)
     expected_denominator_args = list(action_prob_func_args_single_user)
     expected_denominator_args[action_prob_func_args_beta_index] = beta_target
-    expected_denominator = (
-        mock_action_prob_func(  # pylint: disable=no-value-for-parameter
-            *expected_denominator_args
-        )
-    )
+    expected_denominator = mock_action_prob_func(*expected_denominator_args)
 
     expected_result = (1 - expected_numerator) / (1 - expected_denominator)
     result = get_radon_nikodym_weight(

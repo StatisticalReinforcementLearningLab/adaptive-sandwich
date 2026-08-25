@@ -75,7 +75,9 @@ def _find_run_output_dir() -> pathlib.Path:
         )
     run_output_dir = candidates[0] / "exp=1"
     if not run_output_dir.is_dir():
-        raise FileNotFoundError(f"Expected experiment output directory not found: {run_output_dir}.")
+        raise FileNotFoundError(
+            f"Expected experiment output directory not found: {run_output_dir}."
+        )
     return run_output_dir
 
 
@@ -112,7 +114,9 @@ def main() -> None:
     requested = sys.argv[1:] or list(SCALES.keys())
     unknown = set(requested) - set(SCALES.keys())
     if unknown:
-        raise ValueError(f"Unknown scale(s) {unknown}; choose from {list(SCALES.keys())}")
+        raise ValueError(
+            f"Unknown scale(s) {unknown}; choose from {list(SCALES.keys())}"
+        )
 
     for scale in requested:
         _generate_one(scale)

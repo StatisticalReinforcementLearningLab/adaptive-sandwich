@@ -14,6 +14,73 @@ per-subject and per-update loops can be replaced with a small, fixed number
 of jax.vmap calls instead of one Python-dispatched call per subject (or per
 subject per update).
 
+Pipeline, in the order get_avg_weighted_estimating_function_stacks_and_aux_values
+(post_deployment_analysis.py) calls it, once per differentiated (betas,
+theta) value:
+
+1. Structural precompute (plain numpy, rebuilt once per call, NEVER traced):
+   build_action_prob_layer_precompute -> ActionProbLayerPrecompute,
+   build_update_layer_precompute -> UpdateLayerPrecompute,
+   build_inference_layer_precompute -> InferenceLayerPrecompute. These
+   encode WHICH cells are active/valid and WHICH policy/action applied --
+   never the differentiated values themselves -- so none of this needs to
+   re-run inside jax.grad/jax.vmap tracing.
+2. Batched forward pass (traced; depends on the current betas/theta):
+   compute_action_prob_layer_outputs (ONE jax.vmap spanning every subject x
+   every global decision time at once, for the Radon-Nikodym weights and,
+   if needed, the reconstructed action probabilities) feeds
+   compute_windowed_weight_products (one jnp.cumprod per subject, to slice
+   out every update's/inference's weight-window product at once, without
+   ever dividing prefix products), whose outputs feed
+   compute_batched_algorithm_component / compute_batched_inference_outputs
+   (one jax.vmap per (update, shape-bucket), or per inference shape-bucket).
+3. Optional data checks (skipped when suppress_all_data_checks=True):
+   check_batched_algorithm_estimating_function_args_equivalent /
+   check_batched_inference_estimating_function_args_equivalent, which reuse
+   the exact same bucket-override builders as step 2
+   (_build_algorithm_bucket_overrides / _build_inference_bucket_overrides),
+   so what gets checked is guaranteed identical to what the real computation
+   used, not a separately-derived approximation of it.
+
+Shapes recur across almost every function below and are defined once here
+rather than re-derived in each docstring:
+  N = number of subjects.
+  T = number of distinct global decision times (every subject shares this
+      axis, even though most are only active for a sub-range of it).
+  U = number of non-initial, non-fallback policy updates.
+  bucket_size = number of subjects sharing one exact argument shape at one
+      update (or, for the inference layer, overall) -- see UpdateArgBucket.
+
+Vs. the original per-subject implementation. This module has two spiritual
+predecessors, both still present in the codebase (porting either is
+deliberately out of scope here -- see the ADR's Step 4 "Scope" note):
+
+  - post_deployment_analysis._reference_single_subject_weighted_estimating_function_stacker:
+    a plain-Python, one-subject-at-a-time implementation, kept ONLY as a
+    correctness oracle for tests -- no production code path calls it
+    anymore. It loops in Python over threaded_update_func_args_by_policy_num,
+    and for each update inline-computes one jnp.prod(all_weights[lo:hi])
+    weight-window product (via helper_functions.compute_subject_radon_nikodym_weights'
+    per-subject raw weights and lo/hi bookkeeping) before calling
+    algorithm_estimating_func(*update_args) directly. This module replaces
+    that per-subject, per-update Python double-loop with: the raw weights
+    for EVERY subject via one compute_action_prob_layer_outputs jax.vmap
+    call; EVERY subject's EVERY window product at once via
+    compute_windowed_weight_products' cumulative-product-with-reset (instead
+    of each caller re-deriving its own lo/hi and re-slicing); and the
+    estimating-function evaluations themselves via
+    compute_batched_algorithm_component's one jax.vmap per (update,
+    shape-bucket), instead of one dispatch per (subject, update) pair.
+  - helper_functions.compute_subject_radon_nikodym_weights: the shared,
+    still-per-subject weight/bookkeeping helper that
+    deployment_conditioning_monitor.py and
+    get_datum_for_blowup_supervised_learning.py still call directly (a
+    deliberate scope decision, not an oversight -- porting them is the
+    natural next step if their performance ever becomes a concern).
+    compute_action_prob_layer_outputs + compute_windowed_weight_products
+    together are this module's batched, all-subjects-at-once counterpart,
+    used only by post_deployment_analysis.py's hot path.
+
 Two hazards drive most of the design here:
 
 1. jax.vmap cannot skip invalid cells -- every cell must be called with SOME

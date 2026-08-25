@@ -329,7 +329,9 @@ def test_check_batched_inference_estimating_function_args_equivalent_passes_on_c
     # No policy updates at all (everything stays on the initial policy) --
     # isolates the inference side from the algorithm-side override logic
     # exercised by the test above.
-    action_prob_func_args_by_subject_id_by_decision_time = {1: {1: (jnp.array([2.0]), 0.5)}}
+    action_prob_func_args_by_subject_id_by_decision_time = {
+        1: {1: (jnp.array([2.0]), 0.5)}
+    }
     action_by_decision_time_by_subject_id = {1: {1: 0}}
     policy_num_by_decision_time_by_subject_id = {1: {1: 1}}
 

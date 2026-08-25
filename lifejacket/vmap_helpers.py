@@ -1,7 +1,7 @@
 import collections
 
-from jax import numpy as jnp
 import numpy as np
+from jax import numpy as jnp
 
 
 # TODO: Check for exactly the required types earlier
@@ -40,9 +40,7 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
 
             batched_arg_tensors.append(jnp.stack(batched_arg_list, 0))
             batch_axes.append(0)
-        elif (
-            isinstance(first, (jnp.ndarray, np.ndarray)) and first.ndim == 1
-        ) or (
+        elif (isinstance(first, (jnp.ndarray, np.ndarray)) and first.ndim == 1) or (
             isinstance(first, collections.abc.Sequence) and not isinstance(first, str)
         ):
             ########## We have a vector (1D array, or plain sequence) arg

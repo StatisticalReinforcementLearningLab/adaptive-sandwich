@@ -10,7 +10,7 @@ def RL_least_squares_estimating_function_regularized(
     actions,
     rewards,
     action1probs,
-    action1probtimes,  # pylint: disable=unused-argument
+    action1probtimes,
     action_centering,
     lambda_,
     n,

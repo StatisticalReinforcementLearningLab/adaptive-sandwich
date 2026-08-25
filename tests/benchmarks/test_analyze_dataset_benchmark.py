@@ -41,10 +41,10 @@ import time
 
 import numpy as np
 import pytest
+from tests.utils import get_abs_path
 
 from lifejacket.helper_functions import load_function_from_same_named_file
 from lifejacket.post_deployment_analysis import analyze_dataset
-from tests.utils import get_abs_path
 
 FUNCTIONS_DIR = get_abs_path(
     __file__, "../simulators_and_runners/functions_to_pass_to_analysis"

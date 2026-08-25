@@ -1,9 +1,9 @@
 import collections
 import logging
 
-import pandas as pd
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 
 from .calculate_derivatives import (
     calculate_inference_loss_derivatives,
@@ -201,7 +201,12 @@ def form_adjusted_meat_adjustments_directly(
     # Now dig even deeper to get weight derivatives and inference estimating function mixed
     # derivatives that go into the V's
 
-    pi_and_weight_gradients_by_calendar_t = calculate_pi_and_weight_gradients(
+    # Return value intentionally unused: this call's return value isn't
+    # consumed anywhere below (confirmed, not an oversight introduced here),
+    # but the call itself is kept for its logger.debug side effects during
+    # interactive use of this diagnostic function -- see the breakpoint()
+    # further down.
+    _pi_and_weight_gradients_by_calendar_t = calculate_pi_and_weight_gradients(
         study_df,
         active_col_name,
         action_col_name,

@@ -1,9 +1,9 @@
+import os
+import shutil
+
 import pytest
 import sh
-import os
-
 from tests.utils import get_abs_path
-import shutil
 
 
 @pytest.fixture

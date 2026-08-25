@@ -1,6 +1,5 @@
 import numpy as np
 from jax import numpy as jnp
-
 from tests.utils import finite_difference_hessian
 
 
@@ -39,7 +38,7 @@ def test_finite_difference_hessian_constant():
     # Define a constant function f(x) = c
     c = 5
 
-    def f(x):  # pylint: disable=unused-argument
+    def f(x):
         return c
 
     x = np.array([1.0, 2.0])
@@ -103,14 +102,14 @@ def assert_dict_with_arrays_equal(d1, d2):
     Recursively compare two dictionaries (or nested structures) that may contain numpy arrays.
     """
 
-    assert type(d1) == type(d2), f"Type mismatch: {type(d1)} != {type(d2)}"
+    assert type(d1) is type(d2), f"Type mismatch: {type(d1)} != {type(d2)}"
     if isinstance(d1, dict):
         assert d1.keys() == d2.keys(), f"Dict keys mismatch: {d1.keys()} != {d2.keys()}"
         for k in d1:
             assert_dict_with_arrays_equal(d1[k], d2[k])
     elif isinstance(d1, (list, tuple)):
         assert len(d1) == len(d2), f"Length mismatch: {len(d1)} != {len(d2)}"
-        for v1, v2 in zip(d1, d2):
+        for v1, v2 in zip(d1, d2, strict=False):
             assert_dict_with_arrays_equal(v1, v2)
     elif isinstance(d1, (np.ndarray, jnp.ndarray)):
         np.testing.assert_array_equal(d1, d2)

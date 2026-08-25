@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
 import collections
 import logging
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -256,7 +256,7 @@ def thread_update_func_args(
                         ].shape
                     )
                 else:
-                    batched_args = list(zip(*args_list))
+                    batched_args = list(zip(*args_list, strict=False))
                     # Ensure each argument is at least 2D for batching, to avoid shape issues with scalars
                     batched_tensors = []
                     for arg_group in batched_args:
@@ -360,7 +360,7 @@ def thread_inference_func_args(
                     args[inference_func_args_action_prob_index].shape
                 )
             else:
-                batched_args = list(zip(*args_list))
+                batched_args = list(zip(*args_list, strict=False))
                 batched_tensors = []
                 for arg_group in batched_args:
                     arr = jnp.array(arg_group)

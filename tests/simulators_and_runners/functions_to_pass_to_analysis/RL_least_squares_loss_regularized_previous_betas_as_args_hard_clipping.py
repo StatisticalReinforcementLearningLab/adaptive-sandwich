@@ -1,8 +1,8 @@
 import jax
-from jax import numpy as jnp
-from jax import core
-from jax.experimental import host_callback as hcb
 import numpy as np
+from jax import core
+from jax import numpy as jnp
+from jax.experimental import host_callback as hcb
 
 
 def synthetic_get_action_1_prob_pure(

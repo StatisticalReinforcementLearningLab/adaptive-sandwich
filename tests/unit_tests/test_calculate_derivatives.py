@@ -1,5 +1,5 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 from jax import numpy as jnp
 
 import simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure
@@ -558,19 +558,17 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering():
     user_1_rewards = np.array([1.0, -1, 0], dtype="float32")
     user_1_loss_gradient = -2 * sum(
         (
-            (
-                user_1_rewards[i]
-                - beta[:2] @ user_1_states[i]
-                - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
-            )
-            * np.concatenate(
-                [
-                    user_1_states[i],
-                    user_1_centered_actions[i] * user_1_states[i],
-                ]
-            )
-            for i in range(3)
+            user_1_rewards[i]
+            - beta[:2] @ user_1_states[i]
+            - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
         )
+        * np.concatenate(
+            [
+                user_1_states[i],
+                user_1_centered_actions[i] * user_1_states[i],
+            ]
+        )
+        for i in range(3)
     )
 
     user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
@@ -757,19 +755,17 @@ def test_calculate_rl_update_derivatives_specific_update_with_and_without_zero_p
     user_1_rewards = np.array([1.0, -1, 0], dtype="float32")
     user_1_loss_gradient = -2 * sum(
         (
-            (
-                user_1_rewards[i]
-                - beta[:2] @ user_1_states[i]
-                - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
-            )
-            * np.concatenate(
-                [
-                    user_1_states[i],
-                    user_1_centered_actions[i] * user_1_states[i],
-                ]
-            )
-            for i in range(3)
+            user_1_rewards[i]
+            - beta[:2] @ user_1_states[i]
+            - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
         )
+        * np.concatenate(
+            [
+                user_1_states[i],
+                user_1_centered_actions[i] * user_1_states[i],
+            ]
+        )
+        for i in range(3)
     )
 
     user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
@@ -1098,19 +1094,17 @@ def test_calculate_rl_update_derivatives_specific_update_action_centering_increm
     user_1_rewards = np.array([1.0, -1, 0, 0], dtype="float32")
     user_1_loss_gradient = -2 * sum(
         (
-            (
-                user_1_rewards[i]
-                - beta[:2] @ user_1_states[i]
-                - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
-            )
-            * np.concatenate(
-                [
-                    user_1_states[i],
-                    user_1_centered_actions[i] * user_1_states[i],
-                ]
-            )
-            for i in range(4)
+            user_1_rewards[i]
+            - beta[:2] @ user_1_states[i]
+            - beta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
         )
+        * np.concatenate(
+            [
+                user_1_states[i],
+                user_1_centered_actions[i] * user_1_states[i],
+            ]
+        )
+        for i in range(4)
     )
 
     user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")
@@ -3529,19 +3523,17 @@ def test_calculate_inference_loss_derivatives_multiple_size_groups():
     user_1_rewards = np.array([1.0, -1, 0, 0], dtype="float32")
     user_1_loss_gradient = -2 * sum(
         (
-            (
-                user_1_rewards[i]
-                - theta[:2] @ user_1_states[i]
-                - theta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
-            )
-            * np.concatenate(
-                [
-                    user_1_states[i],
-                    user_1_centered_actions[i] * user_1_states[i],
-                ]
-            )
-            for i in range(4)
+            user_1_rewards[i]
+            - theta[:2] @ user_1_states[i]
+            - theta[2:] @ (user_1_centered_actions[i] * user_1_states[i])
         )
+        * np.concatenate(
+            [
+                user_1_states[i],
+                user_1_centered_actions[i] * user_1_states[i],
+            ]
+        )
+        for i in range(4)
     )
 
     user_2_centered_actions = np.array([1 - 0.1, 1 - 0.2, 0 - 0.3], dtype="float32")

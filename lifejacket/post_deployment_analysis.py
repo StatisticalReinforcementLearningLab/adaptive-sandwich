@@ -1,24 +1,22 @@
 from __future__ import annotations
 
 import collections
-import pathlib
-import pickle
 import logging
 import math
-from typing import Any, Callable
+import pathlib
+import pickle
+import time
+from collections.abc import Callable
+from typing import Any
 
 import click
 import jax
 import numpy as np
-from jax import numpy as jnp
-import scipy
 import pandas as pd
+import scipy
+from jax import numpy as jnp
 
-from .arg_threading_helpers import (
-    thread_action_prob_func_args,
-    thread_inference_func_args,
-    thread_update_func_args,
-)
+from . import get_datum_for_blowup_supervised_learning, input_checks
 from .batched_weighted_estimating_function_stack import (
     build_action_prob_layer_precompute,
     build_inference_layer_precompute,
@@ -38,11 +36,6 @@ from .constants import (
 from .form_adjusted_meat_adjustments_directly import (
     form_adjusted_meat_adjustments_directly,
 )
-from . import input_checks
-from . import get_datum_for_blowup_supervised_learning
-from .small_sample_corrections import perform_desired_small_sample_correction
-
-
 from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
@@ -55,6 +48,7 @@ from .helper_functions import (
     log_phase_duration,
     unflatten_params,
 )
+from .small_sample_corrections import perform_desired_small_sample_correction
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -450,7 +444,9 @@ def analyze_dataset(
             )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
-    with log_phase_duration("data_structure_prep.construct_beta_index_by_policy_num_map"):
+    with log_phase_duration(
+        "data_structure_prep.construct_beta_index_by_policy_num_map"
+    ):
         beta_index_by_policy_num, initial_policy_num = (
             construct_beta_index_by_policy_num_map(
                 analysis_df, policy_num_col_name, active_col_name
@@ -685,7 +681,9 @@ def analyze_dataset(
         )
 
     if collect_data_for_blowup_supervised_learning:
-        with log_phase_duration("get_datum_for_blowup_supervised_learning (diagnostic)"):
+        with log_phase_duration(
+            "get_datum_for_blowup_supervised_learning (diagnostic)"
+        ):
             datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
                 raw_joint_bread_matrix,
                 joint_bread_cond,
@@ -718,7 +716,9 @@ def analyze_dataset(
                 action_by_decision_time_by_subject_id,
             )
 
-            with open(output_folder_abs_path / "supervised_learning_datum.pkl", "wb") as f:
+            with open(
+                output_folder_abs_path / "supervised_learning_datum.pkl", "wb"
+            ) as f:
                 pickle.dump(datum_and_label_dict, f)
 
     print(f"\nParameter estimate:\n {theta_est}")
@@ -974,11 +974,11 @@ def _reference_single_subject_weighted_estimating_function_stacker(
                             first_time_after_first_update,
                             subject_start_time,
                         )
-                        - decision_time_to_all_weights_index_offset :
+                        - decision_time_to_all_weights_index_offset
                         # One more than the latest time the subject was in the deployment before the time
                         # the update under consideration first applied. Note the + 1 because range
                         # does not include the right endpoint.
-                        min(
+                         : min(
                             min_time_by_policy_num.get(policy_num, math.inf),
                             subject_end_time + 1,
                         )
@@ -1284,7 +1284,44 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         action_prob_layer.subject_end_idx,
     )
 
-    # 4. Data checks: if action probabilities are used in the algorithm or
+    # 4. Batched algorithm/inference component computation, run BEFORE the
+    # data checks below (step 5) so they can reuse its per-bucket "threaded"
+    # (reconstructed-action-prob) results instead of recomputing an
+    # identical jax.vmap pass just for validation -- see
+    # check_batched_algorithm_estimating_function_args_equivalent's
+    # precomputed_threaded_results docstring.
+    with log_phase_duration("batched_components.algorithm"):
+        algorithm_component, algorithm_bucket_outputs = (
+            compute_batched_algorithm_component(
+                betas,
+                beta_dim,
+                algorithm_estimating_func,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                action_prob_layer,
+                update_layer,
+                pi_beta_grid,
+                rl_weight_products,
+            )
+        )
+    with log_phase_duration("batched_components.inference"):
+        inference_component, inference_hessians, inference_bucket_outputs = (
+            compute_batched_inference_outputs(
+                theta,
+                theta_dim,
+                inference_estimating_func,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_layer,
+                inference_layer,
+                pi_beta_grid,
+                inference_weight_products,
+                need_hessians=include_auxiliary_outputs,
+            )
+        )
+
+    # 5. Data checks: if action probabilities are used in the algorithm or
     # inference estimating functions, make sure that substituting in the
     # reconstructed action probabilities (as the batched computation above
     # does) is approximately equivalent to using the original action
@@ -1299,55 +1336,34 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
                 "Checking that reconstructed action probabilities are consistent with "
                 "recorded ones in the algorithm update function args for all subjects."
             )
-        check_batched_algorithm_estimating_function_args_equivalent(
-            algorithm_estimating_func,
-            betas,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_previous_betas_index,
-            alg_update_func_args_action_prob_index,
-            action_prob_layer,
-            update_layer,
-            pi_beta_grid,
-        )
+        with log_phase_duration("data_checks.algorithm"):
+            check_batched_algorithm_estimating_function_args_equivalent(
+                algorithm_estimating_func,
+                betas,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                action_prob_layer,
+                update_layer,
+                pi_beta_grid,
+                algorithm_bucket_outputs,
+            )
         if inference_func_args_action_prob_index >= 0:
             logger.info(
                 "Checking that reconstructed action probabilities are consistent with "
                 "recorded ones in the inference function args for all subjects."
             )
-        check_batched_inference_estimating_function_args_equivalent(
-            inference_estimating_func,
-            theta,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_layer,
-            inference_layer,
-            pi_beta_grid,
-        )
-
-    algorithm_component = compute_batched_algorithm_component(
-        betas,
-        beta_dim,
-        algorithm_estimating_func,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_previous_betas_index,
-        alg_update_func_args_action_prob_index,
-        action_prob_layer,
-        update_layer,
-        pi_beta_grid,
-        rl_weight_products,
-    )
-    inference_component, inference_hessians = compute_batched_inference_outputs(
-        theta,
-        theta_dim,
-        inference_estimating_func,
-        inference_func_args_theta_index,
-        inference_func_args_action_prob_index,
-        action_prob_layer,
-        inference_layer,
-        pi_beta_grid,
-        inference_weight_products,
-        need_hessians=include_auxiliary_outputs,
-    )
+        with log_phase_duration("data_checks.inference"):
+            check_batched_inference_estimating_function_args_equivalent(
+                inference_estimating_func,
+                theta,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_layer,
+                inference_layer,
+                pi_beta_grid,
+                inference_bucket_outputs,
+            )
 
     stacks = jnp.concatenate([algorithm_component, inference_component], axis=1)
 
@@ -1355,9 +1371,11 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         return jnp.mean(stacks, axis=0)
 
     outer_products = jax.vmap(jnp.outer)(stacks, stacks)
-    inference_only_outer_products = jax.vmap(jnp.outer)(inference_component, inference_component)
+    inference_only_outer_products = jax.vmap(jnp.outer)(
+        inference_component, inference_component
+    )
 
-    # 5. Note this strange return structure! We will differentiate the first output,
+    # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the estimating functions sum check, per_subject_classical_bread_contributions, and
     # classical meat and inverse read matrices. The raw per-subject stacks are also returned for
@@ -1373,7 +1391,6 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_hessians,
         stacks,
     )
-
 
 
 def construct_classical_and_adjusted_sandwiches(
@@ -1570,13 +1587,18 @@ def construct_classical_and_adjusted_sandwiches(
     # concurrent jax.jit compilations, not fully root-caused. Net effect at
     # n=100: ~7.1s -> ~16.3-16.5s total wall-clock. Reverted; do not re-add
     # jax.jit here without re-measuring at both benchmark scales.
-    with log_phase_duration("jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"):
-        raw_joint_bread_matrix, (
-            avg_estimating_function_stack,
-            per_subject_joint_adjusted_meat_contributions,
-            per_subject_classical_meat_contributions,
-            per_subject_classical_bread_contributions,
-            per_subject_estimating_function_stacks,
+    with log_phase_duration(
+        "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"
+    ):
+        (
+            raw_joint_bread_matrix,
+            (
+                avg_estimating_function_stack,
+                per_subject_joint_adjusted_meat_contributions,
+                per_subject_classical_meat_contributions,
+                per_subject_classical_bread_contributions,
+                per_subject_estimating_function_stacks,
+            ),
         ) = jax.jacrev(
             get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
         )(
@@ -1780,7 +1802,6 @@ def stabilize_joint_bread_if_necessary(
     )
     num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
     for i in range(1, num_updates + 1):
-
         # Add ridge penalty to diagonal block to control its condition number if necessary.
         # Define the slice for the current diagonal block
         diagonal_block_slice = slice((i - 1) * beta_dim, i * beta_dim)
@@ -1836,9 +1857,9 @@ def stabilize_joint_bread_if_necessary(
                 break
 
             damping_applied *= incremental_damping_factor
-            RL_stack_beta_derivatives_block[
-                off_diagonal_block_row_slices
-            ] *= incremental_damping_factor
+            RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= (
+                incremental_damping_factor
+            )
         else:
             damping_applied = 0
             RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= 0
@@ -2170,26 +2191,21 @@ def compute_local_linearization_error_ratio(
             The median, 90th percentile, and max local linearization error ratio
             over the sampled perturbations.
     """
-    # Ensure float64 for diagnostics even if upstream ran in float32.
-    joint_bread_float64 = jnp.asarray(stabilized_joint_bread_matrix, dtype=jnp.float64)
-    g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
-    stacks_float64 = jnp.asarray(
-        per_subject_estimating_function_stacks, dtype=jnp.float64
-    )
+    joint_bread = stabilized_joint_bread_matrix
+    g_hat = avg_estimating_function_stack
+    stacks = per_subject_estimating_function_stacks
 
     # Add a small ridge to improve numerical stability for ill-conditioned bread.
     ridge_scale = 1e-8
 
     # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
     cond_threshold = 1e12
-    bread_cond = float(jnp.linalg.cond(joint_bread_float64))
+    bread_cond = float(jnp.linalg.cond(joint_bread))
 
     if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
-        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
+        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread)))
         ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
-        joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
-            joint_bread_float64.shape[0], dtype=jnp.float64
-        )
+        joint_bread = joint_bread + ridge * jnp.eye(joint_bread.shape[0])
         logger.info(
             "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
             float(ridge),
@@ -2197,7 +2213,7 @@ def compute_local_linearization_error_ratio(
             cond_threshold,
         )
 
-    num_subjects = stacks_float64.shape[0]
+    num_subjects = stacks.shape[0]
 
     # This closure is jit-friendly by construction: suppress_all_data_checks and
     # include_auxiliary_outputs are hardcoded below (never traced), so the
@@ -2228,43 +2244,38 @@ def compute_local_linearization_error_ratio(
     # static_argnums/static_argnames to a module-level function instead.
     @jax.jit
     def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
-        return jnp.asarray(
-            get_avg_weighted_estimating_function_stacks_and_aux_values(
-                flattened_betas_and_theta,
-                beta_dim,
-                theta_dim,
-                subject_ids,
-                action_prob_func,
-                action_prob_func_args_beta_index,
-                alg_update_func,
-                alg_update_func_type,
-                alg_update_func_args_beta_index,
-                alg_update_func_args_action_prob_index,
-                alg_update_func_args_action_prob_times_index,
-                alg_update_func_args_previous_betas_index,
-                inference_func,
-                inference_func_type,
-                inference_func_args_theta_index,
-                inference_func_args_action_prob_index,
-                action_prob_func_args_by_subject_id_by_decision_time,
-                policy_num_by_decision_time_by_subject_id,
-                initial_policy_num,
-                beta_index_by_policy_num,
-                inference_func_args_by_subject_id,
-                inference_action_prob_decision_times_by_subject_id,
-                update_func_args_by_by_subject_id_by_policy_num,
-                action_by_decision_time_by_subject_id,
-                True,  # suppress_all_data_checks
-                True,  # suppress_interactive_data_checks
-                False,  # include_auxiliary_outputs
-            ),
-            dtype=jnp.float64,
+        return get_avg_weighted_estimating_function_stacks_and_aux_values(
+            flattened_betas_and_theta,
+            beta_dim,
+            theta_dim,
+            subject_ids,
+            action_prob_func,
+            action_prob_func_args_beta_index,
+            alg_update_func,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
+            inference_func,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            policy_num_by_decision_time_by_subject_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            inference_func_args_by_subject_id,
+            inference_action_prob_decision_times_by_subject_id,
+            update_func_args_by_by_subject_id_by_policy_num,
+            action_by_decision_time_by_subject_id,
+            True,  # suppress_all_data_checks
+            True,  # suppress_interactive_data_checks
+            False,  # include_auxiliary_outputs
         )
 
     # Evaluate at the final estimate.
-    eta_hat = jnp.asarray(
-        flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
-    )
+    eta_hat = flatten_params(all_post_update_betas, theta_est)
 
     # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
     # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
@@ -2279,6 +2290,7 @@ def compute_local_linearization_error_ratio(
     chunk_size = 1
 
     ratios_list = []
+    chunk_wall_times = []
     num_chunks = (J + chunk_size - 1) // chunk_size
 
     for chunk_idx in range(num_chunks):
@@ -2288,20 +2300,18 @@ def compute_local_linearization_error_ratio(
         if cur_size <= 0:
             continue
 
-        subkey = jax.random.fold_in(key, chunk_idx)
-        W = jax.random.normal(
-            subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
-        )
+        chunk_start = time.perf_counter()
 
-        U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
+        subkey = jax.random.fold_in(key, chunk_idx)
+        W = jax.random.normal(subkey, shape=(cur_size, num_subjects))
+
+        U = (W @ stacks) / jnp.sqrt(num_subjects)
 
         c = 1.0
         # TODO: Consider QR decomposition
-        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
-            joint_bread_float64, U.T
-        ).T
+        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(joint_bread, U.T).T
 
-        B_delta = (joint_bread_float64 @ delta.T).T
+        B_delta = (joint_bread @ delta.T).T
         g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
         remainder = g_plus - g_hat - B_delta
 
@@ -2309,7 +2319,18 @@ def compute_local_linearization_error_ratio(
         numer = jnp.linalg.norm(remainder, axis=1)
         ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
 
+        # block_until_ready so each chunk's wall time reflects its own actual
+        # device work (JAX dispatch is async otherwise) -- separates one-time
+        # jit compile cost (chunk 0) from steady-state per-chunk cost.
+        jax.block_until_ready(ratios)
+        chunk_wall_times.append(time.perf_counter() - chunk_start)
+
         ratios_list.append(ratios)
+
+    logger.info(
+        "Local linearization diagnostic per-chunk wall times (seconds): %s",
+        [round(t, 3) for t in chunk_wall_times],
+    )
 
     ratios = jnp.concatenate(ratios_list, axis=0)
 

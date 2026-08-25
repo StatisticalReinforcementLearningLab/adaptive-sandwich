@@ -22,22 +22,20 @@ this toy deployment:
    math (test 1) being correct.
 """
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 from scipy.special import expit
 from sklearn.linear_model import LinearRegression
 
-import jax.numpy as jnp
-
+from lifejacket import post_deployment_analysis
+from lifejacket.constants import FunctionTypes, SmallSampleCorrections
 from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
     synthetic_get_action_1_prob_pure,
 )
 from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_squares_loss_rl import (
     synthetic_get_least_squares_loss_rl,
 )
-
-from lifejacket import post_deployment_analysis
-from lifejacket.constants import FunctionTypes, SmallSampleCorrections
 
 # Toy deployment settings from the notebook's "Particular Setting" section: T=2
 # decision points, n=2 users, one RL update (after t=1), a sigmoid/Boltzmann policy
@@ -102,9 +100,11 @@ def beta_and_theta_estimates():
     design = np.column_stack([np.ones_like(ACTIONS), ACTIONS])
     t1_mask = CALENDAR_T == 1
 
-    beta_hat = LinearRegression(fit_intercept=False).fit(
-        design[t1_mask], REWARDS[t1_mask]
-    ).coef_
+    beta_hat = (
+        LinearRegression(fit_intercept=False)
+        .fit(design[t1_mask], REWARDS[t1_mask])
+        .coef_
+    )
     theta_hat = LinearRegression(fit_intercept=False).fit(design, REWARDS).coef_
     return beta_hat, theta_hat
 
@@ -171,15 +171,19 @@ def _independent_bread_meat_sandwich(beta_hat, theta_hat):
 
     # Lower-left block: average, over users, of the outer product of each user's
     # inference estimating function with their Radon-Nikodym weight gradient.
-    BL = sum(
-        np.outer(psi, wg) for psi, wg in zip(psi_by_user, weight_grad_by_user)
-    ) / num_subjects
+    BL = (
+        sum(
+            np.outer(psi, wg)
+            for psi, wg in zip(psi_by_user, weight_grad_by_user, strict=False)
+        )
+        / num_subjects
+    )
 
     bread = np.block([[UL, np.zeros((2, 2))], [BL, BR]])
 
     stacked_by_user = [
         np.concatenate([est_beta, psi])
-        for est_beta, psi in zip(est_beta_by_user, psi_by_user)
+        for est_beta, psi in zip(est_beta_by_user, psi_by_user, strict=False)
     ]
     meat = sum(np.outer(s, s) for s in stacked_by_user) / num_subjects
 
@@ -334,7 +338,11 @@ def package_pipeline_outputs(beta_and_theta_estimates):
     )
 
     theta_only_adjusted_sandwich = joint_sandwich_matrix[-2:, -2:]
-    return raw_joint_bread_matrix, joint_adjusted_meat_matrix, theta_only_adjusted_sandwich
+    return (
+        raw_joint_bread_matrix,
+        joint_adjusted_meat_matrix,
+        theta_only_adjusted_sandwich,
+    )
 
 
 def test_adaptive_sandwich_matches_independent_closed_form_calculation(

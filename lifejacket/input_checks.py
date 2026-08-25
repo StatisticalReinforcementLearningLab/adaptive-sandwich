@@ -2,17 +2,16 @@ import collections
 import logging
 from typing import Any
 
-import numpy as np
 import jax
-from jax import numpy as jnp
+import numpy as np
 import pandas as pd
 import plotext as plt
+from jax import numpy as jnp
 
 from .calculate_derivatives import (
     get_batched_arg_lists_and_involved_user_ids,
     group_user_args_by_shape,
 )
-from .constants import SmallSampleCorrections
 from .helper_functions import (
     confirm_input_check_result,
 )
@@ -101,10 +100,6 @@ def perform_first_wave_input_checks(
         calendar_t_col_name,
         alg_update_func_args,
         alg_update_func_args_action_prob_times_index,
-    )
-
-    confirm_no_small_sample_correction_desired_if_not_requested(
-        small_sample_correction, suppress_interactive_data_checks
     )
 
     ### Validate action prob function and args
@@ -332,8 +327,10 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
             zip(
                 active_df[calendar_t_col_name].to_numpy(),
                 active_df[subject_id_col_name].to_numpy(),
+                strict=False,
             ),
             active_df[action_prob_col_name].to_numpy(),
+            strict=False,
         )
     )
 
@@ -343,9 +340,7 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
     unexpected_keys = []
     for decision_time, args_by_subject_id in action_prob_func_args.items():
         nontrivial_args_by_subject_id = {
-            subject_id: args
-            for subject_id, args in args_by_subject_id.items()
-            if args
+            subject_id: args for subject_id, args in args_by_subject_id.items() if args
         }
         if not nontrivial_args_by_subject_id:
             continue
@@ -374,7 +369,9 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
             actual_chunks.append(
                 jnp.array(
                     [
-                        actual_action_prob_by_key.get((decision_time, subject_id), jnp.nan)
+                        actual_action_prob_by_key.get(
+                            (decision_time, subject_id), jnp.nan
+                        )
                         for subject_id in group_subject_ids
                     ]
                 )
@@ -448,9 +445,9 @@ def require_alg_update_args_given_for_all_subjects_at_each_update(
     )
     all_subject_ids = set(analysis_df[subject_id_col_name].unique())
     for policy_num in alg_update_func_args:
-        assert (
-            set(alg_update_func_args[policy_num].keys()) == all_subject_ids
-        ), f"Not all subjects present in algorithm update function args for policy number {policy_num}. Please see the contract for details."
+        assert set(alg_update_func_args[policy_num].keys()) == all_subject_ids, (
+            f"Not all subjects present in algorithm update function args for policy number {policy_num}. Please see the contract for details."
+        )
 
 
 def require_action_prob_args_in_alg_update_func_correspond_to_analysis_df(
@@ -510,9 +507,9 @@ def require_action_prob_func_args_given_for_all_subjects_at_each_decision(
     )
     all_subject_ids = set(analysis_df[subject_id_col_name].unique())
     for decision_time in action_prob_func_args:
-        assert (
-            set(action_prob_func_args[decision_time].keys()) == all_subject_ids
-        ), f"Not all subjects present in algorithm update function args for decision time {decision_time}. Please see the contract for details."
+        assert set(action_prob_func_args[decision_time].keys()) == all_subject_ids, (
+            f"Not all subjects present in algorithm update function args for decision time {decision_time}. Please see the contract for details."
+        )
 
 
 def require_action_prob_func_args_given_for_all_decision_times(
@@ -523,9 +520,9 @@ def require_action_prob_func_args_given_for_all_decision_times(
     )
     all_times = set(analysis_df[calendar_t_col_name].unique())
 
-    assert (
-        set(action_prob_func_args.keys()) == all_times
-    ), "Not all decision times present in action prob function args. Please see the contract for details."
+    assert set(action_prob_func_args.keys()) == all_times, (
+        "Not all decision times present in action prob function args. Please see the contract for details."
+    )
 
 
 def require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
@@ -578,24 +575,24 @@ def require_all_named_columns_present_in_analysis_df(
     logger.info(
         "Checking that all named columns are present in the analysis DataFrame."
     )
-    assert (
-        active_col_name in analysis_df.columns
-    ), f"{active_col_name} not in analysis DataFrame."
-    assert (
-        action_col_name in analysis_df.columns
-    ), f"{action_col_name} not in analysis DataFrame."
-    assert (
-        policy_num_col_name in analysis_df.columns
-    ), f"{policy_num_col_name} not in analysis DataFrame."
-    assert (
-        calendar_t_col_name in analysis_df.columns
-    ), f"{calendar_t_col_name} not in analysis DataFrame."
-    assert (
-        subject_id_col_name in analysis_df.columns
-    ), f"{subject_id_col_name} not in analysis DataFrame."
-    assert (
-        action_prob_col_name in analysis_df.columns
-    ), f"{action_prob_col_name} not in analysis DataFrame."
+    assert active_col_name in analysis_df.columns, (
+        f"{active_col_name} not in analysis DataFrame."
+    )
+    assert action_col_name in analysis_df.columns, (
+        f"{action_col_name} not in analysis DataFrame."
+    )
+    assert policy_num_col_name in analysis_df.columns, (
+        f"{policy_num_col_name} not in analysis DataFrame."
+    )
+    assert calendar_t_col_name in analysis_df.columns, (
+        f"{calendar_t_col_name} not in analysis DataFrame."
+    )
+    assert subject_id_col_name in analysis_df.columns, (
+        f"{subject_id_col_name} not in analysis DataFrame."
+    )
+    assert action_prob_col_name in analysis_df.columns, (
+        f"{action_prob_col_name} not in analysis DataFrame."
+    )
 
 
 def require_all_named_columns_not_object_type_in_analysis_df(
@@ -616,9 +613,9 @@ def require_all_named_columns_not_object_type_in_analysis_df(
         subject_id_col_name,
         action_prob_col_name,
     ):
-        assert (
-            analysis_df[colname].dtype != "object"
-        ), f"At least {colname} is of object type in analysis DataFrame."
+        assert analysis_df[colname].dtype != "object", (
+            f"At least {colname} is of object type in analysis DataFrame."
+        )
 
 
 def require_binary_actions(analysis_df, active_col_name, action_col_name):
@@ -725,9 +722,9 @@ def require_all_policy_numbers_in_analysis_df_except_possibly_initial_and_fallba
         active_df[active_df[policy_num_col_name] > min_nonnegative_policy_number][
             policy_num_col_name
         ].unique()
-    ).issubset(
-        alg_update_func_args.keys()
-    ), f"There are non-fallback, non-initial policy numbers in the analysis DataFrame that are not in the update function args: {set(active_df[active_df[policy_num_col_name] > 0][policy_num_col_name].unique()) - set(alg_update_func_args.keys())}. Please see the contract for details."
+    ).issubset(alg_update_func_args.keys()), (
+        f"There are non-fallback, non-initial policy numbers in the analysis DataFrame that are not in the update function args: {set(active_df[active_df[policy_num_col_name] > 0][policy_num_col_name].unique()) - set(alg_update_func_args.keys())}. Please see the contract for details."
+    )
 
 
 def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
@@ -744,20 +741,6 @@ def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
     ):
         confirm_input_check_result(
             "\nYou specified that the algorithm update function supplied does not have action probabilities or previous betas in its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-        )
-
-
-def confirm_no_small_sample_correction_desired_if_not_requested(
-    small_sample_correction,
-    suppress_interactive_data_checks,
-):
-    logger.info(
-        "Confirming that no small sample correction is desired if it's not requested."
-    )
-    if small_sample_correction == SmallSampleCorrections.NONE:
-        confirm_input_check_result(
-            "\nYou specified that you would not like to perform any small-sample corrections. Please verify that this is correct.\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
         )
 
@@ -964,9 +947,9 @@ def require_betas_match_in_alg_update_args_each_update(
             if first_beta is None:
                 first_beta = beta
             else:
-                assert np.array_equal(
-                    beta, first_beta
-                ), f"Betas do not match across subjects in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
+                assert np.array_equal(beta, first_beta), (
+                    f"Betas do not match across subjects in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
+                )
 
 
 def require_previous_betas_match_in_alg_update_args_each_update(
@@ -989,9 +972,9 @@ def require_previous_betas_match_in_alg_update_args_each_update(
             if first_previous_betas is None:
                 first_previous_betas = previous_betas
             else:
-                assert np.array_equal(
-                    previous_betas, first_previous_betas
-                ), f"Previous betas do not match across subjects in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
+                assert np.array_equal(previous_betas, first_previous_betas), (
+                    f"Previous betas do not match across subjects in the algorithm update function args for policy number {policy_num}. Please see the contract for details."
+                )
 
 
 def require_betas_match_in_action_prob_func_args_each_decision(
@@ -1011,9 +994,9 @@ def require_betas_match_in_action_prob_func_args_each_decision(
             if first_beta is None:
                 first_beta = beta
             else:
-                assert np.array_equal(
-                    beta, first_beta
-                ), f"Betas do not match across subjects in the action prob args for decision_time {decision_time}. Please see the contract for details."
+                assert np.array_equal(beta, first_beta), (
+                    f"Betas do not match across subjects in the action prob args for decision_time {decision_time}. Please see the contract for details."
+                )
 
 
 def require_valid_action_prob_times_given_if_index_supplied(
@@ -1034,12 +1017,12 @@ def require_valid_action_prob_times_given_if_index_supplied(
             if not args:
                 continue
             times = args[alg_update_func_args_action_prob_times_index]
-            assert (
-                times[i] > times[i - 1] for i in range(1, len(times))
-            ), f"Non-strictly-increasing times were given for action probabilities in the algorithm update function args for subject {subject_id} and policy {policy_idx}. Please see the contract for details."
-            assert (
-                times[0] >= min_time and times[-1] <= max_time
-            ), f"Times not present in the study were given for action probabilities in the algorithm update function args. The min and max times in the analysis DataFrame are {min_time} and {max_time}, while subject {subject_id} has times {times} supplied for policy {policy_idx}. Please see the contract for details."
+            assert (times[i] > times[i - 1] for i in range(1, len(times))), (
+                f"Non-strictly-increasing times were given for action probabilities in the algorithm update function args for subject {subject_id} and policy {policy_idx}. Please see the contract for details."
+            )
+            assert times[0] >= min_time and times[-1] <= max_time, (
+                f"Times not present in the study were given for action probabilities in the algorithm update function args. The min and max times in the analysis DataFrame are {min_time} and {max_time}, while subject {subject_id} has times {times} supplied for policy {policy_idx}. Please see the contract for details."
+            )
 
 
 def require_estimating_functions_sum_to_zero(

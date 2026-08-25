@@ -8,7 +8,7 @@ def synthetic_get_least_squares_estimating_function_rl(
     actions,
     rewards,
     action1probs,
-    action1probtimes,  # pylint: disable=unused-argument
+    action1probtimes,
     action_centering,
 ):
     beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)

@@ -2,8 +2,8 @@ import collections
 import logging
 
 import jax
-from jax import numpy as jnp
 import numpy as np
+from jax import numpy as jnp
 
 from .constants import FunctionTypes
 from .helper_functions import (
@@ -155,7 +155,6 @@ def calculate_pi_and_weight_gradients(
     sorted_user_ids = sorted(user_ids)
 
     for calendar_t, args_by_user_id in action_prob_func_args.items():
-
         pi_gradients, weight_gradients = calculate_pi_and_weight_gradients_specific_t(
             study_df,
             active_col_name,
@@ -675,7 +674,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     *batched_arg_tensors,
 ):
     if update_func_type == FunctionTypes.LOSS:
-        return jax.jit(  # pylint: disable=not-callable
+        return jax.jit(
             jax.vmap(
                 fun=jax.jacrev(
                     jax.grad(update_func, update_func_args_beta_index),
@@ -686,7 +685,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
             )
         )(*batched_arg_tensors)
     if update_func_type == FunctionTypes.ESTIMATING:
-        return jax.jit(  # pylint: disable=not-callable
+        return jax.jit(
             jax.vmap(
                 fun=jax.jacrev(
                     update_func,

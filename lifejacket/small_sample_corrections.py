@@ -49,7 +49,7 @@ def perform_desired_small_sample_correction(
         )
         per_subject_adjusted_correction_weights = (
             per_subject_classical_correction_weights
-        ) = (num_subjects / (num_subjects - theta_dim) * np.ones(num_subjects))
+        ) = num_subjects / (num_subjects - theta_dim) * np.ones(num_subjects)
     elif small_sample_correction in {
         SmallSampleCorrections.Z2theta,
         SmallSampleCorrections.Z3theta,

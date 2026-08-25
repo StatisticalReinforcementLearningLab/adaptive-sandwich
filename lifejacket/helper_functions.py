@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import os
-import importlib.util
 import importlib.machinery
+import importlib.util
 import logging
 import math
+import os
 import time
 from typing import Any
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 
 from .vmap_helpers import stack_batched_arg_lists_into_tensors
@@ -301,9 +301,7 @@ def confirm_input_check_result(message, suppress_interaction, error=None):
         return
     answer = None
     while answer != "y":
-        # pylint: disable=bad-builtin
         answer = input(message).lower()
-        # pylint: enable=bad-builtin
         if answer == "y":
             print("\nOk, proceeding.\n")
         elif answer == "n":
@@ -531,7 +529,10 @@ def compute_subject_radon_nikodym_weights(
         ]
     )
     active_actions_list_by_decision_time_index = jnp.array(
-        [action_by_decision_time[decision_time] for decision_time in active_decision_times]
+        [
+            action_by_decision_time[decision_time]
+            for decision_time in active_decision_times
+        ]
     )
 
     num_args = None
@@ -543,7 +544,7 @@ def compute_subject_radon_nikodym_weights(
     # NOTE: Cannot do [[]] * num_args here! Then all lists point same object...
     batched_threaded_arg_lists = [[] for _ in range(num_args)]
     for (
-        decision_time,
+        _decision_time,
         args,
     ) in sorted_threaded_action_prob_args_by_decision_time.items():
         if not args:
@@ -579,7 +580,7 @@ def compute_subject_radon_nikodym_weights(
     )
     all_weights_raw = []
     for (
-        decision_time,
+        _decision_time,
         args,
     ) in sorted_threaded_action_prob_args_by_decision_time.items():
         all_weights_raw.append(active_weights[active_index] if args else 1.0)
@@ -695,12 +696,14 @@ def extract_action_and_policy_by_decision_time_by_subject_id(
             zip(
                 active_subject_df[calendar_t_col_name],
                 active_subject_df[action_col_name],
+                strict=False,
             )
         )
         policy_num_by_decision_time_by_subject_id[subject_id] = dict(
             zip(
                 active_subject_df[calendar_t_col_name],
                 active_subject_df[policy_num_col_name],
+                strict=False,
             )
         )
     return (

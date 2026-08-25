@@ -2174,26 +2174,21 @@ def compute_local_linearization_error_ratio(
             The median, 90th percentile, and max local linearization error ratio
             over the sampled perturbations.
     """
-    # Ensure float64 for diagnostics even if upstream ran in float32.
-    joint_bread_float64 = jnp.asarray(stabilized_joint_bread_matrix, dtype=jnp.float64)
-    g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
-    stacks_float64 = jnp.asarray(
-        per_subject_estimating_function_stacks, dtype=jnp.float64
-    )
+    joint_bread = stabilized_joint_bread_matrix
+    g_hat = avg_estimating_function_stack
+    stacks = per_subject_estimating_function_stacks
 
     # Add a small ridge to improve numerical stability for ill-conditioned bread.
     ridge_scale = 1e-8
 
     # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
     cond_threshold = 1e12
-    bread_cond = float(jnp.linalg.cond(joint_bread_float64))
+    bread_cond = float(jnp.linalg.cond(joint_bread))
 
     if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
-        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
+        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread)))
         ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
-        joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
-            joint_bread_float64.shape[0], dtype=jnp.float64
-        )
+        joint_bread = joint_bread + ridge * jnp.eye(joint_bread.shape[0])
         logger.info(
             "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
             float(ridge),
@@ -2201,7 +2196,7 @@ def compute_local_linearization_error_ratio(
             cond_threshold,
         )
 
-    num_subjects = stacks_float64.shape[0]
+    num_subjects = stacks.shape[0]
 
     # This closure is jit-friendly by construction: suppress_all_data_checks and
     # include_auxiliary_outputs are hardcoded below (never traced), so the
@@ -2232,43 +2227,38 @@ def compute_local_linearization_error_ratio(
     # static_argnums/static_argnames to a module-level function instead.
     @jax.jit
     def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
-        return jnp.asarray(
-            get_avg_weighted_estimating_function_stacks_and_aux_values(
-                flattened_betas_and_theta,
-                beta_dim,
-                theta_dim,
-                subject_ids,
-                action_prob_func,
-                action_prob_func_args_beta_index,
-                alg_update_func,
-                alg_update_func_type,
-                alg_update_func_args_beta_index,
-                alg_update_func_args_action_prob_index,
-                alg_update_func_args_action_prob_times_index,
-                alg_update_func_args_previous_betas_index,
-                inference_func,
-                inference_func_type,
-                inference_func_args_theta_index,
-                inference_func_args_action_prob_index,
-                action_prob_func_args_by_subject_id_by_decision_time,
-                policy_num_by_decision_time_by_subject_id,
-                initial_policy_num,
-                beta_index_by_policy_num,
-                inference_func_args_by_subject_id,
-                inference_action_prob_decision_times_by_subject_id,
-                update_func_args_by_by_subject_id_by_policy_num,
-                action_by_decision_time_by_subject_id,
-                True,  # suppress_all_data_checks
-                True,  # suppress_interactive_data_checks
-                False,  # include_auxiliary_outputs
-            ),
-            dtype=jnp.float64,
+        return get_avg_weighted_estimating_function_stacks_and_aux_values(
+            flattened_betas_and_theta,
+            beta_dim,
+            theta_dim,
+            subject_ids,
+            action_prob_func,
+            action_prob_func_args_beta_index,
+            alg_update_func,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
+            inference_func,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            policy_num_by_decision_time_by_subject_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            inference_func_args_by_subject_id,
+            inference_action_prob_decision_times_by_subject_id,
+            update_func_args_by_by_subject_id_by_policy_num,
+            action_by_decision_time_by_subject_id,
+            True,  # suppress_all_data_checks
+            True,  # suppress_interactive_data_checks
+            False,  # include_auxiliary_outputs
         )
 
     # Evaluate at the final estimate.
-    eta_hat = jnp.asarray(
-        flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
-    )
+    eta_hat = flatten_params(all_post_update_betas, theta_est)
 
     # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
     # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
@@ -2293,17 +2283,15 @@ def compute_local_linearization_error_ratio(
             continue
 
         subkey = jax.random.fold_in(key, chunk_idx)
-        W = jax.random.normal(subkey, shape=(cur_size, num_subjects), dtype=jnp.float64)
+        W = jax.random.normal(subkey, shape=(cur_size, num_subjects))
 
-        U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
+        U = (W @ stacks) / jnp.sqrt(num_subjects)
 
         c = 1.0
         # TODO: Consider QR decomposition
-        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
-            joint_bread_float64, U.T
-        ).T
+        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(joint_bread, U.T).T
 
-        B_delta = (joint_bread_float64 @ delta.T).T
+        B_delta = (joint_bread @ delta.T).T
         g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
         remainder = g_plus - g_hat - B_delta
 

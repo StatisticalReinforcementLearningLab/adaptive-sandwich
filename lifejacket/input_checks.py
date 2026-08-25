@@ -12,7 +12,6 @@ from .calculate_derivatives import (
     get_batched_arg_lists_and_involved_user_ids,
     group_user_args_by_shape,
 )
-from .constants import SmallSampleCorrections
 from .helper_functions import (
     confirm_input_check_result,
 )
@@ -101,10 +100,6 @@ def perform_first_wave_input_checks(
         calendar_t_col_name,
         alg_update_func_args,
         alg_update_func_args_action_prob_times_index,
-    )
-
-    confirm_no_small_sample_correction_desired_if_not_requested(
-        small_sample_correction, suppress_interactive_data_checks
     )
 
     ### Validate action prob function and args
@@ -746,20 +741,6 @@ def confirm_action_probabilities_not_in_alg_update_args_if_index_not_supplied(
     ):
         confirm_input_check_result(
             "\nYou specified that the algorithm update function supplied does not have action probabilities or previous betas in its arguments. Please verify this is correct.\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-        )
-
-
-def confirm_no_small_sample_correction_desired_if_not_requested(
-    small_sample_correction,
-    suppress_interactive_data_checks,
-):
-    logger.info(
-        "Confirming that no small sample correction is desired if it's not requested."
-    )
-    if small_sample_correction == SmallSampleCorrections.NONE:
-        confirm_input_check_result(
-            "\nYou specified that you would not like to perform any small-sample corrections. Please verify that this is correct.\n\nContinue? (y/n)\n",
             suppress_interactive_data_checks,
         )
 

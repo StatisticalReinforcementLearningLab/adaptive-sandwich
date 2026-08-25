@@ -11,13 +11,16 @@
 
 Save your standard errors from pooling in online decision-making algorithms.
 
-## Setup (if not using conda)
-### Create and activate a virtual environment
-- `python3 -m venv .venv; source /.venv/bin/activate`
+## Setup
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+- Install uv (see the [install docs](https://docs.astral.sh/uv/getting-started/installation/))
+- Run `uv sync --extra dev` to create `.venv` and install locked dependencies
+- Prefix commands with `uv run`, e.g. `uv run python -m pytest`, or `source .venv/bin/activate` to activate the environment directly
 
 ### Adding a package
-- Add to `requirements.txt` with a specific version or no version if you want the latest stable
-- Run `pip freeze > requirements.txt` to lock the versions of your package and all its subpackages
+- Runtime dependency: `uv add <package>`
+- Dev/test-only dependency: `uv add --optional dev <package>`
+- Either updates `pyproject.toml` and `uv.lock` together
 
 ## Running the code
 - `export PYTHONPATH to the absolute path of this repository on your computer
@@ -26,9 +29,9 @@ Save your standard errors from pooling in online decision-making algorithms.
 ## Linting/Formatting
 
 ## Testing
-python -m pytest
-python -m pytest tests/unit_tests
-python -m pytest tests/integration_tests
+uv run python -m pytest
+uv run python -m pytest tests/unit_tests
+uv run python -m pytest tests/integration_tests
 
 ### Performance benchmarks
 `tests/benchmarks` is a phase-timing + numerical-regression benchmark for
@@ -44,5 +47,5 @@ See `docs/adr/0001-adaptive-sandwich-performance-plan.md` for why this exists
 `tests/benchmarks/generate_fixture.py` for how to regenerate its fixtures.
 
 ## TODO
-1. Add precommit hooks (pip freeze, linting, formatting)
+1. Add pre-commit hooks (linting, formatting)
 

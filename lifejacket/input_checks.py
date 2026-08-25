@@ -297,6 +297,28 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
 
     active_df = analysis_df[analysis_df[active_col_name] == 1]
 
+    # A dict keyed by (decision_time, subject_id) would silently keep only the
+    # last row for any duplicate active (calendar_t, subject_id) pair, quietly
+    # dropping the rest from this check's coverage instead of comparing every
+    # row like the old per-row DataFrame.apply() implementation did -- fail
+    # loudly instead so bad input data can't silently defang this check.
+    dup_mask = active_df.duplicated(
+        subset=[calendar_t_col_name, subject_id_col_name], keep=False
+    )
+    if dup_mask.any():
+        examples = (
+            active_df.loc[dup_mask, [calendar_t_col_name, subject_id_col_name]]
+            .drop_duplicates()
+            .head(5)
+            .to_dict("records")
+        )
+        raise ValueError(
+            "analysis_df contains duplicate active rows for the same "
+            f"(decision_time, subject_id) key (e.g. {examples}). This makes "
+            "action probability reconstruction ambiguous; please deduplicate "
+            "or fix the input data."
+        )
+
     # Keyed by (decision_time, subject_id) so the "actual" value gathered for
     # comparison always lines up with the exact same key used to build the
     # "reconstructed" one below -- never relying on two different iteration

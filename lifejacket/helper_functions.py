@@ -502,19 +502,6 @@ def compute_subject_radon_nikodym_weights(
             "invariant this Radon-Nikodym weight-window logic assumes."
         )
 
-    active_action_prob_func_args = [
-        args for args in action_prob_func_args_by_decision_time.values() if args
-    ]
-    active_betas_list_by_decision_time_index = jnp.array(
-        [
-            action_prob_func_args[action_prob_func_args_beta_index]
-            for action_prob_func_args in active_action_prob_func_args
-        ]
-    )
-    active_actions_list_by_decision_time_index = jnp.array(
-        list(action_by_decision_time.values())
-    )
-
     # Sort the threaded args by decision time to be cautious. We check if the
     # subject id is present in the subject args dict because we may call this
     # on a subset of the subject arg dict when we are batching arguments by
@@ -524,6 +511,28 @@ def compute_subject_radon_nikodym_weights(
         for decision_time in range(subject_start_time, subject_end_time + 1)
         if decision_time in threaded_action_prob_func_args_by_decision_time
     }
+
+    # Build the beta_target/action vectors in the SAME order as the threaded
+    # args we stack below, so the vmap arguments stay aligned even if
+    # action_prob_func_args_by_decision_time/action_by_decision_time were not
+    # insertion-sorted by decision_time (their order is whatever row order
+    # analysis_df had, which is not guaranteed to match).
+    active_decision_times = [
+        decision_time
+        for decision_time, args in sorted_threaded_action_prob_args_by_decision_time.items()
+        if args
+    ]
+    active_betas_list_by_decision_time_index = jnp.array(
+        [
+            action_prob_func_args_by_decision_time[decision_time][
+                action_prob_func_args_beta_index
+            ]
+            for decision_time in active_decision_times
+        ]
+    )
+    active_actions_list_by_decision_time_index = jnp.array(
+        [action_by_decision_time[decision_time] for decision_time in active_decision_times]
+    )
 
     num_args = None
     for args in sorted_threaded_action_prob_args_by_decision_time.values():

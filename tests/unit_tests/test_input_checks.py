@@ -133,6 +133,28 @@ def test_require_action_probabilities_in_analysis_df_can_be_reconstructed_unexpe
         )
 
 
+def test_require_action_probabilities_in_analysis_df_can_be_reconstructed_duplicate_active_rows_fails_clearly():
+    # Two active rows for the same (calendar_t, subject_id) -- must fail loudly
+    # instead of silently keeping only one via dict-key collision, which would
+    # quietly drop the duplicate from this check's coverage.
+    analysis_df, action_prob_func_args = _build_reconstruction_fixture()
+    duplicate_row = analysis_df[
+        (analysis_df["calendar_t"] == 0) & (analysis_df["user_id"] == 0)
+    ]
+    analysis_df = pd.concat([analysis_df, duplicate_row], ignore_index=True)
+
+    with pytest.raises(ValueError, match="duplicate active rows"):
+        input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+            analysis_df,
+            "action_prob",
+            "calendar_t",
+            "user_id",
+            "active",
+            action_prob_func_args,
+            _action_prob_func,
+        )
+
+
 def _algorithm_estimating_func(beta, features):
     return beta * features
 

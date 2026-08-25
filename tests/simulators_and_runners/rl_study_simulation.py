@@ -77,17 +77,11 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         if args.dataset_type == RLStudyArgs.ORALYTICS:
             fill_columns = ["reward", "brush_time", "action", "action1prob"]
             fill_vals = np.vstack([rewards, brush_times, actions, action_probs]).T
-            study_df.loc[
-                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
-                fill_columns,
-            ] = fill_vals
+            study_df.loc[curr_time_bool, fill_columns] = fill_vals
         else:
             fill_columns = ["reward", "action", "action1prob"]
             fill_vals = np.vstack([rewards, actions, action_probs]).T
-            study_df.loc[
-                (study_df["calendar_t"] == t) & (study_df["in_study"] == 1),
-                fill_columns,
-            ] = fill_vals
+            study_df.loc[curr_time_bool, fill_columns] = fill_vals
 
         if t < study_env.calendar_T:
             logger.info("Updating study df for time %s.", t)

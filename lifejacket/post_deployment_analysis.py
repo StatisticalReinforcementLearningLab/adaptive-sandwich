@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import collections
+import dataclasses
 import logging
 import math
 import pathlib
 import pickle
 import time
+import typing
 from collections.abc import Callable
 from typing import Any
 
@@ -18,6 +20,11 @@ from jax import numpy as jnp
 
 from . import get_datum_for_blowup_supervised_learning, input_checks
 from .batched_weighted_estimating_function_stack import (
+    ActionProbLayerPrecompute,
+    InferenceLayerPrecompute,
+    UpdateArgBucket,
+    UpdateLayerPrecompute,
+    _stackable_positions,
     build_action_prob_layer_precompute,
     build_inference_layer_precompute,
     build_update_layer_precompute,
@@ -49,6 +56,7 @@ from .helper_functions import (
     unflatten_params,
 )
 from .small_sample_corrections import perform_desired_small_sample_correction
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -1096,6 +1104,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
     include_auxiliary_outputs: bool = True,
+    precomputed_layers: tuple[
+        ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute
+    ]
+    | None = None,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
@@ -1173,6 +1185,27 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         include_auxiliary_outputs (bool):
             If True, returns the adjusted meat, classical meat, and classical bread contributions in addition to the average weighted estimating function stack.
             If False, returns only the average weighted estimating function stack.
+        precomputed_layers (tuple[ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute] | None):
+            If given, used directly in place of building
+            action_prob_layer/update_layer/inference_layer from the raw
+            action_prob_func_args_by_subject_id_by_decision_time/
+            update_func_args_by_by_subject_id_by_policy_num/
+            inference_func_args_by_subject_id arguments (the three
+            build_*_precompute calls are skipped entirely). This exists so a
+            caller that has already built these once (e.g. the
+            local-linearization diagnostic in
+            compute_local_linearization_error_ratio, which calls this
+            function 15 times with identical structural data and only the
+            differentiated betas/theta values changing across calls) can
+            reuse them, and -- when the caller is a jax.jit trace -- pass a
+            reconstruction of them built from genuine traced arguments
+            instead of Python-closed-over concrete arrays, which is what
+            actually keeps large (N, T, ...)-shaped precompute data from
+            being embedded as XLA literal constants in the compiled
+            program. If None (the default), the three objects are built
+            fresh from the raw arguments as before -- this is what the one
+            real, non-jitted jax.jacrev call site in
+            construct_classical_and_adjusted_sandwiches still does.
 
     Returns:
         jnp.ndarray:
@@ -1211,38 +1244,46 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         theta_dim,
     )
     subject_ids_np = np.asarray(subject_ids.tolist())
-
-    # 2. One-time, plain-numpy structural precompute (never touches betas/theta
-    # values -- only which cells are active and which policy/action applied).
-    # This replaces the ragged per-subject/per-update Python loops with a
-    # small, fixed number of jax.vmap calls below. See
-    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4.
-    action_prob_layer = build_action_prob_layer_precompute(
-        subject_ids_np,
-        action_prob_func_args_by_subject_id_by_decision_time,
-        action_by_decision_time_by_subject_id,
-        policy_num_by_decision_time_by_subject_id,
-        beta_index_by_policy_num,
-        initial_policy_num,
-        action_prob_func_args_beta_index,
-    )
-    update_layer = build_update_layer_precompute(
-        subject_ids_np,
-        update_func_args_by_by_subject_id_by_policy_num,
-        beta_index_by_policy_num,
-        alg_update_func_args_action_prob_times_index,
-        action_prob_layer,
-    )
     need_pi_beta_grid = (
         alg_update_func_args_action_prob_index >= 0
         or inference_func_args_action_prob_index >= 0
     )
-    inference_layer = build_inference_layer_precompute(
-        inference_func_args_by_subject_id,
-        inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_subject_id,
-        action_prob_layer,
-    )
+
+    if precomputed_layers is not None:
+        # See this parameter's own docstring above: skip rebuilding the
+        # structural precompute from the raw arguments -- the caller has
+        # already built (or, under jax.jit, reconstructed from traced
+        # arrays) equivalent action_prob_layer/update_layer/inference_layer
+        # objects.
+        action_prob_layer, update_layer, inference_layer = precomputed_layers
+    else:
+        # 2. One-time, plain-numpy structural precompute (never touches betas/theta
+        # values -- only which cells are active and which policy/action applied).
+        # This replaces the ragged per-subject/per-update Python loops with a
+        # small, fixed number of jax.vmap calls below. See
+        # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4.
+        action_prob_layer = build_action_prob_layer_precompute(
+            subject_ids_np,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            action_by_decision_time_by_subject_id,
+            policy_num_by_decision_time_by_subject_id,
+            beta_index_by_policy_num,
+            initial_policy_num,
+            action_prob_func_args_beta_index,
+        )
+        update_layer = build_update_layer_precompute(
+            subject_ids_np,
+            update_func_args_by_by_subject_id_by_policy_num,
+            beta_index_by_policy_num,
+            alg_update_func_args_action_prob_times_index,
+            action_prob_layer,
+        )
+        inference_layer = build_inference_layer_precompute(
+            inference_func_args_by_subject_id,
+            inference_func_args_action_prob_index,
+            inference_action_prob_decision_times_by_subject_id,
+            action_prob_layer,
+        )
     # Cheap visibility into shape-bucket fan-out: each distinct shape bucket
     # at a given update becomes its own jax.vmap dispatch in
     # compute_batched_algorithm_component below (see
@@ -2107,6 +2148,332 @@ def compute_eigenvalue_and_condition_diagnostics(
     )
 
 
+class _BucketJitArrays(typing.NamedTuple):
+    """
+    Traced-argument counterpart of one UpdateArgBucket: subject_positions
+    (read as a scatter index by compute_batched_algorithm_component /
+    compute_batched_inference_outputs' `.at[bucket.subject_positions,
+    ...].set(...)`) and the pre-stacked tensor for every "stackable"
+    raw_arg_lists position (every position that is not overridden by
+    _build_algorithm_bucket_overrides/_build_inference_bucket_overrides and
+    not all-None -- see _bucket_stackable_positions). A plain
+    typing.NamedTuple is a first-class JAX pytree with no registration
+    needed (see Investigation A/B discussion above this module's
+    compute_local_linearization_error_ratio).
+
+    Deliberately does NOT carry the position indices themselves (which
+    positions were stacked, in what order) -- those are static Python ints,
+    recomputed identically by _bucket_stackable_positions from the
+    (closed-over, never-traced) base bucket + override_positions at both
+    extract and rebuild time, so they never need to flow through this
+    traced pytree at all.
+    """
+
+    subject_positions: jnp.ndarray  # (bucket_size,) int
+    stacked_tensors: tuple[jnp.ndarray, ...]  # one per stackable position
+
+
+class _ActionProbLayerJitArrays(typing.NamedTuple):
+    """
+    Traced-argument counterpart of ActionProbLayerPrecompute's (N, T, ...)
+    / (N,)-shaped fields that compute_action_prob_layer_outputs /
+    compute_windowed_weight_products read as real array VALUES (not merely
+    a `.shape`). ActionProbLayerPrecompute's other fields (subject_ids,
+    time_values, time_to_col, fill_col_index, subject_start_idx,
+    min_time_by_policy_num, subject_id_to_pos, T) are either never read by
+    those two functions, or read only for small/scalar Python-level
+    bookkeeping -- never as data flowing into a jnp op -- so they stay
+    closed-over Python/numpy constants on the base object (see
+    _rebuild_precomputes_from_jit_arrays); embedding those as XLA constants
+    is not the pathology this module exists to avoid, since their size
+    doesn't scale with N*T the way the fields below do.
+    """
+
+    active_mask: jnp.ndarray  # (N, T) bool
+    beta_row_index: jnp.ndarray  # (N, T) int
+    actions_grid: jnp.ndarray  # (N, T) int
+    raw_arg_tensors: tuple[jnp.ndarray, ...]  # each (N, T, *shape_k)
+    lo_idx: jnp.ndarray  # (N,) int
+    subject_end_idx: jnp.ndarray  # (N,) int
+
+
+class _UpdateLayerJitArrays(typing.NamedTuple):
+    hi_idx: jnp.ndarray  # (N, U) int
+    valid_update: jnp.ndarray  # (N, U) bool
+    buckets_by_update_index: tuple[tuple[_BucketJitArrays, ...], ...]
+
+
+class _InferenceLayerJitArrays(typing.NamedTuple):
+    buckets: tuple[_BucketJitArrays, ...]
+
+
+class _DiagnosticJitArrays(typing.NamedTuple):
+    """
+    The flat pytree that becomes _eval_avg_stack_jit's second, genuinely
+    traced argument -- see that closure's own comment for why this (as
+    opposed to closing over the precompute objects directly) is the actual
+    fix for the compile-time-scales-with-N pathology.
+    """
+
+    action_prob: _ActionProbLayerJitArrays
+    update: _UpdateLayerJitArrays
+    inference: _InferenceLayerJitArrays
+
+
+def _algorithm_override_positions(
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+) -> set[int]:
+    """
+    The raw_arg_lists positions _build_algorithm_bucket_overrides always
+    (beta) or conditionally (previous-betas, action-prob, each only if its
+    *_index is >= 0) overrides for every bucket at every update -- these
+    depend only on this static config, never on which bucket. A bucket's
+    raw_arg_lists value at one of these positions is never actually read as
+    the estimating function's real input (see _assemble_call_args_and_in_axes:
+    override_position_values entries replace it entirely before the
+    jax.vmap call), so it never needs to become a traced array -- mirrors
+    _assemble_call_args_and_in_axes's own "remaining_positions = not in
+    override_position_values" split.
+    """
+    positions = {alg_update_func_args_beta_index}
+    if alg_update_func_args_previous_betas_index >= 0:
+        positions.add(alg_update_func_args_previous_betas_index)
+    if alg_update_func_args_action_prob_index >= 0:
+        positions.add(alg_update_func_args_action_prob_index)
+    return positions
+
+
+def _inference_override_positions(
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+) -> set[int]:
+    """Same idea as _algorithm_override_positions, for inference buckets."""
+    positions = {inference_func_args_theta_index}
+    if inference_func_args_action_prob_index >= 0:
+        positions.add(inference_func_args_action_prob_index)
+    return positions
+
+
+def _bucket_stackable_positions(
+    bucket: UpdateArgBucket, override_positions: set[int]
+) -> list[int]:
+    """
+    Which of bucket.raw_arg_lists' positions get pre-stacked into a traced
+    tensor by _extract_bucket_jit_arrays/_rebuild_bucket_from_jit_arrays --
+    every position that is neither overridden nor all-None, exactly
+    mirroring _assemble_call_args_and_in_axes's own
+    remaining_positions + _stackable_positions computation. Keeping this as
+    one small, shared helper (rather than two separately-written position
+    lists in extract vs. rebuild) is what guarantees extraction and rebuild
+    stay in lockstep.
+    """
+    num_args = len(bucket.raw_arg_lists)
+    remaining_positions = [k for k in range(num_args) if k not in override_positions]
+    return _stackable_positions(bucket.raw_arg_lists, remaining_positions)
+
+
+def _extract_bucket_jit_arrays(
+    bucket: UpdateArgBucket, override_positions: set[int]
+) -> _BucketJitArrays:
+    stackable = _bucket_stackable_positions(bucket, override_positions)
+    stacked_tensors, _ = stack_batched_arg_lists_into_tensors(
+        [bucket.raw_arg_lists[pos] for pos in stackable]
+    )
+    return _BucketJitArrays(
+        subject_positions=jnp.asarray(bucket.subject_positions),
+        stacked_tensors=tuple(stacked_tensors),
+    )
+
+
+def _rebuild_bucket_from_jit_arrays(
+    base_bucket: UpdateArgBucket,
+    bucket_jit_arrays: _BucketJitArrays,
+    override_positions: set[int],
+) -> UpdateArgBucket:
+    stackable = _bucket_stackable_positions(base_bucket, override_positions)
+    new_raw_arg_lists = list(base_bucket.raw_arg_lists)
+    for pos, tensor in zip(stackable, bucket_jit_arrays.stacked_tensors, strict=True):
+        # Store the traced (bucket_size, ...) tensor directly, rather than
+        # unstacking it into a Python list of per-subject slices via
+        # list(tensor): stack_batched_arg_lists_into_tensors
+        # (vmap_helpers.py) recognizes an already-array-shaped position and
+        # passes it through as-is, instead of re-deriving the identical
+        # tensor via a slice-then-restack round trip that would otherwise
+        # add two graph ops per subject in the bucket for no benefit --
+        # get_avg_weighted_estimating_function_stacks_and_aux_values still
+        # runs completely unmodified once precomputed_layers is substituted
+        # in; only the internal representation of an already-stacked
+        # position changed, not the numeric result.
+        new_raw_arg_lists[pos] = tensor
+    return dataclasses.replace(
+        base_bucket,
+        subject_positions=bucket_jit_arrays.subject_positions,
+        raw_arg_lists=new_raw_arg_lists,
+    )
+
+
+def _extract_diagnostic_jit_arrays(
+    action_prob_layer: ActionProbLayerPrecompute,
+    update_layer: UpdateLayerPrecompute,
+    inference_layer: InferenceLayerPrecompute,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+) -> _DiagnosticJitArrays:
+    """
+    Pulls every array-valued field that compute_action_prob_layer_outputs /
+    compute_windowed_weight_products / compute_batched_algorithm_component /
+    compute_batched_inference_outputs read as real array DATA (as opposed to
+    merely consulting a `.shape`, or reading small/scalar Python-level
+    metadata) out of the three (concrete, numpy-valued) structural
+    precompute objects, as a flat pytree of jnp arrays. Called once,
+    eagerly (outside any jit trace), in compute_local_linearization_error_ratio.
+
+    This flat pytree is what becomes _eval_avg_stack_jit's second,
+    genuinely traced argument: every leaf here is data that scales with the
+    number of subjects (N) and/or decision times (T) -- exactly the data
+    that must NOT be left as a Python closure over the base precompute
+    objects, since a jax.jit trace bakes any closed-over concrete array
+    into the compiled program as an XLA literal constant, and
+    large-constant embedding/optimization is what made compile time balloon
+    with N before this fix (see
+    docs/adr/0001-adaptive-sandwich-performance-plan.md and this function's
+    call site's own comments). See _ActionProbLayerJitArrays/_BucketJitArrays
+    for exactly which fields, and why the rest are left as closed-over
+    Python constants instead.
+    """
+    algo_overrides = _algorithm_override_positions(
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+    )
+    inference_overrides = _inference_override_positions(
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+    )
+
+    action_prob_jit_arrays = _ActionProbLayerJitArrays(
+        active_mask=jnp.asarray(action_prob_layer.active_mask),
+        beta_row_index=jnp.asarray(action_prob_layer.beta_row_index),
+        actions_grid=jnp.asarray(action_prob_layer.actions_grid),
+        raw_arg_tensors=tuple(
+            jnp.asarray(t) for t in action_prob_layer.raw_arg_tensors
+        ),
+        lo_idx=jnp.asarray(action_prob_layer.lo_idx),
+        subject_end_idx=jnp.asarray(action_prob_layer.subject_end_idx),
+    )
+    update_jit_arrays = _UpdateLayerJitArrays(
+        hi_idx=jnp.asarray(update_layer.hi_idx),
+        valid_update=jnp.asarray(update_layer.valid_update),
+        buckets_by_update_index=tuple(
+            tuple(
+                _extract_bucket_jit_arrays(bucket, algo_overrides) for bucket in buckets
+            )
+            for buckets in update_layer.buckets_by_update_index
+        ),
+    )
+    inference_jit_arrays = _InferenceLayerJitArrays(
+        buckets=tuple(
+            _extract_bucket_jit_arrays(bucket, inference_overrides)
+            for bucket in inference_layer.buckets
+        )
+    )
+    return _DiagnosticJitArrays(
+        action_prob=action_prob_jit_arrays,
+        update=update_jit_arrays,
+        inference=inference_jit_arrays,
+    )
+
+
+def _rebuild_precomputes_from_jit_arrays(
+    base_action_prob_layer: ActionProbLayerPrecompute,
+    base_update_layer: UpdateLayerPrecompute,
+    base_inference_layer: InferenceLayerPrecompute,
+    jit_arrays: _DiagnosticJitArrays,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+) -> tuple[ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute]:
+    """
+    Inverse of _extract_diagnostic_jit_arrays -- called INSIDE the jax.jit
+    trace (from _eval_avg_stack_jit's body): reconstructs three precompute
+    objects equivalent to the base ones, but with every extracted field's
+    value coming from jit_arrays' traced leaves instead of the base
+    objects' closed-over concrete arrays.
+
+    dataclasses.replace(base_object, **traced_fields) works directly here
+    with no pytree registration needed at all: ActionProbLayerPrecompute /
+    UpdateLayerPrecompute / InferenceLayerPrecompute / UpdateArgBucket are
+    all plain frozen dataclasses, so replace() just builds a fresh instance
+    with the given fields overridden by tracers, copying every
+    non-overridden field (time_to_col, subject_id_to_pos,
+    min_time_by_policy_num, subject_ids_in_order,
+    action_prob_times_by_subject, policy_nums_by_update_index, etc.)
+    through unchanged as ordinary closed-over Python objects -- this is
+    Investigation B's "manual extract/rebuild via dataclasses.replace"
+    design.
+    """
+    algo_overrides = _algorithm_override_positions(
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+    )
+    inference_overrides = _inference_override_positions(
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+    )
+
+    action_prob_layer = dataclasses.replace(
+        base_action_prob_layer,
+        active_mask=jit_arrays.action_prob.active_mask,
+        beta_row_index=jit_arrays.action_prob.beta_row_index,
+        actions_grid=jit_arrays.action_prob.actions_grid,
+        raw_arg_tensors=jit_arrays.action_prob.raw_arg_tensors,
+        lo_idx=jit_arrays.action_prob.lo_idx,
+        subject_end_idx=jit_arrays.action_prob.subject_end_idx,
+    )
+    update_layer = dataclasses.replace(
+        base_update_layer,
+        hi_idx=jit_arrays.update.hi_idx,
+        valid_update=jit_arrays.update.valid_update,
+        buckets_by_update_index=[
+            [
+                _rebuild_bucket_from_jit_arrays(
+                    base_bucket, bucket_jit_arrays, algo_overrides
+                )
+                for base_bucket, bucket_jit_arrays in zip(
+                    base_buckets, jit_buckets, strict=True
+                )
+            ]
+            for base_buckets, jit_buckets in zip(
+                base_update_layer.buckets_by_update_index,
+                jit_arrays.update.buckets_by_update_index,
+                strict=True,
+            )
+        ],
+    )
+    inference_layer = dataclasses.replace(
+        base_inference_layer,
+        buckets=[
+            _rebuild_bucket_from_jit_arrays(
+                base_bucket, bucket_jit_arrays, inference_overrides
+            )
+            for base_bucket, bucket_jit_arrays in zip(
+                base_inference_layer.buckets,
+                jit_arrays.inference.buckets,
+                strict=True,
+            )
+        ],
+    )
+    return action_prob_layer, update_layer, inference_layer
+
+
 def compute_local_linearization_error_ratio(
     stabilized_joint_bread_matrix: jnp.ndarray,
     avg_estimating_function_stack: jnp.ndarray,
@@ -2215,6 +2582,49 @@ def compute_local_linearization_error_ratio(
 
     num_subjects = stacks.shape[0]
 
+    # One-time structural precompute, built exactly the way
+    # get_avg_weighted_estimating_function_stacks_and_aux_values would build
+    # it itself (same build_*_precompute calls, same raw arguments) -- but
+    # built HERE, once, in plain eager numpy, so it can be extracted into a
+    # traced jit argument below instead of being closed over by
+    # _eval_avg_stack_jit. See _extract_diagnostic_jit_arrays's own
+    # docstring for why closing over these objects directly (the previous
+    # version of this fix) is exactly what caused compile time to balloon
+    # with the number of subjects.
+    subject_ids_np = np.asarray(subject_ids.tolist())
+    base_action_prob_layer = build_action_prob_layer_precompute(
+        subject_ids_np,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        action_by_decision_time_by_subject_id,
+        policy_num_by_decision_time_by_subject_id,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_prob_func_args_beta_index,
+    )
+    base_update_layer = build_update_layer_precompute(
+        subject_ids_np,
+        update_func_args_by_by_subject_id_by_policy_num,
+        beta_index_by_policy_num,
+        alg_update_func_args_action_prob_times_index,
+        base_action_prob_layer,
+    )
+    base_inference_layer = build_inference_layer_precompute(
+        inference_func_args_by_subject_id,
+        inference_func_args_action_prob_index,
+        inference_action_prob_decision_times_by_subject_id,
+        base_action_prob_layer,
+    )
+    jit_arrays = _extract_diagnostic_jit_arrays(
+        base_action_prob_layer,
+        base_update_layer,
+        base_inference_layer,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+    )
+
     # This closure is jit-friendly by construction: suppress_all_data_checks and
     # include_auxiliary_outputs are hardcoded below (never traced), so the
     # np.testing.assert_allclose/.tolist()/int() concretization hazards that
@@ -2242,8 +2652,36 @@ def compute_local_linearization_error_ratio(
     # and below: jax.jit needs those values fixed at trace time, and several of
     # them (the dict-typed args) are unhashable, so they can't be passed as jit
     # static_argnums/static_argnames to a module-level function instead.
+    #
+    # jit_arrays is this closure's SECOND argument (not closed over) --
+    # deliberately, so its leaves are real jit trace parameters rather than
+    # Python constants XLA would otherwise have to embed as literals (see
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md's "Real-scale
+    # (n=10000) findings" section, and _extract_diagnostic_jit_arrays'
+    # docstring). base_action_prob_layer/base_update_layer/base_inference_layer
+    # ARE still closed over, but only to supply the small, never-traced
+    # metadata dataclasses.replace(...) needs to fill in every field this
+    # closure's jit_arrays argument does not carry (time_to_col,
+    # subject_id_to_pos, subject_ids_in_order, action_prob_times_by_subject,
+    # etc.) -- see _rebuild_precomputes_from_jit_arrays.
     @jax.jit
-    def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
+    def _eval_avg_stack_jit(
+        flattened_betas_and_theta: jnp.ndarray,
+        jit_arrays: _DiagnosticJitArrays,
+    ) -> jnp.ndarray:
+        action_prob_layer, update_layer, inference_layer = (
+            _rebuild_precomputes_from_jit_arrays(
+                base_action_prob_layer,
+                base_update_layer,
+                base_inference_layer,
+                jit_arrays,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+            )
+        )
         return get_avg_weighted_estimating_function_stacks_and_aux_values(
             flattened_betas_and_theta,
             beta_dim,
@@ -2272,6 +2710,7 @@ def compute_local_linearization_error_ratio(
             True,  # suppress_all_data_checks
             True,  # suppress_interactive_data_checks
             False,  # include_auxiliary_outputs
+            precomputed_layers=(action_prob_layer, update_layer, inference_layer),
         )
 
     # Evaluate at the final estimate.
@@ -2312,7 +2751,7 @@ def compute_local_linearization_error_ratio(
         delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(joint_bread, U.T).T
 
         B_delta = (joint_bread @ delta.T).T
-        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
+        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d, jit_arrays))(delta)
         remainder = g_plus - g_hat - B_delta
 
         denom = jnp.linalg.norm(B_delta, axis=1)

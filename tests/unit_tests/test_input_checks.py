@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -78,6 +79,24 @@ def test_require_action_probabilities_in_analysis_df_can_be_reconstructed_passes
         "active",
         action_prob_func_args,
         _action_prob_func,
+    )
+
+
+def test_require_action_probabilities_in_analysis_df_can_be_reconstructed_passes_jit_wrapped_func():
+    # Regression test: a jax.jit-wrapped action_prob_func is a PjitFunction,
+    # which has no __code__, unlike a plain function or a jax.grad-wrapped
+    # one. get_batched_arg_lists_and_involved_user_ids must not rely on
+    # func.__code__.co_argcount to find the arg count.
+    analysis_df, action_prob_func_args = _build_reconstruction_fixture()
+
+    input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+        analysis_df,
+        "action_prob",
+        "calendar_t",
+        "user_id",
+        "active",
+        action_prob_func_args,
+        jax.jit(_action_prob_func),
     )
 
 

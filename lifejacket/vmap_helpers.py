@@ -24,6 +24,22 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
     batch_axes = []
 
     for batched_arg_list in batched_arg_lists:
+        if isinstance(batched_arg_list, (jnp.ndarray, np.ndarray)):
+            # Already a single (bucket_size, ...) tensor -- e.g. a
+            # jax.jit-traced array reconstructed by
+            # post_deployment_analysis._rebuild_bucket_from_jit_arrays from a
+            # genuine jit argument, rather than a plain Python list of
+            # per-subject values. Use it as-is instead of round-tripping
+            # through list(...)/jnp.stack below, which would otherwise add
+            # one slice + one restack graph op per subject in the bucket for
+            # a tensor that is already exactly the shape/axis-0-batched form
+            # this function exists to produce. This is unreachable for every
+            # existing caller (build_batched_arg_lists_by_subject always
+            # supplies a plain Python list), so it changes no existing
+            # behavior.
+            batched_arg_tensors.append(jnp.asarray(batched_arg_list))
+            batch_axes.append(0)
+            continue
         first = batched_arg_list[0]
         # NOTE: isinstance(first, (jnp.ndarray, np.ndarray)) is True for a 0-D
         # (scalar-shaped) array too -- including a jax.jit-traced value, since

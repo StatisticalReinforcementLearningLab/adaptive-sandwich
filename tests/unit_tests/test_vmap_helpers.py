@@ -77,3 +77,21 @@ def test_stack_batched_arg_lists_into_tensors_multiple_arg_positions():
     assert batch_axes == [0, 0]
     assert tensors[0].shape == (2,)
     assert tensors[1].shape == (2, 2)
+
+
+def test_stack_batched_arg_lists_into_tensors_already_stacked_array_passthrough():
+    # A position that is ALREADY a single (bucket_size, ...) array -- rather than a Python
+    # list of bucket_size per-subject values -- must be used as-is, not re-derived via
+    # list(...)/jnp.stack. This is the shape
+    # post_deployment_analysis._rebuild_bucket_from_jit_arrays produces when reconstructing
+    # an UpdateArgBucket from a jax.jit-traced argument instead of a plain per-subject list
+    # (see that function's own comment for why avoiding the round trip matters).
+    already_stacked = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+
+    tensors, batch_axes = stack_batched_arg_lists_into_tensors([already_stacked])
+
+    assert batch_axes == [0]
+    assert tensors[0].shape == (3, 2)
+    np.testing.assert_allclose(tensors[0], already_stacked)
+    # Passed straight through, not rebuilt into a new array via stack/vstack.
+    assert tensors[0] is already_stacked

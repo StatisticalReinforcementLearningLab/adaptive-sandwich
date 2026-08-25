@@ -336,16 +336,26 @@ class SigmoidLS:
         )
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
         initial_policy_num = self.get_initial_policy_num(all_prev_data)
-        self.rl_update_args[next_policy_num] = {}
+        current_beta = self.get_current_beta_estimate()
+        num_users = all_prev_data["user_id"].nunique()
 
+        # Group once instead of re-scanning the (growing) full history for every
+        # user with a fresh boolean mask.
+        in_study_groups = dict(
+            tuple(
+                all_prev_data[all_prev_data["in_study"] == 1].groupby(
+                    "user_id", sort=False
+                )
+            )
+        )
+
+        result = {}
         if not self.collect_args_to_reconstruct_action_probs:
             for user_id in self.get_all_users(all_prev_data):
-                in_study_user_data = all_prev_data.loc[
-                    (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
-                ]
-                self.rl_update_args[next_policy_num][user_id] = (
+                in_study_user_data = in_study_groups.get(user_id)
+                result[user_id] = (
                     (
-                        self.get_current_beta_estimate(),
+                        current_beta,
                         self.get_base_states(in_study_user_data),
                         self.get_treat_states(in_study_user_data),
                         self.get_actions(in_study_user_data),
@@ -357,21 +367,19 @@ class SigmoidLS:
                         self.get_action1probstimes(in_study_user_data),
                         self.action_centering,
                         self.lambda_,
-                        len(all_prev_data["user_id"].unique()),
+                        num_users,
                     )
                     # We only care about the data overall, however, if there is any
                     # in-study data for this user so far
-                    if not in_study_user_data.empty
+                    if in_study_user_data is not None
                     else ()
                 )
         else:
             for user_id in self.get_all_users(all_prev_data):
-                in_study_user_data = all_prev_data.loc[
-                    (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
-                ]
-                self.rl_update_args[next_policy_num][user_id] = (
+                in_study_user_data = in_study_groups.get(user_id)
+                result[user_id] = (
                     (
-                        self.get_current_beta_estimate(),
+                        current_beta,
                         self.get_base_states(in_study_user_data),
                         self.get_treat_states(in_study_user_data),
                         self.get_actions(in_study_user_data),
@@ -389,39 +397,47 @@ class SigmoidLS:
                         self.upper_clip,
                         self.action_centering,
                         self.lambda_,
-                        len(all_prev_data["user_id"].unique()),
+                        num_users,
                     )
                     # We only care about the data overall, however, if there is any
                     # in-study data for this user so far
-                    if not in_study_user_data.empty
+                    if in_study_user_data is not None
                     else ()
                 )
+        self.rl_update_args[next_policy_num] = result
 
     def collect_pi_args(self, all_prev_data, calendar_t):
         logger.info(
             "Collecting args to pi function at time %d for each user in dictionary format",
             calendar_t,
         )
-        assert calendar_t == jnp.max(all_prev_data["calendar_t"].to_numpy())
+        assert calendar_t == all_prev_data["calendar_t"].max()
+
+        # There is exactly one row per user at calendar_t == calendar_t (this is
+        # also the last row for each user in all_prev_data), so pull the whole
+        # batch out in one pass instead of re-filtering all_prev_data (which grows
+        # every decision time) once per user. Slicing per-user out of numpy here
+        # (rather than out of a jnp array) also avoids JAX recompiling a slice op
+        # for every distinct history length seen across users/time.
+        curr_data = all_prev_data.loc[all_prev_data["calendar_t"] == calendar_t]
+        treat_states = curr_data[self.treat_feats].to_numpy()
+        in_study = curr_data["in_study"].to_numpy()
+        user_ids = curr_data["user_id"].to_numpy()
+        current_beta = self.get_current_beta_estimate()
 
         self.pi_args[calendar_t] = {
             user_id: (
                 (
-                    self.get_current_beta_estimate(),
+                    current_beta,
                     self.lower_clip,
                     self.steepness,
                     self.upper_clip,
-                    self.get_treat_states(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    )[-1],
+                    jnp.array(treat_states[i]),
                 )
-                if all_prev_data.loc[
-                    (all_prev_data.user_id == user_id)
-                    & (all_prev_data.calendar_t == calendar_t)
-                ].in_study.item()
+                if in_study[i]
                 else ()
             )
-            for user_id in self.get_all_users(all_prev_data)
+            for i, user_id in enumerate(user_ids)
         }
 
     def get_action_probs(self, curr_timestep_data):
@@ -670,54 +686,79 @@ class SmoothPosteriorSampling:
             calendar_t,
         )
         next_policy_num = int(all_prev_data["policy_num"].max() + 1)
-        self.rl_update_args[next_policy_num] = {}
+        current_beta = self.get_current_beta_estimate()
+        num_users_entered_before_last_update = (
+            self.get_num_users_entered_before_last_update()
+        )
+        prior_sigma_inv = jnp.linalg.inv(self.prior_sigma)
+
+        # Group once instead of re-scanning the (growing) full history for every
+        # user with a fresh boolean mask.
+        in_study_groups = dict(
+            tuple(
+                all_prev_data[all_prev_data["in_study"] == 1].groupby(
+                    "user_id", sort=False
+                )
+            )
+        )
+
+        result = {}
         for user_id in self.get_all_users(all_prev_data):
-            in_study_user_data = all_prev_data.loc[
-                (all_prev_data.user_id == user_id) & (all_prev_data.in_study == 1)
-            ]
-            self.rl_update_args[next_policy_num][user_id] = (
+            in_study_user_data = in_study_groups.get(user_id)
+            result[user_id] = (
                 (
-                    self.get_current_beta_estimate(),
-                    self.get_num_users_entered_before_last_update(),
+                    current_beta,
+                    num_users_entered_before_last_update,
                     self.get_treat_states(in_study_user_data),
                     self.get_actions(in_study_user_data),
                     self.get_rewards(in_study_user_data),
                     self.prior_mu,
-                    jnp.linalg.inv(self.prior_sigma),
+                    prior_sigma_inv,
                     self.noise_var,
                 )
                 # We only care about the data overall, however, if there is any
                 # in-study data for this user so far
-                if not in_study_user_data.empty
+                if in_study_user_data is not None
                 else ()
             )
+        self.rl_update_args[next_policy_num] = result
 
     def collect_pi_args(self, all_prev_data, calendar_t):
         logger.info(
             "Collecting args to pi function at time %d for each user in dictionary format",
             calendar_t,
         )
-        assert calendar_t == jnp.max(all_prev_data["calendar_t"].to_numpy())
+        assert calendar_t == all_prev_data["calendar_t"].max()
+
+        # There is exactly one row per user at calendar_t == calendar_t (this is
+        # also the last row for each user in all_prev_data), so pull the whole
+        # batch out in one pass instead of re-filtering all_prev_data (which grows
+        # every decision time) once per user. Slicing per-user out of numpy here
+        # (rather than out of a jnp array) also avoids JAX recompiling a slice op
+        # for every distinct history length seen across users/time.
+        curr_data = all_prev_data.loc[all_prev_data["calendar_t"] == calendar_t]
+        treat_states = curr_data[self.treat_feats].to_numpy()
+        in_study = curr_data["in_study"].to_numpy()
+        user_ids = curr_data["user_id"].to_numpy()
+        current_beta = self.get_current_beta_estimate()
+        num_users_entered_before_last_update = (
+            self.get_num_users_entered_before_last_update()
+        )
 
         self.pi_args[calendar_t] = {
             user_id: (
                 (
-                    self.get_current_beta_estimate(),
-                    self.get_treat_states(
-                        all_prev_data.loc[all_prev_data.user_id == user_id]
-                    )[-1],
-                    self.get_num_users_entered_before_last_update(),
+                    current_beta,
+                    jnp.array(treat_states[i]),
+                    num_users_entered_before_last_update,
                     self.lower_clip,
                     self.upper_clip,
                     self.steepness,
                 )
-                if all_prev_data.loc[
-                    (all_prev_data.user_id == user_id)
-                    & (all_prev_data.calendar_t == calendar_t)
-                ].in_study.item()
+                if in_study[i]
                 else ()
             )
-            for user_id in self.get_all_users(all_prev_data)
+            for i, user_id in enumerate(user_ids)
         }
 
     def get_action_probs(self, curr_timestep_data):

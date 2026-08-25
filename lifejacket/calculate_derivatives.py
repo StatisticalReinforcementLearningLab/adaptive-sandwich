@@ -1,4 +1,5 @@
 import collections
+import inspect
 import logging
 
 import jax
@@ -39,7 +40,11 @@ def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_u
     # for the first Truthy tuple
     # TODO: If there are arguments with defaults and not supplied, this will break.
     # Should probably in fact iterate through to first Truthy tuple.
-    num_args = func.__code__.co_argcount
+    # NOTE: inspect.signature (not func.__code__.co_argcount) so this also works
+    # for a jax.jit-wrapped func -- its __code__ belongs to the PjitFunction/
+    # C-extension wrapper (or is absent entirely), not the wrapped function,
+    # whereas inspect.signature follows __wrapped__ to the original signature.
+    num_args = len(inspect.signature(func).parameters)
 
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
@@ -730,8 +735,10 @@ def calculate_inference_loss_derivatives(
     except Exception:
         pass
 
-    num_args = inference_func.__code__.co_argcount
-    inference_func_arg_names = inference_func.__code__.co_varnames[:num_args]
+    # NOTE: inspect.signature (not inference_func.__code__), so this also works
+    # for a jax.jit-wrapped inference_func -- see get_batched_arg_lists_and_involved_user_ids.
+    inference_func_arg_names = tuple(inspect.signature(inference_func).parameters)
+    num_args = len(inference_func_arg_names)
     # NOTE: Cannot do [[]] * num_args here! Then all lists point
     # same object...
     batched_arg_lists = [[] for _ in range(num_args)]

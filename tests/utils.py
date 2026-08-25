@@ -67,7 +67,17 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
         np.testing.assert_allclose(
             observed_analysis_dict["theta_est"],
             expected_analysis_dict["theta_est"],
-            rtol=1e-6,
+            # Bumped from rtol=1e-6 after
+            # test_RL_center_1_inf_center_1_steep_3_incremental_2_decs_btw_update
+            # and its _previous_betas_given variant started failing in CI
+            # (ubuntu-latest) but not locally (macOS) -- cross-platform
+            # float32 reassociation noise (observed: ~4e-9 absolute, ~2e-6
+            # relative), the same class of noise the joint_meat_matrix
+            # comparison below already documents, just not previously seen
+            # on this check. rtol=1e-5 keeps ~5x margin over the observed
+            # noise while staying far tighter than joint_meat_matrix's
+            # rtol=1e-3.
+            rtol=1e-5,
         )
 
         # Too hard to go back in time and add expected values for all the keys here,
@@ -111,8 +121,9 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             # This comparison has needed repeated tolerance bumps over time
             # (see git history) to absorb float32 reassociation noise that
             # differs between CI's linux/x86_64 runner and other platforms --
-            # theta_est and the final sandwich variance estimates below use
-            # much tighter tolerances and are unaffected.
+            # the final sandwich variance estimates below use much tighter
+            # tolerances and remain unaffected; theta_est above needed the
+            # same kind of bump too (see its own comment).
             rtol=1e-3,
         )
         np.testing.assert_allclose(

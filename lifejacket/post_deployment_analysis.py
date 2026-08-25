@@ -5,6 +5,7 @@ import logging
 import math
 import pathlib
 import pickle
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -1283,7 +1284,44 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         action_prob_layer.subject_end_idx,
     )
 
-    # 4. Data checks: if action probabilities are used in the algorithm or
+    # 4. Batched algorithm/inference component computation, run BEFORE the
+    # data checks below (step 5) so they can reuse its per-bucket "threaded"
+    # (reconstructed-action-prob) results instead of recomputing an
+    # identical jax.vmap pass just for validation -- see
+    # check_batched_algorithm_estimating_function_args_equivalent's
+    # precomputed_threaded_results docstring.
+    with log_phase_duration("batched_components.algorithm"):
+        algorithm_component, algorithm_bucket_outputs = (
+            compute_batched_algorithm_component(
+                betas,
+                beta_dim,
+                algorithm_estimating_func,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                action_prob_layer,
+                update_layer,
+                pi_beta_grid,
+                rl_weight_products,
+            )
+        )
+    with log_phase_duration("batched_components.inference"):
+        inference_component, inference_hessians, inference_bucket_outputs = (
+            compute_batched_inference_outputs(
+                theta,
+                theta_dim,
+                inference_estimating_func,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_layer,
+                inference_layer,
+                pi_beta_grid,
+                inference_weight_products,
+                need_hessians=include_auxiliary_outputs,
+            )
+        )
+
+    # 5. Data checks: if action probabilities are used in the algorithm or
     # inference estimating functions, make sure that substituting in the
     # reconstructed action probabilities (as the batched computation above
     # does) is approximately equivalent to using the original action
@@ -1298,55 +1336,34 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
                 "Checking that reconstructed action probabilities are consistent with "
                 "recorded ones in the algorithm update function args for all subjects."
             )
-        check_batched_algorithm_estimating_function_args_equivalent(
-            algorithm_estimating_func,
-            betas,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_previous_betas_index,
-            alg_update_func_args_action_prob_index,
-            action_prob_layer,
-            update_layer,
-            pi_beta_grid,
-        )
+        with log_phase_duration("data_checks.algorithm"):
+            check_batched_algorithm_estimating_function_args_equivalent(
+                algorithm_estimating_func,
+                betas,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                action_prob_layer,
+                update_layer,
+                pi_beta_grid,
+                algorithm_bucket_outputs,
+            )
         if inference_func_args_action_prob_index >= 0:
             logger.info(
                 "Checking that reconstructed action probabilities are consistent with "
                 "recorded ones in the inference function args for all subjects."
             )
-        check_batched_inference_estimating_function_args_equivalent(
-            inference_estimating_func,
-            theta,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_layer,
-            inference_layer,
-            pi_beta_grid,
-        )
-
-    algorithm_component = compute_batched_algorithm_component(
-        betas,
-        beta_dim,
-        algorithm_estimating_func,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_previous_betas_index,
-        alg_update_func_args_action_prob_index,
-        action_prob_layer,
-        update_layer,
-        pi_beta_grid,
-        rl_weight_products,
-    )
-    inference_component, inference_hessians = compute_batched_inference_outputs(
-        theta,
-        theta_dim,
-        inference_estimating_func,
-        inference_func_args_theta_index,
-        inference_func_args_action_prob_index,
-        action_prob_layer,
-        inference_layer,
-        pi_beta_grid,
-        inference_weight_products,
-        need_hessians=include_auxiliary_outputs,
-    )
+        with log_phase_duration("data_checks.inference"):
+            check_batched_inference_estimating_function_args_equivalent(
+                inference_estimating_func,
+                theta,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_layer,
+                inference_layer,
+                pi_beta_grid,
+                inference_bucket_outputs,
+            )
 
     stacks = jnp.concatenate([algorithm_component, inference_component], axis=1)
 
@@ -1358,7 +1375,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_component, inference_component
     )
 
-    # 5. Note this strange return structure! We will differentiate the first output,
+    # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the estimating functions sum check, per_subject_classical_bread_contributions, and
     # classical meat and inverse read matrices. The raw per-subject stacks are also returned for
@@ -2273,6 +2290,7 @@ def compute_local_linearization_error_ratio(
     chunk_size = 1
 
     ratios_list = []
+    chunk_wall_times = []
     num_chunks = (J + chunk_size - 1) // chunk_size
 
     for chunk_idx in range(num_chunks):
@@ -2281,6 +2299,8 @@ def compute_local_linearization_error_ratio(
         cur_size = end - start
         if cur_size <= 0:
             continue
+
+        chunk_start = time.perf_counter()
 
         subkey = jax.random.fold_in(key, chunk_idx)
         W = jax.random.normal(subkey, shape=(cur_size, num_subjects))
@@ -2299,7 +2319,18 @@ def compute_local_linearization_error_ratio(
         numer = jnp.linalg.norm(remainder, axis=1)
         ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
 
+        # block_until_ready so each chunk's wall time reflects its own actual
+        # device work (JAX dispatch is async otherwise) -- separates one-time
+        # jit compile cost (chunk 0) from steady-state per-chunk cost.
+        jax.block_until_ready(ratios)
+        chunk_wall_times.append(time.perf_counter() - chunk_start)
+
         ratios_list.append(ratios)
+
+    logger.info(
+        "Local linearization diagnostic per-chunk wall times (seconds): %s",
+        [round(t, 3) for t in chunk_wall_times],
+    )
 
     ratios = jnp.concatenate(ratios_list, axis=0)
 

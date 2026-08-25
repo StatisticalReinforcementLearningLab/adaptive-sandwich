@@ -932,7 +932,7 @@ def compute_batched_algorithm_component(
     update_layer: UpdateLayerPrecompute,
     pi_beta_grid: jnp.ndarray | None,
     rl_weight_products: jnp.ndarray,  # (N, U)
-) -> jnp.ndarray:
+) -> tuple[jnp.ndarray, list[jnp.ndarray]]:
     """
     Per-call. Returns (N, U * beta_dim): row n is exactly
     concat([weight_u * algorithm_estimating_func(*update_args_u) for u in
@@ -940,10 +940,19 @@ def compute_batched_algorithm_component(
     gate applied via valid_update. Replaces an O(N*U) Python-dispatched loop
     with O(U * shape_buckets_per_update) jax.vmap calls, each scattered back
     with a single .at[idx].set(...).
+
+    Also returns the raw, unweighted per-bucket outputs (one entry per
+    non-empty (update, bucket) pair, in traversal order) -- this is exactly
+    the "threaded" (reconstructed-action-prob) result
+    check_batched_algorithm_estimating_function_args_equivalent would
+    otherwise recompute from scratch via a second, identical
+    _build_algorithm_bucket_overrides + jax.vmap call. Passing it back lets
+    the data check reuse this call's work instead of duplicating it.
     """
     N = action_prob_layer.subject_ids.shape[0]
     U = len(update_layer.policy_nums_by_update_index)
     per_update_components = jnp.zeros((N, U, beta_dim), dtype=betas.dtype)
+    bucket_outputs: list[jnp.ndarray] = []
 
     for u, policy_num in enumerate(update_layer.policy_nums_by_update_index):
         beta_u = betas[u]
@@ -983,6 +992,7 @@ def compute_batched_algorithm_component(
                     f"for {bucket_size} subject(s) at policy_num={policy_num!r}; "
                     f"expected ({bucket_size}, {beta_dim})."
                 )
+            bucket_outputs.append(bucket_output)
             per_update_components = per_update_components.at[
                 bucket.subject_positions, u
             ].set(bucket_output)
@@ -992,7 +1002,7 @@ def compute_batched_algorithm_component(
         * update_layer.valid_update[:, :, None]
         * rl_weight_products[:, :, None]
     )
-    return weighted.reshape(N, U * beta_dim)
+    return weighted.reshape(N, U * beta_dim), bucket_outputs
 
 
 def compute_batched_inference_outputs(
@@ -1006,14 +1016,21 @@ def compute_batched_inference_outputs(
     pi_beta_grid: jnp.ndarray | None,
     inference_weight_products: jnp.ndarray,  # (N,)
     need_hessians: bool,
-) -> tuple[jnp.ndarray, jnp.ndarray | None]:
+) -> tuple[jnp.ndarray, jnp.ndarray | None, list[jnp.ndarray]]:
     """
     Per-call. Returns (weighted_inference_component (N, theta_dim),
-    inference_hessians (N, theta_dim, theta_dim) or None). inference_hessians
-    is the unweighted per-subject Jacobian of inference_estimating_func wrt
-    theta (classical bread contribution) -- matches the original
+    inference_hessians (N, theta_dim, theta_dim) or None, bucket_outputs).
+    inference_hessians is the unweighted per-subject Jacobian of
+    inference_estimating_func wrt theta (classical bread contribution) --
+    matches the original
     jax.jacrev(inference_estimating_func, argnums=theta_index)(*threaded_args),
     with no Radon-Nikodym weight applied, exactly as before.
+
+    bucket_outputs is the raw, unweighted per-bucket output (one entry per
+    bucket in inference_layer.buckets, in order) -- see
+    compute_batched_algorithm_component's docstring for why this is returned
+    (reused by check_batched_inference_estimating_function_args_equivalent
+    instead of it recomputing the same "threaded" pass).
     """
     N = action_prob_layer.subject_ids.shape[0]
     component = jnp.zeros((N, theta_dim), dtype=theta.dtype)
@@ -1022,6 +1039,7 @@ def compute_batched_inference_outputs(
         if need_hessians
         else None
     )
+    bucket_outputs: list[jnp.ndarray] = []
 
     for bucket in inference_layer.buckets:
         bucket_size = len(bucket.subject_ids_in_order)
@@ -1050,6 +1068,7 @@ def compute_batched_inference_outputs(
                 f"inference_estimating_func returned shape {bucket_component.shape} "
                 f"for {bucket_size} subject(s); expected ({bucket_size}, {theta_dim})."
             )
+        bucket_outputs.append(bucket_component)
         component = component.at[bucket.subject_positions].set(bucket_component)
 
         if need_hessians:
@@ -1068,47 +1087,60 @@ def compute_batched_inference_outputs(
             hessians = hessians.at[bucket.subject_positions].set(bucket_hessians)
 
     weighted_component = component * inference_weight_products[:, None]
-    return weighted_component, hessians
+    return weighted_component, hessians, bucket_outputs
+
+
+def _compute_threaded_bucket_result(
+    estimating_func: collections.abc.Callable,
+    bucket: UpdateArgBucket,
+    threaded_overrides: dict[int, tuple[Any, int | None]],
+) -> jnp.ndarray:
+    """
+    Builds the threaded (reconstructed-action-prob) call for one bucket and
+    evaluates it -- exactly the same shape of call
+    compute_batched_algorithm_component/compute_batched_inference_outputs
+    already makes for this bucket. Only used as a fallback when the caller
+    doesn't already have that result on hand (see
+    check_batched_algorithm_estimating_function_args_equivalent's
+    precomputed_threaded_results parameter).
+    """
+    threaded_call_args, threaded_in_axes = _assemble_call_args_and_in_axes(
+        bucket.raw_arg_lists, threaded_overrides
+    )
+    return jax.vmap(estimating_func, in_axes=threaded_in_axes)(*threaded_call_args)
 
 
 def _assert_original_and_threaded_bucket_results_agree(
     estimating_func: collections.abc.Callable,
     bucket: UpdateArgBucket,
-    threaded_overrides: dict[int, tuple[Any, int | None]],
+    threaded_result: jnp.ndarray,
     atol: float,
     rtol: float,
 ) -> None:
     """
     Shared comparison step for both check_batched_*_equivalent functions:
-    calls estimating_func over one bucket with (a) the original, entirely
-    un-substituted arguments and (b) the given threaded overrides, and
-    asserts they agree within tolerance. Factored out specifically so the
-    two callers' tolerances share one definition instead of two literal
-    copies that can silently drift apart (as happened once already: the
-    inference side had been copied from the algorithm side's atol=1e-7,
-    rtol=1e-3 instead of matching its own original,
+    calls estimating_func over one bucket with the original, entirely
+    un-substituted arguments, and asserts the result agrees with the given
+    threaded_result within tolerance. Factored out specifically so the two
+    callers' tolerances share one definition instead of two literal copies
+    that can silently drift apart (as happened once already: the inference
+    side had been copied from the algorithm side's atol=1e-7, rtol=1e-3
+    instead of matching its own original,
     input_checks.require_threaded_inference_estimating_function_args_equivalent's
     looser rtol=1e-2, no-atol tolerance).
     """
-    threaded_call_args, threaded_in_axes = _assemble_call_args_and_in_axes(
-        bucket.raw_arg_lists, threaded_overrides
-    )
     original_call_args, original_in_axes = _assemble_call_args_and_in_axes(
         bucket.raw_arg_lists, {}
     )
-
     original_result = jax.vmap(estimating_func, in_axes=original_in_axes)(
         *original_call_args
     )
-    # Need to stop gradient here: the threaded args trace back to betas/theta,
+    # Need to stop gradient here: threaded_result traces back to betas/theta,
     # which are being differentiated in the real jax.jacrev call this check
     # runs alongside, and np.asarray can't convert a traced value.
-    threaded_result = jax.lax.stop_gradient(
-        jax.vmap(estimating_func, in_axes=threaded_in_axes)(*threaded_call_args)
-    )
     np.testing.assert_allclose(
         np.asarray(original_result),
-        np.asarray(threaded_result),
+        np.asarray(jax.lax.stop_gradient(threaded_result)),
         atol=atol,
         rtol=rtol,
     )
@@ -1123,6 +1155,7 @@ def check_batched_algorithm_estimating_function_args_equivalent(
     action_prob_layer: ActionProbLayerPrecompute,
     update_layer: UpdateLayerPrecompute,
     pi_beta_grid: jnp.ndarray | None,
+    precomputed_threaded_results: list[jnp.ndarray] | None = None,
 ) -> None:
     """
     Batched equivalent of
@@ -1140,33 +1173,50 @@ def check_batched_algorithm_estimating_function_args_equivalent(
     pattern the rest of this module exists to eliminate, just relocated to
     feed this check instead of the main computation. No-op if action
     probabilities are not used in the algorithm estimating function.
+
+    precomputed_threaded_results, if given, must be
+    compute_batched_algorithm_component's own bucket_outputs return value
+    (one entry per non-empty (update, bucket) pair, in the same traversal
+    order used here) -- reusing it instead of recomputing the threaded call
+    from scratch avoids doubling this check's cost on top of the main
+    computation's identical work. If None, the threaded result is computed
+    fresh here (used by callers that only have this check's own inputs, e.g.
+    standalone tests).
     """
     if alg_update_func_args_action_prob_index < 0:
         return
+    result_idx = 0
     for u, policy_num in enumerate(update_layer.policy_nums_by_update_index):
         beta_u = betas[u]
         for bucket in update_layer.buckets_by_update_index[u]:
             if len(bucket.subject_ids_in_order) == 0:
                 continue
 
-            threaded_overrides = _build_algorithm_bucket_overrides(
-                betas,
-                beta_u,
-                policy_num,
-                bucket,
-                alg_update_func_args_beta_index,
-                alg_update_func_args_previous_betas_index,
-                alg_update_func_args_action_prob_index,
-                action_prob_layer,
-                pi_beta_grid,
-            )
+            if precomputed_threaded_results is not None:
+                threaded_result = precomputed_threaded_results[result_idx]
+            else:
+                threaded_overrides = _build_algorithm_bucket_overrides(
+                    betas,
+                    beta_u,
+                    policy_num,
+                    bucket,
+                    alg_update_func_args_beta_index,
+                    alg_update_func_args_previous_betas_index,
+                    alg_update_func_args_action_prob_index,
+                    action_prob_layer,
+                    pi_beta_grid,
+                )
+                threaded_result = _compute_threaded_bucket_result(
+                    algorithm_estimating_func, bucket, threaded_overrides
+                )
+            result_idx += 1
             # Tolerance matches
             # input_checks.require_threaded_algorithm_estimating_function_args_equivalent
             # exactly -- see _assert_original_and_threaded_bucket_results_agree.
             _assert_original_and_threaded_bucket_results_agree(
                 algorithm_estimating_func,
                 bucket,
-                threaded_overrides,
+                threaded_result,
                 atol=1e-7,
                 rtol=1e-3,
             )
@@ -1180,33 +1230,43 @@ def check_batched_inference_estimating_function_args_equivalent(
     action_prob_layer: ActionProbLayerPrecompute,
     inference_layer: InferenceLayerPrecompute,
     pi_beta_grid: jnp.ndarray | None,
+    precomputed_threaded_results: list[jnp.ndarray] | None = None,
 ) -> None:
     """
     Batched equivalent of
     input_checks.require_threaded_inference_estimating_function_args_equivalent
     -- see check_batched_algorithm_estimating_function_args_equivalent's
-    docstring for the shared rationale. No-op if action probabilities are not
-    used in the inference estimating function.
+    docstring for the shared rationale, including precomputed_threaded_results
+    (here, compute_batched_inference_outputs's own bucket_outputs). No-op if
+    action probabilities are not used in the inference estimating function.
     """
     if inference_func_args_action_prob_index < 0:
         return
+    result_idx = 0
     for bucket in inference_layer.buckets:
         if len(bucket.subject_ids_in_order) == 0:
             continue
 
-        threaded_overrides = _build_inference_bucket_overrides(
-            theta,
-            bucket,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_layer,
-            pi_beta_grid,
-        )
+        if precomputed_threaded_results is not None:
+            threaded_result = precomputed_threaded_results[result_idx]
+        else:
+            threaded_overrides = _build_inference_bucket_overrides(
+                theta,
+                bucket,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_layer,
+                pi_beta_grid,
+            )
+            threaded_result = _compute_threaded_bucket_result(
+                inference_estimating_func, bucket, threaded_overrides
+            )
+        result_idx += 1
         # Tolerance matches
         # input_checks.require_threaded_inference_estimating_function_args_equivalent
         # exactly (a looser rtol, no atol, than the algorithm-side check
         # above -- NOT the same value, and previously copy-pasted wrong; see
         # _assert_original_and_threaded_bucket_results_agree).
         _assert_original_and_threaded_bucket_results_agree(
-            inference_estimating_func, bucket, threaded_overrides, atol=0.0, rtol=1e-2
+            inference_estimating_func, bucket, threaded_result, atol=0.0, rtol=1e-2
         )

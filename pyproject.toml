@@ -38,3 +38,8 @@ lifejacket = "lifejacket.post_deployment_analysis:cli"
 where = ["."]
 include = ["lifejacket*"]
 exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: exercises a larger fixture; excludable with -m \"not slow\"",
+]

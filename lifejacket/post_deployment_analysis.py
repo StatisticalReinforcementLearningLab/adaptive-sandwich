@@ -19,6 +19,17 @@ from .arg_threading_helpers import (
     thread_inference_func_args,
     thread_update_func_args,
 )
+from .batched_weighted_estimating_function_stack import (
+    build_action_prob_layer_precompute,
+    build_inference_layer_precompute,
+    build_update_layer_precompute,
+    check_batched_algorithm_estimating_function_args_equivalent,
+    check_batched_inference_estimating_function_args_equivalent,
+    compute_action_prob_layer_outputs,
+    compute_batched_algorithm_component,
+    compute_batched_inference_outputs,
+    compute_windowed_weight_products,
+)
 from .constants import (
     FunctionTypes,
     SandwichFormationMethods,
@@ -30,19 +41,18 @@ from .form_adjusted_meat_adjustments_directly import (
 from . import input_checks
 from . import get_datum_for_blowup_supervised_learning
 from .small_sample_corrections import perform_desired_small_sample_correction
-from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 
 from .helper_functions import (
     calculate_beta_dim,
     collect_all_post_update_betas,
+    compute_subject_radon_nikodym_weights,
     construct_beta_index_by_policy_num_map,
     extract_action_and_policy_by_decision_time_by_subject_id,
     flatten_params,
     get_active_df_column,
-    get_min_time_by_policy_num,
-    get_radon_nikodym_weight,
     load_function_from_same_named_file,
+    log_phase_duration,
     unflatten_params,
 )
 
@@ -408,48 +418,59 @@ def analyze_dataset(
         level=logging.INFO,
     )
 
-    theta_est = jnp.array(theta_calculation_func(analysis_df))
+    with log_phase_duration("theta_calculation_func"):
+        theta_est = jnp.array(theta_calculation_func(analysis_df))
 
     beta_dim = calculate_beta_dim(
         action_prob_func_args, action_prob_func_args_beta_index
     )
     if not suppress_all_data_checks:
-        input_checks.perform_first_wave_input_checks(
-            analysis_df,
-            active_col_name,
-            action_col_name,
-            policy_num_col_name,
-            calendar_t_col_name,
-            subject_id_col_name,
-            action_prob_col_name,
-            reward_col_name,
-            action_prob_func,
-            action_prob_func_args,
-            action_prob_func_args_beta_index,
-            alg_update_func_args,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            theta_est,
-            beta_dim,
-            suppress_interactive_data_checks,
-            small_sample_correction,
-        )
+        with log_phase_duration("input_checks"):
+            input_checks.perform_first_wave_input_checks(
+                analysis_df,
+                active_col_name,
+                action_col_name,
+                policy_num_col_name,
+                calendar_t_col_name,
+                subject_id_col_name,
+                action_prob_col_name,
+                reward_col_name,
+                action_prob_func,
+                action_prob_func_args,
+                action_prob_func_args_beta_index,
+                alg_update_func_args,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
+                theta_est,
+                beta_dim,
+                suppress_interactive_data_checks,
+                small_sample_correction,
+            )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
-    beta_index_by_policy_num, initial_policy_num = (
-        construct_beta_index_by_policy_num_map(
-            analysis_df, policy_num_col_name, active_col_name
+    with log_phase_duration("data_structure_prep.construct_beta_index_by_policy_num_map"):
+        beta_index_by_policy_num, initial_policy_num = (
+            construct_beta_index_by_policy_num_map(
+                analysis_df, policy_num_col_name, active_col_name
+            )
         )
-    )
 
-    all_post_update_betas = collect_all_post_update_betas(
-        beta_index_by_policy_num, alg_update_func_args, alg_update_func_args_beta_index
-    )
+    with log_phase_duration("data_structure_prep.collect_all_post_update_betas"):
+        all_post_update_betas = collect_all_post_update_betas(
+            beta_index_by_policy_num,
+            alg_update_func_args,
+            alg_update_func_args_beta_index,
+        )
 
-    action_by_decision_time_by_subject_id, policy_num_by_decision_time_by_subject_id = (
-        extract_action_and_policy_by_decision_time_by_subject_id(
+    with log_phase_duration(
+        "data_structure_prep.extract_action_and_policy_by_decision_time_by_subject_id"
+    ):
+        (
+            action_by_decision_time_by_subject_id,
+            policy_num_by_decision_time_by_subject_id,
+        ) = extract_action_and_policy_by_decision_time_by_subject_id(
             analysis_df,
             subject_id_col_name,
             active_col_name,
@@ -457,22 +478,22 @@ def analyze_dataset(
             action_col_name,
             policy_num_col_name,
         )
-    )
 
-    (
-        inference_func_args_by_subject_id,
-        inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_subject_id,
-    ) = process_inference_func_args(
-        inference_func,
-        inference_func_args_theta_index,
-        analysis_df,
-        theta_est,
-        action_prob_col_name,
-        calendar_t_col_name,
-        subject_id_col_name,
-        active_col_name,
-    )
+    with log_phase_duration("data_structure_prep.process_inference_func_args"):
+        (
+            inference_func_args_by_subject_id,
+            inference_func_args_action_prob_index,
+            inference_action_prob_decision_times_by_subject_id,
+        ) = process_inference_func_args(
+            inference_func,
+            inference_func_args_theta_index,
+            analysis_df,
+            theta_est,
+            action_prob_col_name,
+            calendar_t_col_name,
+            subject_id_col_name,
+            active_col_name,
+        )
 
     # Use a per-subject weighted estimating function stacking function to derive classical and joint
     # meat and bread matrices.  This is facilitated because the *value* of the
@@ -482,56 +503,57 @@ def analyze_dataset(
     )
 
     subject_ids = jnp.array(analysis_df[subject_id_col_name].unique())
-    (
-        stabilized_joint_bread_matrix,
-        raw_joint_bread_matrix,
-        joint_adjusted_meat_matrix,
-        joint_sandwich_matrix,
-        classical_bread_matrix,
-        classical_meat_matrix,
-        classical_sandwich_var_estimate,
-        avg_estimating_function_stack,
-        per_subject_estimating_function_stacks,
-        per_subject_adjusted_corrections,
-        per_subject_classical_corrections,
-        per_subject_adjusted_meat_adjustments,
-    ) = construct_classical_and_adjusted_sandwiches(
-        theta_est,
-        all_post_update_betas,
-        subject_ids,
-        action_prob_func,
-        action_prob_func_args_beta_index,
-        alg_update_func,
-        alg_update_func_type,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_action_prob_index,
-        alg_update_func_args_action_prob_times_index,
-        alg_update_func_args_previous_betas_index,
-        inference_func,
-        inference_func_type,
-        inference_func_args_theta_index,
-        inference_func_args_action_prob_index,
-        action_prob_func_args,
-        policy_num_by_decision_time_by_subject_id,
-        initial_policy_num,
-        beta_index_by_policy_num,
-        inference_func_args_by_subject_id,
-        inference_action_prob_decision_times_by_subject_id,
-        alg_update_func_args,
-        action_by_decision_time_by_subject_id,
-        suppress_all_data_checks,
-        suppress_interactive_data_checks,
-        small_sample_correction,
-        form_adjusted_meat_adjustments_explicitly,
-        stabilize_joint_bread,
-        analysis_df,
-        active_col_name,
-        action_col_name,
-        calendar_t_col_name,
-        subject_id_col_name,
-        action_prob_func_args,
-        action_prob_col_name,
-    )
+    with log_phase_duration("construct_classical_and_adjusted_sandwiches"):
+        (
+            raw_joint_bread_matrix,
+            stabilized_joint_bread_matrix,
+            joint_adjusted_meat_matrix,
+            joint_sandwich_matrix,
+            classical_bread_matrix,
+            classical_meat_matrix,
+            classical_sandwich_var_estimate,
+            avg_estimating_function_stack,
+            per_subject_estimating_function_stacks,
+            per_subject_adjusted_corrections,
+            per_subject_classical_corrections,
+            per_subject_adjusted_meat_adjustments,
+        ) = construct_classical_and_adjusted_sandwiches(
+            theta_est,
+            all_post_update_betas,
+            subject_ids,
+            action_prob_func,
+            action_prob_func_args_beta_index,
+            alg_update_func,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
+            inference_func,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_func_args,
+            policy_num_by_decision_time_by_subject_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            inference_func_args_by_subject_id,
+            inference_action_prob_decision_times_by_subject_id,
+            alg_update_func_args,
+            action_by_decision_time_by_subject_id,
+            suppress_all_data_checks,
+            suppress_interactive_data_checks,
+            small_sample_correction,
+            form_adjusted_meat_adjustments_explicitly,
+            stabilize_joint_bread,
+            analysis_df,
+            active_col_name,
+            action_col_name,
+            calendar_t_col_name,
+            subject_id_col_name,
+            action_prob_func_args,
+            action_prob_col_name,
+        )
 
     theta_dim = len(theta_est)
     if not suppress_all_data_checks:
@@ -570,120 +592,32 @@ def analyze_dataset(
             f,
         )
 
-    joint_bread_cond = jnp.linalg.cond(raw_joint_bread_matrix)
-    logger.info(
-        "Joint bread condition number: %f",
-        joint_bread_cond,
-    )
-
-    # calculate the max eigenvalue of the theta-only adjusted sandwich
-    max_eigenvalue_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
-        adjusted_sandwich_var_estimate
-    ).max()
-    logger.info(
-        "Max eigenvalue of theta-only adjusted sandwich matrix: %f",
-        max_eigenvalue_theta_only_adjusted_sandwich,
-    )
-
-    # Compute ratios: max eigenvalue / median eigenvalue among those >= 1e-8 * max.
-    eigvals_joint_sandwich = scipy.linalg.eigvalsh(joint_sandwich_matrix)
-    max_eig_joint = float(eigvals_joint_sandwich.max())
-    logger.info(
-        "Max eigenvalue of joint adjusted sandwich matrix: %f",
-        max_eig_joint,
-    )
-
-    joint_keep = eigvals_joint_sandwich >= (1e-8 * max_eig_joint)
-    joint_median_kept = (
-        float(np.median(eigvals_joint_sandwich[joint_keep]))
-        if np.any(joint_keep)
-        else math.nan
-    )
-    max_to_median_ratio_joint_sandwich = (
-        (max_eig_joint / joint_median_kept)
-        if (not math.isnan(joint_median_kept) and joint_median_kept > 0)
-        else (
-            math.inf
-            if (not math.isnan(joint_median_kept) and joint_median_kept == 0)
-            else math.nan
-        )
-    )
-    logger.info(
-        "Max/median eigenvalue ratio (joint sandwich; median over eigvals >= 1e-8*max): %f",
-        max_to_median_ratio_joint_sandwich,
-    )
-
-    eigvals_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
-        adjusted_sandwich_var_estimate
-    )
-    max_eig_theta = float(eigvals_theta_only_adjusted_sandwich.max())
-    theta_keep = eigvals_theta_only_adjusted_sandwich >= (1e-8 * max_eig_theta)
-    theta_median_kept = (
-        float(np.median(eigvals_theta_only_adjusted_sandwich[theta_keep]))
-        if np.any(theta_keep)
-        else math.nan
-    )
-    max_to_median_ratio_theta_only_adjusted_sandwich = (
-        (max_eig_theta / theta_median_kept)
-        if (not math.isnan(theta_median_kept) and theta_median_kept > 0)
-        else (
-            math.inf
-            if (not math.isnan(theta_median_kept) and theta_median_kept == 0)
-            else math.nan
-        )
-    )
-    logger.info(
-        "Max/median eigenvalue ratio (theta-only adjusted sandwich; median over eigvals >= 1e-8*max): %f",
-        max_to_median_ratio_theta_only_adjusted_sandwich,
-    )
-
-    # --- Local linearization validity diagnostic (single-run) ---
-    # We compare the nonlinear Taylor remainder of the joint estimating-function map to the
-    # retained linear term, at perturbations on the O(1/sqrt(n)) scale.
-    #
-    # Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
-    # where g(eta) is the avg per-subject weighted estimating-function stack and B is the
-    # joint bread (Jacobian of g w.r.t. flattened betas+theta).
-    #
-    # This ratio is dimensionless and can be used as a necessary/sanity diagnostic that the
-    # first-order linearization is locally accurate at the estimation scale.
-
-    def _compute_local_linearization_error_ratio() -> tuple[float, float]:
-        # Ensure float64 for diagnostics even if upstream ran in float32.
-        joint_bread_float64 = jnp.asarray(
-            stabilized_joint_bread_matrix, dtype=jnp.float64
-        )
-        g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
-        stacks_float64 = jnp.asarray(
-            per_subject_estimating_function_stacks, dtype=jnp.float64
+    with log_phase_duration("eigenvalue_and_condition_diagnostics"):
+        (
+            joint_bread_cond,
+            max_eig_joint,
+            eigvals_joint_sandwich,
+            max_to_median_ratio_joint_sandwich,
+            max_eig_theta,
+            eigvals_theta_only_adjusted_sandwich,
+            max_to_median_ratio_theta_only_adjusted_sandwich,
+        ) = compute_eigenvalue_and_condition_diagnostics(
+            raw_joint_bread_matrix,
+            joint_sandwich_matrix,
+            adjusted_sandwich_var_estimate,
         )
 
-        # Add a small ridge to improve numerical stability for ill-conditioned bread.
-        ridge_scale = 1e-8
-
-        # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
-        cond_threshold = 1e12
-        bread_cond = float(jnp.linalg.cond(joint_bread_float64))
-
-        if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
-            diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
-            ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
-            joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
-                joint_bread_float64.shape[0], dtype=jnp.float64
-            )
-            logger.info(
-                "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
-                float(ridge),
-                bread_cond,
-                cond_threshold,
-            )
-
-        num_subjects = stacks_float64.shape[0]
-
-        def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
-            return jnp.asarray(
-                get_avg_weighted_estimating_function_stacks_and_aux_values(
-                    flattened_betas_and_theta,
+    # Local linearization validity diagnostic (single-run) -- see
+    # compute_local_linearization_error_ratio's docstring for the full explanation.
+    with log_phase_duration("local_linearization_diagnostic"):
+        try:
+            local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
+                compute_local_linearization_error_ratio(
+                    stabilized_joint_bread_matrix,
+                    avg_estimating_function_stack,
+                    per_subject_estimating_function_stacks,
+                    all_post_update_betas,
+                    theta_est,
                     beta_dim,
                     theta_dim,
                     subject_ids,
@@ -707,101 +641,17 @@ def analyze_dataset(
                     inference_action_prob_decision_times_by_subject_id,
                     alg_update_func_args,
                     action_by_decision_time_by_subject_id,
-                    True,  # suppress_all_data_checks
-                    True,  # suppress_interactive_data_checks
-                    False,  # include_auxiliary_outputs
-                ),
-                dtype=jnp.float64,
+                )
             )
-
-        # Evaluate at the final estimate.
-        eta_hat = jnp.asarray(
-            flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
-        )
-
-        # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
-        # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
-        # square-root. If G is the (n x d) matrix of per-subject stacks, then (1/n) G^T G is the
-        # empirical covariance in joint estimating function stack space. Sampling u = (G^T w)/sqrt(n) with w~N(0, I_n) gives
-        # u ~ N(0, empirical joint estimating function stack covariance G^T G/n ) in joint estimating function stack space.
-        key = jax.random.PRNGKey(0)
-
-        # The number of perturbations we will probe
-        J = 15
-        # Chunk size to reduce peak memory
-        chunk_size = 1
-
-        ratios_list = []
-        num_chunks = (J + chunk_size - 1) // chunk_size
-
-        for chunk_idx in range(num_chunks):
-            start = chunk_idx * chunk_size
-            end = min(start + chunk_size, J)
-            cur_size = end - start
-            if cur_size <= 0:
-                continue
-
-            subkey = jax.random.fold_in(key, chunk_idx)
-            W = jax.random.normal(
-                subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
+        except Exception as e:
+            # This diagnostic is best-effort; failure should not break analysis.
+            logger.warning(
+                "Failed to compute local linearization error ratio diagnostic: %s",
+                str(e),
             )
-
-            U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
-
-            c = 1.0
-            # TODO: Consider QR decomposition
-            delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
-                joint_bread_float64, U.T
-            ).T
-
-            B_delta = (joint_bread_float64 @ delta.T).T
-            g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
-            remainder = g_plus - g_hat - B_delta
-
-            denom = jnp.linalg.norm(B_delta, axis=1)
-            numer = jnp.linalg.norm(remainder, axis=1)
-            ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
-
-            ratios_list.append(ratios)
-
-        ratios = jnp.concatenate(ratios_list, axis=0)
-
-        local_error_ratio_median = float(jnp.median(ratios))
-        local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))
-        local_error_ratio_max = float(jnp.max(ratios))
-
-        logger.info(
-            "Local linearization error ratio (median over %d draws): %.6f",
-            J,
-            local_error_ratio_median,
-        )
-        logger.info(
-            "Local linearization error ratio (90th pct over %d draws): %.6f",
-            J,
-            local_error_ratio_p90,
-        )
-
-        logger.info(
-            "Local linearization error ratio (max over %d draws): %.6f",
-            J,
-            local_error_ratio_max,
-        )
-
-        return local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max
-
-    try:
-        local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
-            _compute_local_linearization_error_ratio()
-        )
-    except Exception as e:
-        # This diagnostic is best-effort; failure should not break analysis.
-        logger.warning(
-            "Failed to compute local linearization error ratio diagnostic: %s",
-            str(e),
-        )
-        local_error_ratio_median = math.nan
-        local_error_ratio_p90 = math.nan
-        local_error_ratio_max = math.nan
+            local_error_ratio_median = math.nan
+            local_error_ratio_p90 = math.nan
+            local_error_ratio_max = math.nan
 
     debug_pieces_dict = {
         "theta_est": theta_est,
@@ -835,40 +685,41 @@ def analyze_dataset(
         )
 
     if collect_data_for_blowup_supervised_learning:
-        datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
-            raw_joint_bread_matrix,
-            joint_bread_cond,
-            avg_estimating_function_stack,
-            per_subject_estimating_function_stacks,
-            all_post_update_betas,
-            analysis_df,
-            active_col_name,
-            calendar_t_col_name,
-            action_prob_col_name,
-            subject_id_col_name,
-            reward_col_name,
-            theta_est,
-            adjusted_sandwich_var_estimate,
-            subject_ids,
-            beta_dim,
-            theta_dim,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            policy_num_by_decision_time_by_subject_id,
-            theta_calculation_func,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            inference_action_prob_decision_times_by_subject_id,
-            action_prob_func_args,
-            action_by_decision_time_by_subject_id,
-        )
+        with log_phase_duration("get_datum_for_blowup_supervised_learning (diagnostic)"):
+            datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
+                raw_joint_bread_matrix,
+                joint_bread_cond,
+                avg_estimating_function_stack,
+                per_subject_estimating_function_stacks,
+                all_post_update_betas,
+                analysis_df,
+                active_col_name,
+                calendar_t_col_name,
+                action_prob_col_name,
+                subject_id_col_name,
+                reward_col_name,
+                theta_est,
+                adjusted_sandwich_var_estimate,
+                subject_ids,
+                beta_dim,
+                theta_dim,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                policy_num_by_decision_time_by_subject_id,
+                theta_calculation_func,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                inference_func,
+                inference_func_type,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                inference_action_prob_decision_times_by_subject_id,
+                action_prob_func_args,
+                action_by_decision_time_by_subject_id,
+            )
 
-        with open(output_folder_abs_path / "supervised_learning_datum.pkl", "wb") as f:
-            pickle.dump(datum_and_label_dict, f)
+            with open(output_folder_abs_path / "supervised_learning_datum.pkl", "wb") as f:
+                pickle.dump(datum_and_label_dict, f)
 
     print(f"\nParameter estimate:\n {theta_est}")
     print(f"\nAdjusted sandwich variance estimate:\n {adjusted_sandwich_var_estimate}")
@@ -961,7 +812,14 @@ def process_inference_func_args(
     )
 
 
-def single_subject_weighted_estimating_function_stacker(
+# Kept only as a slow, obviously-correct oracle for cross-checking the
+# batched implementation in tests (see
+# test_batched_and_reference_implementations_agree_per_subject_incremental_recruitment
+# in tests/unit_tests/test_post_deployment_analysis.py) -- unused by
+# get_avg_weighted_estimating_function_stacks_and_aux_values or any other
+# production code path since ADS-139 Step 4. See
+# docs/adr/0001-adaptive-sandwich-performance-plan.md.
+def _reference_single_subject_weighted_estimating_function_stacker(
     beta_dim: int,
     subject_id: collections.abc.Hashable,
     action_prob_func: callable,
@@ -1080,102 +938,27 @@ def single_subject_weighted_estimating_function_stacker(
 
     # First, reformat the supplied data into more convenient structures.
 
-    # 1. Form a dictionary mapping policy numbers to the first time they were
-    # applicable (for this subject). Note that this includes ALL policies, initial
-    # fallbacks included.
-    # Collect the first time after the first update separately for convenience.
-    # These are both used to form the Radon-Nikodym weights for the right times.
-    min_time_by_policy_num, first_time_after_first_update = get_min_time_by_policy_num(
-        policy_num_by_decision_time,
-        beta_index_by_policy_num,
-    )
-
-    # 2. Get the start and end times for this subject.
-    subject_start_time = math.inf
-    subject_end_time = -math.inf
-    for decision_time in action_by_decision_time:
-        subject_start_time = min(subject_start_time, decision_time)
-        subject_end_time = max(subject_end_time, decision_time)
-
-    # 3. Form a stack of weighted estimating equations, one for each update of the algorithm.
     logger.info(
         "Computing the algorithm component of the weighted estimating function stack for subject %s.",
         subject_id,
     )
 
-    active_action_prob_func_args = [
-        args for args in action_prob_func_args_by_decision_time.values() if args
-    ]
-    active_betas_list_by_decision_time_index = jnp.array(
-        [
-            action_prob_func_args[action_prob_func_args_beta_index]
-            for action_prob_func_args in active_action_prob_func_args
-        ]
-    )
-    active_actions_list_by_decision_time_index = jnp.array(
-        list(action_by_decision_time.values())
-    )
-
-    # Sort the threaded args by decision time to be cautious. We check if the
-    # subject id is present in the subject args dict because we may call this on a
-    # subset of the subject arg dict when we are batching arguments by shape
-    sorted_threaded_action_prob_args_by_decision_time = {
-        decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
-        for decision_time in range(subject_start_time, subject_end_time + 1)
-        if decision_time in threaded_action_prob_func_args_by_decision_time
-    }
-
-    num_args = None
-    for args in sorted_threaded_action_prob_args_by_decision_time.values():
-        if args:
-            num_args = len(args)
-            break
-
-    # NOTE: Cannot do [[]] * num_args here! Then all lists point
-    # same object...
-    batched_threaded_arg_lists = [[] for _ in range(num_args)]
-    for (
-        decision_time,
-        args,
-    ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        if not args:
-            continue
-        for idx, arg in enumerate(args):
-            batched_threaded_arg_lists[idx].append(arg)
-
-    batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
-        batched_threaded_arg_lists
-    )
-
-    # Note that we do NOT use the shared betas in the first arg to the weight function,
-    # since we don't want differentiation to happen with respect to them.
-    # Just grab the original beta from the update function arguments. This is the same
-    # value, but impervious to differentiation with respect to all_post_update_betas. The
-    # args, on the other hand, are a function of all_post_update_betas.
-    active_weights = jax.vmap(
-        fun=get_radon_nikodym_weight,
-        in_axes=[0, None, None, 0] + batch_axes,
-        out_axes=0,
-    )(
-        active_betas_list_by_decision_time_index,
+    (
+        all_weights,
+        decision_time_to_all_weights_index_offset,
+        first_time_after_first_update,
+        min_time_by_policy_num,
+        subject_start_time,
+        subject_end_time,
+    ) = compute_subject_radon_nikodym_weights(
         action_prob_func,
         action_prob_func_args_beta_index,
-        active_actions_list_by_decision_time_index,
-        *batched_threaded_arg_tensors,
+        action_prob_func_args_by_decision_time,
+        threaded_action_prob_func_args_by_decision_time,
+        policy_num_by_decision_time,
+        action_by_decision_time,
+        beta_index_by_policy_num,
     )
-
-    active_index = 0
-    decision_time_to_all_weights_index_offset = min(
-        sorted_threaded_action_prob_args_by_decision_time
-    )
-    all_weights_raw = []
-    for (
-        decision_time,
-        args,
-    ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        all_weights_raw.append(active_weights[active_index] if args else 1.0)
-        active_index += 1
-    all_weights = jnp.array(all_weights_raw)
 
     algorithm_component = jnp.concatenate(
         [
@@ -1427,117 +1210,154 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         beta_dim,
         theta_dim,
     )
+    subject_ids_np = np.asarray(subject_ids.tolist())
 
-    # 2. Thread in the betas and theta in all_post_update_betas_and_theta into the arguments
-    # supplied for the above functions, so that differentiation works correctly.  The existing
-    # values should be the same, but not connected to the parameter we are differentiating
-    # with respect to. Note we will also find it useful below to have the action probability args
-    # nested dict structure flipped to be subject_id -> decision_time -> args, so we do that here too.
-
-    logger.info("Threading in betas to action probability arguments for all subjects.")
-    (
-        threaded_action_prob_func_args_by_decision_time_by_subject_id,
-        action_prob_func_args_by_decision_time_by_subject_id,
-    ) = thread_action_prob_func_args(
+    # 2. One-time, plain-numpy structural precompute (never touches betas/theta
+    # values -- only which cells are active and which policy/action applied).
+    # This replaces the ragged per-subject/per-update Python loops with a
+    # small, fixed number of jax.vmap calls below. See
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4.
+    action_prob_layer = build_action_prob_layer_precompute(
+        subject_ids_np,
         action_prob_func_args_by_subject_id_by_decision_time,
+        action_by_decision_time_by_subject_id,
         policy_num_by_decision_time_by_subject_id,
-        initial_policy_num,
-        betas,
         beta_index_by_policy_num,
+        initial_policy_num,
         action_prob_func_args_beta_index,
     )
-
-    # 3. Thread the central betas into the algorithm update function arguments
-    # and replace any action probabilities with reconstructed ones from the above
-    # arguments with the central betas introduced.
-    logger.info(
-        "Threading in betas and beta-dependent action probabilities to algorithm update "
-        "function args for all subjects"
-    )
-    threaded_update_func_args_by_policy_num_by_subject_id = thread_update_func_args(
+    update_layer = build_update_layer_precompute(
+        subject_ids_np,
         update_func_args_by_by_subject_id_by_policy_num,
-        betas,
         beta_index_by_policy_num,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_action_prob_index,
         alg_update_func_args_action_prob_times_index,
-        alg_update_func_args_previous_betas_index,
-        threaded_action_prob_func_args_by_decision_time_by_subject_id,
-        action_prob_func,
+        action_prob_layer,
     )
-
-    # If action probabilites are used in the algorithm estimating function, make
-    # sure that substituting in the reconstructed action probabilities is approximately
-    # equivalent to using the original action probabilities.
-    if not suppress_all_data_checks and alg_update_func_args_action_prob_index >= 0:
-        input_checks.require_threaded_algorithm_estimating_function_args_equivalent(
-            algorithm_estimating_func,
-            update_func_args_by_by_subject_id_by_policy_num,
-            threaded_update_func_args_by_policy_num_by_subject_id,
-            suppress_interactive_data_checks,
-        )
-
-    # 4. Thread the central theta into the inference function arguments
-    # and replace any action probabilities with reconstructed ones from the above
-    # arguments with the central betas introduced.
-    logger.info(
-        "Threading in theta and beta-dependent action probabilities to inference update "
-        "function args for all subjects"
+    need_pi_beta_grid = (
+        alg_update_func_args_action_prob_index >= 0
+        or inference_func_args_action_prob_index >= 0
     )
-    threaded_inference_func_args_by_subject_id = thread_inference_func_args(
+    inference_layer = build_inference_layer_precompute(
         inference_func_args_by_subject_id,
-        inference_func_args_theta_index,
-        theta,
         inference_func_args_action_prob_index,
-        threaded_action_prob_func_args_by_decision_time_by_subject_id,
         inference_action_prob_decision_times_by_subject_id,
-        action_prob_func,
+        action_prob_layer,
+    )
+    # Cheap visibility into shape-bucket fan-out: each distinct shape bucket
+    # at a given update becomes its own jax.vmap dispatch in
+    # compute_batched_algorithm_component below (see
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4 -- padding
+    # instead of bucketing this axis would silently corrupt any
+    # alg_update_func that reduces over accumulated per-subject rows, e.g.
+    # under incremental/staggered recruitment). Logged unconditionally since
+    # it's O(updates), not O(subjects); watch this if it ever grows close to
+    # the subject count, since that means bucketing isn't actually reducing
+    # dispatch count much for this study's enrollment pattern.
+    bucket_counts_by_update = [len(b) for b in update_layer.buckets_by_update_index]
+    logger.info(
+        "Algorithm shape-bucket fan-out: %d update(s), %d subject(s), "
+        "%d total bucket(s) (max %d in a single update).",
+        len(bucket_counts_by_update),
+        len(subject_ids_np),
+        sum(bucket_counts_by_update),
+        max(bucket_counts_by_update, default=0),
     )
 
-    # If action probabilites are used in the inference estimating function, make
-    # sure that substituting in the reconstructed action probabilities is approximately
-    # equivalent to using the original action probabilities.
-    if not suppress_all_data_checks and inference_func_args_action_prob_index >= 0:
-        input_checks.require_threaded_inference_estimating_function_args_equivalent(
-            inference_estimating_func,
-            inference_func_args_by_subject_id,
-            threaded_inference_func_args_by_subject_id,
-            suppress_interactive_data_checks,
-        )
+    # 3. Batched forward computation: one jax.vmap call spanning every
+    # subject and every global decision time for the Radon-Nikodym weights,
+    # plus O(updates * shape buckets) jax.vmap calls for the algorithm and
+    # inference estimating functions, instead of one Python-dispatched call
+    # per subject (or per subject per update). Computed before the data
+    # checks below so pi_beta_grid is available for them to reuse.
+    raw_weight_grid, pi_beta_grid = compute_action_prob_layer_outputs(
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        action_prob_layer,
+        betas,
+        need_pi_beta_grid,
+    )
+    rl_weight_products, inference_weight_products = compute_windowed_weight_products(
+        raw_weight_grid,
+        action_prob_layer.active_mask,
+        action_prob_layer.lo_idx,
+        update_layer.hi_idx,
+        action_prob_layer.subject_end_idx,
+    )
 
-    # 5. Now we can compute the weighted estimating function stacks for all subjects
-    # as well as collect related values used to construct the adjusted and classical
-    # sandwich variances.
-    results = [
-        single_subject_weighted_estimating_function_stacker(
-            beta_dim,
-            subject_id,
-            action_prob_func,
+    # 4. Data checks: if action probabilities are used in the algorithm or
+    # inference estimating functions, make sure that substituting in the
+    # reconstructed action probabilities (as the batched computation above
+    # does) is approximately equivalent to using the original action
+    # probabilities. Reuses pi_beta_grid (already computed above) instead of
+    # re-deriving reconstructed action probabilities via a second,
+    # per-subject/per-update dispatched pass through
+    # arg_threading_helpers.thread_update_func_args/thread_inference_func_args
+    # -- opt-out via suppress_all_data_checks.
+    if not suppress_all_data_checks:
+        if alg_update_func_args_action_prob_index >= 0:
+            logger.info(
+                "Checking that reconstructed action probabilities are consistent with "
+                "recorded ones in the algorithm update function args for all subjects."
+            )
+        check_batched_algorithm_estimating_function_args_equivalent(
             algorithm_estimating_func,
-            inference_estimating_func,
-            action_prob_func_args_beta_index,
-            inference_func_args_theta_index,
-            action_prob_func_args_by_decision_time_by_subject_id[subject_id],
-            threaded_action_prob_func_args_by_decision_time_by_subject_id[subject_id],
-            threaded_update_func_args_by_policy_num_by_subject_id[subject_id],
-            threaded_inference_func_args_by_subject_id[subject_id],
-            policy_num_by_decision_time_by_subject_id[subject_id],
-            action_by_decision_time_by_subject_id[subject_id],
-            beta_index_by_policy_num,
+            betas,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_previous_betas_index,
+            alg_update_func_args_action_prob_index,
+            action_prob_layer,
+            update_layer,
+            pi_beta_grid,
         )
-        for subject_id in subject_ids.tolist()
-    ]
+        if inference_func_args_action_prob_index >= 0:
+            logger.info(
+                "Checking that reconstructed action probabilities are consistent with "
+                "recorded ones in the inference function args for all subjects."
+            )
+        check_batched_inference_estimating_function_args_equivalent(
+            inference_estimating_func,
+            theta,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_layer,
+            inference_layer,
+            pi_beta_grid,
+        )
 
-    stacks = jnp.array([result[0] for result in results])
+    algorithm_component = compute_batched_algorithm_component(
+        betas,
+        beta_dim,
+        algorithm_estimating_func,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+        action_prob_layer,
+        update_layer,
+        pi_beta_grid,
+        rl_weight_products,
+    )
+    inference_component, inference_hessians = compute_batched_inference_outputs(
+        theta,
+        theta_dim,
+        inference_estimating_func,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_layer,
+        inference_layer,
+        pi_beta_grid,
+        inference_weight_products,
+        need_hessians=include_auxiliary_outputs,
+    )
+
+    stacks = jnp.concatenate([algorithm_component, inference_component], axis=1)
 
     if not include_auxiliary_outputs:
         return jnp.mean(stacks, axis=0)
 
-    outer_products = jnp.array([result[1] for result in results])
-    inference_only_outer_products = jnp.array([result[2] for result in results])
-    inference_hessians = jnp.array([result[3] for result in results])
+    outer_products = jax.vmap(jnp.outer)(stacks, stacks)
+    inference_only_outer_products = jax.vmap(jnp.outer)(inference_component, inference_component)
 
-    # 6. Note this strange return structure! We will differentiate the first output,
+    # 5. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
     # for the estimating functions sum check, per_subject_classical_bread_contributions, and
     # classical meat and inverse read matrices. The raw per-subject stacks are also returned for
@@ -1553,6 +1373,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_hessians,
         stacks,
     )
+
 
 
 def construct_classical_and_adjusted_sandwiches(
@@ -1732,152 +1553,176 @@ def construct_classical_and_adjusted_sandwiches(
     )
     theta_dim = theta_est.shape[0]
     beta_dim = all_post_update_betas.shape[1]
-    # Note that these "contributions" are per-subject Jacobians of the weighted estimating function stack.
-    raw_joint_bread_matrix, (
-        avg_estimating_function_stack,
-        per_subject_joint_adjusted_meat_contributions,
-        per_subject_classical_meat_contributions,
-        per_subject_classical_bread_contributions,
-        per_subject_estimating_function_stacks,
-    ) = jax.jacrev(
-        get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
-    )(
-        # While JAX can technically differentiate with respect to a list of JAX arrays,
-        # it is apparently more efficient to flatten them into a single array. This is done
-        # here to improve performance. We can simply unflatten them inside the function.
-        flatten_params(all_post_update_betas, theta_est),
-        beta_dim,
-        theta_dim,
-        subject_ids,
-        action_prob_func,
-        action_prob_func_args_beta_index,
-        alg_update_func,
-        alg_update_func_type,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_action_prob_index,
-        alg_update_func_args_action_prob_times_index,
-        alg_update_func_args_previous_betas_index,
-        inference_func,
-        inference_func_type,
-        inference_func_args_theta_index,
-        inference_func_args_action_prob_index,
-        action_prob_func_args_by_subject_id_by_decision_time,
-        policy_num_by_decision_time_by_subject_id,
-        initial_policy_num,
-        beta_index_by_policy_num,
-        inference_func_args_by_subject_id,
-        inference_action_prob_decision_times_by_subject_id,
-        update_func_args_by_by_subject_id_by_policy_num,
-        action_by_decision_time_by_subject_id,
-        suppress_all_data_checks,
-        suppress_interactive_data_checks,
-    )
+    # NOTE: wrapping this call in jax.jit was tried and reverted -- twice now.
+    # See docs/adr/0001-adaptive-sandwich-performance-plan.md's "Step 3" section
+    # for both attempts. The first (before ADS-139 Step 4) failed because the
+    # per-subject/per-update graph was fully Python-unrolled, giving XLA
+    # nothing batched to compile once. The second (after Step 4's jax.vmap
+    # batching) compiled fine on its own, but wrapping THIS call specifically
+    # in jax.jit was a net regression at medium scale even so: this call runs
+    # only once per analyze_dataset invocation (unlike the local-linearization
+    # diagnostic below, which now IS jitted and calls the same underlying
+    # function 15 times -- see that closure's own comment), so there is no
+    # compile-once-reuse-many-times amortization here, and compiling this
+    # larger, differentiated graph measurably slowed down even the separate,
+    # already-jitted diagnostic closure running later in the same process
+    # (0.45s -> 3.6s, reproducible) -- some interaction between the two
+    # concurrent jax.jit compilations, not fully root-caused. Net effect at
+    # n=100: ~7.1s -> ~16.3-16.5s total wall-clock. Reverted; do not re-add
+    # jax.jit here without re-measuring at both benchmark scales.
+    with log_phase_duration("jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"):
+        raw_joint_bread_matrix, (
+            avg_estimating_function_stack,
+            per_subject_joint_adjusted_meat_contributions,
+            per_subject_classical_meat_contributions,
+            per_subject_classical_bread_contributions,
+            per_subject_estimating_function_stacks,
+        ) = jax.jacrev(
+            get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
+        )(
+            # While JAX can technically differentiate with respect to a list of JAX arrays,
+            # it is apparently more efficient to flatten them into a single array. This is done
+            # here to improve performance. We can simply unflatten them inside the function.
+            flatten_params(all_post_update_betas, theta_est),
+            beta_dim,
+            theta_dim,
+            subject_ids,
+            action_prob_func,
+            action_prob_func_args_beta_index,
+            alg_update_func,
+            alg_update_func_type,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            alg_update_func_args_action_prob_times_index,
+            alg_update_func_args_previous_betas_index,
+            inference_func,
+            inference_func_type,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            policy_num_by_decision_time_by_subject_id,
+            initial_policy_num,
+            beta_index_by_policy_num,
+            inference_func_args_by_subject_id,
+            inference_action_prob_decision_times_by_subject_id,
+            update_func_args_by_by_subject_id_by_policy_num,
+            action_by_decision_time_by_subject_id,
+            suppress_all_data_checks,
+            suppress_interactive_data_checks,
+        )
 
     num_subjects = len(subject_ids)
 
-    (
-        joint_adjusted_meat_matrix,
-        classical_meat_matrix,
-        per_subject_adjusted_corrections,
-        per_subject_classical_corrections,
-    ) = perform_desired_small_sample_correction(
-        small_sample_correction,
-        per_subject_joint_adjusted_meat_contributions,
-        per_subject_classical_meat_contributions,
-        per_subject_classical_bread_contributions,
-        num_subjects,
-        theta_dim,
-    )
+    with log_phase_duration("perform_desired_small_sample_correction"):
+        (
+            joint_adjusted_meat_matrix,
+            classical_meat_matrix,
+            per_subject_adjusted_corrections,
+            per_subject_classical_corrections,
+        ) = perform_desired_small_sample_correction(
+            small_sample_correction,
+            per_subject_joint_adjusted_meat_contributions,
+            per_subject_classical_meat_contributions,
+            per_subject_classical_bread_contributions,
+            num_subjects,
+            theta_dim,
+        )
 
     # Increase diagonal block dominance possibly improve conditioning of diagonal
     # blocks as necessary, to ensure mathematical stability of joint bread
-    stabilized_joint_bread_matrix = (
-        (
-            stabilize_joint_bread_if_necessary(
-                raw_joint_bread_matrix,
-                beta_dim,
-                theta_dim,
+    with log_phase_duration("stabilize_joint_bread_if_necessary"):
+        stabilized_joint_bread_matrix = (
+            (
+                stabilize_joint_bread_if_necessary(
+                    raw_joint_bread_matrix,
+                    beta_dim,
+                    theta_dim,
+                )
             )
+            if stabilize_joint_bread
+            else raw_joint_bread_matrix
         )
-        if stabilize_joint_bread
-        else raw_joint_bread_matrix
-    )
 
     # Now stably (no explicit inversion) form our sandwiches.
-    joint_sandwich = form_sandwich_from_bread_and_meat(
-        stabilized_joint_bread_matrix,
-        joint_adjusted_meat_matrix,
-        num_subjects,
-        method=SandwichFormationMethods.BREAD_T_QR,
-    )
-    classical_bread_matrix = jnp.mean(per_subject_classical_bread_contributions, axis=0)
-    classical_sandwich = form_sandwich_from_bread_and_meat(
-        classical_bread_matrix,
-        classical_meat_matrix,
-        num_subjects,
-        method=SandwichFormationMethods.BREAD_T_QR,
-    )
+    with log_phase_duration("form_sandwich_from_bread_and_meat (joint)"):
+        joint_sandwich = form_sandwich_from_bread_and_meat(
+            stabilized_joint_bread_matrix,
+            joint_adjusted_meat_matrix,
+            num_subjects,
+            method=SandwichFormationMethods.BREAD_T_QR,
+        )
+    with log_phase_duration("form_sandwich_from_bread_and_meat (classical)"):
+        classical_bread_matrix = jnp.mean(
+            per_subject_classical_bread_contributions, axis=0
+        )
+        classical_sandwich = form_sandwich_from_bread_and_meat(
+            classical_bread_matrix,
+            classical_meat_matrix,
+            num_subjects,
+            method=SandwichFormationMethods.BREAD_T_QR,
+        )
 
     per_subject_adjusted_meat_adjustments = jnp.full(
         (len(subject_ids), theta_dim, theta_dim), jnp.nan
     )
     if form_adjusted_meat_adjustments_explicitly:
-        per_subject_adjusted_classical_meat_contributions = (
-            form_adjusted_meat_adjustments_directly(
-                theta_dim,
-                all_post_update_betas.shape[1],
-                stabilized_joint_bread_matrix,
-                per_subject_estimating_function_stacks,
-                analysis_df,
-                active_col_name,
-                action_col_name,
-                calendar_t_col_name,
-                subject_id_col_name,
-                action_prob_func,
-                action_prob_func_args,
-                action_prob_func_args_beta_index,
-                theta_est,
-                inference_func,
-                inference_func_args_theta_index,
-                subject_ids,
-                action_prob_col_name,
+        with log_phase_duration("form_adjusted_meat_adjustments_directly (diagnostic)"):
+            per_subject_adjusted_classical_meat_contributions = (
+                form_adjusted_meat_adjustments_directly(
+                    theta_dim,
+                    all_post_update_betas.shape[1],
+                    stabilized_joint_bread_matrix,
+                    per_subject_estimating_function_stacks,
+                    analysis_df,
+                    active_col_name,
+                    action_col_name,
+                    calendar_t_col_name,
+                    subject_id_col_name,
+                    action_prob_func,
+                    action_prob_func_args,
+                    action_prob_func_args_beta_index,
+                    theta_est,
+                    inference_func,
+                    inference_func_args_theta_index,
+                    subject_ids,
+                    action_prob_col_name,
+                )
             )
-        )
-        # Validate that the adjusted meat adjustments we just formed are accurate by constructing
-        # the theta-only adjusted sandwich from them and checking that it matches the standard result
-        # we get by taking a subset of the joint sandwich.
-        # First just apply any small-sample correction for parity.
-        (
-            _,
-            theta_only_adjusted_meat_matrix_v2,
-            _,
-            _,
-        ) = perform_desired_small_sample_correction(
-            small_sample_correction,
-            per_subject_joint_adjusted_meat_contributions,
-            per_subject_adjusted_classical_meat_contributions,
-            per_subject_classical_bread_contributions,
-            num_subjects,
-            theta_dim,
-        )
-        theta_only_adjusted_sandwich_from_adjustments = (
-            form_sandwich_from_bread_and_meat(
-                classical_bread_matrix,
+            # Validate that the adjusted meat adjustments we just formed are accurate by constructing
+            # the theta-only adjusted sandwich from them and checking that it matches the standard result
+            # we get by taking a subset of the joint sandwich.
+            # First just apply any small-sample correction for parity.
+            (
+                _,
                 theta_only_adjusted_meat_matrix_v2,
+                _,
+                _,
+            ) = perform_desired_small_sample_correction(
+                small_sample_correction,
+                per_subject_joint_adjusted_meat_contributions,
+                per_subject_adjusted_classical_meat_contributions,
+                per_subject_classical_bread_contributions,
                 num_subjects,
-                method=SandwichFormationMethods.BREAD_T_QR,
+                theta_dim,
             )
-        )
-        theta_only_adjusted_sandwich = joint_sandwich[-theta_dim:, -theta_dim:]
+            theta_only_adjusted_sandwich_from_adjustments = (
+                form_sandwich_from_bread_and_meat(
+                    classical_bread_matrix,
+                    theta_only_adjusted_meat_matrix_v2,
+                    num_subjects,
+                    method=SandwichFormationMethods.BREAD_T_QR,
+                )
+            )
+            theta_only_adjusted_sandwich = joint_sandwich[-theta_dim:, -theta_dim:]
 
-        if not np.allclose(
-            theta_only_adjusted_sandwich,
-            theta_only_adjusted_sandwich_from_adjustments,
-            rtol=3e-2,
-        ):
-            logger.warning(
-                "There may be a bug in the explicit meat adjustment calculation (this doesn't affect the actual calculation, just diagnostics). We've calculated the theta-only adjusted sandwich two different ways and they do not match sufficiently."
-            )
+            if not np.allclose(
+                theta_only_adjusted_sandwich,
+                theta_only_adjusted_sandwich_from_adjustments,
+                rtol=3e-2,
+            ):
+                logger.warning(
+                    "There may be a bug in the explicit meat adjustment calculation (this doesn't affect the actual calculation, just diagnostics). We've calculated the theta-only adjusted sandwich two different ways and they do not match sufficiently."
+                )
 
     # Stack the joint bread pieces together horizontally and return the auxiliary
     # values too. The joint bread should always be block lower triangular.
@@ -2131,6 +1976,365 @@ def form_sandwich_from_bread_and_meat(
         raise ValueError(
             f"Unknown sandwich method: {method}. Please use 'bread_t_qr' or 'meat_decomposition_solve'."
         )
+
+
+def compute_eigenvalue_and_condition_diagnostics(
+    raw_joint_bread_matrix: jnp.ndarray,
+    joint_sandwich_matrix: jnp.ndarray,
+    adjusted_sandwich_var_estimate: jnp.ndarray,
+) -> tuple[float, float, np.ndarray, float, float, np.ndarray, float]:
+    """
+    Computes condition-number and eigenvalue-spread diagnostics for the joint
+    bread matrix and both the joint and theta-only adjusted sandwich matrices.
+
+    Args:
+        raw_joint_bread_matrix (jnp.ndarray):
+            The (unstabilized) joint bread matrix.
+        joint_sandwich_matrix (jnp.ndarray):
+            The joint (betas and theta) sandwich variance matrix.
+        adjusted_sandwich_var_estimate (jnp.ndarray):
+            The theta-only slice of the adjusted sandwich variance matrix.
+
+    Returns:
+        tuple:
+            - joint_bread_cond (float): condition number of the raw joint bread matrix.
+            - max_eig_joint (float): max eigenvalue of the joint sandwich matrix.
+            - eigvals_joint_sandwich (np.ndarray): all eigenvalues of the joint
+              sandwich matrix.
+            - max_to_median_ratio_joint_sandwich (float): max/median eigenvalue ratio
+              for the joint sandwich matrix, over eigenvalues >= 1e-8 * max.
+            - max_eig_theta (float): max eigenvalue of the theta-only adjusted
+              sandwich matrix.
+            - eigvals_theta_only_adjusted_sandwich (np.ndarray): all eigenvalues of
+              the theta-only adjusted sandwich matrix.
+            - max_to_median_ratio_theta_only_adjusted_sandwich (float): max/median
+              eigenvalue ratio for the theta-only adjusted sandwich matrix, over
+              eigenvalues >= 1e-8 * max.
+    """
+    joint_bread_cond = jnp.linalg.cond(raw_joint_bread_matrix)
+    logger.info(
+        "Joint bread condition number: %f",
+        joint_bread_cond,
+    )
+
+    # calculate the max eigenvalue of the theta-only adjusted sandwich
+    eigvals_theta_only_adjusted_sandwich = scipy.linalg.eigvalsh(
+        adjusted_sandwich_var_estimate
+    )
+    max_eig_theta = float(eigvals_theta_only_adjusted_sandwich.max())
+    logger.info(
+        "Max eigenvalue of theta-only adjusted sandwich matrix: %f",
+        max_eig_theta,
+    )
+
+    # Compute ratios: max eigenvalue / median eigenvalue among those >= 1e-8 * max.
+    eigvals_joint_sandwich = scipy.linalg.eigvalsh(joint_sandwich_matrix)
+    max_eig_joint = float(eigvals_joint_sandwich.max())
+    logger.info(
+        "Max eigenvalue of joint adjusted sandwich matrix: %f",
+        max_eig_joint,
+    )
+
+    joint_keep = eigvals_joint_sandwich >= (1e-8 * max_eig_joint)
+    joint_median_kept = (
+        float(np.median(eigvals_joint_sandwich[joint_keep]))
+        if np.any(joint_keep)
+        else math.nan
+    )
+    max_to_median_ratio_joint_sandwich = (
+        (max_eig_joint / joint_median_kept)
+        if (not math.isnan(joint_median_kept) and joint_median_kept > 0)
+        else (
+            math.inf
+            if (not math.isnan(joint_median_kept) and joint_median_kept == 0)
+            else math.nan
+        )
+    )
+    logger.info(
+        "Max/median eigenvalue ratio (joint sandwich; median over eigvals >= 1e-8*max): %f",
+        max_to_median_ratio_joint_sandwich,
+    )
+
+    theta_keep = eigvals_theta_only_adjusted_sandwich >= (1e-8 * max_eig_theta)
+    theta_median_kept = (
+        float(np.median(eigvals_theta_only_adjusted_sandwich[theta_keep]))
+        if np.any(theta_keep)
+        else math.nan
+    )
+    max_to_median_ratio_theta_only_adjusted_sandwich = (
+        (max_eig_theta / theta_median_kept)
+        if (not math.isnan(theta_median_kept) and theta_median_kept > 0)
+        else (
+            math.inf
+            if (not math.isnan(theta_median_kept) and theta_median_kept == 0)
+            else math.nan
+        )
+    )
+    logger.info(
+        "Max/median eigenvalue ratio (theta-only adjusted sandwich; median over eigvals >= 1e-8*max): %f",
+        max_to_median_ratio_theta_only_adjusted_sandwich,
+    )
+
+    return (
+        joint_bread_cond,
+        max_eig_joint,
+        eigvals_joint_sandwich,
+        max_to_median_ratio_joint_sandwich,
+        max_eig_theta,
+        eigvals_theta_only_adjusted_sandwich,
+        max_to_median_ratio_theta_only_adjusted_sandwich,
+    )
+
+
+def compute_local_linearization_error_ratio(
+    stabilized_joint_bread_matrix: jnp.ndarray,
+    avg_estimating_function_stack: jnp.ndarray,
+    per_subject_estimating_function_stacks: jnp.ndarray,
+    all_post_update_betas: jnp.ndarray,
+    theta_est: jnp.ndarray,
+    beta_dim: int,
+    theta_dim: int,
+    subject_ids: jnp.ndarray,
+    action_prob_func: Callable,
+    action_prob_func_args_beta_index: int,
+    alg_update_func: Callable,
+    alg_update_func_type: str,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_action_prob_index: int,
+    alg_update_func_args_action_prob_times_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    inference_func: Callable,
+    inference_func_type: str,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+    action_prob_func_args_by_subject_id_by_decision_time: dict[
+        collections.abc.Hashable, dict[int, tuple[Any, ...]]
+    ],
+    policy_num_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int | float]
+    ],
+    initial_policy_num: int | float,
+    beta_index_by_policy_num: dict[int | float, int],
+    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
+    inference_action_prob_decision_times_by_subject_id: dict[
+        collections.abc.Hashable, list[int]
+    ],
+    update_func_args_by_by_subject_id_by_policy_num: dict[
+        collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
+    ],
+    action_by_decision_time_by_subject_id: dict[
+        collections.abc.Hashable, dict[int, int]
+    ],
+) -> tuple[float, float, float]:
+    """
+    Compares the nonlinear Taylor remainder of the joint estimating-function map to
+    the retained linear term, at perturbations on the O(1/sqrt(n)) scale, as a
+    necessary/sanity diagnostic that the first-order linearization the sandwich
+    variance relies on is locally accurate at the estimation scale.
+
+    Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
+    where g(eta) is the avg per-subject weighted estimating-function stack and B is
+    the joint bread (Jacobian of g w.r.t. flattened betas+theta). This ratio is
+    dimensionless.
+
+    Args:
+        stabilized_joint_bread_matrix (jnp.ndarray):
+            The (possibly) stabilized joint bread matrix, B above.
+        avg_estimating_function_stack (jnp.ndarray):
+            g(eta) above, evaluated at the final estimate.
+        per_subject_estimating_function_stacks (jnp.ndarray):
+            Per-subject estimating function stacks, used to align perturbation draws
+            with the empirical joint estimating-function stack covariance.
+        all_post_update_betas (jnp.ndarray):
+            All parameter estimates for the algorithm updates.
+        theta_est (jnp.ndarray):
+            The parameter estimate for inference.
+        beta_dim, theta_dim, subject_ids, action_prob_func,
+        action_prob_func_args_beta_index, alg_update_func, alg_update_func_type,
+        alg_update_func_args_beta_index, alg_update_func_args_action_prob_index,
+        alg_update_func_args_action_prob_times_index,
+        alg_update_func_args_previous_betas_index, inference_func,
+        inference_func_type, inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        policy_num_by_decision_time_by_subject_id, initial_policy_num,
+        beta_index_by_policy_num, inference_func_args_by_subject_id,
+        inference_action_prob_decision_times_by_subject_id,
+        update_func_args_by_by_subject_id_by_policy_num,
+        action_by_decision_time_by_subject_id:
+            Passed straight through to get_avg_weighted_estimating_function_stacks_and_aux_values;
+            see that function's own docstring.
+
+    Returns:
+        tuple[float, float, float]:
+            The median, 90th percentile, and max local linearization error ratio
+            over the sampled perturbations.
+    """
+    # Ensure float64 for diagnostics even if upstream ran in float32.
+    joint_bread_float64 = jnp.asarray(stabilized_joint_bread_matrix, dtype=jnp.float64)
+    g_hat = jnp.asarray(avg_estimating_function_stack, dtype=jnp.float64)
+    stacks_float64 = jnp.asarray(
+        per_subject_estimating_function_stacks, dtype=jnp.float64
+    )
+
+    # Add a small ridge to improve numerical stability for ill-conditioned bread.
+    ridge_scale = 1e-8
+
+    # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
+    cond_threshold = 1e12
+    bread_cond = float(jnp.linalg.cond(joint_bread_float64))
+
+    if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
+        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread_float64)))
+        ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
+        joint_bread_float64 = joint_bread_float64 + ridge * jnp.eye(
+            joint_bread_float64.shape[0], dtype=jnp.float64
+        )
+        logger.info(
+            "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
+            float(ridge),
+            bread_cond,
+            cond_threshold,
+        )
+
+    num_subjects = stacks_float64.shape[0]
+
+    # This closure is jit-friendly by construction: suppress_all_data_checks and
+    # include_auxiliary_outputs are hardcoded below (never traced), so the
+    # np.testing.assert_allclose/.tolist()/int() concretization hazards that
+    # broke the earlier, ADR-documented jax.jit attempt on the differentiated
+    # call never enter this trace. Since ADS-139 Step 4 replaced the ragged
+    # per-subject/per-update Python loops with jax.vmap batching, this now
+    # traces to a small, compile-once graph -- worth jitting since this
+    # closure is called J=15 times below (this diagnostic previously
+    # dominated wall-clock, per this ADR's Step 0 benchmark).
+    #
+    # LANDMINE: do not change suppress_all_data_checks to a real,
+    # non-hardcoded value here. check_batched_algorithm_estimating_function_args_equivalent
+    # / check_batched_inference_estimating_function_args_equivalent (called
+    # when suppress_all_data_checks is False) call np.asarray() on their
+    # results -- fine under jax.jacrev's concrete-valued autodiff tracing
+    # (which is all they run under elsewhere), but under jax.jit's abstract
+    # tracing every value in the trace becomes a non-concrete tracer
+    # (confirmed empirically: even a jax.lax.stop_gradient'd value raises
+    # TracerArrayConversionError here, unlike under jacrev alone), so those
+    # checks would hard-crash the moment this closure ever traced with
+    # checks enabled.
+    #
+    # This closure must stay nested here (rather than hoisted to module level like
+    # the outer function around it) because it closes over the static config above
+    # and below: jax.jit needs those values fixed at trace time, and several of
+    # them (the dict-typed args) are unhashable, so they can't be passed as jit
+    # static_argnums/static_argnames to a module-level function instead.
+    @jax.jit
+    def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
+        return jnp.asarray(
+            get_avg_weighted_estimating_function_stacks_and_aux_values(
+                flattened_betas_and_theta,
+                beta_dim,
+                theta_dim,
+                subject_ids,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                alg_update_func,
+                alg_update_func_type,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
+                inference_func,
+                inference_func_type,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_func_args_by_subject_id_by_decision_time,
+                policy_num_by_decision_time_by_subject_id,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                inference_func_args_by_subject_id,
+                inference_action_prob_decision_times_by_subject_id,
+                update_func_args_by_by_subject_id_by_policy_num,
+                action_by_decision_time_by_subject_id,
+                True,  # suppress_all_data_checks
+                True,  # suppress_interactive_data_checks
+                False,  # include_auxiliary_outputs
+            ),
+            dtype=jnp.float64,
+        )
+
+    # Evaluate at the final estimate.
+    eta_hat = jnp.asarray(
+        flatten_params(all_post_update_betas, theta_est), dtype=jnp.float64
+    )
+
+    # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
+    # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
+    # square-root. If G is the (n x d) matrix of per-subject stacks, then (1/n) G^T G is the
+    # empirical covariance in joint estimating function stack space. Sampling u = (G^T w)/sqrt(n) with w~N(0, I_n) gives
+    # u ~ N(0, empirical joint estimating function stack covariance G^T G/n ) in joint estimating function stack space.
+    key = jax.random.PRNGKey(0)
+
+    # The number of perturbations we will probe
+    J = 15
+    # Chunk size to reduce peak memory
+    chunk_size = 1
+
+    ratios_list = []
+    num_chunks = (J + chunk_size - 1) // chunk_size
+
+    for chunk_idx in range(num_chunks):
+        start = chunk_idx * chunk_size
+        end = min(start + chunk_size, J)
+        cur_size = end - start
+        if cur_size <= 0:
+            continue
+
+        subkey = jax.random.fold_in(key, chunk_idx)
+        W = jax.random.normal(
+            subkey, shape=(cur_size, num_subjects), dtype=jnp.float64
+        )
+
+        U = (W @ stacks_float64) / jnp.sqrt(num_subjects)
+
+        c = 1.0
+        # TODO: Consider QR decomposition
+        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(
+            joint_bread_float64, U.T
+        ).T
+
+        B_delta = (joint_bread_float64 @ delta.T).T
+        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
+        remainder = g_plus - g_hat - B_delta
+
+        denom = jnp.linalg.norm(B_delta, axis=1)
+        numer = jnp.linalg.norm(remainder, axis=1)
+        ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
+
+        ratios_list.append(ratios)
+
+    ratios = jnp.concatenate(ratios_list, axis=0)
+
+    local_error_ratio_median = float(jnp.median(ratios))
+    local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))
+    local_error_ratio_max = float(jnp.max(ratios))
+
+    logger.info(
+        "Local linearization error ratio (median over %d draws): %.6f",
+        J,
+        local_error_ratio_median,
+    )
+    logger.info(
+        "Local linearization error ratio (90th pct over %d draws): %.6f",
+        J,
+        local_error_ratio_p90,
+    )
+
+    logger.info(
+        "Local linearization error ratio (max over %d draws): %.6f",
+        J,
+        local_error_ratio_max,
+    )
+
+    return local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max
 
 
 if __name__ == "__main__":

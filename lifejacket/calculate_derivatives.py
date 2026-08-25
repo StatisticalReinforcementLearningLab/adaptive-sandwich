@@ -10,6 +10,7 @@ from .helper_functions import (
     conditional_x_or_one_minus_x,
     load_function_from_same_named_file,
 )
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -75,73 +76,6 @@ def group_user_args_by_shape(user_arg_dict, empty_allowed=True):
         shape_id = tuple(get_shape(arg) for arg in args)
         user_arg_dicts_by_shape[shape_id][user_id] = args
     return user_arg_dicts_by_shape.values()
-
-
-# TODO: Check for exactly the required types earlier
-# TODO: Try except and nice error message
-# TODO: This is complicated enough to deserve its own unit tests
-def stack_batched_arg_lists_into_tensor(batched_arg_lists):
-    """
-    Stack a simple Python list of lists of function arguments (across all users for a specific arg position)
-    into a list of jnp arrays that can be supplied to vmap as batch arguments. vmap requires all elements of
-    such a batched array to be the same shape, as do the stacking functions we use here.  Thus we require
-    this be called on batches of users with the same data shape. We also supply the axes one must
-    iterate over to get each users's args in a batch.
-    """
-
-    batched_arg_tensors = []
-
-    # This ends up being all zeros because of the way we are (now) doing the
-    # stacking, but better to not assume that externally and send out what
-    # we've done with this list.
-    batch_axes = []
-
-    for batched_arg_list in batched_arg_lists:
-        if (
-            isinstance(
-                batched_arg_list[0],
-                (jnp.ndarray, np.ndarray),
-            )
-            and batched_arg_list[0].ndim > 2
-        ):
-            raise TypeError("Arrays with dimension greater that 2 are not supported.")
-        if (
-            isinstance(
-                batched_arg_list[0],
-                (jnp.ndarray, np.ndarray),
-            )
-            and batched_arg_list[0].ndim == 2
-        ):
-            ########## We have a matrix (2D array) arg
-
-            batched_arg_tensors.append(jnp.stack(batched_arg_list, 0))
-            batch_axes.append(0)
-        elif isinstance(
-            batched_arg_list[0],
-            (collections.abc.Sequence, jnp.ndarray, np.ndarray),
-        ) and not isinstance(batched_arg_list[0], str):
-            ########## We have a vector (1D array) arg
-            if not isinstance(batched_arg_list[0], (jnp.ndarray, np.ndarray)):
-                try:
-                    batched_arg_list = [jnp.array(x) for x in batched_arg_list]
-                except Exception as e:
-                    raise TypeError(
-                        "Argument of sequence type that cannot be cast to JAX numpy array"
-                    ) from e
-            assert batched_arg_list[0].ndim == 1
-
-            batched_arg_tensors.append(jnp.vstack(batched_arg_list))
-            batch_axes.append(0)
-        else:
-            ########## Otherwise we should have a list of scalars.
-            # Just turn into a jnp array.
-            batched_arg_tensors.append(jnp.array(batched_arg_list))
-            batch_axes.append(0)
-
-    return (
-        batched_arg_tensors,
-        batch_axes,
-    )
 
 
 # TODO: Add clarity on why we need gradients at all times.
@@ -298,7 +232,7 @@ def calculate_pi_and_weight_gradients_specific_t(
             continue
 
         logger.debug("Reforming batched data lists into tensors.")
-        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
+        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
             batched_arg_lists
         )
 
@@ -585,7 +519,7 @@ def calculate_rl_update_derivatives_specific_update(
         logger.debug("Reforming batched data lists into tensors.")
         # Now just transform the previous list of lists into a jnp array for each
         # index (a tensor for each argument).  This is for passing to vmap.
-        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
+        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
             batched_arg_lists
         )
 
@@ -864,7 +798,7 @@ def calculate_inference_loss_derivatives(
         all_involved_user_ids |= involved_user_ids
 
         logger.debug("Reforming batched data lists into tensors.")
-        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensor(
+        batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
             batched_arg_lists
         )
 

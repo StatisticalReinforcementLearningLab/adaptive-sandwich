@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import os
 import importlib.util
 import importlib.machinery
 import logging
+import math
+import time
 from typing import Any
 
 import numpy as np
+import jax
 import jax.numpy as jnp
 import pandas as pd
+
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -17,6 +23,25 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
+
+
+@contextlib.contextmanager
+def log_phase_duration(phase_name: str):
+    """
+    Context manager that logs the wall-clock duration of the wrapped block at
+    INFO level, tagged with phase_name.
+
+    This exists to give a coarse, always-on breakdown of where analyze_dataset
+    (and similar entry points) spend their time, without requiring a separate
+    profiler to be attached. See docs/adr/0001-adaptive-sandwich-performance-plan.md
+    for how this is used as the first step of the performance work.
+    """
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        logger.info("Phase '%s' took %.3f seconds.", phase_name, elapsed)
 
 
 def conditional_x_or_one_minus_x(x, condition):
@@ -105,6 +130,50 @@ def zero_small_off_diagonal_blocks(
                 J_trim = J_trim.at[r0:r1, c0:c1].set(0.0)
 
     return J_trim
+
+
+def append_new_block_row_to_block_lower_triangular_matrix(
+    cached_block: jnp.ndarray, new_block_row: jnp.ndarray
+) -> jnp.ndarray:
+    """
+    Augments a square, block lower-triangular matrix with a new block row,
+    exploiting the fact that a block lower-triangular structure means the new
+    row's only nonzero entries are in its own columns and the columns already
+    present in cached_block -- there are no new rows required above the
+    diagonal, since earlier outputs cannot depend on parameters introduced
+    after them.
+
+    Args:
+        cached_block (jnp.ndarray): The existing square block matrix, shape
+            (previous_dim, previous_dim).
+        new_block_row (jnp.ndarray): The new bottom block row, shape
+            (new_dim, previous_dim + new_dim) -- typically a Jacobian of
+            new_dim new outputs with respect to all previous_dim + new_dim
+            parameters (previous ones plus the new_dim newly introduced
+            ones).
+
+    Returns:
+        jnp.ndarray: The augmented (previous_dim + new_dim, previous_dim +
+            new_dim) square matrix, with cached_block and a new all-zero
+            block in the top row, and new_block_row spanning the full width
+            of the bottom row.
+
+    IMPORTANT: jnp.block requires a NESTED list to build a 2D block matrix --
+    passing a flat list instead concatenates every element along the last
+    axis only (equivalent to hstack), which silently produces a non-square,
+    wrong-shaped result as soon as cached_block has more than new_dim rows.
+    This function exists specifically so that mistake can't be made twice;
+    see docs/adr/0001-adaptive-sandwich-performance-plan.md for the bug this
+    was extracted from.
+    """
+    previous_dim = cached_block.shape[0]
+    new_dim = new_block_row.shape[0]
+    return jnp.block(
+        [
+            [cached_block, jnp.zeros((previous_dim, new_dim))],
+            [new_block_row],
+        ]
+    )
 
 
 def invert_bread_matrix(
@@ -346,6 +415,185 @@ def get_min_time_by_policy_num(
             first_time_after_first_update = decision_time
 
     return min_time_by_policy_num, first_time_after_first_update
+
+
+def compute_subject_radon_nikodym_weights(
+    action_prob_func,
+    action_prob_func_args_beta_index,
+    action_prob_func_args_by_decision_time,
+    threaded_action_prob_func_args_by_decision_time,
+    policy_num_by_decision_time,
+    action_by_decision_time,
+    beta_index_by_policy_num,
+):
+    """
+    Computes, for a single subject, the full-window vector of Radon-Nikodym
+    weights (get_radon_nikodym_weight, jax.vmap'd over this subject's active
+    decision times, padded with the product-identity 1.0 at any decision time
+    with no real action-probability-function args) plus the auxiliary values
+    needed to select the correct sub-window of that vector for a given
+    algorithm update or for inference.
+
+    This was extracted from what used to be three near-identical, hand-copied
+    implementations (one each in post_deployment_analysis.py,
+    deployment_conditioning_monitor.py, and
+    get_datum_for_blowup_supervised_learning.py) differing only in local
+    variable-name prefixes -- see
+    docs/adr/0001-adaptive-sandwich-performance-plan.md.
+
+    Args:
+        action_prob_func (callable): The action probability function.
+        action_prob_func_args_beta_index (int): The index of beta in the
+            action probability function's arguments.
+        action_prob_func_args_by_decision_time (dict[int, tuple[Any, ...]]):
+            This subject's action probability function arguments by decision
+            time (all decision times; empty tuple if not active then). NOTE:
+            these do NOT contain the shared betas, so they're impervious to
+            differentiation.
+        threaded_action_prob_func_args_by_decision_time (dict[int, tuple[Any, ...]]):
+            Same, but with the shared betas threaded in for differentiation.
+        policy_num_by_decision_time (dict[int, int | float]): The policy
+            number in use at each of this subject's active decision times.
+        action_by_decision_time (dict[int, int]): The action taken at each of
+            this subject's active decision times.
+        beta_index_by_policy_num (dict[int | float, int]): Maps non-initial,
+            non-fallback policy numbers to their index in all_post_update_betas.
+
+    Returns:
+        all_weights (jnp.ndarray): 1-D array of weights, one per decision
+            time in [subject_start_time, subject_end_time], in order.
+        decision_time_to_all_weights_index_offset (int): subtract this from a
+            decision time to get its index into all_weights (== subject_start_time).
+        first_time_after_first_update (int | None): passed through from
+            get_min_time_by_policy_num.
+        min_time_by_policy_num (dict[int | float, int]): passed through from
+            get_min_time_by_policy_num.
+        subject_start_time (int): this subject's earliest active decision time.
+        subject_end_time (int): this subject's latest active decision time.
+    """
+    min_time_by_policy_num, first_time_after_first_update = get_min_time_by_policy_num(
+        policy_num_by_decision_time,
+        beta_index_by_policy_num,
+    )
+
+    subject_start_time = math.inf
+    subject_end_time = -math.inf
+    for decision_time in action_by_decision_time:
+        subject_start_time = min(subject_start_time, decision_time)
+        subject_end_time = max(subject_end_time, decision_time)
+
+    # Fail loudly here rather than letting active_index (below) silently
+    # misalign or overrun active_weights on a genuine intra-window gap (this
+    # subject active, then inactive, then active again, within their own
+    # [subject_start_time, subject_end_time]) -- see
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4. This
+    # protects every caller of this shared function identically.
+    gap_times = [
+        decision_time
+        for decision_time in range(int(subject_start_time), int(subject_end_time) + 1)
+        if not action_prob_func_args_by_decision_time.get(decision_time)
+    ]
+    if gap_times:
+        raise ValueError(
+            f"Subject has an intra-window gap (inactive at decision time(s) "
+            f"{gap_times}, strictly between their own first active time "
+            f"{subject_start_time} and last active time {subject_end_time}), "
+            "which violates the 'once active, stays active with no re-entry' "
+            "invariant this Radon-Nikodym weight-window logic assumes."
+        )
+
+    # Sort the threaded args by decision time to be cautious. We check if the
+    # subject id is present in the subject args dict because we may call this
+    # on a subset of the subject arg dict when we are batching arguments by
+    # shape.
+    sorted_threaded_action_prob_args_by_decision_time = {
+        decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
+        for decision_time in range(subject_start_time, subject_end_time + 1)
+        if decision_time in threaded_action_prob_func_args_by_decision_time
+    }
+
+    # Build the beta_target/action vectors in the SAME order as the threaded
+    # args we stack below, so the vmap arguments stay aligned even if
+    # action_prob_func_args_by_decision_time/action_by_decision_time were not
+    # insertion-sorted by decision_time (their order is whatever row order
+    # analysis_df had, which is not guaranteed to match).
+    active_decision_times = [
+        decision_time
+        for decision_time, args in sorted_threaded_action_prob_args_by_decision_time.items()
+        if args
+    ]
+    active_betas_list_by_decision_time_index = jnp.array(
+        [
+            action_prob_func_args_by_decision_time[decision_time][
+                action_prob_func_args_beta_index
+            ]
+            for decision_time in active_decision_times
+        ]
+    )
+    active_actions_list_by_decision_time_index = jnp.array(
+        [action_by_decision_time[decision_time] for decision_time in active_decision_times]
+    )
+
+    num_args = None
+    for args in sorted_threaded_action_prob_args_by_decision_time.values():
+        if args:
+            num_args = len(args)
+            break
+
+    # NOTE: Cannot do [[]] * num_args here! Then all lists point same object...
+    batched_threaded_arg_lists = [[] for _ in range(num_args)]
+    for (
+        decision_time,
+        args,
+    ) in sorted_threaded_action_prob_args_by_decision_time.items():
+        if not args:
+            continue
+        for idx, arg in enumerate(args):
+            batched_threaded_arg_lists[idx].append(arg)
+
+    batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
+        batched_threaded_arg_lists
+    )
+
+    # Note that we do NOT use the shared betas in the first arg to the weight
+    # function, since we don't want differentiation to happen with respect to
+    # them. Just grab the original beta from the update function arguments.
+    # This is the same value, but impervious to differentiation with respect
+    # to all_post_update_betas. The args, on the other hand, are a function
+    # of all_post_update_betas.
+    active_weights = jax.vmap(
+        fun=get_radon_nikodym_weight,
+        in_axes=[0, None, None, 0] + batch_axes,
+        out_axes=0,
+    )(
+        active_betas_list_by_decision_time_index,
+        action_prob_func,
+        action_prob_func_args_beta_index,
+        active_actions_list_by_decision_time_index,
+        *batched_threaded_arg_tensors,
+    )
+
+    active_index = 0
+    decision_time_to_all_weights_index_offset = min(
+        sorted_threaded_action_prob_args_by_decision_time
+    )
+    all_weights_raw = []
+    for (
+        decision_time,
+        args,
+    ) in sorted_threaded_action_prob_args_by_decision_time.items():
+        all_weights_raw.append(active_weights[active_index] if args else 1.0)
+        active_index += 1
+    all_weights = jnp.array(all_weights_raw)
+
+    return (
+        all_weights,
+        decision_time_to_all_weights_index_offset,
+        first_time_after_first_update,
+        min_time_by_policy_num,
+        subject_start_time,
+        subject_end_time,
+    )
 
 
 def calculate_beta_dim(

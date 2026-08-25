@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 import collections
 
@@ -14,7 +13,10 @@ import pandas as pd
 
 from . import post_deployment_analysis
 from .constants import FunctionTypes
-from .vmap_helpers import stack_batched_arg_lists_into_tensors
+from .helper_functions import (
+    append_new_block_row_to_block_lower_triangular_matrix,
+    compute_subject_radon_nikodym_weights,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -867,19 +869,9 @@ def construct_premature_classical_and_adjusted_sandwiches(
         action_by_decision_time_by_subject_id,
     )
 
-    joint_adjusted_bread_matrix = jnp.block(
-        [
-            [
-                truncated_joint_adjusted_bread_matrix,
-                np.zeros(
-                    (
-                        truncated_joint_adjusted_bread_matrix.shape[0],
-                        new_inference_block_row.shape[0],
-                    )
-                ),
-            ],
-            [new_inference_block_row],
-        ]
+    joint_adjusted_bread_matrix = append_new_block_row_to_block_lower_triangular_matrix(
+        truncated_joint_adjusted_bread_matrix,
+        new_inference_block_row,
     )
     per_subject_estimating_function_stacks = jnp.concatenate(
         [
@@ -1195,96 +1187,22 @@ def single_subject_weighted_inference_estimating_function(
 
     # First, reformat the supplied data into more convenient structures.
 
-    # 1. Get the first time after the first update for convenience.
-    # This is used to form the Radon-Nikodym weights for the right times.
-    _, first_time_after_first_update = (
-        post_deployment_analysis.get_min_time_by_policy_num(
-            policy_num_by_decision_time,
-            beta_index_by_policy_num,
-        )
-    )
-
-    # 2. Get the start and end times for this subject.
-    subject_start_time = math.inf
-    subject_end_time = -math.inf
-    for decision_time in action_by_decision_time:
-        subject_start_time = min(subject_start_time, decision_time)
-        subject_end_time = max(subject_end_time, decision_time)
-
-    # 3. Calculate the Radon-Nikodym weights for the inference estimating function.
-    in_study_action_prob_func_args = [
-        args for args in action_prob_func_args_by_decision_time.values() if args
-    ]
-    in_study_betas_list_by_decision_time_index = jnp.array(
-        [
-            action_prob_func_args[action_prob_func_args_beta_index]
-            for action_prob_func_args in in_study_action_prob_func_args
-        ]
-    )
-    in_study_actions_list_by_decision_time_index = jnp.array(
-        list(action_by_decision_time.values())
-    )
-
-    # Sort the threaded args by decision time to be cautious. We check if the
-    # subject id is present in the subject args dict because we may call this on a
-    # subset of the subject arg dict when we are batching arguments by shape
-    sorted_threaded_action_prob_args_by_decision_time = {
-        decision_time: threaded_action_prob_func_args_by_decision_time[decision_time]
-        for decision_time in range(subject_start_time, subject_end_time + 1)
-        if decision_time in threaded_action_prob_func_args_by_decision_time
-    }
-
-    num_args = None
-    for args in sorted_threaded_action_prob_args_by_decision_time.values():
-        if args:
-            num_args = len(args)
-            break
-
-    # NOTE: Cannot do [[]] * num_args here! Then all lists point
-    # same object...
-    batched_threaded_arg_lists = [[] for _ in range(num_args)]
-    for (
-        decision_time,
-        args,
-    ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        if not args:
-            continue
-        for idx, arg in enumerate(args):
-            batched_threaded_arg_lists[idx].append(arg)
-
-    batched_threaded_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
-        batched_threaded_arg_lists
-    )
-
-    # Note that we do NOT use the shared betas in the first arg to the weight function,
-    # since we don't want differentiation to happen with respect to them.
-    # Just grab the original beta from the update function arguments. This is the same
-    # value, but impervious to differentiation with respect to all_post_update_betas. The
-    # args, on the other hand, are a function of all_post_update_betas.
-    in_study_weights = jax.vmap(
-        fun=post_deployment_analysis.get_radon_nikodym_weight,
-        in_axes=[0, None, None, 0] + batch_axes,
-        out_axes=0,
-    )(
-        in_study_betas_list_by_decision_time_index,
+    (
+        all_weights,
+        decision_time_to_all_weights_index_offset,
+        first_time_after_first_update,
+        _,
+        subject_start_time,
+        subject_end_time,
+    ) = compute_subject_radon_nikodym_weights(
         action_prob_func,
         action_prob_func_args_beta_index,
-        in_study_actions_list_by_decision_time_index,
-        *batched_threaded_arg_tensors,
+        action_prob_func_args_by_decision_time,
+        threaded_action_prob_func_args_by_decision_time,
+        policy_num_by_decision_time,
+        action_by_decision_time,
+        beta_index_by_policy_num,
     )
-
-    in_study_index = 0
-    decision_time_to_all_weights_index_offset = min(
-        sorted_threaded_action_prob_args_by_decision_time
-    )
-    all_weights_raw = []
-    for (
-        decision_time,
-        args,
-    ) in sorted_threaded_action_prob_args_by_decision_time.items():
-        all_weights_raw.append(in_study_weights[in_study_index] if args else 1.0)
-        in_study_index += 1
-    all_weights = jnp.array(all_weights_raw)
 
     # 4. Form the weighted inference estimating equation.
     weighted_inference_estimating_function = jnp.prod(

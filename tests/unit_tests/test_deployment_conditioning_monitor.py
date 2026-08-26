@@ -162,7 +162,6 @@ def test_incremental_phi_dot_bar_consistency_with_after_study_analysis():
         reward_col_name="reward",
         suppress_interactive_data_checks=True,
         suppress_all_data_checks=True,
-        small_sample_correction="none",
         collect_data_for_blowup_supervised_learning=False,
         form_adjusted_meat_adjustments_explicitly=False,
         stabilize_joint_bread=False,

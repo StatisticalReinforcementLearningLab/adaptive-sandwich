@@ -29,7 +29,7 @@ from scipy.special import expit
 from sklearn.linear_model import LinearRegression
 
 from lifejacket import post_deployment_analysis
-from lifejacket.constants import FunctionTypes, SmallSampleCorrections
+from lifejacket.constants import FunctionTypes
 from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_action_1_prob_pure import (
     synthetic_get_action_1_prob_pure,
 )
@@ -194,8 +194,7 @@ def _independent_bread_meat_sandwich(beta_hat, theta_hat):
     return bread, meat, theta_only_sandwich
 
 
-@pytest.fixture
-def package_pipeline_outputs(beta_and_theta_estimates):
+def _run_package_pipeline(beta_hat, theta_hat, jacobian_row_chunk_size=None):
     """
     Runs the actual, real lifejacket pipeline on the toy deployment: builds the
     minimal per-subject argument dictionaries construct_classical_and_adjusted_
@@ -204,8 +203,12 @@ def package_pipeline_outputs(beta_and_theta_estimates):
     latter is generic enough to serve as both the RL loss and the inference loss
     here, since both sides use only the intercept as state), and returns the raw
     joint bread, joint meat, and theta-only adjusted sandwich it computes.
+
+    jacobian_row_chunk_size is passed straight through to
+    construct_classical_and_adjusted_sandwiches, so the chunked-backward
+    equivalence test below can exercise every representation of the parameter
+    against the identical toy deployment.
     """
-    beta_hat, theta_hat = beta_and_theta_estimates
     beta_hat_jnp = jnp.array(beta_hat, dtype=jnp.float32)
     theta_hat_jnp = jnp.array(theta_hat, dtype=jnp.float32)
     all_post_update_betas = jnp.stack([beta_hat_jnp])
@@ -325,7 +328,6 @@ def package_pipeline_outputs(beta_and_theta_estimates):
         action_by_decision_time_by_subject_id,
         True,  # suppress_all_data_checks
         True,  # suppress_interactive_data_checks
-        SmallSampleCorrections.NONE,
         False,  # form_adjusted_meat_adjustments_explicitly
         False,  # stabilize_joint_bread: compare against the raw/unstabilized bread
         None,  # analysis_df (only needed if forming meat adjustments explicitly)
@@ -335,6 +337,7 @@ def package_pipeline_outputs(beta_and_theta_estimates):
         None,  # subject_id_col_name
         None,  # action_prob_func_args
         None,  # action_prob_col_name
+        jacobian_row_chunk_size=jacobian_row_chunk_size,
     )
 
     theta_only_adjusted_sandwich = joint_sandwich_matrix[-2:, -2:]
@@ -343,6 +346,11 @@ def package_pipeline_outputs(beta_and_theta_estimates):
         joint_adjusted_meat_matrix,
         theta_only_adjusted_sandwich,
     )
+
+
+@pytest.fixture
+def package_pipeline_outputs(beta_and_theta_estimates):
+    return _run_package_pipeline(*beta_and_theta_estimates)
 
 
 def test_adaptive_sandwich_matches_independent_closed_form_calculation(
@@ -378,3 +386,41 @@ def test_adaptive_sandwich_matches_notebook_recorded_values(package_pipeline_out
     np.testing.assert_allclose(
         theta_sandwich, NOTEBOOK_THETA_SANDWICH, rtol=1e-4, atol=1e-6
     )
+
+
+def test_jacobian_row_chunk_size_representations_numerically_identical(
+    package_pipeline_outputs, beta_and_theta_estimates
+):
+    """
+    Every representation of jacobian_row_chunk_size must produce the same
+    numbers on the identical toy deployment:
+
+    - None (the default) = auto, which at this tiny out_dim (=4, far below
+      the unchunked threshold) resolves to the single unchunked eager
+      jax.vmap(pullback) -- the pre-auto default path.
+    - 0 = force that same unchunked path explicitly, so it must be
+      bitwise-identical to the auto default here.
+    - 3 = an explicit chunk size (with a shorter remainder chunk of 1),
+      exercising the jitted chunked backward path -- mathematically
+      identical, allowed float32 noise only.
+    """
+    forced_unchunked = _run_package_pipeline(
+        *beta_and_theta_estimates, jacobian_row_chunk_size=0
+    )
+    chunked = _run_package_pipeline(
+        *beta_and_theta_estimates, jacobian_row_chunk_size=3
+    )
+
+    for auto_value, forced_value in zip(
+        package_pipeline_outputs, forced_unchunked, strict=True
+    ):
+        np.testing.assert_array_equal(np.asarray(auto_value), np.asarray(forced_value))
+    for auto_value, chunked_value in zip(
+        package_pipeline_outputs, chunked, strict=True
+    ):
+        np.testing.assert_allclose(
+            np.asarray(auto_value),
+            np.asarray(chunked_value),
+            rtol=1e-5,
+            atol=1e-6,
+        )

@@ -369,17 +369,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -687,17 +690,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -1272,17 +1278,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -1801,17 +1810,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -2373,17 +2385,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-6,
     )
@@ -3087,17 +3102,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-5,
     )
@@ -3921,17 +3939,20 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
     )
     np.testing.assert_allclose(
         result[1][1],
-        jnp.array(
-            [
-                jnp.outer(
-                    expected_weighted_stack_1,
-                    expected_weighted_stack_1,
-                ),
-                jnp.outer(
-                    expected_weighted_stack_2,
-                    expected_weighted_stack_2,
-                ),
-            ]
+        jnp.sum(
+            jnp.array(
+                [
+                    jnp.outer(
+                        expected_weighted_stack_1,
+                        expected_weighted_stack_1,
+                    ),
+                    jnp.outer(
+                        expected_weighted_stack_2,
+                        expected_weighted_stack_2,
+                    ),
+                ]
+            ),
+            axis=0,
         ),
         rtol=1e-5,
     )
@@ -4010,3 +4031,45 @@ def test_get_radon_nikodym_weight_same_beta():
     )
 
     np.testing.assert_allclose(result, expected_result)
+
+
+def test_resolve_jacobian_row_chunk_size_auto_heuristic():
+    """
+    The None="auto" heuristic, pinned to the empirical calibration points in
+    lifejacket/constants.py: unchunked (None) at and below the out_dim
+    threshold (this repo's own benchmark fixtures, out_dim 28/56, land
+    there, keeping the default path byte-identical); above it, chunk sizes
+    at or below every budget verified safe at real oralytics scale.
+    """
+    resolve = post_deployment_analysis.resolve_jacobian_row_chunk_size
+
+    # At/below the threshold: unchunked, exactly today's default path.
+    assert resolve(None, 28) is None
+    assert resolve(None, 56) is None
+    assert resolve(None, 512) is None
+    # Boundary: 513 is the first chunked out_dim, capped at 64 (the largest
+    # chunk ever verified safe, at out_dim ~1500).
+    assert resolve(None, 513) == 64
+    assert resolve(None, 1024) == 64
+    # Real-scale anchors (see constants.py): 43 at ~1500 and 32 at ~2000 are
+    # both strictly smaller than the verified-safe 64 there; 21 at ~3100 and
+    # 15 at ~4185 sit at/below the budgets verified safe at those scales.
+    assert resolve(None, 1500) == 43
+    assert resolve(None, 2000) == 32
+    assert resolve(None, 3100) == 21
+    assert resolve(None, 4185) == 15
+    # Floor at 1 for absurdly large out_dim.
+    assert resolve(None, 10**7) == 1
+
+
+def test_resolve_jacobian_row_chunk_size_explicit_overrides():
+    resolve = post_deployment_analysis.resolve_jacobian_row_chunk_size
+
+    # 0 forces the unchunked single eager vmap even where auto would chunk.
+    assert resolve(0, 4185) is None
+    # A positive int is honored verbatim in both regimes.
+    assert resolve(16, 4185) == 16
+    assert resolve(16, 8) == 16
+    # Negative is rejected.
+    with pytest.raises(ValueError, match="jacobian_row_chunk_size"):
+        resolve(-1, 100)

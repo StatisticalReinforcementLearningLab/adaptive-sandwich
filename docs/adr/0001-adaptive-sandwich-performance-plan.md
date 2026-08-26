@@ -5,8 +5,10 @@
   before Step 4 (reverted in full) and once after (partially kept: the local-linearization
   diagnostic's forward-pass closure is now jitted, a clear win; jitting the main differentiated
   call was tried and reverted again, a clear regression even post-Step-4 -- see "Step 3, second
-  attempt: jit after Step 4" below); Step 5 remains proposed)
-- Date: 2026-08-24
+  attempt: jit after Step 4" below); Step 5 remains proposed; Step 7 is done -- the
+  small-sample-correction feature was removed outright, not optimized, once profiling
+  identified it as the dominant real-scale memory cost -- see "Step 7" below)
+- Date: 2026-08-26
 - Ticket: ADS-139
 
 ## Context
@@ -620,6 +622,237 @@ Step 2's consolidation gives one shared, tested implementation to modify
 once, and only if the benchmark still shows it matters at realistic update
 counts after Steps 3-4.
 
+### Step 6: `combine_updates_into_one_vmap` (per-update loop collapse, done)
+
+Motivation: `compute_batched_algorithm_component`'s outer Python loop over
+updates (`U` ~11-31 at oralytics scale) exists only because each update has a
+different active-subject set/shape, not because of a real data dependency --
+every update's `betas[u]` is already concrete by the time this runs. Two
+CPU-only toy experiments (dense, no staggered recruitment) suggested
+collapsing this loop plus the per-update shape-bucket loop into ONE combined
+`jax.vmap` call (spanning update x subject at once) could reduce peak RSS
+and wall-clock time, with the gap *widening*, not narrowing, at larger scale
+-- a different, more promising signal than chunking-alone or
+JIT-with-explicit-residuals, both of which looked fine on a toy and did not
+transfer to the real hot path (see Step 3's second attempt, above).
+
+Implemented as a new opt-in, `combine_updates_into_one_vmap: bool = False`,
+(since made the AUTO-resolved default, `bool | None = None` -- see Step 8)
+following this file's established index-convention/opt-in pattern
+(`lifejacket/batched_weighted_estimating_function_stack.py`,
+`lifejacket/post_deployment_analysis.py`). Mechanism: every update's ragged
+positions are self-padded (reusing `self_pad_ragged_args_and_build_mask`,
+extended with an optional `target_max_length` so a per-update local pad can
+be re-padded to one shared global length) up to one length shared by every
+update, instead of each update's own local max; a subject invalid at a given
+update is self-padded with that subject's OWN real args from their nearest
+valid update (`update_fill_index` -- the same forward/backward-fill
+construction `ActionProbLayerPrecompute.fill_col_index` already uses along
+the time axis, applied here along the update axis instead); the resulting
+`(N, U, *shape)` tensors are flattened to `(N*U, *shape)` and evaluated via
+one `jax.vmap` call, then reshaped back and gated by the same
+`valid_update * rl_weight_products` multiply the original loop already
+applies. Requires `alg_update_func_args_mask_index >= 0` (raises `ValueError`
+otherwise); requires `alg_update_func_args_previous_betas_index < 0` (raises
+`NotImplementedError` otherwise) -- a repo-wide grep found the only two
+shipped functions that use `previous_betas_index >= 0`
+(`RL_least_squares_loss_regularized_previous_betas_as_args[_hard_clipping].py`)
+index into it via a separate `post_update_policy_nums` offset array, never
+via `previous_betas.shape[0]`/`len(...)`, so no shipped function is known to
+depend on its length -- but the real target function
+(`oralytics_RL_estimating_function`, sibling `adjusted-sandwich-user` repo)
+has no `previous_betas` argument at all (index always -1), and no golden
+fixture in this repo exercises `previous_betas_index >= 0` either, so
+supporting that combination was left unbuilt (loud error) rather than
+shipped unverified. The inference side (`compute_batched_inference_outputs`)
+has no per-update axis at all and was deliberately left out of scope.
+
+**Measured, not assumed, against this repo's own real fixtures** (not
+synthetic): both `tests/benchmarks` fixtures' `rl_update_args` already carry
+genuinely ragged, staggered-recruitment per-subject/per-update history
+lengths (confirmed by direct inspection), so a mask-aware variant of the
+shipped `RL_least_squares_loss_regularized` loss
+(`RL_least_squares_loss_regularized_masked.py`, algebraically identical on
+real data -- the appended mask is the only difference) could be run through
+a full `analyze_dataset` call on the real fixture data three ways --
+original/unmasked, masked-uncombined, masked-combined -- and compared
+directly (see `tests/benchmarks/test_combine_updates_into_one_vmap_benchmark.py`).
+All three match the existing golden fixture to float32 noise at both scales.
+Isolated-process (to avoid `ru_maxrss`'s monotonic-watermark contamination
+across runs in one process) timing/RSS for the `jax.jacrev(...)` forward/backward
+split:
+
+| scale (n, T, U) | variant | forward_vjp | backward_vmap_chunks | peak RSS after forward | peak RSS after backward |
+|---|---|---|---|---|---|
+| small (20, 6, 6) | baseline | 1.98s | 1.10s | 450.7 MB | 570.2 MB |
+| small (20, 6, 6) | combined | 1.41s | 0.71s | 400.6 MB | 489.4 MB |
+| medium (100, 10, 13) | baseline | 3.91s | 1.97s | 645.1 MB | 838.0 MB |
+| medium (100, 10, 13) | combined | 1.51s | 0.78s | 459.8 MB | 579.7 MB |
+
+Unlike the chunking and JIT-with-explicit-residuals attempts above, this
+result **transfers positively** at both fixture scales, and the gap widens
+with scale exactly as the toy predicted (small: ~29% faster / ~14% lower
+peak RSS; medium: ~61% faster / ~31% lower peak RSS) -- despite these
+fixtures having a far smaller `beta_dim` (4) than oralytics (135), so this is
+not yet a verdict at oralytics scale, only a real (not toy), reproducible,
+same-direction signal at both scales this repo's fixtures can exercise.
+Real-scale (oralytics) verification is a deliberate follow-up, out of scope
+for this step (see task handoff), to be run under the same memory watchdog
+used for the original OOM repro.
+
+### Step 7: small-sample correction feature removed (not optimized, done)
+
+A real, watchdog-protected oralytics-scale run (`num_users=50`, `beta_dim=135`,
+`out_dim~3130`) showed the per-subject `(num_subjects, out_dim, out_dim)`
+outer-product tensor built by `get_avg_weighted_estimating_function_stacks_and_aux_values`
+for the joint adjusted meat matrix -- plus its `(num_subjects, theta_dim,
+theta_dim)` classical-meat sibling -- as the dominant real-scale memory cost:
+the first tensor alone is ~1.96GB at that size, and both were carried through
+`jax.vjp`'s residual tape into `perform_desired_small_sample_correction`
+(`lifejacket/small_sample_corrections.py`), which existed solely to apply one
+of four small-sample corrections (`none`, `Z1theta`, `Z2theta`, `Z3theta`) to
+the meat matrices before forming the sandwich.
+
+An initial fix (committed earlier in this same investigation) kept the
+feature but added an opt-in fast path: when the requested correction gives
+every subject the same scalar weight (`none`/`Z1theta`), `mean_i(w *
+outer(stack_i, stack_i)) == w * (stacks.T @ stacks) / N` exactly (`sum_i
+outer(x_i, x_i) == X.T @ X`), so the per-subject tensor never needed to be
+materialized for those two values. `Z2theta`/`Z3theta` need genuinely
+per-subject leverage weights and were left on the original
+`jax.vmap(jnp.outer)` path.
+
+In practice, nothing in this repo, its test suite, or its sibling
+`adjusted-sandwich-user` runner repo ever passed anything other than
+`"none"` for `small_sample_correction` -- a repo-wide grep confirmed
+`Z1theta`/`Z2theta`/`Z3theta` appeared nowhere outside the enum and the
+module implementing them. Given that, the feature was removed outright at
+the user's explicit request rather than kept behind an opt-in flag:
+`SmallSampleCorrections`, `small_sample_corrections.py`, and the
+`small_sample_correction` parameter/CLI flag were deleted everywhere in this
+repo (from `analyze_dataset`, `construct_classical_and_adjusted_sandwiches`,
+the CLI, and every call/test site).
+`get_avg_weighted_estimating_function_stacks_and_aux_values` now
+unconditionally computes `stacks.T @ stacks` (and
+`inference_component.T @ inference_component`) for the joint/classical meat
+matrices -- the same identity as the fast path above, just with no
+conditional and no other code path left that would ever need the
+per-subject tensor. `construct_classical_and_adjusted_sandwiches` divides
+those pre-summed matrices by `num_subjects` directly in place of the removed
+`perform_desired_small_sample_correction` call; the two
+`per_subject_*_corrections` outputs are kept as trivial `jnp.ones(num_subjects)`
+placeholders purely so `analyze_dataset`'s `debug_pieces.pkl` output shape
+(checked by `tests/utils.py`'s exact-key-list assertion) is undisturbed.
+
+Verified numerically identical to pre-removal `"none"` behavior on both
+`tests/benchmarks` golden fixtures (full suite re-run after the deletion,
+same tolerances as before this step). At these fixtures' own scale
+(`out_dim` 28 (small) / 56 (medium), `num_subjects` 20 / 100) the deleted
+tensor was only ~0.06MB / ~1.2MB to begin with, so isolated-process peak RSS
+for the whole `analyze_dataset` call is statistically unchanged
+(`/usr/bin/time -l` "maximum resident set size": small ~702.6MB before this
+step vs. ~704.2MB after; medium ~1163.1MB vs. ~1163.0MB) -- these fixtures
+are far too small to exercise the cost this step removes, exactly as already
+noted for Step 6 above. The `Peak RSS after compute_meat_matrices` log line
+(same `resource.getrusage`-based instrumentation used throughout this file)
+confirms the phase itself now adds only ~2.5MB on top of the preceding
+`backward_vmap_chunks` phase at both scales -- consistent with never
+constructing the per-subject tensor, even transiently. A real oralytics-scale
+before/after comparison remains a deliberate follow-up (same watchdog
+process as the original OOM repro), since this repo's own fixtures cannot
+reach the ~1.96GB tensor size that motivated this step.
+
+### Step 8: auto-enabled defaults for `combine_updates_into_one_vmap` and `jacobian_row_chunk_size` (done)
+
+Steps 6's `combine_updates_into_one_vmap` and the chunked-backward
+`jacobian_row_chunk_size` (both introduced above as explicit opt-ins) were
+verified this same investigation to be *necessary* for the real
+70-subject/31-update/`beta_dim=135` oralytics study (`out_dim` ~4185) to
+complete on a 24GB machine -- which made "the user must know to pass both,
+and pick a chunk size" too much to ask for the primary real use case. Both
+now default to AUTO, with the resolution logged at INFO and explicit values
+preserved as overrides in both directions:
+
+- `combine_updates_into_one_vmap: bool | None = None` (was `bool = False`).
+  `None` = auto: enabled exactly when eligible
+  (`alg_update_func_args_mask_index >= 0` -- combining cannot be auto-enabled
+  without the mask opt-in, since it needs a mask-aware `alg_update_func` --
+  AND `alg_update_func_args_previous_betas_index < 0`), silently off
+  otherwise; `True` keeps every loud ineligibility error verbatim; `False`
+  forces the loop even when eligible. Resolution happens in
+  `resolve_combine_updates_into_one_vmap`
+  (`batched_weighted_estimating_function_stack.py`, pure, directly
+  unit-tested) at the single choke point both real entry paths flow through
+  (`get_avg_weighted_estimating_function_stacks_and_aux_values`, immediately
+  before `build_update_layer_precompute`); the `precomputed_layers`
+  diagnostic path bypasses it exactly as before. The two structural
+  invariants only checkable *during* the combined-block precompute (one
+  shape-bucket per update after global padding; identical non-ragged shapes
+  across updates) fall back in auto mode -- `build_update_layer_precompute`
+  grew a `combine_is_required: bool = True` argument, and when it is False
+  (auto), the self-contained combined block's `ValueError` is caught, a
+  WARNING naming the violated invariant is logged, and the precompute
+  returns with `combined_*` left `None`, i.e. the shipped, golden-tested
+  default loop. This is cheap by construction (the default per-update bucket
+  structures are always fully built *before* the combined block starts --
+  the block was deliberately written independent of the main loop's state)
+  and never a correctness risk (the fallback IS the default path, and the
+  two paths were already verified numerically identical at both fixture
+  scales in Step 6). Erroring instead (option (b) considered) would have
+  turned previously-working masked studies with unusual shape structure into
+  hard failures purely because a speed heuristic got more ambitious.
+
+- `jacobian_row_chunk_size: int | None = None`, with `None` now meaning
+  auto rather than "never chunk": unchunked (the original single eager
+  `jax.vmap(pullback)`) when `out_dim <= 512`, else
+  `max(1, min(64, 65536 // out_dim))`; a NEW `0` sentinel forces the
+  original unchunked path explicitly (0 was previously a `ValueError`); a
+  positive int stays an explicit chunk size, unchanged, including the
+  jitted-chunk mechanism. Resolution happens in
+  `resolve_jacobian_row_chunk_size` (`post_deployment_analysis.py`, pure,
+  directly unit-tested), called the moment `out_dim` is first known inside
+  `construct_classical_and_adjusted_sandwiches`. The constants
+  (`JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM = 512`,
+  `JACOBIAN_AUTO_ROW_BUDGET = 65536`, `JACOBIAN_AUTO_MAX_CHUNK = 64`,
+  `lifejacket/constants.py`) are grounded in this investigation's real
+  oralytics measurements (all `beta_dim=135`, 24GB Mac, combined+masked):
+  unchunked crashed at `out_dim` ~1500 while chunk 64 worked there (8.4s
+  backward) and at ~2000 (21.8s); chunk 64 CRASHED at ~3100 while chunk 16
+  worked (69-71s, peak RSS ~2.1GB); chunk 16 worked at ~4185 (174s, peak
+  RSS ~3.1GB). Treating `chunk_size * out_dim` as the budget, the crash
+  boundary sits in (128k, 198k]; 65,536 is roughly one-third of the crash
+  point and at-or-below every verified-safe budget in the dangerous
+  `out_dim >= 3100` regime, i.e. calibrated conservatively rather than to
+  the edge (headroom over the last ~10% of speed). The 512 threshold keeps
+  every problem at this repo's own fixture scales (`out_dim` 28/56, where
+  the jitted chunk path measured ~2.4x SLOWER than eager -- see the
+  chunking caveats above) on the untouched eager path; nothing was measured
+  between `out_dim` 56 and ~1500, so the conservative end of that gap was
+  chosen (worst case above the threshold: one ~1.4-1.8s compile, plus one
+  for a remainder chunk, on problems whose backward already costs seconds;
+  worst case below it would be an OOM'd machine). `out_dim` is honestly a
+  single-variable PROXY (`U*beta_dim + theta_dim` correlates with, but does
+  not equal, the true per-cotangent backward footprint, which also grows
+  with `num_subjects x num_updates x history length`), calibrated on ONE
+  study shape on ONE machine -- the explicit parameter is the documented
+  escape hatch in both directions (smaller to use less memory, larger or 0
+  to go faster when memory is plentiful).
+
+Default behavior at this repo's own benchmark scales is unchanged by
+construction (unmasked fixtures resolve combine to off; `out_dim` 28/56
+resolve chunking to the untouched unchunked eager call), verified by
+re-running the small and medium (`-m slow`) golden benchmark suites
+unchanged after the change. New unit tests cover both resolvers' decision
+matrices/boundaries, the auto-fallback-on-structural-violation path (both
+invariants; explicit `True` still errors loudly), and numeric identity
+between auto-resolved and explicitly-passed equivalents (combine: exact;
+chunked-vs-unchunked backward: float32 noise only). CLI semantics follow the
+existing conventions: `--combine_updates_into_one_vmap` keeps `type=bool`
+with `default=None` (click's BOOL already parses True/False tokens, and the
+`-1000` int-sentinel convention is reserved for argument-INDEX options, not
+feature toggles); `--jacobian_row_chunk_size` keeps `type=int, default=None`
+with `0` as the explicit "no chunking" value.
+
 ### Rejected alternatives
 
 - **Migrate to float64 for speed.** This is CPU-only (no GPU/TPU config
@@ -629,8 +862,8 @@ counts after Steps 3-4.
   float32-vs-float64 compute difference on CPU. Not worth the ULP-level
   change in every existing regression fixture for no real speed benefit.
 - **Move the post-hoc numpy linear algebra to `jax.numpy`**
-  (`stabilize_joint_bread_if_necessary`, `form_adjusted_meat_adjustments_directly`,
-  the small-sample-correction inversion) to be "more JAX-native." All of
+  (`stabilize_joint_bread_if_necessary`, `form_adjusted_meat_adjustments_directly`)
+  to be "more JAX-native." All of
   this runs *after* `jax.jacrev` has already returned concrete arrays, never
   inside a differentiated path, and operates on small one-off matrices
   outside any jit boundary -- numpy straight into LAPACK is the faster

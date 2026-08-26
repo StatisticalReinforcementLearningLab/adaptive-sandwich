@@ -49,7 +49,6 @@ def perform_first_wave_input_checks(
     theta_est,
     beta_dim,
     suppress_interactive_data_checks,
-    small_sample_correction,
 ):
     ### Validate algorithm loss/estimating function and args
     require_alg_update_args_given_for_all_subjects_at_each_update(

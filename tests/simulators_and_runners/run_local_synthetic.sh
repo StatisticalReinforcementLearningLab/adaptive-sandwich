@@ -27,7 +27,6 @@ lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-monitor_bread_conditioning_and_intervene=0
 
 # Arguments that only affect inference side.
 active_col_name="in_study"
@@ -69,7 +68,7 @@ jacobian_row_chunk_size=""
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:K:N:w:W:R:O:-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:K:w:W:R:O:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -117,7 +116,6 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     Q  | suppress_interactive_data_checks )                 needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                         needs_arg; suppress_all_data_checks="$OPTARG" ;;
     K  | form_adjusted_meat_adjustments_explicitly )        needs_arg; form_adjusted_meat_adjustments_explicitly="$OPTARG" ;;
-    N  | monitor_bread_conditioning_and_intervene ) needs_arg; monitor_bread_conditioning_and_intervene="$OPTARG" ;;
     w  | collect_args_to_reconstruct_action_probs )         needs_arg; collect_args_to_reconstruct_action_probs="$OPTARG" ;;
     W  | alg_update_func_args_previous_betas_index )        needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
     R  | run_diagnostics )                                  needs_arg; run_diagnostics="$OPTARG" ;;
@@ -171,8 +169,7 @@ python rl_study_simulation.py \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
   --lambda_=$lambda_ \
-  --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs \
-  --monitor_bread_conditioning_and_intervene=$monitor_bread_conditioning_and_intervene
+  --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.

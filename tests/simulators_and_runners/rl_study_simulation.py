@@ -572,13 +572,6 @@ def main():
         help="Number of updates between recruitment times (minimum 1)",
     )
 
-    parser.add_argument(
-        "--monitor_bread_conditioning_and_intervene",
-        type=int,
-        default=0,
-        help="Whether to monitor bread conditioning and intervene if necessary. This is to facilitate after-study analysis.",
-    )
-
     args = parser.parse_args()
     logger.info("Args provided to rl_study_simulation.py:\n%s", args)
 

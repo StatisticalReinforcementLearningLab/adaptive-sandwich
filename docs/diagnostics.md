@@ -1,11 +1,14 @@
 # Diagnostic suite for the adjusted sandwich
 
 `lifejacket.diagnostics` implements a layered set of checks for the adjusted-sandwich
-inference produced by `post_deployment_analysis.analyze_dataset`. It is opt-in
-(`run_diagnostics=True` / `--run_diagnostics=True`), does not change the adjusted sandwich
-estimator itself, and never automatically falls back to the classical sandwich when a check
-fails: failure of these checks means the current adjusted-Wald analysis lacks support, not that
-the classical sandwich is valid instead.
+inference produced by `post_deployment_analysis.analyze_dataset`. It runs by default
+(`run_diagnostics` defaults to `True`; pass `run_diagnostics=False` / `--run_diagnostics=False`
+to disable it), does not change the adjusted sandwich estimator itself, and never automatically
+falls back to the classical sandwich when a check fails: failure of these checks means the
+current adjusted-Wald analysis lacks support, not that the classical sandwich is valid instead.
+The default `DiagnosticConfig()` only runs the cheap checks below; the expensive exact-
+nonlinear-perturbation and Jacobian-drift checks (`compute_exact_nonlinear_roots`) stay opt-in
+regardless of `run_diagnostics`.
 
 The suite is organized around one idea: the adjusted sandwich can fail for different reasons,
 and a single number cannot certify all of them.

@@ -287,10 +287,13 @@ def cli():
 @click.option(
     "--run_diagnostics",
     type=bool,
-    default=False,
-    help="If True, runs the extended diagnostic suite (see lifejacket.diagnostics) after "
-    "computing the adjusted sandwich and writes diagnostic_report.pkl. Does not affect the "
-    "adjusted sandwich computation itself.",
+    default=True,
+    help="If True (the default), runs the extended diagnostic suite (see lifejacket.diagnostics) "
+    "after computing the adjusted sandwich and writes diagnostic_report.pkl. Does not affect the "
+    "adjusted sandwich computation itself. Defaults to DiagnosticConfig()'s own cheap-checks-only "
+    "settings (root/implementation, local nonlinearity, bread stability, influence concentration, "
+    "exploration/weights) -- the expensive exact-nonlinear-perturbation/Jacobian-drift checks stay "
+    "opt-in (see --diagnostic_config_pickle) even when this is True.",
 )
 @click.option(
     "--diagnostic_config_pickle",
@@ -392,7 +395,7 @@ def analyze_dataset(
     inference_func_args_ragged_indices: tuple[int, ...] = (),
     jacobian_row_chunk_size: int | None = None,
     combine_updates_into_one_vmap: bool | None = None,
-    run_diagnostics: bool = False,
+    run_diagnostics: bool = True,
     diagnostic_config: diagnostics.DiagnosticConfig | None = None,
 ) -> None:
     """
@@ -509,10 +512,14 @@ def analyze_dataset(
         (compute_local_linearization_error_ratio), which continues to use the
         original per-update/per-bucket loop regardless.
     run_diagnostics (bool):
-        If True, runs the extended diagnostic suite (lifejacket.diagnostics.run_diagnostic_suite)
-        after the adjusted sandwich has been computed and writes its DiagnosticReport to
-        diagnostic_report.pkl in output_dir. Defaults to False and does not otherwise affect the
-        adjusted sandwich computation.
+        If True (the default), runs the extended diagnostic suite (lifejacket.diagnostics.
+        run_diagnostic_suite) after the adjusted sandwich has been computed and writes its
+        DiagnosticReport to diagnostic_report.pkl in output_dir. Does not otherwise affect the
+        adjusted sandwich computation. With no diagnostic_config override, this runs only
+        DiagnosticConfig()'s cheap checks (root/implementation, local nonlinearity, bread
+        stability, influence concentration, exploration/weights) -- the expensive exact-
+        nonlinear-perturbation/Jacobian-drift checks (compute_exact_nonlinear_roots) stay
+        opt-in regardless of this flag.
     diagnostic_config (lifejacket.diagnostics.DiagnosticConfig | None):
         Configuration for the diagnostic suite, used only when run_diagnostics is True. Defaults
         to DiagnosticConfig() when not supplied.
@@ -805,37 +812,52 @@ def analyze_dataset(
         logger.info("Running extended diagnostic suite (lifejacket.diagnostics).")
 
         def _diagnostics_g_tilde(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
-            return jnp.asarray(
-                get_avg_weighted_estimating_function_stacks_and_aux_values(
-                    flattened_betas_and_theta,
-                    beta_dim,
-                    theta_dim,
-                    subject_ids,
-                    action_prob_func,
-                    action_prob_func_args_beta_index,
-                    alg_update_func,
-                    alg_update_func_type,
-                    alg_update_func_args_beta_index,
-                    alg_update_func_args_action_prob_index,
-                    alg_update_func_args_action_prob_times_index,
-                    alg_update_func_args_previous_betas_index,
-                    inference_func,
-                    inference_func_type,
-                    inference_func_args_theta_index,
-                    inference_func_args_action_prob_index,
-                    action_prob_func_args,
-                    policy_num_by_decision_time_by_subject_id,
-                    initial_policy_num,
-                    beta_index_by_policy_num,
-                    inference_func_args_by_subject_id,
-                    inference_action_prob_decision_times_by_subject_id,
-                    alg_update_func_args,
-                    action_by_decision_time_by_subject_id,
-                    True,  # suppress_all_data_checks
-                    True,  # suppress_interactive_data_checks
-                    False,  # include_auxiliary_outputs
+            # The diagnostic suite calls this dozens of times (once per sampled
+            # perturbation direction/radius across several checks), and
+            # get_avg_weighted_estimating_function_stacks_and_aux_values
+            # unconditionally logs shape-bucket-fan-out/phase-duration INFO
+            # lines meant to describe the one real analysis call above --
+            # without this, those lines flood the log with identical repeats.
+            # Raised/restored around just this call so the real analysis run's
+            # own logging above, and the diagnostic summary/warnings below,
+            # are unaffected.
+            root_logger = logging.getLogger()
+            previous_level = root_logger.level
+            root_logger.setLevel(logging.WARNING)
+            try:
+                return jnp.asarray(
+                    get_avg_weighted_estimating_function_stacks_and_aux_values(
+                        flattened_betas_and_theta,
+                        beta_dim,
+                        theta_dim,
+                        subject_ids,
+                        action_prob_func,
+                        action_prob_func_args_beta_index,
+                        alg_update_func,
+                        alg_update_func_type,
+                        alg_update_func_args_beta_index,
+                        alg_update_func_args_action_prob_index,
+                        alg_update_func_args_action_prob_times_index,
+                        alg_update_func_args_previous_betas_index,
+                        inference_func,
+                        inference_func_type,
+                        inference_func_args_theta_index,
+                        inference_func_args_action_prob_index,
+                        action_prob_func_args,
+                        policy_num_by_decision_time_by_subject_id,
+                        initial_policy_num,
+                        beta_index_by_policy_num,
+                        inference_func_args_by_subject_id,
+                        inference_action_prob_decision_times_by_subject_id,
+                        alg_update_func_args,
+                        action_by_decision_time_by_subject_id,
+                        True,  # suppress_all_data_checks
+                        True,  # suppress_interactive_data_checks
+                        False,  # include_auxiliary_outputs
+                    )
                 )
-            )
+            finally:
+                root_logger.setLevel(previous_level)
 
         try:
             diagnostic_report = diagnostics.run_diagnostic_suite(

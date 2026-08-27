@@ -142,12 +142,15 @@ padding/masking feature that fixes exactly that.
 
 ## Diagnostics
 
-`analyze`/`analyze_dataset` accept an optional `--run_diagnostics`/`run_diagnostics` flag that
-runs a layered diagnostic suite (root/implementation checks, local and exact nonlinearity
-checks, bread-stability checks, influence concentration, exploration/importance-weight checks,
-and optional simulator calibration) over the adjusted sandwich and writes
-`diagnostic_report.pkl`. It does not change the adjusted sandwich estimator itself, and a
-diagnostic failure does not mean the classical sandwich is valid instead. See
+`analyze`/`analyze_dataset` accept a `--run_diagnostics`/`run_diagnostics` flag, **on by
+default**, that runs a layered diagnostic suite over the adjusted sandwich and writes
+`diagnostic_report.pkl`. By default this runs only the cheap checks (root/implementation,
+local nonlinearity, bread stability, influence concentration, exploration/importance-weight
+checks) -- the expensive exact-nonlinear-perturbation and Jacobian-drift checks, and simulator
+calibration, stay opt-in (pass `--diagnostic_config_pickle`/`diagnostic_config` with
+`compute_exact_nonlinear_roots=True`, or call `lifejacket.simulator_calibration.
+calibrate_and_classify` directly). It does not change the adjusted sandwich estimator itself,
+and a diagnostic failure does not mean the classical sandwich is valid instead. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish.
 
 ## Linting/Formatting

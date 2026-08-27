@@ -1,3 +1,13 @@
+"""
+This module contains functions for calculating derivatives and handling
+batched arguments for users in a study. It includes utilities for grouping
+user arguments by shape, padding loss gradients, and managing involved
+user IDs.
+
+It is largely legacy code, but still used in some debugging code that calculates
+the adjusted sandwich by alternative means (directly forming the per-user meat adjustments.)
+"""
+
 import collections
 import inspect
 import logging
@@ -20,16 +30,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
-
-"""
-This module contains functions for calculating derivatives and handling
-batched arguments for users in a study. It includes utilities for grouping
-user arguments by shape, padding loss gradients, and managing involved
-user IDs.
-
-It is largely legacy code, but still used in some debugging code that calculates
-the adjusted sandwich by alternative means (directly forming the per-user meat adjustments.)
-"""
 
 
 def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_user_id):

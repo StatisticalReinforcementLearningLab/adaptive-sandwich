@@ -117,6 +117,10 @@ def _run_analyze_dataset(tmp_path, scale, suppress_all_data_checks, caplog):
             suppress_interactive_data_checks=True,
             suppress_all_data_checks=suppress_all_data_checks,
             form_adjusted_meat_adjustments_explicitly=False,
+            # This benchmark measures the core estimation pipeline; run_diagnostics
+            # now defaults to True, which would add an unrelated phase to the timing
+            # this test is specifically measuring.
+            run_diagnostics=False,
         )
         total_seconds = time.perf_counter() - start
 

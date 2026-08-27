@@ -51,7 +51,7 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimat
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 form_adjusted_meat_adjustments_explicitly=0
-run_diagnostics=0
+run_diagnostics=1
 diagnostic_config_pickle=""
 # Opt-in mask/padding bucket consolidation (see lifejacket's
 # alg_update_func_args_mask_index docs and docs/masking_tutorial.md). -1000

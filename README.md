@@ -122,7 +122,6 @@ analyze_dataset(
     reward_col_name="reward",
     suppress_interactive_data_checks=True,
     suppress_all_data_checks=False,
-    small_sample_correction="none",
     collect_data_for_blowup_supervised_learning=False,
     form_adjusted_meat_adjustments_explicitly=False,
     stabilize_joint_bread=False,
@@ -137,6 +136,11 @@ tuple. See `tests/unit_tests/test_post_deployment_analysis.py`'s `setup_data_*`
 fixtures for worked examples of constructing them from scratch, or
 `tests/simulators_and_runners/rl_study_simulation.py` for how the synthetic
 simulator builds them.
+
+If your analysis is slow or runs out of memory under staggered recruitment
+(many distinct per-subject history lengths), see
+[docs/masking_tutorial.md](docs/masking_tutorial.md) for the opt-in
+padding/masking feature that fixes exactly that.
 
 ## Linting/Formatting
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting, run automatically via [pre-commit](https://pre-commit.com/) before every commit.

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import collections
+import dataclasses
 import logging
 import math
 import pathlib
 import pickle
+import resource
+import sys
 import time
+import typing
 from collections.abc import Callable
 from typing import Any
 
@@ -18,6 +22,11 @@ from jax import numpy as jnp
 
 from . import get_datum_for_blowup_supervised_learning, input_checks
 from .batched_weighted_estimating_function_stack import (
+    ActionProbLayerPrecompute,
+    InferenceLayerPrecompute,
+    UpdateArgBucket,
+    UpdateLayerPrecompute,
+    _stackable_positions,
     build_action_prob_layer_precompute,
     build_inference_layer_precompute,
     build_update_layer_precompute,
@@ -27,11 +36,14 @@ from .batched_weighted_estimating_function_stack import (
     compute_batched_algorithm_component,
     compute_batched_inference_outputs,
     compute_windowed_weight_products,
+    resolve_combine_updates_into_one_vmap,
 )
 from .constants import (
+    JACOBIAN_AUTO_MAX_CHUNK,
+    JACOBIAN_AUTO_ROW_BUDGET,
+    JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM,
     FunctionTypes,
     SandwichFormationMethods,
-    SmallSampleCorrections,
 )
 from .form_adjusted_meat_adjustments_directly import (
     form_adjusted_meat_adjustments_directly,
@@ -48,7 +60,7 @@ from .helper_functions import (
     log_phase_duration,
     unflatten_params,
 )
-from .small_sample_corrections import perform_desired_small_sample_correction
+from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -56,6 +68,20 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
+
+
+def _peak_rss_mb() -> float:
+    """
+    This process's peak resident set size ("high-water mark"), in MB.
+
+    ru_maxrss's units are platform-dependent -- bytes on macOS/BSD, kibibytes
+    on Linux (see each platform's getrusage(2)) -- so the divisor must be
+    chosen per-platform rather than assuming one or the other; a fixed
+    bytes-assuming divisor under-reports by ~1024x on the Linux clusters real
+    analyses run on.
+    """
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return rss / (1024 * 1024 if sys.platform == "darwin" else 1024)
 
 
 @click.group()
@@ -139,6 +165,18 @@ def cli():
     help="Index of the previous betas array in the tuple of algorithm update func args, if applicable. Note that these are only post-update betas. Sometimes a beta_0 may be defined pre-update; this should not be in here.",
 )
 @click.option(
+    "--alg_update_func_args_mask_index",
+    type=int,
+    default=-1000,
+    help="Opt-in (default: unused): index of a new, LAST argument alg_update_func accepts a per-subject validity mask at (1.0=real row, 0.0=padded row), if applicable. When given (>= 0), every shape-bucket at each update is consolidated into one by self-padding every alg_update_func_args_ragged_indices position instead of grouping subjects by exact arg-tuple shape -- fixes real-world incremental-recruitment studies producing far more shape-buckets than subject count alone would suggest. Only usable with an alg_update_func written to accept and correctly multiply by this mask.",
+)
+@click.option(
+    "--alg_update_func_args_ragged_indices",
+    type=int,
+    multiple=True,
+    help="Which alg_update_func_args positions to self-pad when alg_update_func_args_mask_index is given (repeat this option once per position) -- must be non-empty in that case. Ignored otherwise.",
+)
+@click.option(
     "--inference_func_filename",
     type=click.Path(exists=True),
     help="File that contains the per-subject loss/estimating function used to determine the inference estimate and relevant imports.  The filename without its extension will be assumed to match the function name.",
@@ -155,6 +193,18 @@ def cli():
     type=int,
     required=True,
     help="Index of the algorithm parameter vector beta in the tuple of inference loss/estimating func args.",
+)
+@click.option(
+    "--inference_func_args_mask_index",
+    type=int,
+    default=-1000,
+    help="Same as alg_update_func_args_mask_index, for inference_func.",
+)
+@click.option(
+    "--inference_func_args_ragged_indices",
+    type=int,
+    multiple=True,
+    help="Same as alg_update_func_args_ragged_indices, for inference_func.",
 )
 @click.option(
     "--theta_calculation_func_filename",
@@ -217,19 +267,6 @@ def cli():
     help="Flag to suppress all data checks. Not usually recommended, as suppressing only interactive checks suffices to keep tests/simulations running and is safer.",
 )
 @click.option(
-    "--small_sample_correction",
-    type=click.Choice(
-        [
-            SmallSampleCorrections.NONE,
-            SmallSampleCorrections.Z1theta,
-            SmallSampleCorrections.Z2theta,
-            SmallSampleCorrections.Z3theta,
-        ]
-    ),
-    default=SmallSampleCorrections.NONE,
-    help="Type of small sample correction to apply to the variance estimate",
-)
-@click.option(
     "--collect_data_for_blowup_supervised_learning",
     type=bool,
     default=False,
@@ -246,6 +283,18 @@ def cli():
     type=bool,
     default=True,
     help="If True, stabilizes the joint bread matrix if it does not meet conditioning thresholds.",
+)
+@click.option(
+    "--jacobian_row_chunk_size",
+    type=int,
+    default=None,
+    help="Unset (default) = AUTO: the jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values) backward pass runs as a single unchunked jax.vmap over the full output basis for small problems (out_dim <= 512), and is split into memory-bounded chunks of at most max(1, min(64, 65536 // out_dim)) output-basis rows for large ones -- numerically identical either way; the heuristic is calibrated on one real oralytics-scale study on one 24GB machine, with out_dim as a proxy for the true memory footprint (see resolve_jacobian_row_chunk_size's docstring). 0 = force the single unchunked vmap (the fastest option when it fits in memory). A positive int = explicit chunk size, honored verbatim: pass a smaller value (e.g. 8 or 4) to use less memory on a smaller machine or bigger study (or after a crash under auto), a larger one to go faster when memory is known-plentiful.",
+)
+@click.option(
+    "--combine_updates_into_one_vmap",
+    type=bool,
+    default=None,
+    help="Unset (default) = AUTO: replaces compute_batched_algorithm_component's per-update, per-shape-bucket jax.vmap loop with exactly one jax.vmap call spanning every (subject, update) pair at once (fewer, bigger dispatches; numerically identical) whenever eligible -- alg_update_func_args_mask_index >= 0 (a mask-aware alg_update_func is a prerequisite, so this cannot be auto-enabled without that opt-in) and alg_update_func_args_previous_betas_index < 0 -- and silently stays on the original loop otherwise; if a combining invariant only checkable mid-precompute is violated, auto mode falls back to the original loop with a WARNING log. True = force on, raising loudly when ineligible rather than silently mis-batching. False = force off even when eligible. Not applied to the separate local-linearization diagnostic, which always uses the original loop.",
 )
 def analyze_dataset_wrapper(**kwargs):
     """
@@ -325,10 +374,15 @@ def analyze_dataset(
     reward_col_name: str,
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
-    small_sample_correction: str,
     collect_data_for_blowup_supervised_learning: bool,
     form_adjusted_meat_adjustments_explicitly: bool,
     stabilize_joint_bread: bool,
+    alg_update_func_args_mask_index: int = -1,
+    alg_update_func_args_ragged_indices: tuple[int, ...] = (),
+    inference_func_args_mask_index: int = -1,
+    inference_func_args_ragged_indices: tuple[int, ...] = (),
+    jacobian_row_chunk_size: int | None = None,
+    combine_updates_into_one_vmap: bool | None = None,
 ) -> None:
     """
     Analyzes a dataset to provide a parameter estimate and an estimate of its variance using  and classical sandwich estimators.
@@ -389,8 +443,6 @@ def analyze_dataset(
         Whether to suppress interactive data checks. This should be used in simulations, for example.
     suppress_all_data_checks (bool):
         Whether to suppress all data checks. Not recommended.
-    small_sample_correction (str):
-        Type of small sample correction to apply.
     collect_data_for_blowup_supervised_learning (bool):
         Whether to collect data for doing supervised learning about adjusted sandwich blowup.
     form_adjusted_meat_adjustments_explicitly (bool):
@@ -400,6 +452,54 @@ def analyze_dataset(
     stabilize_joint_bread (bool):
         If True, stabilizes the joint bread matrix if it does not meet conditioning
         thresholds.
+    alg_update_func_args_mask_index (int):
+        Opt-in (default -1 = off, zero behavior change): if >= 0, consolidates every
+        shape-bucket at each algorithm update into one by self-padding every
+        alg_update_func_args_ragged_indices position and appending a validity mask
+        (1.0 real / 0.0 padded) as a new last argument to alg_update_func, instead of
+        grouping subjects by exact arg-tuple shape. Fixes real-world
+        incremental-recruitment studies producing far more shape-buckets than
+        subject count alone would suggest (e.g. 146 buckets at just 70 subjects in
+        one observed case). Only usable with an alg_update_func written to accept
+        and correctly multiply by the appended mask before any row-wise sum -- see
+        batched_weighted_estimating_function_stack.self_pad_ragged_args_and_build_mask's
+        own docstring for the full padding/masking contract.
+    alg_update_func_args_ragged_indices (tuple[int, ...]):
+        Which alg_update_func_args positions to self-pad when
+        alg_update_func_args_mask_index >= 0 -- e.g. every position shaped
+        (num_decision_times_so_far, ...) that varies per subject under staggered
+        recruitment. Must be non-empty in that case; ignored otherwise.
+    inference_func_args_mask_index (int):
+        Same as alg_update_func_args_mask_index, for inference_func.
+    inference_func_args_ragged_indices (tuple[int, ...]):
+        Same as alg_update_func_args_ragged_indices, for inference_func.
+    jacobian_row_chunk_size (int | None):
+        Passed straight through to construct_classical_and_adjusted_sandwiches's
+        jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values) call.
+        None (the default) = AUTO: a single unchunked backward vmap for small
+        problems (out_dim <= 512), a conservative heuristic chunk size for
+        large ones -- calibrated on one real oralytics-scale study on one
+        24GB machine, with out_dim as a proxy for the true memory footprint
+        (see resolve_jacobian_row_chunk_size's docstring for the details and
+        caveats). 0 = force the single unchunked vmap (the pre-auto default;
+        fastest when it fits in memory). A positive int = explicit chunk
+        size, honored verbatim (pass a smaller one to use less memory, a
+        larger one to go faster when memory is known-plentiful).
+    combine_updates_into_one_vmap (bool | None):
+        Passed straight through to construct_classical_and_adjusted_sandwiches
+        (and, from there, to get_avg_weighted_estimating_function_stacks_and_aux_values,
+        which resolves it); see those docstrings for the full semantics. None
+        (the default) = AUTO: the per-update loop collapse is enabled
+        whenever eligible (alg_update_func_args_mask_index >= 0 and
+        alg_update_func_args_previous_betas_index < 0 -- it cannot be
+        auto-enabled otherwise, since it needs a mask-aware alg_update_func),
+        silently left off otherwise, and falls back to the default loop with
+        a WARNING log if a structural invariant only checkable mid-precompute
+        is violated -- results are numerically identical either way. True =
+        force on, with loud errors when ineligible. False = force off. NOT
+        passed to the separate local-linearization diagnostic below
+        (compute_local_linearization_error_ratio), which continues to use the
+        original per-update/per-bucket loop regardless.
 
     Returns:
     dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
@@ -440,7 +540,6 @@ def analyze_dataset(
                 theta_est,
                 beta_dim,
                 suppress_interactive_data_checks,
-                small_sample_correction,
             )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
@@ -539,7 +638,6 @@ def analyze_dataset(
             action_by_decision_time_by_subject_id,
             suppress_all_data_checks,
             suppress_interactive_data_checks,
-            small_sample_correction,
             form_adjusted_meat_adjustments_explicitly,
             stabilize_joint_bread,
             analysis_df,
@@ -549,6 +647,12 @@ def analyze_dataset(
             subject_id_col_name,
             action_prob_func_args,
             action_prob_col_name,
+            alg_update_func_args_mask_index=alg_update_func_args_mask_index,
+            alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
+            inference_func_args_mask_index=inference_func_args_mask_index,
+            inference_func_args_ragged_indices=inference_func_args_ragged_indices,
+            jacobian_row_chunk_size=jacobian_row_chunk_size,
+            combine_updates_into_one_vmap=combine_updates_into_one_vmap,
         )
 
     theta_dim = len(theta_est)
@@ -637,6 +741,10 @@ def analyze_dataset(
                     inference_action_prob_decision_times_by_subject_id,
                     alg_update_func_args,
                     action_by_decision_time_by_subject_id,
+                    alg_update_func_args_mask_index=alg_update_func_args_mask_index,
+                    alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
+                    inference_func_args_mask_index=inference_func_args_mask_index,
+                    inference_func_args_ragged_indices=inference_func_args_ragged_indices,
                 )
             )
         except Exception as e:
@@ -1096,6 +1204,15 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
     include_auxiliary_outputs: bool = True,
+    precomputed_layers: tuple[
+        ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute
+    ]
+    | None = None,
+    alg_update_func_args_mask_index: int = -1,
+    alg_update_func_args_ragged_indices: tuple[int, ...] = (),
+    inference_func_args_mask_index: int = -1,
+    inference_func_args_ragged_indices: tuple[int, ...] = (),
+    combine_updates_into_one_vmap: bool | None = None,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
 ]:
@@ -1173,7 +1290,75 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         include_auxiliary_outputs (bool):
             If True, returns the adjusted meat, classical meat, and classical bread contributions in addition to the average weighted estimating function stack.
             If False, returns only the average weighted estimating function stack.
-
+        precomputed_layers (tuple[ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute] | None):
+            If given, used directly in place of building
+            action_prob_layer/update_layer/inference_layer from the raw
+            action_prob_func_args_by_subject_id_by_decision_time/
+            update_func_args_by_by_subject_id_by_policy_num/
+            inference_func_args_by_subject_id arguments (the three
+            build_*_precompute calls are skipped entirely). This exists so a
+            caller that has already built these once (e.g. the
+            local-linearization diagnostic in
+            compute_local_linearization_error_ratio, which calls this
+            function 15 times with identical structural data and only the
+            differentiated betas/theta values changing across calls) can
+            reuse them, and -- when the caller is a jax.jit trace -- pass a
+            reconstruction of them built from genuine traced arguments
+            instead of Python-closed-over concrete arrays, which is what
+            actually keeps large (N, T, ...)-shaped precompute data from
+            being embedded as XLA literal constants in the compiled
+            program. If None (the default), the three objects are built
+            fresh from the raw arguments as before -- this is what the one
+            real, non-jitted jax.jacrev call site in
+            construct_classical_and_adjusted_sandwiches still does. Ignored
+            (along with the four *_mask_index/*_ragged_indices arguments
+            below) when precomputed_layers is given -- the caller already
+            decided how those layers were built.
+        alg_update_func_args_mask_index (int):
+            Opt-in (default -1 = off, zero behavior change): if >= 0,
+            consolidates every shape-bucket at each update into one by
+            self-padding every alg_update_func_args_ragged_indices position
+            and appending a validity mask as a new last argument to
+            alg_update_func, instead of grouping subjects by exact arg-tuple
+            shape. Fixes real-world incremental-recruitment studies producing
+            far more shape-buckets than any subject-count-only benchmark
+            exercises. Only usable with an alg_update_func written to accept
+            and correctly multiply by the appended mask -- see
+            batched_weighted_estimating_function_stack.self_pad_ragged_args_and_build_mask's
+            own docstring.
+        alg_update_func_args_ragged_indices (tuple[int, ...]):
+            Which alg_update_func_args positions to self-pad when
+            alg_update_func_args_mask_index >= 0 -- must be non-empty in that
+            case. Ignored otherwise.
+        inference_func_args_mask_index (int):
+            Same as alg_update_func_args_mask_index, for inference_func.
+        inference_func_args_ragged_indices (tuple[int, ...]):
+            Same as alg_update_func_args_ragged_indices, for inference_func.
+        combine_updates_into_one_vmap (bool | None):
+            When enabled, replaces compute_batched_algorithm_component's
+            per-update, per-shape-bucket jax.vmap loop with exactly one
+            jax.vmap call spanning every (subject, update) pair at once --
+            fewer, bigger dispatches instead of many small ones,
+            numerically identical either way. None (the default) = AUTO:
+            resolved here (immediately before build_update_layer_precompute)
+            via batched_weighted_estimating_function_stack.resolve_combine_updates_into_one_vmap
+            -- enabled exactly when eligible (alg_update_func_args_mask_index
+            >= 0 AND alg_update_func_args_previous_betas_index < 0),
+            otherwise silently left on the default loop; if a structural
+            invariant violation only detectable during
+            build_update_layer_precompute's combined-block work is hit, auto
+            mode falls back to the default loop with a WARNING log instead
+            of erroring (see that function's combine_is_required argument).
+            True = force on, keeping every loud error: requires
+            alg_update_func_args_mask_index >= 0 (raises ValueError
+            otherwise) and is incompatible with
+            alg_update_func_args_previous_betas_index >= 0 (raises
+            NotImplementedError otherwise -- see
+            build_update_layer_precompute's own docstring for both). False =
+            force off, even when eligible. Ignored when precomputed_layers
+            is given, exactly like the four *_mask_index/*_ragged_indices
+            arguments above -- the caller already decided how those layers
+            were built.
     Returns:
         jnp.ndarray:
             A 2D JAX NumPy array holding the average weighted estimating function stack.
@@ -1181,8 +1366,14 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             A tuple containing
             1. the average weighted estimating function stack
-            2. the subject-level adjusted meat matrix contributions
-            3. the subject-level classical meat matrix contributions
+            2. the adjusted meat matrix, pre-summed across subjects
+               (stacks.T @ stacks -- an exact linear-algebra identity for
+               sum_i outer(stack_i, stack_i), never materializing the
+               (num_subjects, out_dim, out_dim) per-subject tensor, which
+               dominates memory at real (oralytics-scale) problem sizes --
+               see docs/adr/0001-adaptive-sandwich-performance-plan.md)
+            3. the classical meat matrix, pre-summed across subjects the
+               same way (inference_component.T @ inference_component)
             4. the subject-level inverse classical bread matrix contributions
             5. raw per-subject weighted estimating function
             stacks.
@@ -1211,38 +1402,70 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         theta_dim,
     )
     subject_ids_np = np.asarray(subject_ids.tolist())
-
-    # 2. One-time, plain-numpy structural precompute (never touches betas/theta
-    # values -- only which cells are active and which policy/action applied).
-    # This replaces the ragged per-subject/per-update Python loops with a
-    # small, fixed number of jax.vmap calls below. See
-    # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4.
-    action_prob_layer = build_action_prob_layer_precompute(
-        subject_ids_np,
-        action_prob_func_args_by_subject_id_by_decision_time,
-        action_by_decision_time_by_subject_id,
-        policy_num_by_decision_time_by_subject_id,
-        beta_index_by_policy_num,
-        initial_policy_num,
-        action_prob_func_args_beta_index,
-    )
-    update_layer = build_update_layer_precompute(
-        subject_ids_np,
-        update_func_args_by_by_subject_id_by_policy_num,
-        beta_index_by_policy_num,
-        alg_update_func_args_action_prob_times_index,
-        action_prob_layer,
-    )
     need_pi_beta_grid = (
         alg_update_func_args_action_prob_index >= 0
         or inference_func_args_action_prob_index >= 0
     )
-    inference_layer = build_inference_layer_precompute(
-        inference_func_args_by_subject_id,
-        inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_subject_id,
-        action_prob_layer,
-    )
+
+    if precomputed_layers is not None:
+        # See this parameter's own docstring above: skip rebuilding the
+        # structural precompute from the raw arguments -- the caller has
+        # already built (or, under jax.jit, reconstructed from traced
+        # arrays) equivalent action_prob_layer/update_layer/inference_layer
+        # objects.
+        action_prob_layer, update_layer, inference_layer = precomputed_layers
+    else:
+        # 2. One-time, plain-numpy structural precompute (never touches betas/theta
+        # values -- only which cells are active and which policy/action applied).
+        # This replaces the ragged per-subject/per-update Python loops with a
+        # small, fixed number of jax.vmap calls below. See
+        # docs/adr/0001-adaptive-sandwich-performance-plan.md, Step 4.
+        action_prob_layer = build_action_prob_layer_precompute(
+            subject_ids_np,
+            action_prob_func_args_by_subject_id_by_decision_time,
+            action_by_decision_time_by_subject_id,
+            policy_num_by_decision_time_by_subject_id,
+            beta_index_by_policy_num,
+            initial_policy_num,
+            action_prob_func_args_beta_index,
+        )
+        # Resolve the tri-state combine request (None = auto) at this single
+        # choke point both real entry paths flow through -- the
+        # precomputed_layers/diagnostic path above bypasses it, exactly as
+        # documented. combine_is_required=True only for an explicit True, so
+        # auto-resolved combining falls back (warn-logged) on structural
+        # invariant violations instead of erroring -- see
+        # build_update_layer_precompute's docstring.
+        resolved_combine_updates_into_one_vmap = resolve_combine_updates_into_one_vmap(
+            combine_updates_into_one_vmap,
+            alg_update_func_args_mask_index,
+            alg_update_func_args_previous_betas_index,
+        )
+        update_layer = build_update_layer_precompute(
+            subject_ids_np,
+            update_func_args_by_by_subject_id_by_policy_num,
+            beta_index_by_policy_num,
+            alg_update_func_args_action_prob_times_index,
+            action_prob_layer,
+            alg_update_func_args_mask_index,
+            alg_update_func_args_ragged_indices,
+            combine_updates_into_one_vmap=resolved_combine_updates_into_one_vmap,
+            alg_update_func_args_beta_index=alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index=alg_update_func_args_action_prob_index,
+            # Truthiness, not `is True`: any explicit truthy request (True, 1,
+            # np.True_, ...) must keep the documented fail-loud contract --
+            # only auto (None) gets the warn-and-fall-back semantics.
+            combine_is_required=combine_updates_into_one_vmap is not None
+            and bool(combine_updates_into_one_vmap),
+        )
+        inference_layer = build_inference_layer_precompute(
+            inference_func_args_by_subject_id,
+            inference_func_args_action_prob_index,
+            inference_action_prob_decision_times_by_subject_id,
+            action_prob_layer,
+            inference_func_args_mask_index,
+            inference_func_args_ragged_indices,
+        )
     # Cheap visibility into shape-bucket fan-out: each distinct shape bucket
     # at a given update becomes its own jax.vmap dispatch in
     # compute_batched_algorithm_component below (see
@@ -1370,10 +1593,14 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     if not include_auxiliary_outputs:
         return jnp.mean(stacks, axis=0)
 
-    outer_products = jax.vmap(jnp.outer)(stacks, stacks)
-    inference_only_outer_products = jax.vmap(jnp.outer)(
-        inference_component, inference_component
-    )
+    # mean_i(outer(stack_i, stack_i)) == (stacks.T @ stacks) / N exactly
+    # (sum_i outer(x_i, x_i) == X.T @ X). Computing stacks.T @ stacks
+    # directly never materializes the (N, out_dim, out_dim) per-subject
+    # tensor jax.vmap(jnp.outer) would -- that tensor was the dominant
+    # memory cost at real problem sizes (out_dim in the thousands). See
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md.
+    outer_products = stacks.T @ stacks
+    inference_only_outer_products = inference_component.T @ inference_component
 
     # 6. Note this strange return structure! We will differentiate the first output,
     # but the second tuple will be passed along without modification via has_aux=True and then used
@@ -1391,6 +1618,90 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
         inference_hessians,
         stacks,
     )
+
+
+def resolve_jacobian_row_chunk_size(
+    requested: int | None,
+    out_dim: int,
+) -> int | None:
+    """
+    Resolves the jacobian_row_chunk_size request into a concrete decision for
+    construct_classical_and_adjusted_sandwiches's backward pass: returns None
+    for a single unchunked eager jax.vmap(pullback) over the whole cotangent
+    basis, or a positive chunk size for the chunked, jitted backward path.
+
+    - requested > 0: honored verbatim (the pre-auto explicit behavior).
+    - requested == 0: force the unchunked single eager vmap -- the pre-auto
+      DEFAULT behavior -- even when the auto heuristic would chunk. Fastest
+      when it fits in memory.
+    - requested < 0: ValueError.
+    - requested is None (the default, "auto"): unchunked when
+      out_dim <= JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM (small problems, where
+      chunking's one-time jit compile was measured ~2.4x SLOWER than the
+      plain eager call); otherwise
+      max(1, min(JACOBIAN_AUTO_MAX_CHUNK, JACOBIAN_AUTO_ROW_BUDGET // out_dim)),
+      which keeps chunk_size * out_dim (the empirically-usable memory proxy)
+      at or below every budget verified safe at real oralytics scale and at
+      roughly one-third of the one observed crash-while-chunked budget --
+      see the constants' own comment in lifejacket/constants.py for the full
+      empirical calibration table.
+
+    HONESTY NOTE on the heuristic: out_dim (= num_updates * beta_dim +
+    theta_dim) is a single-variable PROXY for the true per-cotangent
+    backward-graph footprint, which also grows with num_subjects x
+    num_updates x per-subject history length; the thresholds were calibrated
+    on ONE study shape (oralytics, beta_dim=135) on ONE 24GB machine. The
+    explicit parameter is the escape hatch in both directions: to use LESS
+    memory (smaller machine, bigger study, or a crash under auto), pass a
+    smaller explicit chunk size (e.g. 8 or 4); to go FASTER when memory is
+    known-plentiful, pass a larger explicit chunk size, or 0 to force the
+    single unchunked vmap.
+    """
+    if requested is not None:
+        if requested < 0:
+            raise ValueError(
+                "jacobian_row_chunk_size must be a non-negative int or None "
+                "(None = auto, 0 = force a single unchunked backward vmap, "
+                f"positive = explicit chunk size), got {requested!r}."
+            )
+        if requested == 0:
+            logger.info(
+                "jacobian_row_chunk_size=0: forcing the single unchunked "
+                "eager jax.vmap(pullback) backward pass (out_dim=%d).",
+                out_dim,
+            )
+            return None
+        logger.info(
+            "jacobian_row_chunk_size=%d was passed explicitly; using it as-is "
+            "(out_dim=%d).",
+            requested,
+            out_dim,
+        )
+        return requested
+    if out_dim <= JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM:
+        logger.info(
+            "jacobian_row_chunk_size=None (auto) resolved to unchunked: "
+            "out_dim=%d <= %d. Pass an explicit positive chunk size to chunk "
+            "anyway (e.g. if this crashes from memory pressure).",
+            out_dim,
+            JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM,
+        )
+        return None
+    chunk_size = max(
+        1, min(JACOBIAN_AUTO_MAX_CHUNK, JACOBIAN_AUTO_ROW_BUDGET // out_dim)
+    )
+    logger.info(
+        "jacobian_row_chunk_size=None (auto) resolved to chunk size %d: "
+        "out_dim=%d > %d, targeting chunk_size * out_dim <= %d (a memory "
+        "proxy calibrated on one 24GB-machine study -- pass a smaller "
+        "explicit chunk size if memory is tighter, a larger one or 0 for the "
+        "unchunked vmap if memory is plentiful).",
+        chunk_size,
+        out_dim,
+        JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM,
+        JACOBIAN_AUTO_ROW_BUDGET,
+    )
+    return chunk_size
 
 
 def construct_classical_and_adjusted_sandwiches(
@@ -1429,7 +1740,6 @@ def construct_classical_and_adjusted_sandwiches(
     ],
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
-    small_sample_correction: str,
     form_adjusted_meat_adjustments_explicitly: bool,
     stabilize_joint_bread: bool,
     analysis_df: pd.DataFrame | None,
@@ -1439,6 +1749,12 @@ def construct_classical_and_adjusted_sandwiches(
     subject_id_col_name: str | None,
     action_prob_func_args: tuple | None,
     action_prob_col_name: str | None,
+    alg_update_func_args_mask_index: int = -1,
+    alg_update_func_args_ragged_indices: tuple[int, ...] = (),
+    inference_func_args_mask_index: int = -1,
+    inference_func_args_ragged_indices: tuple[int, ...] = (),
+    jacobian_row_chunk_size: int | None = None,
+    combine_updates_into_one_vmap: bool | None = None,
 ) -> tuple[
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
@@ -1523,9 +1839,6 @@ def construct_classical_and_adjusted_sandwiches(
             If True, suppresses interactive data checks that would otherwise be performed to ensure
             the correctness of the threaded arguments. The checks are still performed, but
             any interactive prompts are suppressed.
-        small_sample_correction (str):
-            The type of small sample correction to apply. See SmallSampleCorrections class for
-            options.
         form_adjusted_meat_adjustments_explicitly (bool):
             If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
@@ -1548,6 +1861,67 @@ def construct_classical_and_adjusted_sandwiches(
         action_prob_col_name (str):
             The name of the column in analysis_df indicating the action probability of the action taken,
             needed if forming the adjusted meat adjustments explicitly.
+        alg_update_func_args_mask_index, alg_update_func_args_ragged_indices,
+        inference_func_args_mask_index, inference_func_args_ragged_indices:
+            Passed straight through to the jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)
+            call this function makes; see that function's own docstring for what they do.
+            (compute_local_linearization_error_ratio is called separately, by analyze_dataset
+            directly, not from here -- it receives its own copies of these same four arguments.)
+        jacobian_row_chunk_size (int | None):
+            None (the default) = AUTO: resolved by
+            resolve_jacobian_row_chunk_size once out_dim is known -- a
+            single, plain eager jax.vmap(pullback) call over the full output
+            basis (the original behavior) when out_dim <=
+            JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM, else a heuristic chunk size
+            max(1, min(JACOBIAN_AUTO_MAX_CHUNK, JACOBIAN_AUTO_ROW_BUDGET //
+            out_dim)); see that resolver's docstring, including the honesty
+            note that its out_dim threshold is a proxy calibrated on one
+            study shape/machine and how to override in both directions.
+            0 = force the single unchunked eager vmap even when auto would
+            chunk (fastest when it fits in memory). A positive int is an
+            explicit chunk size, honored verbatim (the pre-auto opt-in
+            behavior, unchanged): the
+            jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)
+            call below is instead computed as one jax.vjp call (the
+            expensive forward pass, paid exactly once either way) followed
+            by ceil(out_dim / jacobian_row_chunk_size) separate backward
+            calls, each over at most jacobian_row_chunk_size rows of the
+            output-basis identity matrix, concatenated back together --
+            mathematically and numerically IDENTICAL to the unchunked call
+            (see docs/adr/0001-adaptive-sandwich-performance-plan.md's
+            "chunked jacrev" section) regardless of chunk size. When
+            chunking is requested this way, each backward call is made
+            through a jax.jit-compiled function that takes the forward
+            pass's pullback residuals as explicit arguments rather than
+            closing over them (compiled once per distinct chunk shape,
+            reused for every chunk of that shape -- see the inline comment
+            at the call site for the mechanism, why it avoids both
+            re-running the forward pass and embedding residuals as XLA
+            constants, AND an important measured caveat: on this repo's
+            own "medium" benchmark fixture, this jit-compiled path was
+            measured to cost MORE wall-clock time than the plain eager
+            per-chunk loop it replaces, with no peak-memory improvement,
+            because compiling this hot path's large per-update/shape-bucket
+            unrolled graph is itself expensive -- so do not assume a
+            smaller jacobian_row_chunk_size is a free memory win without
+            re-measuring both time and memory at your own scale). Tune this
+            per-study/per-machine when the auto heuristic's proxy doesn't
+            match your machine or study shape.
+        combine_updates_into_one_vmap (bool | None):
+            Passed straight through -- UNRESOLVED -- to
+            get_avg_weighted_estimating_function_stacks_and_aux_values's own
+            argument of the same name, which is where None (the default,
+            "auto") is resolved via
+            batched_weighted_estimating_function_stack.resolve_combine_updates_into_one_vmap;
+            see both docstrings for the semantics (None = enable when
+            eligible, with a warn-logged fallback to the default loop on
+            mid-precompute structural violations; True = force on with loud
+            errors when ineligible; False = force off). NOT threaded into
+            the separate local-linearization diagnostic
+            (compute_local_linearization_error_ratio, called directly by
+            analyze_dataset, not from here) -- that diagnostic continues to
+            use the original per-update/per-bucket loop regardless of this
+            argument.
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -1560,8 +1934,13 @@ def construct_classical_and_adjusted_sandwiches(
             - The classical sandwich matrix.
             - The average weighted estimating function stack.
             - All per-subject weighted estimating function stacks.
-            - The per-subject adjusted meat small-sample corrections.
-            - The per-subject classical meat small-sample corrections.
+            - A trivial all-ones array of length num_subjects, kept only for
+              output-shape stability (previously the per-subject adjusted
+              meat small-sample corrections; there is no small-sample
+              correction feature any more).
+            - A trivial all-ones array of length num_subjects, kept only for
+              output-shape stability (previously the per-subject classical
+              meat small-sample corrections).
             - The per-subject adjusted meat adjustments, if form_adjusted_meat_adjustments_explicitly
               is True, otherwise an array of NaNs.
     """
@@ -1587,67 +1966,333 @@ def construct_classical_and_adjusted_sandwiches(
     # concurrent jax.jit compilations, not fully root-caused. Net effect at
     # n=100: ~7.1s -> ~16.3-16.5s total wall-clock. Reverted; do not re-add
     # jax.jit here without re-measuring at both benchmark scales.
+    # Fail fast on a nonsensical value, before the expensive forward pass;
+    # resolve_jacobian_row_chunk_size re-validates and handles the None/0
+    # semantics once out_dim is known below.
+    if jacobian_row_chunk_size is not None and jacobian_row_chunk_size < 0:
+        raise ValueError(
+            "jacobian_row_chunk_size must be a non-negative int or None "
+            "(None = auto, 0 = force a single unchunked backward vmap, "
+            f"positive = explicit chunk size), got {jacobian_row_chunk_size!r}."
+        )
+
     with log_phase_duration(
         "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"
     ):
-        (
-            raw_joint_bread_matrix,
+        # While JAX can technically differentiate with respect to a list of JAX arrays,
+        # it is apparently more efficient to flatten them into a single array. This is done
+        # here to improve performance. We can simply unflatten them inside the function.
+        flattened_betas_and_theta = flatten_params(all_post_update_betas, theta_est)
+
+        def _avg_stack_fn(flattened_x):
+            return get_avg_weighted_estimating_function_stacks_and_aux_values(
+                flattened_x,
+                beta_dim,
+                theta_dim,
+                subject_ids,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                alg_update_func,
+                alg_update_func_type,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
+                inference_func,
+                inference_func_type,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_func_args_by_subject_id_by_decision_time,
+                policy_num_by_decision_time_by_subject_id,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                inference_func_args_by_subject_id,
+                inference_action_prob_decision_times_by_subject_id,
+                update_func_args_by_by_subject_id_by_policy_num,
+                action_by_decision_time_by_subject_id,
+                suppress_all_data_checks,
+                suppress_interactive_data_checks,
+                alg_update_func_args_mask_index=alg_update_func_args_mask_index,
+                alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
+                inference_func_args_mask_index=inference_func_args_mask_index,
+                inference_func_args_ragged_indices=inference_func_args_ragged_indices,
+                combine_updates_into_one_vmap=combine_updates_into_one_vmap,
+            )
+
+        # This is jax.jacrev(f, has_aux=True)(x) manually inlined -- see
+        # jax/_src/api.py's jacrev/_std_basis/_vjp (jax 0.4.30): jacrev IS
+        # exactly one jax.vjp call (the expensive forward pass -- structural
+        # precompute + all batched per-subject/per-update estimating-function
+        # evaluations -- paid ONCE, unchanged from today) followed by one
+        # jax.vmap(pullback) call over jnp.eye(out_dim). Chunking splits ONLY
+        # that second step, which is what was confirmed (real repro, 24GB
+        # machine, num_users=30) to exhaust memory at real scale -- see
+        # docs/adr/0001-adaptive-sandwich-performance-plan.md's "chunked
+        # jacrev" section.
+        with log_phase_duration(
+            "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values).forward_vjp"
+        ):
             (
                 avg_estimating_function_stack,
-                per_subject_joint_adjusted_meat_contributions,
-                per_subject_classical_meat_contributions,
-                per_subject_classical_bread_contributions,
-                per_subject_estimating_function_stacks,
-            ),
-        ) = jax.jacrev(
-            get_avg_weighted_estimating_function_stacks_and_aux_values, has_aux=True
-        )(
-            # While JAX can technically differentiate with respect to a list of JAX arrays,
-            # it is apparently more efficient to flatten them into a single array. This is done
-            # here to improve performance. We can simply unflatten them inside the function.
-            flatten_params(all_post_update_betas, theta_est),
-            beta_dim,
-            theta_dim,
-            subject_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_subject_id_by_decision_time,
-            policy_num_by_decision_time_by_subject_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_subject_id,
-            inference_action_prob_decision_times_by_subject_id,
-            update_func_args_by_by_subject_id_by_policy_num,
-            action_by_decision_time_by_subject_id,
-            suppress_all_data_checks,
-            suppress_interactive_data_checks,
+                pullback,
+                (
+                    _avg_estimating_function_stack_aux_copy,
+                    per_subject_joint_adjusted_meat_contributions,
+                    per_subject_classical_meat_contributions,
+                    per_subject_classical_bread_contributions,
+                    per_subject_estimating_function_stacks,
+                ),
+            ) = jax.vjp(_avg_stack_fn, flattened_betas_and_theta, has_aux=True)
+            # JAX dispatches asynchronously -- without forcing the forward
+            # pass's outputs to materialize here, this phase's timer would
+            # only measure dispatch overhead, and the real device time would
+            # leak into whichever phase next reads these values (see
+            # docs/adr/0001-adaptive-sandwich-performance-plan.md's
+            # forward/backward split measurement).
+            jax.block_until_ready(
+                (
+                    avg_estimating_function_stack,
+                    _avg_estimating_function_stack_aux_copy,
+                    per_subject_joint_adjusted_meat_contributions,
+                    per_subject_classical_meat_contributions,
+                    per_subject_classical_bread_contributions,
+                    per_subject_estimating_function_stacks,
+                )
+            )
+            # ru_maxrss is a monotonically-increasing process watermark (never
+            # decreases), so logging it here and again after the backward
+            # phase below gives the ADDITIONAL peak memory the backward
+            # phase caused, isolated from whatever the forward pass (this
+            # jax.vjp call's own saved residuals/linearization tape) already
+            # used.
+            logger.info(
+                "Peak RSS after forward_vjp: %.1f MB",
+                _peak_rss_mb(),
+            )
+
+        out_dim = avg_estimating_function_stack.shape[0]
+
+        # out_dim is first known exactly here (right before the backward
+        # branch), so this is where the None="auto" default gets resolved to
+        # either "unchunked" (None) or a concrete chunk size -- see
+        # resolve_jacobian_row_chunk_size's docstring for the heuristic, its
+        # empirical calibration, and its honesty caveats.
+        resolved_jacobian_row_chunk_size = resolve_jacobian_row_chunk_size(
+            jacobian_row_chunk_size, out_dim
         )
+
+        with log_phase_duration(
+            "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values).backward_vmap_chunks"
+        ):
+            cotangent_basis = jnp.eye(
+                out_dim, dtype=avg_estimating_function_stack.dtype
+            )
+
+            if resolved_jacobian_row_chunk_size is None:
+                # No chunking (an explicit 0, or auto resolving small
+                # out_dim to unchunked): the exact original behavior (a
+                # single eager jax.vmap(pullback) call over the whole
+                # output basis, unchanged since before this file's own
+                # forward/backward split). Deliberately NOT run through the
+                # jit machinery below -- see that branch's comment for why:
+                # measured on this repo's own "medium" benchmark fixture,
+                # jax.jit-compiling this backward step, even via the
+                # explicit-residual mechanism that avoids the
+                # closure-embedding trap, costs MORE wall-clock time (one
+                # XLA compile of the whole per-update/shape-bucket unrolled
+                # graph, ~4.8s at that fixture's scale, vs. ~2.0s for the
+                # plain eager call) and did not show a peak-memory win
+                # either, for a single, un-chunked call that has no
+                # repeated-call compile-cost amortization to earn it back.
+                raw_joint_bread_matrix = jax.vmap(pullback)(cotangent_basis)[0]
+            else:
+                effective_chunk_size = min(resolved_jacobian_row_chunk_size, out_dim)
+
+                # Chunking was explicitly requested (trading time for lower
+                # peak memory during this phase, per this parameter's own
+                # docstring) -- so, unlike the no-chunking branch above,
+                # there IS a real compile-once-reuse-many opportunity here
+                # if jacobian_row_chunk_size divides out_dim into several
+                # same-shaped chunks. This branch uses that opportunity via
+                # an explicit-residual jax.jit mechanism rather than the
+                # plain eager per-chunk jax.vmap(pullback) loop an earlier
+                # version of this code used:
+                #
+                # A naive "jax.jit(lambda c: jax.vmap(pullback)(c))" closes
+                # over `pullback`, and jax.jit embeds a closed-over
+                # jax.vjp pullback's captured forward-pass residuals as XLA
+                # literal constants in the compiled program -- confirmed
+                # (via compiled-HLO constant counts, on a toy problem) to
+                # make peak memory WORSE than the plain eager loop, with no
+                # speed benefit. That is the same closure-embedding
+                # pathology already diagnosed and fixed for
+                # _eval_avg_stack_jit elsewhere in this file (see
+                # _extract_diagnostic_jit_arrays/
+                # _rebuild_precomputes_from_jit_arrays).
+                #
+                # The mechanism below avoids that specific trap by getting
+                # pullback's captured residuals OUT of the closure and into
+                # explicit jit arguments, using only public jax.tree_util
+                # API. jax.vjp's returned pullback is deliberately built
+                # (jax/_src/interpreters/ad.py's `vjp`, jax 0.4.30: "Ensure
+                # that vjp_ is a PyTree so that we can pass it from the
+                # forward to the backward pass in a custom VJP") as a
+                # jax.tree_util.Partial chain with the forward-pass
+                # residuals inside `.args` -- a registered pytree, not an
+                # opaque closure. So jax.tree_util.tree_flatten(pullback)
+                # yields those residual arrays as genuine flat leaves (with
+                # the jaxpr/pvals/avals structure captured as a static
+                # treedef, not as data), and a function written to take
+                # (cotangent_chunk, *residual_leaves) as REAL arguments --
+                # jax.jit-compiled ONCE below -- gets those residuals
+                # passed as true runtime inputs on every one of the
+                # ceil(out_dim / effective_chunk_size) calls, not baked in
+                # as literals. jax.jit compiles once per distinct chunk
+                # shape it is called with (the same "compile once per
+                # shape" pattern already relied on elsewhere in this file
+                # for _eval_avg_stack_jit) -- at most twice here, since
+                # every chunk has effective_chunk_size rows except possibly
+                # a shorter final remainder chunk.
+                #
+                # IMPORTANT, measured finding (not just a toy-problem
+                # extrapolation -- see this session's own toy benchmarking
+                # for that separately) -- this mechanism was ALSO measured
+                # directly against the real
+                # get_avg_weighted_estimating_function_stacks_and_aux_values
+                # hot path, using this repo's own "medium" benchmark
+                # fixture (n=100, T=10, out_dim=56): there, jax.jit
+                # compiling this backward step -- even via this
+                # closure-avoiding mechanism -- did NOT reduce peak memory
+                # relative to the plain eager per-chunk jax.vmap(pullback)
+                # loop, and cost substantially MORE wall-clock time (each
+                # distinct chunk shape's XLA compile took several seconds
+                # by itself, dwarfing the eager loop's total backward-phase
+                # time at this fixture's scale). This directly contradicts
+                # the toy-problem prediction that motivated trying this
+                # mechanism, and reinforces -- with a second, independent,
+                # real-hot-path data point -- this same function's
+                # historical note (above, near the top of
+                # construct_classical_and_adjusted_sandwiches) that
+                # jax.jit-compiling this specific hot path has already
+                # once been tried and reverted for a similar compile-cost
+                # reason. The mechanism is kept here, gated behind the
+                # explicit jacobian_row_chunk_size opt-in, because: (a) it
+                # is still the only verified way to jit this step at all
+                # without the (worse) closure-embedding memory regression;
+                # (b) this repo's own fixtures are far smaller
+                # (beta_dim/out_dim) than the real oralytics-scale crash
+                # this chunking knob exists for, so a real-scale verdict on
+                # whether the compile cost is worth it cannot be reached
+                # here (see this function's own module-level ADR notes);
+                # and (c) it is correctness-preserving either way. Anyone
+                # tuning jacobian_row_chunk_size for a real memory crisis
+                # should re-measure both wall-clock time AND peak memory at
+                # their own scale before assuming this mechanism helps --
+                # do not assume it is a free win.
+                #
+                # This also relies on an internal-but-deliberate JAX
+                # implementation detail (pullback being a flatten-able
+                # Partial chain with residuals in .args), not a documented
+                # part of jax.vjp's public contract, so we defensively fall
+                # back to the plain eager loop if tree_flatten ever yields
+                # zero leaves (e.g. a future jax release restructuring
+                # pullback) -- correctness is unaffected either way; only
+                # the (already-uncertain, per above) memory/speed tradeoff
+                # would be affected, silently, without this fallback ever
+                # being exercised in CI today.
+                residual_leaves, pullback_treedef = jax.tree_util.tree_flatten(pullback)
+
+                if not residual_leaves:
+                    raw_joint_bread_matrix = jnp.concatenate(
+                        [
+                            jax.vmap(pullback)(
+                                cotangent_basis[start : start + effective_chunk_size]
+                            )[0]
+                            for start in range(0, out_dim, effective_chunk_size)
+                        ],
+                        axis=0,
+                    )
+                else:
+
+                    def _backward_chunk(cotangent_chunk, *leaves):
+                        chunk_pullback = jax.tree_util.tree_unflatten(
+                            pullback_treedef, list(leaves)
+                        )
+                        return jax.vmap(chunk_pullback)(cotangent_chunk)[0]
+
+                    jitted_backward_chunk = jax.jit(_backward_chunk)
+
+                    with log_phase_duration(
+                        "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"
+                        ".backward_vmap_chunks.jit_compile"
+                    ):
+                        first_chunk_size = min(effective_chunk_size, out_dim)
+                        compiled_backward_chunk = jitted_backward_chunk.lower(
+                            cotangent_basis[0:first_chunk_size], *residual_leaves
+                        ).compile()
+
+                    with log_phase_duration(
+                        "jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)"
+                        ".backward_vmap_chunks.chunk_calls"
+                    ):
+                        chunk_parts = []
+                        for start in range(0, out_dim, effective_chunk_size):
+                            chunk = cotangent_basis[
+                                start : start + effective_chunk_size
+                            ]
+                            if chunk.shape[0] == first_chunk_size:
+                                chunk_parts.append(
+                                    compiled_backward_chunk(chunk, *residual_leaves)
+                                )
+                            else:
+                                # A shorter final remainder chunk -- a
+                                # differently-shaped input, so jax.jit
+                                # compiles once more for this one distinct
+                                # shape (and would reuse that compilation
+                                # if this shape recurred, though it never
+                                # does here since there is at most one
+                                # remainder chunk).
+                                chunk_parts.append(
+                                    jitted_backward_chunk(chunk, *residual_leaves)
+                                )
+                        raw_joint_bread_matrix = jnp.concatenate(chunk_parts, axis=0)
+
+            jax.block_until_ready(raw_joint_bread_matrix)
+            logger.info(
+                "Peak RSS after backward_vmap_chunks: %.1f MB",
+                _peak_rss_mb(),
+            )
 
     num_subjects = len(subject_ids)
 
-    with log_phase_duration("perform_desired_small_sample_correction"):
-        (
-            joint_adjusted_meat_matrix,
-            classical_meat_matrix,
-            per_subject_adjusted_corrections,
-            per_subject_classical_corrections,
-        ) = perform_desired_small_sample_correction(
-            small_sample_correction,
-            per_subject_joint_adjusted_meat_contributions,
-            per_subject_classical_meat_contributions,
-            per_subject_classical_bread_contributions,
-            num_subjects,
-            theta_dim,
+    with log_phase_duration("compute_meat_matrices"):
+        # per_subject_joint_adjusted_meat_contributions and
+        # per_subject_classical_meat_contributions are already pre-summed
+        # across subjects (stacks.T @ stacks and inference_component.T @
+        # inference_component -- see
+        # get_avg_weighted_estimating_function_stacks_and_aux_values), so
+        # the meat matrices are just their per-subject average.
+        # per_subject_adjusted_corrections/per_subject_classical_corrections
+        # are kept as trivial all-ones arrays purely to preserve this
+        # function's output shape (there is no longer any small-sample
+        # correction to report here).
+        joint_adjusted_meat_matrix = (
+            per_subject_joint_adjusted_meat_contributions / num_subjects
+        )
+        classical_meat_matrix = per_subject_classical_meat_contributions / num_subjects
+        per_subject_adjusted_corrections = jnp.ones(num_subjects)
+        per_subject_classical_corrections = jnp.ones(num_subjects)
+        # This is the phase this session's real oralytics-scale run was
+        # observed to crash inside, back when this step materialized a
+        # per-subject (N, out_dim, out_dim) tensor (see
+        # docs/adr/0001-adaptive-sandwich-performance-plan.md); force
+        # materialization and log peak RSS here, same pattern as the
+        # forward_vjp/backward_vmap_chunks phases above, to confirm that
+        # cost is gone.
+        jax.block_until_ready((joint_adjusted_meat_matrix, classical_meat_matrix))
+        logger.info(
+            "Peak RSS after compute_meat_matrices: %.1f MB",
+            _peak_rss_mb(),
         )
 
     # Increase diagonal block dominance possibly improve conditioning of diagonal
@@ -1683,6 +2328,11 @@ def construct_classical_and_adjusted_sandwiches(
             num_subjects,
             method=SandwichFormationMethods.BREAD_T_QR,
         )
+    jax.block_until_ready((joint_sandwich, classical_bread_matrix, classical_sandwich))
+    logger.info(
+        "Peak RSS after form_sandwich_from_bread_and_meat: %.1f MB",
+        _peak_rss_mb(),
+    )
 
     per_subject_adjusted_meat_adjustments = jnp.full(
         (len(subject_ids), theta_dim, theta_dim), jnp.nan
@@ -1713,19 +2363,14 @@ def construct_classical_and_adjusted_sandwiches(
             # Validate that the adjusted meat adjustments we just formed are accurate by constructing
             # the theta-only adjusted sandwich from them and checking that it matches the standard result
             # we get by taking a subset of the joint sandwich.
-            # First just apply any small-sample correction for parity.
-            (
-                _,
-                theta_only_adjusted_meat_matrix_v2,
-                _,
-                _,
-            ) = perform_desired_small_sample_correction(
-                small_sample_correction,
-                per_subject_joint_adjusted_meat_contributions,
-                per_subject_adjusted_classical_meat_contributions,
-                per_subject_classical_bread_contributions,
-                num_subjects,
-                theta_dim,
+            # per_subject_adjusted_classical_meat_contributions is a genuine
+            # per-subject (num_subjects, theta_dim, theta_dim) tensor, freshly
+            # computed by form_adjusted_meat_adjustments_directly just above
+            # (unlike joint_adjusted_meat_matrix/classical_meat_matrix above,
+            # which are pre-summed), so its meat matrix is just its
+            # per-subject mean.
+            theta_only_adjusted_meat_matrix_v2 = jnp.mean(
+                per_subject_adjusted_classical_meat_contributions, axis=0
             )
             theta_only_adjusted_sandwich_from_adjustments = (
                 form_sandwich_from_bread_and_meat(
@@ -2107,6 +2752,332 @@ def compute_eigenvalue_and_condition_diagnostics(
     )
 
 
+class _BucketJitArrays(typing.NamedTuple):
+    """
+    Traced-argument counterpart of one UpdateArgBucket: subject_positions
+    (read as a scatter index by compute_batched_algorithm_component /
+    compute_batched_inference_outputs' `.at[bucket.subject_positions,
+    ...].set(...)`) and the pre-stacked tensor for every "stackable"
+    raw_arg_lists position (every position that is not overridden by
+    _build_algorithm_bucket_overrides/_build_inference_bucket_overrides and
+    not all-None -- see _bucket_stackable_positions). A plain
+    typing.NamedTuple is a first-class JAX pytree with no registration
+    needed (see Investigation A/B discussion above this module's
+    compute_local_linearization_error_ratio).
+
+    Deliberately does NOT carry the position indices themselves (which
+    positions were stacked, in what order) -- those are static Python ints,
+    recomputed identically by _bucket_stackable_positions from the
+    (closed-over, never-traced) base bucket + override_positions at both
+    extract and rebuild time, so they never need to flow through this
+    traced pytree at all.
+    """
+
+    subject_positions: jnp.ndarray  # (bucket_size,) int
+    stacked_tensors: tuple[jnp.ndarray, ...]  # one per stackable position
+
+
+class _ActionProbLayerJitArrays(typing.NamedTuple):
+    """
+    Traced-argument counterpart of ActionProbLayerPrecompute's (N, T, ...)
+    / (N,)-shaped fields that compute_action_prob_layer_outputs /
+    compute_windowed_weight_products read as real array VALUES (not merely
+    a `.shape`). ActionProbLayerPrecompute's other fields (subject_ids,
+    time_values, time_to_col, fill_col_index, subject_start_idx,
+    min_time_by_policy_num, subject_id_to_pos, T) are either never read by
+    those two functions, or read only for small/scalar Python-level
+    bookkeeping -- never as data flowing into a jnp op -- so they stay
+    closed-over Python/numpy constants on the base object (see
+    _rebuild_precomputes_from_jit_arrays); embedding those as XLA constants
+    is not the pathology this module exists to avoid, since their size
+    doesn't scale with N*T the way the fields below do.
+    """
+
+    active_mask: jnp.ndarray  # (N, T) bool
+    beta_row_index: jnp.ndarray  # (N, T) int
+    actions_grid: jnp.ndarray  # (N, T) int
+    raw_arg_tensors: tuple[jnp.ndarray, ...]  # each (N, T, *shape_k)
+    lo_idx: jnp.ndarray  # (N,) int
+    subject_end_idx: jnp.ndarray  # (N,) int
+
+
+class _UpdateLayerJitArrays(typing.NamedTuple):
+    hi_idx: jnp.ndarray  # (N, U) int
+    valid_update: jnp.ndarray  # (N, U) bool
+    buckets_by_update_index: tuple[tuple[_BucketJitArrays, ...], ...]
+
+
+class _InferenceLayerJitArrays(typing.NamedTuple):
+    buckets: tuple[_BucketJitArrays, ...]
+
+
+class _DiagnosticJitArrays(typing.NamedTuple):
+    """
+    The flat pytree that becomes _eval_avg_stack_jit's second, genuinely
+    traced argument -- see that closure's own comment for why this (as
+    opposed to closing over the precompute objects directly) is the actual
+    fix for the compile-time-scales-with-N pathology.
+    """
+
+    action_prob: _ActionProbLayerJitArrays
+    update: _UpdateLayerJitArrays
+    inference: _InferenceLayerJitArrays
+
+
+def _algorithm_override_positions(
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+) -> set[int]:
+    """
+    The raw_arg_lists positions _build_algorithm_bucket_overrides always
+    (beta) or conditionally (previous-betas, action-prob, each only if its
+    *_index is >= 0) overrides for every bucket at every update -- these
+    depend only on this static config, never on which bucket. A bucket's
+    raw_arg_lists value at one of these positions is never actually read as
+    the estimating function's real input (see _assemble_call_args_and_in_axes:
+    override_position_values entries replace it entirely before the
+    jax.vmap call), so it never needs to become a traced array -- mirrors
+    _assemble_call_args_and_in_axes's own "remaining_positions = not in
+    override_position_values" split.
+    """
+    positions = {alg_update_func_args_beta_index}
+    if alg_update_func_args_previous_betas_index >= 0:
+        positions.add(alg_update_func_args_previous_betas_index)
+    if alg_update_func_args_action_prob_index >= 0:
+        positions.add(alg_update_func_args_action_prob_index)
+    return positions
+
+
+def _inference_override_positions(
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+) -> set[int]:
+    """Same idea as _algorithm_override_positions, for inference buckets."""
+    positions = {inference_func_args_theta_index}
+    if inference_func_args_action_prob_index >= 0:
+        positions.add(inference_func_args_action_prob_index)
+    return positions
+
+
+def _bucket_stackable_positions(
+    bucket: UpdateArgBucket, override_positions: set[int]
+) -> list[int]:
+    """
+    Which of bucket.raw_arg_lists' positions get pre-stacked into a traced
+    tensor by _extract_bucket_jit_arrays/_rebuild_bucket_from_jit_arrays --
+    every position that is neither overridden nor all-None, exactly
+    mirroring _assemble_call_args_and_in_axes's own
+    remaining_positions + _stackable_positions computation. Keeping this as
+    one small, shared helper (rather than two separately-written position
+    lists in extract vs. rebuild) is what guarantees extraction and rebuild
+    stay in lockstep.
+    """
+    num_args = len(bucket.raw_arg_lists)
+    remaining_positions = [k for k in range(num_args) if k not in override_positions]
+    return _stackable_positions(bucket.raw_arg_lists, remaining_positions)
+
+
+def _extract_bucket_jit_arrays(
+    bucket: UpdateArgBucket, override_positions: set[int]
+) -> _BucketJitArrays:
+    stackable = _bucket_stackable_positions(bucket, override_positions)
+    stacked_tensors, _ = stack_batched_arg_lists_into_tensors(
+        [bucket.raw_arg_lists[pos] for pos in stackable]
+    )
+    return _BucketJitArrays(
+        subject_positions=jnp.asarray(bucket.subject_positions),
+        stacked_tensors=tuple(stacked_tensors),
+    )
+
+
+def _rebuild_bucket_from_jit_arrays(
+    base_bucket: UpdateArgBucket,
+    bucket_jit_arrays: _BucketJitArrays,
+    override_positions: set[int],
+) -> UpdateArgBucket:
+    stackable = _bucket_stackable_positions(base_bucket, override_positions)
+    new_raw_arg_lists = list(base_bucket.raw_arg_lists)
+    for pos, tensor in zip(stackable, bucket_jit_arrays.stacked_tensors, strict=True):
+        # Store the traced (bucket_size, ...) tensor directly, rather than
+        # unstacking it into a Python list of per-subject slices via
+        # list(tensor): stack_batched_arg_lists_into_tensors
+        # (vmap_helpers.py) recognizes an already-array-shaped position and
+        # passes it through as-is, instead of re-deriving the identical
+        # tensor via a slice-then-restack round trip that would otherwise
+        # add two graph ops per subject in the bucket for no benefit --
+        # get_avg_weighted_estimating_function_stacks_and_aux_values still
+        # runs completely unmodified once precomputed_layers is substituted
+        # in; only the internal representation of an already-stacked
+        # position changed, not the numeric result.
+        new_raw_arg_lists[pos] = tensor
+    return dataclasses.replace(
+        base_bucket,
+        subject_positions=bucket_jit_arrays.subject_positions,
+        raw_arg_lists=new_raw_arg_lists,
+    )
+
+
+def _extract_diagnostic_jit_arrays(
+    action_prob_layer: ActionProbLayerPrecompute,
+    update_layer: UpdateLayerPrecompute,
+    inference_layer: InferenceLayerPrecompute,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+) -> _DiagnosticJitArrays:
+    """
+    Pulls every array-valued field that compute_action_prob_layer_outputs /
+    compute_windowed_weight_products / compute_batched_algorithm_component /
+    compute_batched_inference_outputs read as real array DATA (as opposed to
+    merely consulting a `.shape`, or reading small/scalar Python-level
+    metadata) out of the three (concrete, numpy-valued) structural
+    precompute objects, as a flat pytree of jnp arrays. Called once,
+    eagerly (outside any jit trace), in compute_local_linearization_error_ratio.
+
+    This flat pytree is what becomes _eval_avg_stack_jit's second,
+    genuinely traced argument: every leaf here is data that scales with the
+    number of subjects (N) and/or decision times (T) -- exactly the data
+    that must NOT be left as a Python closure over the base precompute
+    objects, since a jax.jit trace bakes any closed-over concrete array
+    into the compiled program as an XLA literal constant, and
+    large-constant embedding/optimization is what made compile time balloon
+    with N before this fix (see
+    docs/adr/0001-adaptive-sandwich-performance-plan.md and this function's
+    call site's own comments). See _ActionProbLayerJitArrays/_BucketJitArrays
+    for exactly which fields, and why the rest are left as closed-over
+    Python constants instead.
+    """
+    algo_overrides = _algorithm_override_positions(
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+    )
+    inference_overrides = _inference_override_positions(
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+    )
+
+    action_prob_jit_arrays = _ActionProbLayerJitArrays(
+        active_mask=jnp.asarray(action_prob_layer.active_mask),
+        beta_row_index=jnp.asarray(action_prob_layer.beta_row_index),
+        actions_grid=jnp.asarray(action_prob_layer.actions_grid),
+        raw_arg_tensors=tuple(
+            jnp.asarray(t) for t in action_prob_layer.raw_arg_tensors
+        ),
+        lo_idx=jnp.asarray(action_prob_layer.lo_idx),
+        subject_end_idx=jnp.asarray(action_prob_layer.subject_end_idx),
+    )
+    update_jit_arrays = _UpdateLayerJitArrays(
+        hi_idx=jnp.asarray(update_layer.hi_idx),
+        valid_update=jnp.asarray(update_layer.valid_update),
+        buckets_by_update_index=tuple(
+            tuple(
+                _extract_bucket_jit_arrays(bucket, algo_overrides) for bucket in buckets
+            )
+            for buckets in update_layer.buckets_by_update_index
+        ),
+    )
+    inference_jit_arrays = _InferenceLayerJitArrays(
+        buckets=tuple(
+            _extract_bucket_jit_arrays(bucket, inference_overrides)
+            for bucket in inference_layer.buckets
+        )
+    )
+    return _DiagnosticJitArrays(
+        action_prob=action_prob_jit_arrays,
+        update=update_jit_arrays,
+        inference=inference_jit_arrays,
+    )
+
+
+def _rebuild_precomputes_from_jit_arrays(
+    base_action_prob_layer: ActionProbLayerPrecompute,
+    base_update_layer: UpdateLayerPrecompute,
+    base_inference_layer: InferenceLayerPrecompute,
+    jit_arrays: _DiagnosticJitArrays,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_previous_betas_index: int,
+    alg_update_func_args_action_prob_index: int,
+    inference_func_args_theta_index: int,
+    inference_func_args_action_prob_index: int,
+) -> tuple[ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute]:
+    """
+    Inverse of _extract_diagnostic_jit_arrays -- called INSIDE the jax.jit
+    trace (from _eval_avg_stack_jit's body): reconstructs three precompute
+    objects equivalent to the base ones, but with every extracted field's
+    value coming from jit_arrays' traced leaves instead of the base
+    objects' closed-over concrete arrays.
+
+    dataclasses.replace(base_object, **traced_fields) works directly here
+    with no pytree registration needed at all: ActionProbLayerPrecompute /
+    UpdateLayerPrecompute / InferenceLayerPrecompute / UpdateArgBucket are
+    all plain frozen dataclasses, so replace() just builds a fresh instance
+    with the given fields overridden by tracers, copying every
+    non-overridden field (time_to_col, subject_id_to_pos,
+    min_time_by_policy_num, subject_ids_in_order,
+    action_prob_times_by_subject, policy_nums_by_update_index, etc.)
+    through unchanged as ordinary closed-over Python objects -- this is
+    Investigation B's "manual extract/rebuild via dataclasses.replace"
+    design.
+    """
+    algo_overrides = _algorithm_override_positions(
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+    )
+    inference_overrides = _inference_override_positions(
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+    )
+
+    action_prob_layer = dataclasses.replace(
+        base_action_prob_layer,
+        active_mask=jit_arrays.action_prob.active_mask,
+        beta_row_index=jit_arrays.action_prob.beta_row_index,
+        actions_grid=jit_arrays.action_prob.actions_grid,
+        raw_arg_tensors=jit_arrays.action_prob.raw_arg_tensors,
+        lo_idx=jit_arrays.action_prob.lo_idx,
+        subject_end_idx=jit_arrays.action_prob.subject_end_idx,
+    )
+    update_layer = dataclasses.replace(
+        base_update_layer,
+        hi_idx=jit_arrays.update.hi_idx,
+        valid_update=jit_arrays.update.valid_update,
+        buckets_by_update_index=[
+            [
+                _rebuild_bucket_from_jit_arrays(
+                    base_bucket, bucket_jit_arrays, algo_overrides
+                )
+                for base_bucket, bucket_jit_arrays in zip(
+                    base_buckets, jit_buckets, strict=True
+                )
+            ]
+            for base_buckets, jit_buckets in zip(
+                base_update_layer.buckets_by_update_index,
+                jit_arrays.update.buckets_by_update_index,
+                strict=True,
+            )
+        ],
+    )
+    inference_layer = dataclasses.replace(
+        base_inference_layer,
+        buckets=[
+            _rebuild_bucket_from_jit_arrays(
+                base_bucket, bucket_jit_arrays, inference_overrides
+            )
+            for base_bucket, bucket_jit_arrays in zip(
+                base_inference_layer.buckets,
+                jit_arrays.inference.buckets,
+                strict=True,
+            )
+        ],
+    )
+    return action_prob_layer, update_layer, inference_layer
+
+
 def compute_local_linearization_error_ratio(
     stabilized_joint_bread_matrix: jnp.ndarray,
     avg_estimating_function_stack: jnp.ndarray,
@@ -2146,6 +3117,10 @@ def compute_local_linearization_error_ratio(
     action_by_decision_time_by_subject_id: dict[
         collections.abc.Hashable, dict[int, int]
     ],
+    alg_update_func_args_mask_index: int = -1,
+    alg_update_func_args_ragged_indices: tuple[int, ...] = (),
+    inference_func_args_mask_index: int = -1,
+    inference_func_args_ragged_indices: tuple[int, ...] = (),
 ) -> tuple[float, float, float]:
     """
     Compares the nonlinear Taylor remainder of the joint estimating-function map to
@@ -2182,9 +3157,14 @@ def compute_local_linearization_error_ratio(
         beta_index_by_policy_num, inference_func_args_by_subject_id,
         inference_action_prob_decision_times_by_subject_id,
         update_func_args_by_by_subject_id_by_policy_num,
-        action_by_decision_time_by_subject_id:
-            Passed straight through to get_avg_weighted_estimating_function_stacks_and_aux_values;
-            see that function's own docstring.
+        action_by_decision_time_by_subject_id,
+        alg_update_func_args_mask_index, alg_update_func_args_ragged_indices,
+        inference_func_args_mask_index, inference_func_args_ragged_indices:
+            Passed straight through to get_avg_weighted_estimating_function_stacks_and_aux_values
+            (via this function's own build_update_layer_precompute/build_inference_layer_precompute
+            calls, since this diagnostic builds its structural precompute directly rather than
+            through that function); see that function's own docstring for what the four
+            mask/ragged-indices arguments do.
 
     Returns:
         tuple[float, float, float]:
@@ -2215,6 +3195,53 @@ def compute_local_linearization_error_ratio(
 
     num_subjects = stacks.shape[0]
 
+    # One-time structural precompute, built exactly the way
+    # get_avg_weighted_estimating_function_stacks_and_aux_values would build
+    # it itself (same build_*_precompute calls, same raw arguments) -- but
+    # built HERE, once, in plain eager numpy, so it can be extracted into a
+    # traced jit argument below instead of being closed over by
+    # _eval_avg_stack_jit. See _extract_diagnostic_jit_arrays's own
+    # docstring for why closing over these objects directly (the previous
+    # version of this fix) is exactly what caused compile time to balloon
+    # with the number of subjects.
+    subject_ids_np = np.asarray(subject_ids.tolist())
+    base_action_prob_layer = build_action_prob_layer_precompute(
+        subject_ids_np,
+        action_prob_func_args_by_subject_id_by_decision_time,
+        action_by_decision_time_by_subject_id,
+        policy_num_by_decision_time_by_subject_id,
+        beta_index_by_policy_num,
+        initial_policy_num,
+        action_prob_func_args_beta_index,
+    )
+    base_update_layer = build_update_layer_precompute(
+        subject_ids_np,
+        update_func_args_by_by_subject_id_by_policy_num,
+        beta_index_by_policy_num,
+        alg_update_func_args_action_prob_times_index,
+        base_action_prob_layer,
+        alg_update_func_args_mask_index,
+        alg_update_func_args_ragged_indices,
+    )
+    base_inference_layer = build_inference_layer_precompute(
+        inference_func_args_by_subject_id,
+        inference_func_args_action_prob_index,
+        inference_action_prob_decision_times_by_subject_id,
+        base_action_prob_layer,
+        inference_func_args_mask_index,
+        inference_func_args_ragged_indices,
+    )
+    jit_arrays = _extract_diagnostic_jit_arrays(
+        base_action_prob_layer,
+        base_update_layer,
+        base_inference_layer,
+        alg_update_func_args_beta_index,
+        alg_update_func_args_previous_betas_index,
+        alg_update_func_args_action_prob_index,
+        inference_func_args_theta_index,
+        inference_func_args_action_prob_index,
+    )
+
     # This closure is jit-friendly by construction: suppress_all_data_checks and
     # include_auxiliary_outputs are hardcoded below (never traced), so the
     # np.testing.assert_allclose/.tolist()/int() concretization hazards that
@@ -2242,8 +3269,36 @@ def compute_local_linearization_error_ratio(
     # and below: jax.jit needs those values fixed at trace time, and several of
     # them (the dict-typed args) are unhashable, so they can't be passed as jit
     # static_argnums/static_argnames to a module-level function instead.
+    #
+    # jit_arrays is this closure's SECOND argument (not closed over) --
+    # deliberately, so its leaves are real jit trace parameters rather than
+    # Python constants XLA would otherwise have to embed as literals (see
+    # docs/adr/0001-adaptive-sandwich-performance-plan.md's "Real-scale
+    # (n=10000) findings" section, and _extract_diagnostic_jit_arrays'
+    # docstring). base_action_prob_layer/base_update_layer/base_inference_layer
+    # ARE still closed over, but only to supply the small, never-traced
+    # metadata dataclasses.replace(...) needs to fill in every field this
+    # closure's jit_arrays argument does not carry (time_to_col,
+    # subject_id_to_pos, subject_ids_in_order, action_prob_times_by_subject,
+    # etc.) -- see _rebuild_precomputes_from_jit_arrays.
     @jax.jit
-    def _eval_avg_stack_jit(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
+    def _eval_avg_stack_jit(
+        flattened_betas_and_theta: jnp.ndarray,
+        jit_arrays: _DiagnosticJitArrays,
+    ) -> jnp.ndarray:
+        action_prob_layer, update_layer, inference_layer = (
+            _rebuild_precomputes_from_jit_arrays(
+                base_action_prob_layer,
+                base_update_layer,
+                base_inference_layer,
+                jit_arrays,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_previous_betas_index,
+                alg_update_func_args_action_prob_index,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+            )
+        )
         return get_avg_weighted_estimating_function_stacks_and_aux_values(
             flattened_betas_and_theta,
             beta_dim,
@@ -2272,6 +3327,7 @@ def compute_local_linearization_error_ratio(
             True,  # suppress_all_data_checks
             True,  # suppress_interactive_data_checks
             False,  # include_auxiliary_outputs
+            precomputed_layers=(action_prob_layer, update_layer, inference_layer),
         )
 
     # Evaluate at the final estimate.
@@ -2312,7 +3368,7 @@ def compute_local_linearization_error_ratio(
         delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(joint_bread, U.T).T
 
         B_delta = (joint_bread @ delta.T).T
-        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d))(delta)
+        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d, jit_arrays))(delta)
         remainder = g_plus - g_hat - B_delta
 
         denom = jnp.linalg.norm(B_delta, axis=1)

@@ -111,6 +111,7 @@ from __future__ import annotations
 
 import collections.abc
 import dataclasses
+import logging
 import math
 from typing import Any
 
@@ -124,6 +125,156 @@ from .vmap_helpers import (
     build_batched_arg_lists_by_subject,
     stack_batched_arg_lists_into_tensors,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _row_length(value: Any) -> int | None:
+    if hasattr(value, "shape"):
+        return None if value.ndim == 0 else value.shape[0]
+    if isinstance(value, (list, tuple)) and not isinstance(value, str):
+        return len(value)
+    return None
+
+
+def self_pad_ragged_args_and_build_mask(
+    args_by_subject_id: dict[Any, tuple],
+    ragged_indices: tuple[int, ...],
+    mask_index: int,
+    target_max_length: int | None = None,
+) -> dict[Any, tuple]:
+    """
+    Opt-in alternative to exact-shape bucketing (group_user_args_by_shape):
+    instead of grouping subjects with different per-position array lengths
+    into separate shape-buckets, self-pad every position named in
+    ragged_indices (ones whose axis-0 length -- e.g. a per-decision-time
+    history -- legitimately differs across subjects, typically because of
+    staggered/incremental recruitment) up to the max length seen across
+    subjects, and append a validity mask (1.0 for a real row, 0.0 for a
+    padded one) as a new LAST argument. This lets a mask-aware
+    alg_update_func/inference_func (one that multiplies any row-wise sum by
+    the mask before reducing) be called via a single jax.vmap dispatch for
+    this whole group instead of one dispatch per distinct shape -- the fix
+    for real-world incremental-recruitment studies producing far more
+    shape-buckets than any subject-count-only benchmark exercises (a real,
+    measured 146 buckets at just 70 subjects in one such study -- see
+    docs/adr/0001-adaptive-sandwich-performance-plan.md's deferred "Step 5").
+
+    Padding is a REPEAT of each subject's own last real row along that
+    position's axis 0, never a fabricated zero -- consistent with this
+    module's existing self-padding convention elsewhere (see this module's
+    own docstring: "every invalid cell self-padded with that subject's own
+    real data, never a fabricated constant"). This matters even for a
+    function that correctly masks: a fabricated zero can still poison an
+    otherwise-masked-away row through a non-linear op before the mask is
+    ever applied (e.g. 1/act_prob with act_prob==0 produces inf, and
+    0 * inf is nan in IEEE754, not 0) -- a repeated real row never has this
+    problem. Padding alone does NOT make the result correct: the function
+    must still multiply by the mask before any row-wise sum for the padded
+    call to be mathematically equivalent to the unpadded per-subject one.
+
+    Every position in ragged_indices must agree, per subject, on how many
+    real rows that subject has (they're expected to represent the same
+    underlying "how much history does this subject have so far" concept --
+    e.g. state/action/act_prob/decision_times/rewards all indexed by
+    decision time) -- raises ValueError if they don't, or if any subject has
+    zero real rows (no row exists to repeat). mask_index must equal every
+    subject's argument count before padding, i.e. the mask is always
+    appended as a new last argument rather than inserted in the middle, so
+    no other *_index config value (beta_index, previous_betas_index,
+    action_prob_index, action_prob_times_index, ...) ever needs to shift.
+
+    target_max_length (opt-in, default None): pad up to this length instead
+    of this call's own max(subject_lengths). Every existing caller omits
+    this (preserving today's exact "pad to this GROUP's own max" behavior);
+    it exists so a caller consolidating ragged lengths across several
+    independent groups (e.g. build_update_layer_precompute's
+    combine_updates_into_one_vmap path, which needs every update padded to
+    one GLOBAL max shared across updates, not each update's own local max)
+    can reuse this same padding routine instead of duplicating it. Raises
+    ValueError if smaller than this group's own max (that would silently
+    truncate real rows instead of only adding padding).
+    """
+    subject_ids = list(args_by_subject_id.keys())
+    if not subject_ids:
+        return {}
+    if not ragged_indices:
+        raise ValueError("ragged_indices must be non-empty when padding is requested.")
+
+    num_args = len(args_by_subject_id[subject_ids[0]])
+    for sid in subject_ids:
+        if len(args_by_subject_id[sid]) != num_args:
+            raise ValueError(
+                f"Subject {sid!r} has {len(args_by_subject_id[sid])} args, "
+                f"expected {num_args} (same as every other subject) -- "
+                "padding requires a uniform argument count across subjects."
+            )
+    if mask_index != num_args:
+        raise ValueError(
+            f"mask_index={mask_index} must equal the argument count "
+            f"({num_args}) -- the mask is always appended as a new last "
+            "argument, never inserted in the middle."
+        )
+
+    subject_lengths: dict[Any, int] = {}
+    for sid in subject_ids:
+        args = args_by_subject_id[sid]
+        lengths = {pos: _row_length(args[pos]) for pos in ragged_indices}
+        if any(length is None for length in lengths.values()):
+            raise ValueError(
+                f"Subject {sid!r} has a non-array/non-sequence value at one "
+                f"of ragged_indices={ragged_indices} -- cannot determine its "
+                "row length to pad."
+            )
+        distinct = set(lengths.values())
+        if len(distinct) > 1:
+            raise ValueError(
+                f"Subject {sid!r} has disagreeing row counts across "
+                f"ragged_indices={ragged_indices}: {lengths} -- every ragged "
+                "position must agree, per subject, on how many real rows "
+                "that subject has."
+            )
+        (length,) = distinct
+        if length == 0:
+            raise ValueError(
+                f"Subject {sid!r} has zero real rows at ragged_indices="
+                f"{ragged_indices} -- there is no real row to repeat for "
+                "self-padding."
+            )
+        subject_lengths[sid] = length
+
+    max_length = max(subject_lengths.values())
+    if target_max_length is not None:
+        if target_max_length < max_length:
+            raise ValueError(
+                f"target_max_length={target_max_length} is smaller than this "
+                f"group's own max real-row-count ({max_length}) -- padding "
+                "can only add rows, never truncate real ones."
+            )
+        max_length = target_max_length
+    ragged_index_set = set(ragged_indices)
+
+    padded_args_by_subject_id: dict[Any, tuple] = {}
+    for sid in subject_ids:
+        subj_len = subject_lengths[sid]
+        pad_amount = max_length - subj_len
+        new_args = list(args_by_subject_id[sid])
+        for pos in ragged_index_set:
+            value = np.asarray(new_args[pos])
+            if pad_amount > 0:
+                last_row = value[-1:]
+                pad_block = np.repeat(last_row, pad_amount, axis=0)
+                value = np.concatenate([value, pad_block], axis=0)
+            new_args[pos] = value
+        mask = np.concatenate(
+            [
+                np.ones(subj_len, dtype=np.float32),
+                np.zeros(pad_amount, dtype=np.float32),
+            ]
+        )
+        padded_args_by_subject_id[sid] = tuple(new_args) + (mask,)
+
+    return padded_args_by_subject_id
 
 
 def get_global_time_axis(
@@ -439,6 +590,88 @@ class UpdateLayerPrecompute:
     buckets_by_update_index: list[list[UpdateArgBucket]]
     valid_update: np.ndarray  # (N, U) bool
     hi_idx: np.ndarray  # (N, U) int
+    # Populated only when combine_updates_into_one_vmap=True was passed to
+    # build_update_layer_precompute -- every default caller leaves these None,
+    # and compute_batched_algorithm_component branches on that (None => the
+    # original, unchanged per-update/per-bucket loop). See
+    # build_update_layer_precompute's own docstring for what these mean.
+    combined_arg_tensors: tuple[np.ndarray, ...] | None = None  # each (N, U, *shape)
+    combined_arg_positions: tuple[int, ...] | None = None  # raw arg position each
+    # combined_arg_tensors entry corresponds to, in order (excludes the
+    # beta/action-prob override positions, which are supplied at call time).
+    combined_num_args: int | None = None  # total alg_update_func arg count (post-mask)
+    combined_action_prob_col_idx: np.ndarray | None = (
+        None  # (N, U, *shape) int, or None
+    )
+    update_fill_index: np.ndarray | None = (
+        None  # (N, U) int; nearest valid update per subject
+    )
+
+
+def resolve_combine_updates_into_one_vmap(
+    requested: bool | None,
+    alg_update_func_args_mask_index: int,
+    alg_update_func_args_previous_betas_index: int,
+) -> bool:
+    """
+    Resolves the tri-state combine_updates_into_one_vmap request into a
+    concrete decision:
+
+    - requested=True/False: honored verbatim (True keeps every loud
+      eligibility error build_update_layer_precompute/
+      compute_batched_algorithm_component raise; False forces the default
+      per-update/per-bucket loop even when combining would be eligible).
+    - requested=None (the default, "auto"): combining is enabled exactly when
+      it is eligible -- alg_update_func_args_mask_index >= 0 (the caller has
+      already opted into the mask/self-padding mechanism with a mask-aware
+      alg_update_func, which combining requires) AND
+      alg_update_func_args_previous_betas_index < 0 (the combined path does
+      not support previous_betas -- see
+      compute_batched_algorithm_component's docstring). Otherwise it quietly
+      stays off, which is exactly today's shipped default path.
+
+    Pure (aside from an INFO log of the decision), so the eligibility matrix
+    is directly unit-testable. The auto decision here is only about
+    ELIGIBILITY; structural invariants that can only be checked during
+    build_update_layer_precompute's own combined-block work (one shape-bucket
+    per update after global padding, identical non-ragged shapes across
+    updates) are handled there, via its combine_is_required argument.
+    """
+    if requested is not None:
+        logger.info(
+            "combine_updates_into_one_vmap=%s was passed explicitly; using it as-is.",
+            requested,
+        )
+        # bool(), not verbatim: a truthy non-bool (e.g. 1) must behave exactly
+        # like True everywhere downstream -- in particular the caller's
+        # `combine_is_required=(resolved is True)` identity check would
+        # otherwise silently downgrade an explicit request's fail-loud
+        # contract to auto's warn-and-fall-back semantics.
+        return bool(requested)
+    eligible = (
+        alg_update_func_args_mask_index >= 0
+        and alg_update_func_args_previous_betas_index < 0
+    )
+    if eligible:
+        logger.info(
+            "combine_updates_into_one_vmap=None (auto) resolved to True: "
+            "alg_update_func_args_mask_index=%d >= 0 (mask-aware "
+            "alg_update_func) and alg_update_func_args_previous_betas_index="
+            "%d < 0. Pass combine_updates_into_one_vmap=False to force the "
+            "per-update/per-bucket loop instead.",
+            alg_update_func_args_mask_index,
+            alg_update_func_args_previous_betas_index,
+        )
+    else:
+        logger.info(
+            "combine_updates_into_one_vmap=None (auto) resolved to False: "
+            "requires alg_update_func_args_mask_index >= 0 (got %d) and "
+            "alg_update_func_args_previous_betas_index < 0 (got %d). Using "
+            "the default per-update/per-bucket loop.",
+            alg_update_func_args_mask_index,
+            alg_update_func_args_previous_betas_index,
+        )
+    return eligible
 
 
 def build_update_layer_precompute(
@@ -449,6 +682,12 @@ def build_update_layer_precompute(
     beta_index_by_policy_num: dict[int | float, int],
     alg_update_func_args_action_prob_times_index: int,
     action_prob_layer: ActionProbLayerPrecompute,
+    alg_update_func_args_mask_index: int = -1,
+    alg_update_func_args_ragged_indices: tuple[int, ...] = (),
+    combine_updates_into_one_vmap: bool = False,
+    alg_update_func_args_beta_index: int = -1,
+    alg_update_func_args_action_prob_index: int = -1,
+    combine_is_required: bool = True,
 ) -> UpdateLayerPrecompute:
     """
     One-time, plain-numpy precompute. U = number of non-initial, non-fallback
@@ -461,6 +700,79 @@ def build_update_layer_precompute(
     the same machinery input_checks.py's
     require_threaded_algorithm_estimating_function_args_equivalent already
     uses for this identical shape-heterogeneity problem).
+
+    If alg_update_func_args_mask_index >= 0 (opt-in; default -1 preserves
+    today's exact-shape bucketing behavior with zero change), every subject
+    at a given update is instead self_pad_ragged_args_and_build_mask'ed into
+    ONE shared shape before bucketing -- so group_user_args_by_shape then
+    naturally produces a single bucket per update regardless of how many
+    distinct per-subject history lengths exist. This targets real-world
+    incremental-recruitment studies where shape-bucketing alone produces far
+    more buckets than any subject-count-only benchmark exercises. Only usable
+    with an alg_update_func that has been written to accept and correctly
+    apply the appended mask; see that function's own docstring.
+
+    combine_updates_into_one_vmap (opt-in; default False preserves today's
+    exact behavior with zero change): if True, ALSO builds the extra
+    combined_* / update_fill_index fields on the returned UpdateLayerPrecompute
+    that let compute_batched_algorithm_component replace its per-update,
+    per-bucket jax.vmap loop with exactly one jax.vmap call spanning every
+    (subject, update) pair at once -- see that function's docstring for the
+    performance rationale. Requires alg_update_func_args_mask_index >= 0
+    (combining across updates reuses the same self-pad+mask convention
+    already used within an update, extended across updates too): raises
+    ValueError otherwise. Requires alg_update_func_args_beta_index (and, if
+    used, alg_update_func_args_action_prob_index) so the override positions
+    that stay call-time substitutions (never combined into a static tensor)
+    can be identified.
+
+    combine_is_required (default True preserves the loud-error behavior every
+    explicit combine_updates_into_one_vmap=True caller has always had): when
+    False -- passed by get_avg_weighted_estimating_function_stacks_and_aux_values
+    when combining was AUTO-resolved (combine_updates_into_one_vmap=None,
+    resolved True by resolve_combine_updates_into_one_vmap) rather than
+    explicitly demanded -- any ValueError raised while building the
+    combined_* fields (the structural invariants described below, which can
+    only be checked once this work has started) is caught, logged as a
+    WARNING naming the violated invariant, and the precompute is returned
+    with the combined_* fields left None, so
+    compute_batched_algorithm_component transparently uses the default
+    per-update/per-bucket loop. The default bucket structures are always
+    fully built BEFORE the combined block runs, so no work is redone on
+    fallback; results are numerically unaffected either way.
+
+    Mechanism: every update's ragged positions are first padded to their own
+    LOCAL max length (learned exactly as the alg_update_func_args_mask_index
+    path above already does), then re-padded to the GLOBAL max length shared
+    by every update (self_pad_ragged_args_and_build_mask's target_max_length),
+    so every update ends up with the exact same ragged shape. Two structural
+    invariants are then required and checked (a ValueError, naming the
+    offending update/position, if violated): exactly one shape-bucket per
+    update after global padding (i.e. every non-ragged, non-overridden
+    argument position must already agree across every subject at a given
+    update -- the same requirement alg_update_func_args_mask_index alone
+    already implies within an update), and that shape must additionally
+    agree across every DIFFERENT update (a new requirement, needed because
+    every update is about to be stacked into one shared tensor).
+
+    A subject invalid at a given update (valid_update[n, u] is False) has no
+    real args to contribute at that update at all -- these are self-padded
+    with that SAME subject's own real args from their nearest valid update
+    (update_fill_index; forward-fill then backward-fill along the update
+    axis, mirroring ActionProbLayerPrecompute.fill_col_index's identical
+    construction along the time axis), never a fabricated constant -- the
+    same invariant this module's docstring states for every other padded
+    position. compute_batched_algorithm_component still multiplies by the
+    outer valid_update mask afterward, so a self-padded (subject, update)
+    cell's contribution is exactly zeroed either way; the self-padding here
+    exists only so jax.vmap always sees an in-domain input, per this
+    module's hazard (1).
+
+    Scope note: alg_update_func_args_previous_betas_index is NOT threaded
+    through this function at all (compute_batched_algorithm_component raises
+    NotImplementedError if combine_updates_into_one_vmap is combined with
+    alg_update_func_args_previous_betas_index >= 0) -- see that function's
+    docstring for why. No shipped alg_update_func needs both at once today.
     """
     N = len(subject_ids)
     subject_id_to_pos = action_prob_layer.subject_id_to_pos
@@ -493,6 +805,12 @@ def build_update_layer_precompute(
             hi_idx[n, u] = min(idx_candidate, subj_end_plus_1)
 
         nontrivial = {sid: a for sid, a in args_by_subject_id.items() if a}
+        if alg_update_func_args_mask_index >= 0 and nontrivial:
+            nontrivial = self_pad_ragged_args_and_build_mask(
+                nontrivial,
+                alg_update_func_args_ragged_indices,
+                alg_update_func_args_mask_index,
+            )
         buckets: list[UpdateArgBucket] = []
         for shape_group in group_user_args_by_shape(nontrivial):
             sorted_ids = sorted(
@@ -522,11 +840,259 @@ def build_update_layer_precompute(
             )
         buckets_by_update_index.append(buckets)
 
+    combined_arg_tensors = None
+    combined_arg_positions = None
+    combined_num_args = None
+    combined_action_prob_col_idx = None
+    update_fill_index = None
+
+    if combine_updates_into_one_vmap:
+        try:
+            if alg_update_func_args_mask_index < 0:
+                raise ValueError(
+                    "combine_updates_into_one_vmap=True requires "
+                    "alg_update_func_args_mask_index >= 0 -- combining every "
+                    "update into one jax.vmap call needs the same self-pad+mask "
+                    "convention already used within an update, extended across "
+                    "updates too."
+                )
+
+            # Step 1: learn each update's own LOCAL max ragged length (exactly
+            # the alg_update_func_args_mask_index-only padding above, redone
+            # here from the raw, unpadded args -- kept independent of the main
+            # loop above rather than reusing its state, so this block cannot
+            # accidentally perturb that loop's own (already-shipped,
+            # default-path) behavior), then take the max across every update to
+            # get ONE global length shared by all of them.
+            raw_nontrivial_by_update_index: list[dict[Any, tuple]] = []
+            local_max_by_update: list[int | None] = []
+            for policy_num in policy_nums_by_update_index:
+                args_by_subject_id = update_func_args_by_by_subject_id_by_policy_num[
+                    policy_num
+                ]
+                raw_nontrivial = {sid: a for sid, a in args_by_subject_id.items() if a}
+                raw_nontrivial_by_update_index.append(raw_nontrivial)
+                if not raw_nontrivial:
+                    local_max_by_update.append(None)
+                    continue
+                locally_padded = self_pad_ragged_args_and_build_mask(
+                    raw_nontrivial,
+                    alg_update_func_args_ragged_indices,
+                    alg_update_func_args_mask_index,
+                )
+                any_args = next(iter(locally_padded.values()))
+                local_max_by_update.append(
+                    int(np.asarray(any_args[alg_update_func_args_mask_index]).shape[0])
+                )
+
+            real_local_maxes = [m for m in local_max_by_update if m is not None]
+            if not real_local_maxes:
+                raise ValueError(
+                    "combine_updates_into_one_vmap=True but no update has any "
+                    "subject with real algorithm-update args -- nothing to combine."
+                )
+            global_max_length = max(real_local_maxes)
+
+            # Step 2: re-pad every update's ragged positions to that one global
+            # length, and check the two structural invariants combining requires:
+            # exactly one shape-bucket per update after global padding, and that
+            # every non-ragged, non-overridden argument position's shape agrees
+            # across every DIFFERENT update too (not just within one).
+            override_positions = {
+                p
+                for p in (
+                    alg_update_func_args_beta_index,
+                    alg_update_func_args_action_prob_index,
+                )
+                if p >= 0
+            }
+            ragged_and_mask_positions = set(alg_update_func_args_ragged_indices) | {
+                alg_update_func_args_mask_index
+            }
+
+            values_by_update: list[dict[Any, tuple]] = []
+            num_args_total: int | None = None
+            pos_shape_by_position: dict[int, tuple] = {}
+            for policy_num, raw_nontrivial in zip(
+                policy_nums_by_update_index, raw_nontrivial_by_update_index, strict=True
+            ):
+                if not raw_nontrivial:
+                    values_by_update.append({})
+                    continue
+                globally_padded = self_pad_ragged_args_and_build_mask(
+                    raw_nontrivial,
+                    alg_update_func_args_ragged_indices,
+                    alg_update_func_args_mask_index,
+                    target_max_length=global_max_length,
+                )
+                shape_groups = list(group_user_args_by_shape(globally_padded))
+                if len(shape_groups) > 1:
+                    raise ValueError(
+                        "combine_updates_into_one_vmap=True but update at "
+                        f"policy_num={policy_num!r} still has {len(shape_groups)} "
+                        "distinct argument shapes after global-length padding -- "
+                        "every non-ragged, non-overridden argument position must "
+                        "have identical shape across every subject at this "
+                        "update for it to be combined into a single jax.vmap "
+                        "dispatch."
+                    )
+                any_args = next(iter(globally_padded.values()))
+                num_args_here = len(any_args)
+                if num_args_total is None:
+                    num_args_total = num_args_here
+                elif num_args_here != num_args_total:
+                    raise ValueError(
+                        "combine_updates_into_one_vmap=True but update at "
+                        f"policy_num={policy_num!r} has {num_args_here} "
+                        f"argument(s) after padding, expected {num_args_total} "
+                        "(from an earlier update) -- every update must call "
+                        "alg_update_func with the same argument count."
+                    )
+                for pos in range(num_args_here):
+                    if pos in override_positions or pos in ragged_and_mask_positions:
+                        continue
+                    shape_here = np.asarray(any_args[pos]).shape
+                    if pos not in pos_shape_by_position:
+                        pos_shape_by_position[pos] = shape_here
+                    elif pos_shape_by_position[pos] != shape_here:
+                        raise ValueError(
+                            "combine_updates_into_one_vmap=True but argument "
+                            f"position {pos} has shape {shape_here} at "
+                            f"policy_num={policy_num!r}, vs. "
+                            f"{pos_shape_by_position[pos]} at an earlier update "
+                            "-- every non-ragged, non-overridden argument "
+                            "position must have identical shape across every "
+                            "update to be combined into one jax.vmap call."
+                        )
+                values_by_update.append(globally_padded)
+
+            # Step 3: update_fill_index -- nearest VALID update per subject,
+            # forward-fill then backward-fill along the update axis. Same
+            # construction as ActionProbLayerPrecompute.fill_col_index (built
+            # along the time axis over active_mask); here it is built along the
+            # update axis over valid_update instead.
+            update_fill_index = np.where(
+                valid_update, np.tile(np.arange(U), (N, 1)), -1
+            )
+            for u in range(1, U):
+                needs_fill = update_fill_index[:, u] == -1
+                update_fill_index[needs_fill, u] = update_fill_index[needs_fill, u - 1]
+            for u in range(U - 2, -1, -1):
+                needs_fill = update_fill_index[:, u] == -1
+                update_fill_index[needs_fill, u] = update_fill_index[needs_fill, u + 1]
+            if (update_fill_index == -1).any():
+                bad = subject_ids[np.any(update_fill_index == -1, axis=1)]
+                raise ValueError(
+                    f"Subject(s) {bad.tolist()} are invalid (no real algorithm "
+                    "update args) at every update; cannot self-pad their "
+                    "combined-mode row."
+                )
+
+            # Step 4: build one static (N, U, *shape) tensor per non-override
+            # argument position -- real data at every valid (subject, update)
+            # cell, that SAME subject's own real data from their nearest valid
+            # update (via update_fill_index) at every invalid one.
+            subject_ids_list = subject_ids.tolist()
+            # A position holding a literal None for every subject (an unused,
+            # override-only argument slot -- see _stackable_positions' own
+            # docstring; several shipped fixtures/estimating functions rely on
+            # this) is skipped here exactly like _stackable_positions already
+            # skips it for the per-bucket path: it is left out of
+            # combined_positions_list, so its call_args/in_axes entry stays at
+            # compute_batched_algorithm_component's own [None]*num_args default
+            # -- passing the literal None straight through to jax.vmap, same as
+            # today. Building a real (N, U, *shape) tensor for it would instead
+            # crash (nothing real anywhere to self-pad an all-None position
+            # with) or, worse, silently produce an object-dtype array.
+            combined_positions_list = [
+                p
+                for p in range(num_args_total)
+                if p not in override_positions
+                and not all(
+                    args[p] is None
+                    for u in range(U)
+                    for args in values_by_update[u].values()
+                )
+            ]
+            combined_tensor_list = []
+            for pos in combined_positions_list:
+                grid: list[list[Any]] = [[None] * U for _ in range(N)]
+                for u in range(U):
+                    for sid, args in values_by_update[u].items():
+                        grid[subject_id_to_pos[sid]][u] = args[pos]
+                for n in range(N):
+                    for u in range(U):
+                        if grid[n][u] is None:
+                            fill_u = int(update_fill_index[n, u])
+                            grid[n][u] = values_by_update[fill_u][subject_ids_list[n]][
+                                pos
+                            ]
+                combined_tensor_list.append(_stack_grid_to_tensor(grid, N, U))
+
+            combined_arg_tensors = tuple(combined_tensor_list)
+            combined_arg_positions = tuple(combined_positions_list)
+            combined_num_args = num_args_total
+
+            if alg_update_func_args_action_prob_times_index >= 0:
+                times_tensor = combined_tensor_list[
+                    combined_positions_list.index(
+                        alg_update_func_args_action_prob_times_index
+                    )
+                ]
+                flat_times = times_tensor.reshape(-1)
+                col_idx_flat = np.array(
+                    [action_prob_layer.time_to_col[int(t)] for t in flat_times],
+                    dtype=np.int64,
+                )
+                combined_action_prob_col_idx = col_idx_flat.reshape(times_tensor.shape)
+        except ValueError as structural_violation:
+            if combine_is_required:
+                # The caller explicitly passed combine_updates_into_one_vmap=True:
+                # keep every loud error exactly as it was before auto mode
+                # existed (the two structural-invariant ValueErrors above, the
+                # mask_index ValueError, and the nothing-to-combine ValueError).
+                raise
+            # Auto-resolved combining (combine_updates_into_one_vmap=None at
+            # the API surface, resolved to True by eligibility alone): fall
+            # back to the shipped, golden-tested per-update/per-bucket loop
+            # instead of failing an analysis that would have succeeded with
+            # the default path. Correctness is never at stake -- the fallback
+            # IS the default path, and the two paths are tested numerically
+            # identical (see tests/benchmarks/
+            # test_combine_updates_into_one_vmap_benchmark.py); only the
+            # fewer-bigger-dispatches speedup is lost. NOTE: this cheap,
+            # no-rebuild fallback relies on the default per-update bucket
+            # structures having been FULLY built by the main loop above
+            # BEFORE this combined block starts (the block is deliberately
+            # independent of that loop's state -- see its own Step 1
+            # comment). If that ordering is ever refactored, this except arm
+            # silently stops being valid.
+            logger.warning(
+                "combine_updates_into_one_vmap was auto-enabled but this "
+                "study's argument structure violates a combining invariant "
+                "(%s). Continuing on the default per-update/per-bucket loop "
+                "instead -- results are unaffected, only the combined-vmap "
+                "speedup is lost. Pass combine_updates_into_one_vmap=True to "
+                "reproduce this as a hard error, or False to silence this "
+                "warning.",
+                structural_violation,
+            )
+            combined_arg_tensors = None
+            combined_arg_positions = None
+            combined_num_args = None
+            combined_action_prob_col_idx = None
+            update_fill_index = None
+
     return UpdateLayerPrecompute(
         policy_nums_by_update_index=policy_nums_by_update_index,
         buckets_by_update_index=buckets_by_update_index,
         valid_update=valid_update,
         hi_idx=hi_idx,
+        combined_arg_tensors=combined_arg_tensors,
+        combined_arg_positions=combined_arg_positions,
+        combined_num_args=combined_num_args,
+        combined_action_prob_col_idx=combined_action_prob_col_idx,
+        update_fill_index=update_fill_index,
     )
 
 
@@ -540,13 +1106,54 @@ def build_inference_layer_precompute(
     inference_func_args_action_prob_index: int,
     inference_action_prob_decision_times_by_subject_id: dict[Any, Any],
     action_prob_layer: ActionProbLayerPrecompute,
+    inference_func_args_mask_index: int = -1,
+    inference_func_args_ragged_indices: tuple[int, ...] = (),
 ) -> InferenceLayerPrecompute:
     """
     One-time, plain-numpy precompute. Every subject has a real (never-())
     inference-args tuple, so this layer needs shape-bucketing but no
     valid_* mask.
+
+    If inference_func_args_mask_index >= 0 (opt-in; default -1 preserves
+    today's exact-shape bucketing with zero change), self-pads every
+    inference_func_args_ragged_indices position the same way
+    build_update_layer_precompute does for the algorithm side -- see
+    self_pad_ragged_args_and_build_mask's own docstring for the padding
+    rationale and constraints. inference_action_prob_decision_times_by_subject_id
+    is NOT one of inference_func_args_by_subject_id's own positions (a
+    structural difference from the algorithm side, where action-prob-times
+    IS one of the args tuple's positions) -- it must be self-padded in sync,
+    to the same per-subject real-row-count the mask itself encodes, so
+    _gather_reconstructed_action_prob's per-bucket np.stack over it still
+    sees a uniform length once every subject is consolidated into one bucket.
     """
     subject_id_to_pos = action_prob_layer.subject_id_to_pos
+
+    if inference_func_args_mask_index >= 0:
+        padded = self_pad_ragged_args_and_build_mask(
+            inference_func_args_by_subject_id,
+            inference_func_args_ragged_indices,
+            inference_func_args_mask_index,
+        )
+        if inference_func_args_action_prob_index >= 0:
+            padded_times_by_subject_id = {}
+            for sid, args in padded.items():
+                mask = args[inference_func_args_mask_index]
+                subj_len = int(np.sum(mask))
+                max_length = len(mask)
+                times = np.asarray(
+                    inference_action_prob_decision_times_by_subject_id[sid]
+                )
+                pad_amount = max_length - subj_len
+                if pad_amount > 0:
+                    pad_block = np.repeat(times[-1:], pad_amount, axis=0)
+                    times = np.concatenate([times, pad_block], axis=0)
+                padded_times_by_subject_id[sid] = times
+            inference_action_prob_decision_times_by_subject_id = (
+                padded_times_by_subject_id
+            )
+        inference_func_args_by_subject_id = padded
+
     buckets: list[UpdateArgBucket] = []
     for shape_group in group_user_args_by_shape(
         inference_func_args_by_subject_id, empty_allowed=False
@@ -921,6 +1528,119 @@ def _build_inference_bucket_overrides(
     return override_position_values
 
 
+def _gather_combined_reconstructed_action_prob(
+    pi_beta_grid: jnp.ndarray,
+    combined_action_prob_col_idx: np.ndarray,  # (N, U, *shape)
+) -> jnp.ndarray:
+    """
+    combine_updates_into_one_vmap counterpart to
+    _gather_reconstructed_action_prob: gathers every (subject, update) cell's
+    reconstructed action probabilities out of the already-computed (N, T)
+    pi_beta_grid at once, using the (N, U, *shape) column-index tensor
+    build_update_layer_precompute already derived structurally (from
+    time_to_col, at precompute time -- this never depends on the traced
+    betas/theta, so it is built once, not rebuilt every call).
+    """
+    N, U = combined_action_prob_col_idx.shape[:2]
+    flat_shape = combined_action_prob_col_idx.shape[2:]
+    col_idx_flat = combined_action_prob_col_idx.reshape(N, U, -1)
+    n_idx_b = np.broadcast_to(np.arange(N)[:, None, None], col_idx_flat.shape)
+    gathered_flat = pi_beta_grid[n_idx_b, col_idx_flat]  # (N, U, K)
+    return gathered_flat.reshape((N, U) + flat_shape)
+
+
+def _compute_batched_algorithm_component_combined(
+    betas: jnp.ndarray,
+    beta_dim: int,
+    algorithm_estimating_func: collections.abc.Callable,
+    alg_update_func_args_beta_index: int,
+    alg_update_func_args_action_prob_index: int,
+    action_prob_layer: ActionProbLayerPrecompute,
+    update_layer: UpdateLayerPrecompute,
+    pi_beta_grid: jnp.ndarray | None,
+    rl_weight_products: jnp.ndarray,  # (N, U)
+) -> tuple[jnp.ndarray, list[jnp.ndarray]]:
+    """
+    combine_updates_into_one_vmap counterpart to compute_batched_algorithm_component's
+    per-update/per-bucket loop: every (subject, update) cell's
+    algorithm_estimating_func evaluation happens via exactly ONE jax.vmap
+    call over N*U rows, instead of one jax.vmap call per (update,
+    shape-bucket) pair. See build_update_layer_precompute's
+    combine_updates_into_one_vmap docstring for how its fixed-shape (N, U,
+    *shape) argument tensors are self-padded at invalid cells, and this
+    module's own module-level docstring hazard (1) for why every cell must
+    still be a real, in-domain input even though its contribution is zeroed
+    by valid_update afterward regardless.
+
+    Numerically identical to the per-update/per-bucket loop: the only
+    difference is how many jax.vmap dispatches carry the same (already-real,
+    self-padded) rows to algorithm_estimating_func; the outer valid_update *
+    rl_weight_products gate applied at the end is the exact same multiply the
+    original loop's path applies.
+    """
+    N = action_prob_layer.subject_ids.shape[0]
+    U = betas.shape[0]
+    NU = N * U
+    num_args = update_layer.combined_num_args
+
+    call_args: list[Any] = [None] * num_args
+    in_axes: list[Any] = [None] * num_args
+
+    for pos, tensor in zip(
+        update_layer.combined_arg_positions,
+        update_layer.combined_arg_tensors,
+        strict=True,
+    ):
+        flat = tensor.reshape((NU,) + tensor.shape[2:])
+        call_args[pos] = jnp.asarray(flat)
+        in_axes[pos] = 0
+
+    beta_tensor = jnp.broadcast_to(betas[None, :, :], (N, U, beta_dim))
+    call_args[alg_update_func_args_beta_index] = beta_tensor.reshape(NU, beta_dim)
+    in_axes[alg_update_func_args_beta_index] = 0
+
+    if alg_update_func_args_action_prob_index >= 0:
+        reconstructed = _gather_combined_reconstructed_action_prob(
+            pi_beta_grid, update_layer.combined_action_prob_col_idx
+        )
+        call_args[alg_update_func_args_action_prob_index] = reconstructed.reshape(
+            (NU,) + reconstructed.shape[2:]
+        )
+        in_axes[alg_update_func_args_action_prob_index] = 0
+
+    output_flat = jax.vmap(algorithm_estimating_func, in_axes=in_axes)(*call_args)
+    if output_flat.shape != (NU, beta_dim):
+        # Same class of check as the per-bucket loop's own
+        # bucket_output.shape guard -- fails loudly on a malformed
+        # algorithm_estimating_func instead of letting the reshape below
+        # silently produce a wrong-shaped result.
+        raise ValueError(
+            f"algorithm_estimating_func returned shape {output_flat.shape} "
+            f"for {NU} combined (subject, update) row(s); expected "
+            f"({NU}, {beta_dim})."
+        )
+    output = output_flat.reshape(N, U, beta_dim)
+
+    weighted = (
+        output * update_layer.valid_update[:, :, None] * rl_weight_products[:, :, None]
+    )
+
+    # bucket_outputs must stay exactly what
+    # check_batched_algorithm_estimating_function_args_equivalent expects:
+    # one entry per non-empty (update, bucket) pair, in the same traversal
+    # order the per-update/per-bucket loop produces -- so slice/gather it
+    # from the already-computed combined `output` instead of recomputing
+    # anything.
+    bucket_outputs: list[jnp.ndarray] = []
+    for u, buckets in enumerate(update_layer.buckets_by_update_index):
+        for bucket in buckets:
+            if len(bucket.subject_ids_in_order) == 0:
+                continue
+            bucket_outputs.append(output[bucket.subject_positions, u])
+
+    return weighted.reshape(N, U * beta_dim), bucket_outputs
+
+
 def compute_batched_algorithm_component(
     betas: jnp.ndarray,
     beta_dim: int,
@@ -948,7 +1668,44 @@ def compute_batched_algorithm_component(
     otherwise recompute from scratch via a second, identical
     _build_algorithm_bucket_overrides + jax.vmap call. Passing it back lets
     the data check reuse this call's work instead of duplicating it.
+
+    If update_layer carries the combine_updates_into_one_vmap fields (see
+    build_update_layer_precompute), delegates to
+    _compute_batched_algorithm_component_combined instead, which replaces
+    the per-update/per-bucket loop below with exactly one jax.vmap call
+    spanning every (subject, update) pair at once -- numerically identical,
+    just fewer/bigger dispatches. Raises NotImplementedError in that case if
+    alg_update_func_args_previous_betas_index >= 0: previous_betas is a
+    per-update VARIABLE-LENGTH prefix of betas (see
+    _build_algorithm_bucket_overrides), which the combined path's fixed-shape
+    (N, U, beta_dim) tensor layout cannot express without a real per-update
+    masking scheme this prototype does not implement (no shipped
+    alg_update_func needs both at once today -- see
+    build_update_layer_precompute's own docstring).
     """
+    if update_layer.combined_arg_tensors is not None:
+        if alg_update_func_args_previous_betas_index >= 0:
+            raise NotImplementedError(
+                "combine_updates_into_one_vmap does not support "
+                "alg_update_func_args_previous_betas_index >= 0: "
+                "previous_betas is a per-update variable-length prefix of "
+                "betas, which the combined path's fixed-shape (N, U, "
+                "beta_dim) tensor layout cannot express without a masking "
+                "scheme this prototype does not implement. No shipped "
+                "alg_update_func needs both at once today."
+            )
+        return _compute_batched_algorithm_component_combined(
+            betas,
+            beta_dim,
+            algorithm_estimating_func,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_action_prob_index,
+            action_prob_layer,
+            update_layer,
+            pi_beta_grid,
+            rl_weight_products,
+        )
+
     N = action_prob_layer.subject_ids.shape[0]
     U = len(update_layer.policy_nums_by_update_index)
     per_update_components = jnp.zeros((N, U, beta_dim), dtype=betas.dtype)

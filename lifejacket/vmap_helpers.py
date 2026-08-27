@@ -24,6 +24,37 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
     batch_axes = []
 
     for batched_arg_list in batched_arg_lists:
+        if isinstance(batched_arg_list, (jnp.ndarray, np.ndarray)):
+            # Already a single (bucket_size, ...) tensor -- e.g. a
+            # jax.jit-traced array reconstructed by
+            # post_deployment_analysis._rebuild_bucket_from_jit_arrays from a
+            # genuine jit argument, rather than a plain Python list of
+            # per-subject values. Use it as-is instead of round-tripping
+            # through list(...)/jnp.stack below, which would otherwise add
+            # one slice + one restack graph op per subject in the bucket for
+            # a tensor that is already exactly the shape/axis-0-batched form
+            # this function exists to produce. This is unreachable for every
+            # existing caller (build_batched_arg_lists_by_subject always
+            # supplies a plain Python list), so it changes no existing
+            # behavior. (jnp.asarray on an already-jnp array/tracer is an
+            # identity-preserving no-op -- see the passthrough unit test's
+            # `is` assertion -- and moves a numpy input to device.)
+            if batched_arg_list.ndim == 0:
+                # A 0-D array has no axis-0 batch dimension to map over --
+                # accepting it here would only fail later, inside jax.vmap,
+                # with a confusing non-local error. No current caller can
+                # produce this (see above), but this function has a history
+                # of 0-D misclassification via isinstance-only dispatch
+                # (see the NOTE below), so fail loudly and locally instead.
+                raise TypeError(
+                    "Expected an already-stacked (bucket_size, ...) array at "
+                    "this position, got a 0-D (scalar-shaped) array. A "
+                    "scalar-per-subject argument position must be supplied "
+                    "as a plain Python list of per-subject scalars instead."
+                )
+            batched_arg_tensors.append(jnp.asarray(batched_arg_list))
+            batch_axes.append(0)
+            continue
         first = batched_arg_list[0]
         # NOTE: isinstance(first, (jnp.ndarray, np.ndarray)) is True for a 0-D
         # (scalar-shaped) array too -- including a jax.jit-traced value, since

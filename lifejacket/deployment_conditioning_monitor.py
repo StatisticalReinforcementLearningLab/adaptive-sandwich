@@ -125,8 +125,6 @@ class DeploymentConditioningMonitor:
             Whether to suppress interactive data checks. This should be used in simulations, for example.
         suppress_all_data_checks (bool):
             Whether to suppress all data checks. Not recommended.
-        small_sample_correction (str):
-            Type of small sample correction to apply.
         collect_data_for_blowup_supervised_learning (bool):
             Whether to collect data for doing supervised learning about adjusted sandwich blowup.
         form_adjusted_meat_adjustments_explicitly (bool):

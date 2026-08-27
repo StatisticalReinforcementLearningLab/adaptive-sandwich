@@ -37,8 +37,27 @@ def form_adjusted_meat_adjustments_directly(
     user_ids: list[collections.abc.Hashable],
     action_prob_col_name: str,
 ) -> jnp.ndarray:
+    """
+    Diagnostic-only: explicitly forms the per-subject meat adjustments that
+    differentiate the adjusted sandwich from the classical sandwich, and
+    returns their per-subject outer products (the theta-only adjusted meat
+    contribution for each subject). The adjusted sandwich itself is formed
+    without doing any of this (see construct_classical_and_adjusted_sandwiches);
+    this function exists only to make the pieces of that computation inspectable.
+
+    IMPORTANT: this function ends by dropping into an interactive debugger
+    (bare `breakpoint()`). That is by design, not a leftover -- the whole point
+    of calling this (form_adjusted_meat_adjustments_explicitly=True) is to
+    pause and inspect intermediate variables (the M/V-blocks, the per-subject
+    adjustments and fractional adjustments, the RL bread block and its
+    condition numbers, etc.) in an interactive session. It will hang or raise
+    (e.g. BdbQuit on closed stdin) if invoked non-interactively -- do not turn
+    this on in CI, a batch/SLURM job, or any other non-interactive context.
+    """
     logger.info(
-        "Explicitly forming the per-user meat adjustments that differentiate the adjusted sandwich from the classical sandwich."
+        "Explicitly forming the per-user meat adjustments that differentiate the adjusted sandwich from the classical sandwich. "
+        "This will end by dropping into an interactive debugger (breakpoint()) -- "
+        "do not enable form_adjusted_meat_adjustments_explicitly outside an interactive session."
     )
 
     # 1. Form the M-matrices, which are shared across users.

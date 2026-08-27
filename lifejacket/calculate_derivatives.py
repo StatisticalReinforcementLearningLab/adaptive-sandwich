@@ -1,6 +1,7 @@
 import collections
 import inspect
 import logging
+from functools import partial
 
 import jax
 import numpy as np
@@ -19,6 +20,16 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
+
+"""
+This module contains functions for calculating derivatives and handling
+batched arguments for users in a study. It includes utilities for grouping
+user arguments by shape, padding loss gradients, and managing involved
+user IDs.
+
+It is largely legacy code, but still used in some debugging code that calculates
+the adjusted sandwich by alternative means (directly forming the per-user meat adjustments.)
+"""
 
 
 def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_user_id):
@@ -239,6 +250,10 @@ def calculate_pi_and_weight_gradients_specific_t(
         batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
             batched_arg_lists
         )
+        # tuple, not list: get_pi_gradients_batched/get_weight_gradients_batched
+        # are jax.jit'd with batch_axes as a static argument, which must be
+        # hashable.
+        batch_axes = tuple(batch_axes)
 
         logger.debug("Forming pi gradients with respect to beta.")
         # Note that we care about the probability of action 1 specifically,
@@ -362,6 +377,19 @@ def get_radon_nikodym_weight(
 
 
 # TODO: Docstring
+# JIT'd (batch_axes must be a hashable tuple, not a list, for this to work --
+# see calculate_pi_and_weight_gradients_specific_t's call site): resolves the
+# "JIT whole function? or just gradient and hessian batch functions" TODO
+# above calculate_rl_update_derivatives for this pair of batched functions.
+# calculate_pi_and_weight_gradients calls this once per calendar_t, so an
+# eager (unjitted) vmap(grad(...)) re-traces and redispatches through XLA on
+# every one of those calls; jitting lets XLA compile once per distinct
+# (action_prob_func, action_prob_func_args_beta_index, batch_axes, argument
+# shapes) combination and reuse that compiled executable across calendar_t
+# values that share it (the common case absent staggered recruitment/shape
+# heterogeneity). Purely a compilation/dispatch change -- the computed
+# gradients are unaffected.
+@partial(jax.jit, static_argnums=(0, 1, 2))
 def get_pi_gradients_batched(
     action_prob_func,
     action_prob_func_args_beta_index,
@@ -376,6 +404,8 @@ def get_pi_gradients_batched(
 
 
 # TODO: Docstring
+# JIT'd -- see get_pi_gradients_batched's comment just above.
+@partial(jax.jit, static_argnums=(1, 2, 4))
 def get_weight_gradients_batched(
     batched_beta_target_tensor,
     action_prob_func,
@@ -389,7 +419,7 @@ def get_weight_gradients_batched(
     # prob args
     return jax.vmap(
         fun=jax.grad(get_radon_nikodym_weight, 4 + action_prob_func_args_beta_index),
-        in_axes=[0, None, None, 0] + batch_axes,
+        in_axes=(0, None, None, 0) + batch_axes,
         out_axes=0,
     )(
         batched_beta_target_tensor,

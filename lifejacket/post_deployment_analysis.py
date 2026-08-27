@@ -270,7 +270,7 @@ def cli():
     "--form_adjusted_meat_adjustments_explicitly",
     type=bool,
     default=False,
-    help="If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted sandwich from the classical sandwich. This is for diagnostic purposes, as the adjusted sandwich is formed without doing this.",
+    help="If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted sandwich from the classical sandwich. This is for diagnostic purposes, as the adjusted sandwich is formed without doing this. WARNING: this ends by dropping into an interactive debugger (breakpoint()) to allow inspecting intermediate variables -- only use this in an interactive session; it will hang or fail in CI/batch/SLURM or any other non-interactive context.",
 )
 @click.option(
     "--jacobian_row_chunk_size",
@@ -457,7 +457,9 @@ def analyze_dataset(
     form_adjusted_meat_adjustments_explicitly (bool):
         If True, explicitly forms the per-subject meat adjustments that differentiate the
         sandwich from the classical sandwich. This is for diagnostic purposes, as the
-        adjusted sandwich is formed without doing this.
+        adjusted sandwich is formed without doing this. WARNING: this ends by dropping
+        into an interactive debugger (breakpoint()) -- only enable it in an interactive
+        session; see form_adjusted_meat_adjustments_directly's own docstring.
     alg_update_func_args_mask_index (int):
         Opt-in (default -1 = off, zero behavior change): if >= 0, consolidates every
         shape-bucket at each algorithm update into one by self-padding every
@@ -624,7 +626,7 @@ def analyze_dataset(
             per_subject_estimating_function_stacks,
             per_subject_adjusted_corrections,
             per_subject_classical_corrections,
-            per_subject_adjusted_meat_adjustments,
+            per_subject_adjusted_meat_contributions,
         ) = construct_classical_and_adjusted_sandwiches(
             theta_est,
             all_post_update_betas,
@@ -791,7 +793,7 @@ def analyze_dataset(
         "all_post_update_betas": all_post_update_betas,
         "per_subject_adjusted_corrections": per_subject_adjusted_corrections,
         "per_subject_classical_corrections": per_subject_classical_corrections,
-        "per_subject_adjusted_meat_adjustments": per_subject_adjusted_meat_adjustments,
+        "per_subject_adjusted_meat_adjustments": per_subject_adjusted_meat_contributions,
     }
     with open(output_folder_abs_path / "debug_pieces.pkl", "wb") as f:
         pickle.dump(
@@ -1906,7 +1908,9 @@ def construct_classical_and_adjusted_sandwiches(
         form_adjusted_meat_adjustments_explicitly (bool):
             If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
-            adjusted sandwich is formed without doing this.
+            adjusted sandwich is formed without doing this. WARNING: this ends by dropping into an
+            interactive debugger (breakpoint()) -- only enable it in an interactive session; see
+            form_adjusted_meat_adjustments_directly's own docstring.
         analysis_df (pd.DataFrame):
             The full analysis dataframe, needed if forming the adjusted meat adjustments explicitly.
         active_col_name (str):
@@ -1988,7 +1992,6 @@ def construct_classical_and_adjusted_sandwiches(
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
             - The raw joint bread matrix.
-            - The (possibly) stabilized joint bread matrix.
             - The joint meat matrix.
             - The joint sandwich matrix.
             - The classical bread matrix.
@@ -2003,7 +2006,7 @@ def construct_classical_and_adjusted_sandwiches(
             - A trivial all-ones array of length num_subjects, kept only for
               output-shape stability (previously the per-subject classical
               meat small-sample corrections).
-            - The per-subject adjusted meat adjustments, if form_adjusted_meat_adjustments_explicitly
+            - The per-subject adjusted meat contributions, if form_adjusted_meat_adjustments_explicitly
               is True, otherwise an array of NaNs.
     """
     logger.info(
@@ -2381,12 +2384,12 @@ def construct_classical_and_adjusted_sandwiches(
         _peak_rss_mb(),
     )
 
-    per_subject_adjusted_meat_adjustments = jnp.full(
+    per_subject_adjusted_meat_contributions = jnp.full(
         (len(subject_ids), theta_dim, theta_dim), jnp.nan
     )
     if form_adjusted_meat_adjustments_explicitly:
         with log_phase_duration("form_adjusted_meat_adjustments_directly (diagnostic)"):
-            per_subject_adjusted_classical_meat_contributions = (
+            per_subject_adjusted_meat_contributions = (
                 form_adjusted_meat_adjustments_directly(
                     theta_dim,
                     all_post_update_betas.shape[1],
@@ -2410,14 +2413,14 @@ def construct_classical_and_adjusted_sandwiches(
             # Validate that the adjusted meat adjustments we just formed are accurate by constructing
             # the theta-only adjusted sandwich from them and checking that it matches the standard result
             # we get by taking a subset of the joint sandwich.
-            # per_subject_adjusted_classical_meat_contributions is a genuine
+            # per_subject_adjusted_meat_contributions is a genuine
             # per-subject (num_subjects, theta_dim, theta_dim) tensor, freshly
             # computed by form_adjusted_meat_adjustments_directly just above
             # (unlike joint_adjusted_meat_matrix/classical_meat_matrix above,
             # which are pre-summed), so its meat matrix is just its
             # per-subject mean.
             theta_only_adjusted_meat_matrix_v2 = jnp.mean(
-                per_subject_adjusted_classical_meat_contributions, axis=0
+                per_subject_adjusted_meat_contributions, axis=0
             )
             theta_only_adjusted_sandwich_from_adjustments = (
                 form_sandwich_from_bread_and_meat(
@@ -2451,7 +2454,7 @@ def construct_classical_and_adjusted_sandwiches(
         per_subject_estimating_function_stacks,
         per_subject_adjusted_corrections,
         per_subject_classical_corrections,
-        per_subject_adjusted_meat_adjustments,
+        per_subject_adjusted_meat_contributions,
     )
 
 

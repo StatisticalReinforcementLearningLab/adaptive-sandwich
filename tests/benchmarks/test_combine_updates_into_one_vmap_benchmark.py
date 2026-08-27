@@ -96,8 +96,8 @@ def _load_fixture_inputs(scale):
 
 def _run(tmp_path, scale, variant, caplog):
     """
-    variant is one of "baseline", "masked", "combined" -- see this module's
-    own docstring.
+    variant is one of "baseline", "masked", "combined", "auto" -- see this
+    module's own docstring.
     """
     study_df, action_prob_func_args, alg_update_func_args = _load_fixture_inputs(scale)
 

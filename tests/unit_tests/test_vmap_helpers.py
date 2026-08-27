@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from lifejacket.vmap_helpers import stack_batched_arg_lists_into_tensors
 
@@ -95,3 +96,15 @@ def test_stack_batched_arg_lists_into_tensors_already_stacked_array_passthrough(
     np.testing.assert_allclose(tensors[0], already_stacked)
     # Passed straight through, not rebuilt into a new array via stack/vstack.
     assert tensors[0] is already_stacked
+
+
+def test_stack_batched_arg_lists_into_tensors_rejects_bare_0d_array():
+    # A bare 0-D array at a position is a caller contract violation (a
+    # scalar-per-subject position must be a plain Python LIST of scalars):
+    # it has no axis-0 batch dimension, so the passthrough branch accepting
+    # it would only fail later inside jax.vmap with a confusing non-local
+    # error. Must fail loudly and locally instead.
+    with pytest.raises(TypeError, match="0-D"):
+        stack_batched_arg_lists_into_tensors([jnp.array(3.0)])
+    with pytest.raises(TypeError, match="0-D"):
+        stack_batched_arg_lists_into_tensors([np.array(3.0)])

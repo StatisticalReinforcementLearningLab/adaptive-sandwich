@@ -7,6 +7,7 @@ import math
 import pathlib
 import pickle
 import resource
+import sys
 import time
 import typing
 from collections.abc import Callable
@@ -67,6 +68,20 @@ logging.basicConfig(
     datefmt="%Y-%m-%d:%H:%M:%S",
     level=logging.INFO,
 )
+
+
+def _peak_rss_mb() -> float:
+    """
+    This process's peak resident set size ("high-water mark"), in MB.
+
+    ru_maxrss's units are platform-dependent -- bytes on macOS/BSD, kibibytes
+    on Linux (see each platform's getrusage(2)) -- so the divisor must be
+    chosen per-platform rather than assuming one or the other; a fixed
+    bytes-assuming divisor under-reports by ~1024x on the Linux clusters real
+    analyses run on.
+    """
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return rss / (1024 * 1024 if sys.platform == "darwin" else 1024)
 
 
 @click.group()
@@ -2049,10 +2064,10 @@ def construct_classical_and_adjusted_sandwiches(
             # phase below gives the ADDITIONAL peak memory the backward
             # phase caused, isolated from whatever the forward pass (this
             # jax.vjp call's own saved residuals/linearization tape) already
-            # used -- units are bytes on macOS/BSD, KiB on Linux.
+            # used.
             logger.info(
                 "Peak RSS after forward_vjp: %.1f MB",
-                resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024,
+                _peak_rss_mb(),
             )
 
         out_dim = avg_estimating_function_stack.shape[0]
@@ -2245,7 +2260,7 @@ def construct_classical_and_adjusted_sandwiches(
             jax.block_until_ready(raw_joint_bread_matrix)
             logger.info(
                 "Peak RSS after backward_vmap_chunks: %.1f MB",
-                resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024,
+                _peak_rss_mb(),
             )
 
     num_subjects = len(subject_ids)
@@ -2277,7 +2292,7 @@ def construct_classical_and_adjusted_sandwiches(
         jax.block_until_ready((joint_adjusted_meat_matrix, classical_meat_matrix))
         logger.info(
             "Peak RSS after compute_meat_matrices: %.1f MB",
-            resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024,
+            _peak_rss_mb(),
         )
 
     # Increase diagonal block dominance possibly improve conditioning of diagonal
@@ -2316,7 +2331,7 @@ def construct_classical_and_adjusted_sandwiches(
     jax.block_until_ready((joint_sandwich, classical_bread_matrix, classical_sandwich))
     logger.info(
         "Peak RSS after form_sandwich_from_bread_and_meat: %.1f MB",
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024,
+        _peak_rss_mb(),
     )
 
     per_subject_adjusted_meat_adjustments = jnp.full(

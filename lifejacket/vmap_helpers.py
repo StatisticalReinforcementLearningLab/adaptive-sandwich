@@ -36,7 +36,22 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
             # this function exists to produce. This is unreachable for every
             # existing caller (build_batched_arg_lists_by_subject always
             # supplies a plain Python list), so it changes no existing
-            # behavior.
+            # behavior. (jnp.asarray on an already-jnp array/tracer is an
+            # identity-preserving no-op -- see the passthrough unit test's
+            # `is` assertion -- and moves a numpy input to device.)
+            if batched_arg_list.ndim == 0:
+                # A 0-D array has no axis-0 batch dimension to map over --
+                # accepting it here would only fail later, inside jax.vmap,
+                # with a confusing non-local error. No current caller can
+                # produce this (see above), but this function has a history
+                # of 0-D misclassification via isinstance-only dispatch
+                # (see the NOTE below), so fail loudly and locally instead.
+                raise TypeError(
+                    "Expected an already-stacked (bucket_size, ...) array at "
+                    "this position, got a 0-D (scalar-shaped) array. A "
+                    "scalar-per-subject argument position must be supplied "
+                    "as a plain Python list of per-subject scalars instead."
+                )
             batched_arg_tensors.append(jnp.asarray(batched_arg_list))
             batch_axes.append(0)
             continue

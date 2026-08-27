@@ -25,11 +25,6 @@ from .helper_functions import (
 from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.INFO,
-)
 
 
 def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_user_id):

@@ -12,11 +12,6 @@ import scipy.stats
 from .constants import DiagnosticClassifications
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.INFO,
-)
 
 
 def clopper_pearson_upper_bound(

@@ -21,11 +21,6 @@ from .vmap_helpers import batch_args_by_subject, stack_batched_arg_lists_into_te
 np.set_printoptions(threshold=np.inf)
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.INFO,
-)
 
 
 # TODO: any checks needed here about alg update function type?

@@ -63,11 +63,6 @@ from .helper_functions import (
 from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.INFO,
-)
 
 
 def _peak_rss_mb() -> float:
@@ -86,7 +81,20 @@ def _peak_rss_mb() -> float:
 
 @click.group()
 def cli():
-    pass
+    """
+    lifejacket command-line interface.
+
+    Logging is configured here, at the CLI entry point, rather than at import
+    time in library modules -- see
+    https://docs.python.org/3/howto/logging.html#configuring-logging-for-a-library.
+    Code that imports lifejacket directly (rather than through this CLI) gets
+    silent library loggers by default, as recommended there.
+    """
+    logging.basicConfig(
+        format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d:%H:%M:%S",
+        level=logging.INFO,
+    )
 
 
 # TODO: Check all help strings for accuracy.
@@ -528,12 +536,6 @@ def analyze_dataset(
     dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
     classical sandwich variance estimate.
     """
-
-    logging.basicConfig(
-        format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-        datefmt="%Y-%m-%d:%H:%M:%S",
-        level=logging.INFO,
-    )
 
     with log_phase_duration("theta_calculation_func"):
         theta_est = jnp.array(theta_calculation_func(analysis_df))

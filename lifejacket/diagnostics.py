@@ -16,11 +16,6 @@ from .helper_functions import get_radon_nikodym_weight, matrix_inv_sqrt
 from .simulator_calibration import clopper_pearson_upper_bound
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.INFO,
-)
 
 # NOTE ON SCALING CONVENTION: everywhere below, `joint_sandwich_matrix` (and any
 # theta-only slice of it) is taken to already equal B_hat^{-1} M_hat B_hat^{-T} / n, i.e. it IS

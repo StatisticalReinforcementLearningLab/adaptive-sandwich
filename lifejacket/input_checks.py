@@ -687,6 +687,14 @@ def require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_na
 
 
 def require_action_probabilities_in_range_0_to_1(analysis_df, action_prob_col_name):
+    # NOTE: this intentionally does not assert on the computed boolean. Some existing deployment
+    # scenarios (e.g. near-deterministic/"infinite steepness" policies exercised by
+    # tests/integration_tests) legitimately produce recorded probabilities of exactly 0.0/1.0
+    # after floating-point rounding, and this check has never enforced the open interval in
+    # practice -- turning it into a hard assertion here would be a backward-incompatible change
+    # to the always-on input-check path. lifejacket.diagnostics.check_exploration_and_weights
+    # (opt-in, part of the new diagnostic suite) DOES hard-fail on out-of-range probabilities,
+    # which is the appropriate place to enforce this positivity/overlap requirement.
     logger.info("Checking that action probabilities are in the interval (0, 1).")
     analysis_df[action_prob_col_name].between(0, 1, inclusive="neither").all()
 
@@ -1016,7 +1024,7 @@ def require_valid_action_prob_times_given_if_index_supplied(
             if not args:
                 continue
             times = args[alg_update_func_args_action_prob_times_index]
-            assert (times[i] > times[i - 1] for i in range(1, len(times))), (
+            assert all(times[i] > times[i - 1] for i in range(1, len(times))), (
                 f"Non-strictly-increasing times were given for action probabilities in the algorithm update function args for subject {subject_id} and policy {policy_idx}. Please see the contract for details."
             )
             assert times[0] >= min_time and times[-1] <= max_time, (

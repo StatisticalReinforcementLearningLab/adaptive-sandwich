@@ -42,3 +42,17 @@ class SandwichFormationMethods:
 JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM = 512
 JACOBIAN_AUTO_ROW_BUDGET = 65536
 JACOBIAN_AUTO_MAX_CHUNK = 64
+
+
+class DiagnosticClassifications:
+    SUPPORTED = "supported"
+    LOCALLY_SUPPORTED = "locally_supported"
+    FAILED = "failed"
+    INDETERMINATE = "indeterminate"
+
+
+class CheckStatuses:
+    PASSED = "passed"
+    WARNING = "warning"
+    FAILED = "failed"
+    INDETERMINATE = "indeterminate"

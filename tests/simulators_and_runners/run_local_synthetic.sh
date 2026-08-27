@@ -52,6 +52,8 @@ theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimat
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
 form_adjusted_meat_adjustments_explicitly=0
+run_diagnostics=0
+diagnostic_config_pickle=""
 # Opt-in mask/padding bucket consolidation (see lifejacket's
 # alg_update_func_args_mask_index docs and docs/masking_tutorial.md). -1000
 # is lifejacket's CLI "unused" sentinel; the ragged-indices string is
@@ -67,7 +69,7 @@ jacobian_row_chunk_size=""
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:K:N:w:W-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:K:N:w:W:R:O:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -118,6 +120,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     N  | monitor_bread_conditioning_and_intervene ) needs_arg; monitor_bread_conditioning_and_intervene="$OPTARG" ;;
     w  | collect_args_to_reconstruct_action_probs )         needs_arg; collect_args_to_reconstruct_action_probs="$OPTARG" ;;
     W  | alg_update_func_args_previous_betas_index )        needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
+    R  | run_diagnostics )                                  needs_arg; run_diagnostics="$OPTARG" ;;
+    O  | diagnostic_config_pickle )                         needs_arg; diagnostic_config_pickle="$OPTARG" ;;
     alg_update_func_args_mask_index )                       needs_arg; alg_update_func_args_mask_index="$OPTARG" ;;
     # Repeatable (matching the underlying click multiple=True option) --
     # ACCUMULATE, don't overwrite.
@@ -228,7 +232,9 @@ lifejacket analyze \
   --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
-  --form_adjusted_meat_adjustments_explicitly=$form_adjusted_meat_adjustments_explicitly
+  --form_adjusted_meat_adjustments_explicitly=$form_adjusted_meat_adjustments_explicitly \
+  --run_diagnostics=$run_diagnostics \
+  ${diagnostic_config_pickle:+--diagnostic_config_pickle="$diagnostic_config_pickle"}
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Ending after-study analysis."
 

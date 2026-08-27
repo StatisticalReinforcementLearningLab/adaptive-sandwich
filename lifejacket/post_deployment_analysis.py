@@ -20,7 +20,7 @@ import pandas as pd
 import scipy
 from jax import numpy as jnp
 
-from . import input_checks
+from . import diagnostics, input_checks
 from .batched_weighted_estimating_function_stack import (
     ActionProbLayerPrecompute,
     InferenceLayerPrecompute,
@@ -284,6 +284,22 @@ def cli():
     default=None,
     help="Unset (default) = AUTO: replaces compute_batched_algorithm_component's per-update, per-shape-bucket jax.vmap loop with exactly one jax.vmap call spanning every (subject, update) pair at once (fewer, bigger dispatches; numerically identical) whenever eligible -- alg_update_func_args_mask_index >= 0 (a mask-aware alg_update_func is a prerequisite, so this cannot be auto-enabled without that opt-in) and alg_update_func_args_previous_betas_index < 0 -- and silently stays on the original loop otherwise; if a combining invariant only checkable mid-precompute is violated, auto mode falls back to the original loop with a WARNING log. True = force on, raising loudly when ineligible rather than silently mis-batching. False = force off even when eligible. Not applied to the separate local-linearization diagnostic, which always uses the original loop.",
 )
+@click.option(
+    "--run_diagnostics",
+    type=bool,
+    default=False,
+    help="If True, runs the extended diagnostic suite (see lifejacket.diagnostics) after "
+    "computing the adjusted sandwich and writes diagnostic_report.pkl. Does not affect the "
+    "adjusted sandwich computation itself.",
+)
+@click.option(
+    "--diagnostic_config_pickle",
+    type=click.File("rb"),
+    default=None,
+    help="Optional pickled lifejacket.diagnostics.DiagnosticConfig controlling the diagnostic "
+    "suite. Only used when --run_diagnostics is True; DiagnosticConfig() defaults are used "
+    "otherwise.",
+)
 def analyze_dataset_wrapper(**kwargs):
     """
     This function is a wrapper around analyze_dataset to facilitate command line use.
@@ -333,6 +349,13 @@ def analyze_dataset_wrapper(**kwargs):
     kwargs.pop("inference_func_filename")
     kwargs.pop("theta_calculation_func_filename")
 
+    diagnostic_config_pickle = kwargs.pop("diagnostic_config_pickle", None)
+    kwargs["diagnostic_config"] = (
+        pickle.load(diagnostic_config_pickle)
+        if diagnostic_config_pickle is not None
+        else None
+    )
+
     analyze_dataset(**kwargs)
 
 
@@ -369,6 +392,8 @@ def analyze_dataset(
     inference_func_args_ragged_indices: tuple[int, ...] = (),
     jacobian_row_chunk_size: int | None = None,
     combine_updates_into_one_vmap: bool | None = None,
+    run_diagnostics: bool = False,
+    diagnostic_config: diagnostics.DiagnosticConfig | None = None,
 ) -> None:
     """
     Analyzes a dataset to provide a parameter estimate and an estimate of its variance using  and classical sandwich estimators.
@@ -481,6 +506,14 @@ def analyze_dataset(
         passed to the separate local-linearization diagnostic below
         (compute_local_linearization_error_ratio), which continues to use the
         original per-update/per-bucket loop regardless.
+    run_diagnostics (bool):
+        If True, runs the extended diagnostic suite (lifejacket.diagnostics.run_diagnostic_suite)
+        after the adjusted sandwich has been computed and writes its DiagnosticReport to
+        diagnostic_report.pkl in output_dir. Defaults to False and does not otherwise affect the
+        adjusted sandwich computation.
+    diagnostic_config (lifejacket.diagnostics.DiagnosticConfig | None):
+        Configuration for the diagnostic suite, used only when run_diagnostics is True. Defaults
+        to DiagnosticConfig() when not supplied.
 
     Returns:
     dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
@@ -765,6 +798,101 @@ def analyze_dataset(
             debug_pieces_dict,
             f,
         )
+
+    if run_diagnostics:
+        logger.info("Running extended diagnostic suite (lifejacket.diagnostics).")
+
+        def _diagnostics_g_tilde(flattened_betas_and_theta: jnp.ndarray) -> jnp.ndarray:
+            return jnp.asarray(
+                get_avg_weighted_estimating_function_stacks_and_aux_values(
+                    flattened_betas_and_theta,
+                    beta_dim,
+                    theta_dim,
+                    subject_ids,
+                    action_prob_func,
+                    action_prob_func_args_beta_index,
+                    alg_update_func,
+                    alg_update_func_type,
+                    alg_update_func_args_beta_index,
+                    alg_update_func_args_action_prob_index,
+                    alg_update_func_args_action_prob_times_index,
+                    alg_update_func_args_previous_betas_index,
+                    inference_func,
+                    inference_func_type,
+                    inference_func_args_theta_index,
+                    inference_func_args_action_prob_index,
+                    action_prob_func_args,
+                    policy_num_by_decision_time_by_subject_id,
+                    initial_policy_num,
+                    beta_index_by_policy_num,
+                    inference_func_args_by_subject_id,
+                    inference_action_prob_decision_times_by_subject_id,
+                    alg_update_func_args,
+                    action_by_decision_time_by_subject_id,
+                    True,  # suppress_all_data_checks
+                    True,  # suppress_interactive_data_checks
+                    False,  # include_auxiliary_outputs
+                )
+            )
+
+        try:
+            diagnostic_report = diagnostics.run_diagnostic_suite(
+                _diagnostics_g_tilde,
+                flatten_params(all_post_update_betas, theta_est),
+                raw_joint_bread_matrix,
+                joint_adjusted_meat_matrix,
+                joint_sandwich_matrix,
+                per_subject_estimating_function_stacks,
+                beta_dim,
+                theta_dim,
+                len(subject_ids),
+                diagnostic_config or diagnostics.DiagnosticConfig(),
+                legacy_check_callables=[
+                    (
+                        "action_probabilities_reconstructed",
+                        lambda: (
+                            input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+                                analysis_df,
+                                action_prob_col_name,
+                                calendar_t_col_name,
+                                subject_id_col_name,
+                                active_col_name,
+                                action_prob_func_args,
+                                action_prob_func,
+                            )
+                        ),
+                    ),
+                    (
+                        "estimating_functions_sum_to_zero",
+                        lambda: input_checks.require_estimating_functions_sum_to_zero(
+                            avg_estimating_function_stack, beta_dim, theta_dim, True
+                        ),
+                    ),
+                ],
+                analysis_df=analysis_df,
+                active_col_name=active_col_name,
+                calendar_t_col_name=calendar_t_col_name,
+                action_prob_col_name=action_prob_col_name,
+                action_prob_func=action_prob_func,
+                action_prob_func_args=action_prob_func_args,
+                action_prob_func_args_beta_index=action_prob_func_args_beta_index,
+                action_by_decision_time_by_subject_id=action_by_decision_time_by_subject_id,
+                policy_num_by_decision_time_by_subject_id=policy_num_by_decision_time_by_subject_id,
+                initial_policy_num=initial_policy_num,
+                beta_index_by_policy_num=beta_index_by_policy_num,
+                subject_ids=subject_ids,
+            )
+            logger.info(
+                "Diagnostic suite classification: %s", diagnostic_report.classification
+            )
+            for warning_message in diagnostic_report.warnings:
+                logger.warning(warning_message)
+            with open(output_folder_abs_path / "diagnostic_report.pkl", "wb") as f:
+                pickle.dump(diagnostic_report, f)
+        except Exception as e:  # noqa: BLE001
+            # As with the local linearization diagnostic above, the diagnostic suite is
+            # best-effort and failure to run it should not break the underlying analysis.
+            logger.warning("Failed to run the extended diagnostic suite: %s", str(e))
 
     print(f"\nParameter estimate:\n {theta_est}")
     print(f"\nAdjusted sandwich variance estimate:\n {adjusted_sandwich_var_estimate}")

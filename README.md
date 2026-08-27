@@ -140,6 +140,16 @@ If your analysis is slow or runs out of memory under staggered recruitment
 [docs/masking_tutorial.md](docs/masking_tutorial.md) for the opt-in
 padding/masking feature that fixes exactly that.
 
+## Diagnostics
+
+`analyze`/`analyze_dataset` accept an optional `--run_diagnostics`/`run_diagnostics` flag that
+runs a layered diagnostic suite (root/implementation checks, local and exact nonlinearity
+checks, bread-stability checks, influence concentration, exploration/importance-weight checks,
+and optional simulator calibration) over the adjusted sandwich and writes
+`diagnostic_report.pkl`. It does not change the adjusted sandwich estimator itself, and a
+diagnostic failure does not mean the classical sandwich is valid instead. See
+[`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish.
+
 ## Linting/Formatting
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting, run automatically via [pre-commit](https://pre-commit.com/) before every commit.
 

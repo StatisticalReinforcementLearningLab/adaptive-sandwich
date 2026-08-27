@@ -125,15 +125,6 @@ class DeploymentConditioningMonitor:
             Whether to suppress interactive data checks. This should be used in simulations, for example.
         suppress_all_data_checks (bool):
             Whether to suppress all data checks. Not recommended.
-        collect_data_for_blowup_supervised_learning (bool):
-            Whether to collect data for doing supervised learning about adjusted sandwich blowup.
-        form_adjusted_meat_adjustments_explicitly (bool):
-            If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted
-            sandwich from the classical sandwich. This is for diagnostic purposes, as the
-            adjusted sandwich is formed without doing this.
-        stabilize_joint_bread (bool):
-            If True, stabilizes the joint bread matrix if it does not meet conditioning
-            thresholds.
 
         Returns:
         None: The function writes analysis results and debug pieces to files in the same directory as

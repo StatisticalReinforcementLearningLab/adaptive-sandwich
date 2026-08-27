@@ -109,7 +109,6 @@ def assert_real_run_output_as_expected(test_file_path, relative_path_to_output_d
             "adjusted_sandwich_var_estimate",
             "classical_sandwich_var_estimate",
             "raw_joint_bread_matrix",
-            "stabilized_joint_bread_matrix",
             "joint_meat_matrix",
             "classical_bread_matrix",
             "classical_meat_matrix",

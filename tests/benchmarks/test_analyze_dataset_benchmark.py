@@ -116,9 +116,7 @@ def _run_analyze_dataset(tmp_path, scale, suppress_all_data_checks, caplog):
             reward_col_name="reward",
             suppress_interactive_data_checks=True,
             suppress_all_data_checks=suppress_all_data_checks,
-            collect_data_for_blowup_supervised_learning=False,
             form_adjusted_meat_adjustments_explicitly=False,
-            stabilize_joint_bread=True,
         )
         total_seconds = time.perf_counter() - start
 

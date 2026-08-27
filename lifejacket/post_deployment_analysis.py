@@ -20,7 +20,7 @@ import pandas as pd
 import scipy
 from jax import numpy as jnp
 
-from . import get_datum_for_blowup_supervised_learning, input_checks
+from . import input_checks
 from .batched_weighted_estimating_function_stack import (
     ActionProbLayerPrecompute,
     InferenceLayerPrecompute,
@@ -267,22 +267,10 @@ def cli():
     help="Flag to suppress all data checks. Not usually recommended, as suppressing only interactive checks suffices to keep tests/simulations running and is safer.",
 )
 @click.option(
-    "--collect_data_for_blowup_supervised_learning",
-    type=bool,
-    default=False,
-    help="Flag to collect data for supervised learning blowup detection. This will write a single datum and label to a file in the same directory as the input files.",
-)
-@click.option(
     "--form_adjusted_meat_adjustments_explicitly",
     type=bool,
     default=False,
     help="If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted sandwich from the classical sandwich. This is for diagnostic purposes, as the adjusted sandwich is formed without doing this.",
-)
-@click.option(
-    "--stabilize_joint_bread",
-    type=bool,
-    default=True,
-    help="If True, stabilizes the joint bread matrix if it does not meet conditioning thresholds.",
 )
 @click.option(
     "--jacobian_row_chunk_size",
@@ -374,9 +362,7 @@ def analyze_dataset(
     reward_col_name: str,
     suppress_interactive_data_checks: bool,
     suppress_all_data_checks: bool,
-    collect_data_for_blowup_supervised_learning: bool,
     form_adjusted_meat_adjustments_explicitly: bool,
-    stabilize_joint_bread: bool,
     alg_update_func_args_mask_index: int = -1,
     alg_update_func_args_ragged_indices: tuple[int, ...] = (),
     inference_func_args_mask_index: int = -1,
@@ -443,15 +429,10 @@ def analyze_dataset(
         Whether to suppress interactive data checks. This should be used in simulations, for example.
     suppress_all_data_checks (bool):
         Whether to suppress all data checks. Not recommended.
-    collect_data_for_blowup_supervised_learning (bool):
-        Whether to collect data for doing supervised learning about adjusted sandwich blowup.
     form_adjusted_meat_adjustments_explicitly (bool):
         If True, explicitly forms the per-subject meat adjustments that differentiate the
         sandwich from the classical sandwich. This is for diagnostic purposes, as the
         adjusted sandwich is formed without doing this.
-    stabilize_joint_bread (bool):
-        If True, stabilizes the joint bread matrix if it does not meet conditioning
-        thresholds.
     alg_update_func_args_mask_index (int):
         Opt-in (default -1 = off, zero behavior change): if >= 0, consolidates every
         shape-bucket at each algorithm update into one by self-padding every
@@ -601,7 +582,6 @@ def analyze_dataset(
     with log_phase_duration("construct_classical_and_adjusted_sandwiches"):
         (
             raw_joint_bread_matrix,
-            stabilized_joint_bread_matrix,
             joint_adjusted_meat_matrix,
             joint_sandwich_matrix,
             classical_bread_matrix,
@@ -639,7 +619,6 @@ def analyze_dataset(
             suppress_all_data_checks,
             suppress_interactive_data_checks,
             form_adjusted_meat_adjustments_explicitly,
-            stabilize_joint_bread,
             analysis_df,
             active_col_name,
             action_col_name,
@@ -713,7 +692,7 @@ def analyze_dataset(
         try:
             local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
                 compute_local_linearization_error_ratio(
-                    stabilized_joint_bread_matrix,
+                    raw_joint_bread_matrix,
                     avg_estimating_function_stack,
                     per_subject_estimating_function_stacks,
                     all_post_update_betas,
@@ -762,7 +741,6 @@ def analyze_dataset(
         "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
         "raw_joint_bread_matrix": raw_joint_bread_matrix,
-        "stabilized_joint_bread_matrix": stabilized_joint_bread_matrix,
         "joint_meat_matrix": joint_adjusted_meat_matrix,
         "classical_bread_matrix": classical_bread_matrix,
         "classical_meat_matrix": classical_meat_matrix,
@@ -787,47 +765,6 @@ def analyze_dataset(
             debug_pieces_dict,
             f,
         )
-
-    if collect_data_for_blowup_supervised_learning:
-        with log_phase_duration(
-            "get_datum_for_blowup_supervised_learning (diagnostic)"
-        ):
-            datum_and_label_dict = get_datum_for_blowup_supervised_learning.get_datum_for_blowup_supervised_learning(
-                raw_joint_bread_matrix,
-                joint_bread_cond,
-                avg_estimating_function_stack,
-                per_subject_estimating_function_stacks,
-                all_post_update_betas,
-                analysis_df,
-                active_col_name,
-                calendar_t_col_name,
-                action_prob_col_name,
-                subject_id_col_name,
-                reward_col_name,
-                theta_est,
-                adjusted_sandwich_var_estimate,
-                subject_ids,
-                beta_dim,
-                theta_dim,
-                initial_policy_num,
-                beta_index_by_policy_num,
-                policy_num_by_decision_time_by_subject_id,
-                theta_calculation_func,
-                action_prob_func,
-                action_prob_func_args_beta_index,
-                inference_func,
-                inference_func_type,
-                inference_func_args_theta_index,
-                inference_func_args_action_prob_index,
-                inference_action_prob_decision_times_by_subject_id,
-                action_prob_func_args,
-                action_by_decision_time_by_subject_id,
-            )
-
-            with open(
-                output_folder_abs_path / "supervised_learning_datum.pkl", "wb"
-            ) as f:
-                pickle.dump(datum_and_label_dict, f)
 
     print(f"\nParameter estimate:\n {theta_est}")
     print(f"\nAdjusted sandwich variance estimate:\n {adjusted_sandwich_var_estimate}")
@@ -1741,7 +1678,6 @@ def construct_classical_and_adjusted_sandwiches(
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
     form_adjusted_meat_adjustments_explicitly: bool,
-    stabilize_joint_bread: bool,
     analysis_df: pd.DataFrame | None,
     active_col_name: str | None,
     action_col_name: str | None,
@@ -1843,8 +1779,6 @@ def construct_classical_and_adjusted_sandwiches(
             If True, explicitly forms the per-subject meat adjustments that differentiate the adjusted
             sandwich from the classical sandwich. This is for diagnostic purposes, as the
             adjusted sandwich is formed without doing this.
-        stabilize_joint_bread (bool):
-            If True, will apply various techniques to stabilize the joint bread if necessary.
         analysis_df (pd.DataFrame):
             The full analysis dataframe, needed if forming the adjusted meat adjustments explicitly.
         active_col_name (str):
@@ -2295,25 +2229,10 @@ def construct_classical_and_adjusted_sandwiches(
             _peak_rss_mb(),
         )
 
-    # Increase diagonal block dominance possibly improve conditioning of diagonal
-    # blocks as necessary, to ensure mathematical stability of joint bread
-    with log_phase_duration("stabilize_joint_bread_if_necessary"):
-        stabilized_joint_bread_matrix = (
-            (
-                stabilize_joint_bread_if_necessary(
-                    raw_joint_bread_matrix,
-                    beta_dim,
-                    theta_dim,
-                )
-            )
-            if stabilize_joint_bread
-            else raw_joint_bread_matrix
-        )
-
     # Now stably (no explicit inversion) form our sandwiches.
     with log_phase_duration("form_sandwich_from_bread_and_meat (joint)"):
         joint_sandwich = form_sandwich_from_bread_and_meat(
-            stabilized_joint_bread_matrix,
+            raw_joint_bread_matrix,
             joint_adjusted_meat_matrix,
             num_subjects,
             method=SandwichFormationMethods.BREAD_T_QR,
@@ -2343,7 +2262,7 @@ def construct_classical_and_adjusted_sandwiches(
                 form_adjusted_meat_adjustments_directly(
                     theta_dim,
                     all_post_update_betas.shape[1],
-                    stabilized_joint_bread_matrix,
+                    raw_joint_bread_matrix,
                     per_subject_estimating_function_stacks,
                     analysis_df,
                     active_col_name,
@@ -2395,7 +2314,6 @@ def construct_classical_and_adjusted_sandwiches(
     # values too. The joint bread should always be block lower triangular.
     return (
         raw_joint_bread_matrix,
-        stabilized_joint_bread_matrix,
         joint_adjusted_meat_matrix,
         joint_sandwich,
         classical_bread_matrix,
@@ -2406,168 +2324,6 @@ def construct_classical_and_adjusted_sandwiches(
         per_subject_adjusted_corrections,
         per_subject_classical_corrections,
         per_subject_adjusted_meat_adjustments,
-    )
-
-
-# TODO: I think there should be interaction to confirm stabilization.  It is
-# important for the subject to know if this is happening. Even if enabled, it is important
-# that the subject know it actually kicks in.
-def stabilize_joint_bread_if_necessary(
-    joint_bread_matrix: jnp.ndarray,
-    beta_dim: int,
-    theta_dim: int,
-) -> jnp.ndarray:
-    """
-    Stabilizes the joint bread matrix if necessary by increasing diagonal block
-    dominance and/or adding a small ridge penalty to the diagonal blocks.
-
-    Args:
-        joint_bread_matrix (jnp.ndarray):
-            A 2-D JAX NumPy array representing the joint bread matrix.
-        beta_dim (int):
-            The dimension of each beta parameter.
-        theta_dim (int):
-            The dimension of the theta parameter.
-    Returns:
-        jnp.ndarray:
-            A 2-D NumPy array representing the stabilized joint bread matrix.
-    """
-
-    # TODO: come up with more sophisticated settings here. These are maybe a little loose,
-    # but I especially want to avoid adding ridge penalties if possible.
-    # Would be interested in dividing each by 10, though.
-
-    # Set thresholds to guide stabilization.
-    diagonal_block_cond_threshold = 2e2
-    whole_RL_block_cond_threshold = 1e4
-
-    # Grab just the RL block and convert numpy array for easier manipulation.
-    RL_stack_beta_derivatives_block = np.array(
-        joint_bread_matrix[:-theta_dim, :-theta_dim]
-    )
-    num_updates = RL_stack_beta_derivatives_block.shape[0] // beta_dim
-    for i in range(1, num_updates + 1):
-        # Add ridge penalty to diagonal block to control its condition number if necessary.
-        # Define the slice for the current diagonal block
-        diagonal_block_slice = slice((i - 1) * beta_dim, i * beta_dim)
-        diagonal_block = RL_stack_beta_derivatives_block[
-            diagonal_block_slice, diagonal_block_slice
-        ]
-        diagonal_block_cond_number = np.linalg.cond(diagonal_block)
-        svs = np.linalg.svd(diagonal_block, compute_uv=False)
-        max_sv = svs[0]
-        min_sv = svs[-1]
-
-        ridge_penalty = max(
-            0,
-            (max_sv - diagonal_block_cond_threshold * min_sv)
-            / (diagonal_block_cond_threshold + 1),
-        )
-
-        if ridge_penalty:
-            new_block = diagonal_block + ridge_penalty * np.eye(beta_dim)
-            new_diagonal_block_cond_number = np.linalg.cond(new_block)
-            RL_stack_beta_derivatives_block[
-                diagonal_block_slice, diagonal_block_slice
-            ] = diagonal_block + ridge_penalty * np.eye(beta_dim)
-            # TODO: Require subject input here in interactive settings?
-            logger.info(
-                "Added ridge penalty of %s to diagonal block for update %s to improve conditioning from %s to %s",
-                ridge_penalty,
-                i,
-                diagonal_block_cond_number,
-                new_diagonal_block_cond_number,
-            )
-
-        # Damp off-diagonal blocks to improve conditioning of whole RL block if necessary.
-        off_diagonal_block_row_slices = (
-            slice((i - 1) * beta_dim, i * beta_dim),
-            slice((i - 1) * beta_dim),
-        )
-        whole_block_cur_update_size = i * beta_dim
-        initial_whole_block_cond_number = None
-        incremental_damping_factor = 0.9
-        max_iterations = 50
-        damping_applied = 1
-
-        for _ in range(max_iterations):
-            whole_block_cur_update = RL_stack_beta_derivatives_block[
-                :whole_block_cur_update_size, :whole_block_cur_update_size
-            ]
-            whole_block_cur_update_cond_number = np.linalg.cond(whole_block_cur_update)
-            if initial_whole_block_cond_number is None:
-                initial_whole_block_cond_number = whole_block_cur_update_cond_number
-
-            if whole_block_cur_update_cond_number <= whole_RL_block_cond_threshold:
-                break
-
-            damping_applied *= incremental_damping_factor
-            RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= (
-                incremental_damping_factor
-            )
-        else:
-            damping_applied = 0
-            RL_stack_beta_derivatives_block[off_diagonal_block_row_slices] *= 0
-
-            # TODO: Maybe in this case, roll back through previous rows and damp off diagonals
-            # instead of adding ridge?  Feels a little safer because if we zeroed everything
-            # off-diagonal and didnt touch diagonal, we'd get classical.
-            if whole_block_cur_update_cond_number > whole_RL_block_cond_threshold:
-                logger.warning(
-                    "Off-diagonal blocks were zeroed for update %s, but conditioning is still poor: %s > %s. Adding extra ridge penalty to entire RL block so far.",
-                    i,
-                    whole_block_cur_update_cond_number,
-                    whole_RL_block_cond_threshold,
-                )
-
-            svs = np.linalg.svd(whole_block_cur_update, compute_uv=False)
-            max_sv = svs[0]
-            min_sv = svs[-1]
-
-            ridge_penalty = max(
-                0,
-                (max_sv - whole_RL_block_cond_threshold * min_sv)
-                / (whole_RL_block_cond_threshold + 1),
-            )
-
-            # TODO: This is highly questionable, potentially modifying the matrix very significantly.
-            new_block = whole_block_cur_update + ridge_penalty * np.eye(
-                whole_block_cur_update_size
-            )
-            new_whole_block_cond_number = np.linalg.cond(new_block)
-            RL_stack_beta_derivatives_block[
-                :whole_block_cur_update_size, :whole_block_cur_update_size
-            ] += ridge_penalty * np.eye(whole_block_cur_update_size)
-            logger.info(
-                "Added ridge penalty of %s to entire RL block up to update %s to improve conditioning from %s to %s",
-                ridge_penalty,
-                i,
-                whole_block_cur_update_cond_number,
-                new_whole_block_cond_number,
-            )
-
-            # Add ridge penalty to off-diagonal blocks if necessary.
-
-        if damping_applied < 1:
-            logger.info(
-                "Applied damping factor of %s to off-diagonal blocks for update %s to improve conditioning of whole RL block up to that update from %s to %s",
-                damping_applied,
-                i,
-                initial_whole_block_cond_number,
-                whole_block_cur_update_cond_number,
-            )
-
-    return np.block(
-        [
-            [
-                RL_stack_beta_derivatives_block,
-                joint_bread_matrix[:-theta_dim, -theta_dim:],
-            ],
-            [
-                joint_bread_matrix[-theta_dim:, :-theta_dim],
-                joint_bread_matrix[-theta_dim:, -theta_dim:],
-            ],
-        ]
     )
 
 
@@ -3079,7 +2835,7 @@ def _rebuild_precomputes_from_jit_arrays(
 
 
 def compute_local_linearization_error_ratio(
-    stabilized_joint_bread_matrix: jnp.ndarray,
+    joint_bread_matrix: jnp.ndarray,
     avg_estimating_function_stack: jnp.ndarray,
     per_subject_estimating_function_stacks: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
@@ -3134,8 +2890,8 @@ def compute_local_linearization_error_ratio(
     dimensionless.
 
     Args:
-        stabilized_joint_bread_matrix (jnp.ndarray):
-            The (possibly) stabilized joint bread matrix, B above.
+        joint_bread_matrix (jnp.ndarray):
+            The joint bread matrix, B above.
         avg_estimating_function_stack (jnp.ndarray):
             g(eta) above, evaluated at the final estimate.
         per_subject_estimating_function_stacks (jnp.ndarray):
@@ -3171,7 +2927,7 @@ def compute_local_linearization_error_ratio(
             The median, 90th percentile, and max local linearization error ratio
             over the sampled perturbations.
     """
-    joint_bread = stabilized_joint_bread_matrix
+    joint_bread = joint_bread_matrix
     g_hat = avg_estimating_function_stack
     stacks = per_subject_estimating_function_stacks
 

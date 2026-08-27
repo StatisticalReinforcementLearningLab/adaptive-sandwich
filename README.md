@@ -122,9 +122,7 @@ analyze_dataset(
     reward_col_name="reward",
     suppress_interactive_data_checks=True,
     suppress_all_data_checks=False,
-    collect_data_for_blowup_supervised_learning=False,
     form_adjusted_meat_adjustments_explicitly=False,
-    stabilize_joint_bread=False,
 )
 ```
 

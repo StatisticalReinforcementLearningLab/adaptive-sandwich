@@ -73,10 +73,9 @@ deliberately out of scope here -- see the ADR's Step 4 "Scope" note):
     shape-bucket), instead of one dispatch per (subject, update) pair.
   - helper_functions.compute_subject_radon_nikodym_weights: the shared,
     still-per-subject weight/bookkeeping helper that
-    deployment_conditioning_monitor.py and
-    get_datum_for_blowup_supervised_learning.py still call directly (a
-    deliberate scope decision, not an oversight -- porting them is the
-    natural next step if their performance ever becomes a concern).
+    deployment_conditioning_monitor.py still calls directly (a
+    deliberate scope decision, not an oversight -- porting it is the
+    natural next step if its performance ever becomes a concern).
     compute_action_prob_layer_outputs + compute_windowed_weight_products
     together are this module's batched, all-subjects-at-once counterpart,
     used only by post_deployment_analysis.py's hot path.

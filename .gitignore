@@ -9,4 +9,4 @@ adaptive-sandwich.code-workspace
 *.pyc
 lifejacket.egg-info
 .pytest_cache
-.deploy.sh
+deploy.sh

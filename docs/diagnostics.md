@@ -20,21 +20,30 @@ correct inputs -> adequate exploration -> stable moments and bread -> linearizat
 The `r_j`/`q_j`/`a_{j,l}` family of diagnostics (sections 2 below) examines mainly the
 linearization link. They cannot certify the others -- which is why the suite also reports
 exploration/importance-weight diagnostics, bread-stability diagnostics, and influence
-concentration, and why an exact nonlinear perturbation check and simulator calibration exist as
-stronger (and more expensive) alternatives.
+concentration, and why an exact nonlinear perturbation check exists as a stronger (and more
+expensive) alternative. Going further than any single-run check can -- validating against a
+simulator with known ground truth -- is possible too (`lifejacket.simulator_calibration`), but
+that is a genuinely different kind of activity (a multi-run experiment, not something a single
+`analyze_dataset` call produces) and is described in its own section at the end of this document,
+not listed among the checks below.
 
 ## What each check tests, and what it cannot test
 
 | Check (module function) | What it targets | What it cannot rule out |
 | --- | --- | --- |
-| `check_root_and_implementation` | Wrong supplied functions, an unsolved estimating equation, broken/inconsistent derivatives, non-finite inputs | Anything downstream of a correctly-solved root: overlap, bread conditioning, linearization, the CLT step |
-| `check_local_nonlinearity` (`r_j`, `c_j`, `a_{j,l}`) | Whether the first-order Taylor expansion of the estimating equation is adequate at the estimation scale, for the *reported contrasts specifically* | Whether the sampling distribution is actually close to normal (that's the influence-concentration and simulator-calibration checks); overlap/positivity; whether *un-sampled* directions behave differently |
+| `run_input_checks` (`DiagnosticReport.input_check_results`) | Black-and-white data/wiring correctness (e.g. can the recorded action probabilities be reconstructed from the supplied function) -- not a statistical measurement | Anything about the adjusted sandwich's own statistical adequacy; this is deliberately not what it's for |
+| `check_root_and_implementation` | An unsolved estimating equation, broken/inconsistent derivatives, non-finite inputs, a broken linear solve | Anything downstream of a correctly-solved root: overlap, bread conditioning, linearization, the CLT step |
+| `check_local_nonlinearity` (`r_j`, `c_j`, `a_{j,l}`) | Whether the first-order Taylor expansion of the estimating equation is adequate at the estimation scale, for the *reported contrasts specifically* | Whether the sampling distribution is actually close to normal (that's `check_influence_concentration`); overlap/positivity; whether *un-sampled* directions behave differently |
 | `check_exact_nonlinear_perturbations` | The same question as above, but exactly (via continuation) rather than via a one-step Taylor correction, plus the resulting distortion to the target's covariance, mean, and tail quantiles | Anything not captured by the sampled perturbation directions; with few directions, only a wide bound on the "bad direction" probability is achievable |
 | `check_jacobian_drift` (`rho_j`) | How much the Jacobian changes along a sampled path -- a heuristic input to a contraction-style error bound | Nothing rigorously: this is a *sampled path maximum*, never a certified supremum. `rho_j < 1` does not prove the nonlinear correction is small; `rho_j >= 1` does not by itself prove failure |
 | `check_bread_stability` | Numerical conditioning of the bread matrix and its blocks, and the sensitivity of target SEs to numerically negligible perturbations | Statistical identification as distinct from numerical conditioning (a well-conditioned-looking bread can still reflect weak identification if the *meat* is what's driving the standard error up) |
 | `check_influence_concentration` (`p_max`, `n_eff`, third-moment) | Whether the estimator's fluctuation is built from many small contributions (the premise the CLT approximation needs), or is dominated by a handful of subjects | It does not itself validate normality -- it only flags a specific, common way that a CLT approximation can fail |
 | `check_exploration_and_weights` | Positivity/overlap, importance-weight concentration (ESS), and policy-score-derivative magnitude, evaluated at the estimate *and* under sandwich-scale perturbations | Whether the *supplied* exploration bounds are the deployment's real design bounds -- those must be supplied by the caller via `exploration_floor`/`exploration_ceiling` to be enforced as hard requirements |
-| `lifejacket.simulator_calibration.calibrate_and_classify` | End-to-end behavior (bias, coverage, tail imbalance, diagnostic accuracy) under a caller-supplied simulator | Anything outside the simulated family: a calibrated claim is only ever "within this simulator family," never a universal guarantee |
+
+(`lifejacket.simulator_calibration.calibrate_and_classify` targets end-to-end behavior --bias,
+coverage, tail imbalance, diagnostic accuracy-- under a caller-supplied simulator, but it isn't a
+row in this table on purpose; see "Going further: validating against a simulator" at the end of
+this document for why.)
 
 ## The checks, in detail
 
@@ -48,6 +57,37 @@ which already equals `Cov(eta_hat)` -- see the scaling-convention note at the to
 selector `L` (rows are contrasts `l`) and matching `target_labels` are built once by
 `default_contrast_matrix`: if `config.contrast_matrix` is `None`, `L` defaults to the identity on
 the `theta` block, i.e. one contrast per component of `theta`, labeled `theta_0`, `theta_1`, ...
+
+### 0. Input-check results -- `run_input_checks` (not one of the numbered statistical checks)
+
+Kept deliberately separate from every check below, in `DiagnosticReport.input_check_results`
+(a `dict[str, CheckResult]`, distinct from `check_results`) rather than folded into any of them.
+The distinction: these are black-and-white correctness questions about the supplied *data and
+functions* (does a reconstruction match, is a shape/index consistent) -- not numeric measurements
+of how appropriate the adjusted sandwich is for this experiment, which is what every numbered
+check below actually does. Conflating the two would mean a data-wiring bug and a genuine
+statistical finding could look identical in the report.
+
+`run_input_checks` takes `(name, callable)` pairs (the same `legacy_check_callables` argument
+`run_diagnostic_suite` has always accepted) and invokes each; an exception from any of them is
+caught and turned into its own `failed` `CheckResult` (named after that check, with the exception
+message) rather than propagating. `post_deployment_analysis.analyze_dataset` wires in
+`input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed` here, so the
+diagnostic report gets a non-interactive, structured, always-present record of whether the
+supplied action-probability function reproduces the recorded probabilities -- useful in contexts
+(e.g. an unattended cluster job) where the main pipeline's own interactive confirmation prompt has
+no one to answer it. `input_checks.require_estimating_functions_sum_to_zero` is deliberately **not**
+also wired in here: it tests the same underlying question as `a_root_max` above (was the equation
+actually solved?), but with an arbitrary absolute tolerance rather than `a_root_max`'s
+SE-standardized, portable one (see "Why `r_j` and raw `q_j` have no universal threshold" below for
+why that distinction matters) -- re-running it here would be redundant, not an independent signal.
+It is still run unconditionally, interactively, by the main `analyze_dataset` pipeline itself.
+
+Any `failed` entry in `input_check_results` short-circuits the rest of the suite exactly like a
+`failed` `root_and_implementation` does (`run_diagnostic_suite` sets `hard_failed = True` either
+way) and forces `classification == "failed"` -- but `check_root_and_implementation`'s own `status`
+is unaffected by it either way, so a data-hygiene failure is never visible as if it were a
+statistical one.
 
 ### 1. Root and implementation accuracy -- `check_root_and_implementation`
 
@@ -65,7 +105,14 @@ sets `hard_failed = True` and skips straight to building the report).
    `check_bread_stability`/`check_local_nonlinearity` to flag, not a root-solving failure.
 3. **Backward solve residual.** `metrics["backward_relative_residual"] = ||B_hat @ d_root + g0|| /
    (||B_hat|| * ||d_root|| + eps)` -- a standard numerical-linear-algebra sanity check on the
-   solve itself, reported but not currently gated on a threshold.
+   solve itself. **Hard-fails** if it exceeds `config.backward_residual_tolerance` (default
+   `1e-6`). Unlike every other tolerance in `DiagnosticConfig`, this one is not an engineering
+   guess needing simulator calibration: a healthy LU-based solve is backward-stable by
+   construction, so this residual sits near float64 machine epsilon (~1e-16) regardless of how
+   ill-conditioned `B_hat` is (confirmed empirically across condition numbers spanning twelve
+   orders of magnitude) -- `1e-6` is already ~10 orders of magnitude looser than anything a
+   healthy solve produces, so this is a smoke detector for a broken solve (e.g. a stale/mismatched
+   `bread_factored`), not a statement about statistical adequacy.
 4. **Directional finite-difference check.** For `config.finite_difference_num_directions`
    (default `3`) random unit directions `v`, compares the central finite difference
    `(g_tilde(eta_hat + h v) - g_tilde(eta_hat - h v)) / (2h)` (with
@@ -74,15 +121,8 @@ sets `hard_failed = True` and skips straight to building the report).
    `finite_difference_relative_errors` (one per direction) and their max; a max relative error
    above `1%` is a **warning** (catches a broken/mismatched derivative, not meant to certify
    numerical precision at the last bit).
-5. **Legacy checks.** Any `(name, callable)` pairs passed in via `legacy_check_callables` are
-   invoked; an exception from any of them is caught and turned into a hard failure of this check
-   (with the exception message recorded under `metrics["legacy_check::<name>"]`) rather than
-   propagating. `post_deployment_analysis.analyze_dataset` wires in
-   `input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed` and
-   `input_checks.require_estimating_functions_sum_to_zero` here, so the diagnostic suite
-   re-verifies (cheaply) that the supplied action-probability function reproduces the recorded
-   probabilities and that the update/inferential estimating equations actually average to zero,
-   in addition to whatever the main analysis pipeline already checked.
+Legacy `input_checks` re-verification (was previously folded into this check's own status) now
+lives separately -- see "0. Input-check results" below.
 
 ### 2. Local nonlinearity -- `check_local_nonlinearity` (`r_j`, `c_j`, `a_{j,l}`, joint Mahalanobis)
 
@@ -237,16 +277,22 @@ vectorized dot product. From `xi`, reports per target label in `by_target[label]
 
 - `p_max`: the largest single-subject share of `sum(xi_i^2)`;
 - `n_eff = 1 / sum(p_i^2)` (bounded below by `1`, by construction -- see the code comment on why
-  the warning threshold below is `max(2.0, 0.1*n)` rather than a pure `0.1*n`, which can never
+  the warning threshold below is `max(config.influence_n_eff_min_floor,
+  config.influence_n_eff_min_fraction * n)` rather than a pure fraction of `n`, which can never
   fire for small `n`);
 - `third_moment_concentration = sum(|xi_i|^3) / sum(xi_i^2)^1.5`;
 - `top_influential_subjects`: the top-5 subjects by `|xi_i|`, each with its `xi` value and
   variance share, and its `subject_id` (from the `subject_ids` passed to `run_diagnostic_suite`)
   when `config.report_subject_identifiers` (default `True`).
 
-**Status logic:** `warning` for any target with `n_eff < max(2.0, 0.1*n)` or `p_max > 0.5`.
-This check never hard-fails -- concentrated influence is evidence against the CLT premise, not
-proof that the estimator is wrong.
+**Status logic:** `warning` for any target with `n_eff < max(config.influence_n_eff_min_floor,
+config.influence_n_eff_min_fraction * n)` (defaults `2.0`/`0.1`) or `p_max >
+config.influence_p_max_tolerance` (default `0.5`). This check never hard-fails -- concentrated
+influence is evidence against the CLT premise, not proof that the estimator is wrong. Like every
+tolerance in this module except `backward_residual_tolerance`, these three are engineering
+guesses awaiting simulator calibration (see `docs/adr/0002-diagnostic-threshold-calibration-plan.md`),
+not theorem-derived critical values -- they only recently became overridable `DiagnosticConfig`
+fields at all (previously hardcoded literals in the function body).
 
 **Optional leave-one-out sensitivity** (`config.compute_leave_one_out_sensitivity`, default
 `False`): for the union of the top `config.leave_one_out_top_k` (default `3`) most influential
@@ -270,9 +316,11 @@ skips this check).
   `action_prob_global_max`: straight from the recorded `analysis_df`, via pandas groupby --
   no autodiff needed for this part.
 - **Hard fails** if any recorded probability is nonfinite, or falls outside the open interval
-  `(0, 1)`. (This is where positivity/overlap is actually enforced for the new suite; the
-  legacy `input_checks.require_action_probabilities_in_range_0_to_1` deliberately stays a no-op
-  in the always-on pipeline for backward compatibility -- see the comment on that function.)
+  `(0, 1)`. This is where positivity/overlap is actually enforced -- the legacy
+  `input_checks.require_action_probabilities_in_range_0_to_1` was a deliberate no-op for backward
+  compatibility (some legitimate near-deterministic policies produce recorded probabilities of
+  exactly `0.0`/`1.0` after float rounding) and has since been removed from `input_checks.py`
+  entirely now that this check does the job properly.
 - If `config.exploration_floor`/`config.exploration_ceiling` are supplied (they are not
   recoverable from the data alone -- the caller must know the deployment's actual design bounds),
   `fraction_at_or_near_floor`/`_ceiling` are reported, and any violation is a **hard fail**.
@@ -292,10 +340,6 @@ skips this check).
 
 Everything else in this check is a reported metric, not a hard requirement, since the "right"
 threshold for weight concentration/ESS is deployment-specific and should be simulator-calibrated.
-
-### 8. Simulator calibration -- `lifejacket.simulator_calibration.calibrate_and_classify`
-
-See the dedicated section below.
 
 ## Why `r_j` and raw `q_j` have no universal threshold
 
@@ -365,27 +409,58 @@ unverified claim for a claim this package has no reason to think is better-found
   return this.
 - `locally_supported`: the observed-data checks pass, but no end-to-end simulator calibration is
   available.
-- `failed`: a hard prerequisite (root/implementation, out-of-range probabilities, non-finite
-  values) or a material measured distortion (SE-ratio/mean-shift/quantile-shift outside
-  tolerance in the exact nonlinear check) failed.
+- `failed`: a hard prerequisite (an input-check result, root/implementation, out-of-range
+  probabilities, non-finite values) or a material measured distortion (SE-ratio/mean-shift/
+  quantile-shift outside tolerance in the exact nonlinear check) failed.
 - `indeterminate`: weak identification, rank-deficient target covariance, unstable solves,
   insufficient perturbation directions, or inadequate simulator coverage prevent a conclusion
   either way.
 
-## Simulator calibration
+## Going further: validating against a simulator (not one of the checks above)
 
-`lifejacket.simulator_calibration.calibrate_and_classify` is a simulator-agnostic interface: it
-does not assume or invent any particular deployment model. Given a `replay_fn(seed) ->
-DeploymentReplay` that replays recruitment, outcome generation, policy updates, action
-selection, estimation, and the adjusted sandwich calculation for one simulated deployment, it
-runs the diagnostic suite on training and held-out seeds, and among held-out replays whose
-diagnostics pass, computes `P(inferential failure | diagnostics pass)` (via a caller-supplied
-`failure_predicate`) and its one-sided Clopper-Pearson upper confidence bound. Only when that
-bound is below the configured `risk_tolerance` does it return `supported`; any such claim is
-scoped to "within this simulator family," never a universal guarantee. `tests/unit_tests/
-test_simulator_calibration.py` exercises `calibrate_and_classify` directly against small
-in-process toy replays (affine estimating maps), which is the fastest way to validate the
-calibration/classification logic itself in isolation from a full RL simulator.
+**This is not a single-run check, and deliberately isn't listed as one.** Every check above runs
+once, on one dataset, inside one `analyze_dataset`/`run_diagnostic_suite` call. Actually
+validating a diagnostic's threshold -- rather than trusting an engineering guess -- requires
+running the estimator many times against a simulator with a known ground truth, which is a
+different kind of activity: a standalone experiment you design and run, not a flag you pass to
+`analyze_dataset`. `lifejacket.simulator_calibration.calibrate_and_classify` is the tool for that
+experiment, not an eighth check in the suite.
+
+**The interface.** `calibrate_and_classify` is simulator-agnostic: it does not assume or invent
+any particular deployment model. You supply a `replay_fn(seed) -> DeploymentReplay` that replays
+recruitment, outcome generation, policy updates, action selection, estimation, and the adjusted
+sandwich calculation for one simulated deployment; it runs the diagnostic suite on every seed in
+`train_seeds` and `holdout_seeds`, and among *held-out* replays whose diagnostics pass, computes
+`P(inferential failure | diagnostics pass)` (via a caller-supplied `failure_predicate`) and its
+one-sided Clopper-Pearson upper confidence bound. Only when that bound is below the configured
+`risk_tolerance` does it return `supported`; any such claim is scoped to "within this simulator
+family," never a universal guarantee.
+
+**How to actually run one, for your own deployment family:**
+
+1. **Build `replay_fn`.** For each `seed`, run your simulator end-to-end and package a
+   `DeploymentReplay`: `diagnostic_kwargs` (unpacked directly into `run_diagnostic_suite` --
+   the same `g_tilde`/`B_hat`/`M_hat`/`joint_sandwich_matrix`/`per_subject_stacks`/etc. arguments
+   described throughout this document), `theta_hat`, `theta_variance_estimate`, and
+   `ground_truth_theta` if your simulator can supply one (not every simulator can -- an adaptive
+   design's estimand isn't always a fixed population constant; a common approach is a
+   cross-replicate Monte Carlo mean at the same `n`/`T` as the test seeds, treated as a separate
+   design decision, not something `calibrate_and_classify` picks for you).
+2. **Split `train_seeds`/`holdout_seeds`, and don't skip this.** `train_seeds` are available for
+   your own threshold-tuning but otherwise unused by the function; the reported bound is computed
+   *only* from `holdout_seeds`. Reusing training seeds for that bound would be circular.
+3. **Write your own `failure_predicate`.** The shipped `default_failure_predicate` is explicitly a
+   minimal, non-authoritative example (nonfinite/negative variance, or -- if you supplied
+   `ground_truth_theta` -- a coverage check against it). Match it to what "inferential failure"
+   actually means for your deployment.
+4. **Call it and read `CalibrationResult`**: `classification`, `conditional_failure_rate_upper_bound`,
+   `per_replay_records` (per-seed detail for your own further analysis).
+
+**Honest scope.** This is inherently a multi-run, often computationally significant undertaking --
+each replay re-runs your full simulator, estimator, and diagnostic suite. `tests/unit_tests/
+test_simulator_calibration.py` exercises `calibrate_and_classify` against small in-process toy
+replays (affine estimating maps) -- the fastest way to validate the calibration/classification
+logic itself, but not a stand-in for a real experiment at real scale.
 
 This repository does contain a full deployment simulator
 (`tests/simulators_and_runners/rl_study_simulation.py`, driven by `run_local_synthetic.sh`), and
@@ -401,3 +476,7 @@ necessary; a deployment wanting the full `calibrate_and_classify` treatment agai
 repository's simulator can build a `replay_fn` the same way `analyze_dataset` does internally,
 using the already-public helpers in `post_deployment_analysis`
 (`construct_beta_index_by_policy_num_map`, `construct_classical_and_adjusted_sandwiches`, etc.).
+For a real, cluster-scale worked example of exactly this kind of experiment (validating this
+package's own default tolerances, not a specific deployment's), see
+`docs/adr/0002-diagnostic-threshold-calibration-plan.md` -- the scenario-grid, ground-truth, and
+SLURM-mechanics design there generalizes directly to validating your own deployment family.

@@ -29,6 +29,120 @@ def _scalar_quadratic_map(b, c):
 
 
 # ---------------------------------------------------------------------------
+# 0. check_root_and_implementation's backward-residual gate: a stale/mismatched bread_factored
+#    (the exact bug class this gate exists to catch -- e.g. forgetting to re-factor B_hat after
+#    it changes) must not silently produce a valid-looking root correction.
+# ---------------------------------------------------------------------------
+
+
+def test_root_and_implementation_hard_fails_on_broken_backward_residual():
+    B_true = np.diag([2.0, 3.0])
+    B_wrong = np.diag([2.0, 30.0])  # factored and used to solve, instead of B_true
+
+    def g_tilde(eta):
+        return B_true @ eta - jnp.array([0.02, 0.03])
+
+    eta_hat = jnp.zeros(2)
+    g0 = np.array([-0.02, -0.03])
+    # Inflated so a_root_max stays far below its own tolerance regardless of d_root -- isolates
+    # this test to the backward-residual gate specifically, not a root-error coincidence.
+    V_hat = np.eye(2) * 1e6
+    L = np.eye(2)
+    labels = ["theta_0", "theta_1"]
+
+    result = d.check_root_and_implementation(
+        g_tilde,
+        eta_hat,
+        g0,
+        B_true,
+        np.eye(2),
+        d.factor_bread(B_wrong),
+        L,
+        labels,
+        V_hat,
+        d.DiagnosticConfig(),
+    )
+
+    assert result.status == CheckStatuses.FAILED
+    assert "Backward relative residual" in result.message
+    assert (
+        result.metrics["backward_relative_residual"]
+        > d.DiagnosticConfig().backward_residual_tolerance
+    )
+    assert result.metrics["a_root_max"] < d.DiagnosticConfig().root_error_tolerance_se
+
+
+# ---------------------------------------------------------------------------
+# 0b. run_input_checks: black-and-white input/data-hygiene results, kept separate from the
+#     numeric checks in check_results (never folded into root_and_implementation's own status).
+# ---------------------------------------------------------------------------
+
+
+def test_run_input_checks_reports_pass_and_fail_without_raising():
+    def passing_check():
+        return None
+
+    def failing_check():
+        raise ValueError("mismatched action probabilities")
+
+    results = d.run_input_checks(
+        [("a_passes", passing_check), ("b_fails", failing_check)]
+    )
+
+    assert results["a_passes"].status == CheckStatuses.PASSED
+    assert results["b_fails"].status == CheckStatuses.FAILED
+    assert "mismatched action probabilities" in results["b_fails"].message
+
+
+def test_run_diagnostic_suite_hard_fails_on_input_check_failure_but_keeps_it_separate():
+    rng = np.random.default_rng(4)
+    d_total = 2
+    n = 50
+    B = np.eye(d_total)
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ eta
+
+    eta_hat = jnp.zeros(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+    joint_sandwich = M_hat / n  # B is identity here
+
+    def failing_input_check():
+        raise ValueError("could not reconstruct action probabilities")
+
+    report = d.run_diagnostic_suite(
+        g_tilde,
+        eta_hat,
+        B,
+        M_hat,
+        joint_sandwich,
+        stacks,
+        beta_dim=0,
+        theta_dim=d_total,
+        num_subjects=n,
+        config=d.DiagnosticConfig(num_directions=10),
+        legacy_check_callables=[
+            ("action_probabilities_reconstructed", failing_input_check)
+        ],
+    )
+
+    assert report.classification == DiagnosticClassifications.FAILED
+    assert (
+        report.input_check_results["action_probabilities_reconstructed"].status
+        == CheckStatuses.FAILED
+    )
+    # The failure is a data-hygiene fact, not a statistical one -- root_and_implementation's own
+    # status must be unaffected (this well-behaved affine map has nothing wrong with its root).
+    assert (
+        report.check_results["root_and_implementation"].status == CheckStatuses.PASSED
+    )
+    # A hard-failing input check still short-circuits the rest of the suite, same as before.
+    assert set(report.check_results.keys()) == {"root_and_implementation"}
+
+
+# ---------------------------------------------------------------------------
 # 1. Affine estimating map: R_j = r_j = q_j = a_{j,l} = 0 up to numerical tolerance; exact
 #    nonlinear and linear roots agree.
 # ---------------------------------------------------------------------------
@@ -480,6 +594,40 @@ def test_influence_concentration_single_dominant_subject():
     assert by_target["p_max"] > 0.9
     assert by_target["n_eff"] < 2.0
     assert result.status == CheckStatuses.WARNING
+
+
+def test_influence_concentration_thresholds_are_overridable():
+    n = 10
+    B = np.array([[1.0]])
+    bread_factored = d.factor_bread(B)
+    stacks = np.ones((n, 1))
+    stacks[0, 0] = 2.5  # a mild, sub-default concentration: p_max ~0.41, n_eff ~4.8
+    L = np.array([[1.0]])
+
+    default_result = d.check_influence_concentration(
+        stacks, bread_factored, L, ["target_0"], list(range(n)), d.DiagnosticConfig()
+    )
+    assert default_result.status == CheckStatuses.PASSED
+
+    stricter_p_max = d.check_influence_concentration(
+        stacks,
+        bread_factored,
+        L,
+        ["target_0"],
+        list(range(n)),
+        d.DiagnosticConfig(influence_p_max_tolerance=0.3),
+    )
+    assert stricter_p_max.status == CheckStatuses.WARNING
+
+    stricter_n_eff = d.check_influence_concentration(
+        stacks,
+        bread_factored,
+        L,
+        ["target_0"],
+        list(range(n)),
+        d.DiagnosticConfig(influence_n_eff_min_floor=5.0),
+    )
+    assert stricter_n_eff.status == CheckStatuses.WARNING
 
 
 # ---------------------------------------------------------------------------

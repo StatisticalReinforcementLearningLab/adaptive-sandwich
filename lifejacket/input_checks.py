@@ -169,7 +169,12 @@ def perform_first_wave_input_checks(
     )
     require_consecutive_integer_calendar_times(analysis_df, calendar_t_col_name)
     require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_name)
-    require_action_probabilities_in_range_0_to_1(analysis_df, action_prob_col_name)
+    # Positivity/overlap (recorded probabilities strictly inside (0, 1)) is enforced by
+    # lifejacket.diagnostics.check_exploration_and_weights instead -- see the removed
+    # require_action_probabilities_in_range_0_to_1's history for why: some legitimate
+    # near-deterministic policies legitimately produce recorded probabilities of exactly 0.0/1.0
+    # after floating-point rounding, so a hard assertion here would have been a
+    # backward-incompatible break to the always-on input-check path.
 
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
@@ -679,19 +684,6 @@ def require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_na
         analysis_df[analysis_df[active_col_name] == 1][subject_id_col_name][0],
         collections.abc.Hashable,
     )
-
-
-def require_action_probabilities_in_range_0_to_1(analysis_df, action_prob_col_name):
-    # NOTE: this intentionally does not assert on the computed boolean. Some existing deployment
-    # scenarios (e.g. near-deterministic/"infinite steepness" policies exercised by
-    # tests/integration_tests) legitimately produce recorded probabilities of exactly 0.0/1.0
-    # after floating-point rounding, and this check has never enforced the open interval in
-    # practice -- turning it into a hard assertion here would be a backward-incompatible change
-    # to the always-on input-check path. lifejacket.diagnostics.check_exploration_and_weights
-    # (opt-in, part of the new diagnostic suite) DOES hard-fail on out-of-range probabilities,
-    # which is the appropriate place to enforce this positivity/overlap requirement.
-    logger.info("Checking that action probabilities are in the interval (0, 1).")
-    analysis_df[action_prob_col_name].between(0, 1, inclusive="neither").all()
 
 
 def require_no_policy_numbers_present_in_alg_update_args_but_not_analysis_df(

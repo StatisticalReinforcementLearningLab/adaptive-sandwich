@@ -873,6 +873,15 @@ def analyze_dataset(
                 theta_dim,
                 len(subject_ids),
                 diagnostic_config or diagnostics.DiagnosticConfig(),
+                # Only the reconstruction check is re-run here: it has no numeric equivalent
+                # inside the diagnostic suite. require_estimating_functions_sum_to_zero (still run
+                # unconditionally above, interactively, as part of the main pipeline) is
+                # deliberately NOT also wired in here anymore -- check_root_and_implementation's
+                # own a_root_max already answers the same underlying question ("was the equation
+                # actually solved?"), and does so in SE-standardized, portable units rather than
+                # the legacy check's arbitrary absolute tolerances (the same non-portability
+                # problem discussed for r_j/q_j) -- so re-running it here was redundant, not an
+                # independent signal.
                 legacy_check_callables=[
                     (
                         "action_probabilities_reconstructed",
@@ -886,12 +895,6 @@ def analyze_dataset(
                                 action_prob_func_args,
                                 action_prob_func,
                             )
-                        ),
-                    ),
-                    (
-                        "estimating_functions_sum_to_zero",
-                        lambda: input_checks.require_estimating_functions_sum_to_zero(
-                            avg_estimating_function_stack, beta_dim, theta_dim, True
                         ),
                     ),
                 ],

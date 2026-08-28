@@ -144,14 +144,19 @@ padding/masking feature that fixes exactly that.
 
 `analyze`/`analyze_dataset` accept a `--run_diagnostics`/`run_diagnostics` flag, **on by
 default**, that runs a layered diagnostic suite over the adjusted sandwich and writes
-`diagnostic_report.pkl`. By default this runs only the cheap checks (root/implementation,
-local nonlinearity, bread stability, influence concentration, exploration/importance-weight
-checks) -- the expensive exact-nonlinear-perturbation and Jacobian-drift checks, and simulator
-calibration, stay opt-in (pass `--diagnostic_config_pickle`/`diagnostic_config` with
-`compute_exact_nonlinear_roots=True`, or call `lifejacket.simulator_calibration.
-calibrate_and_classify` directly). It does not change the adjusted sandwich estimator itself,
+`diagnostic_report.pkl`. By default this runs only the cheap checks (input-check results,
+root/implementation, local nonlinearity, bread stability, influence concentration,
+exploration/importance-weight checks) -- the expensive exact-nonlinear-perturbation and
+Jacobian-drift checks stay opt-in (pass `--diagnostic_config_pickle`/`diagnostic_config` with
+`compute_exact_nonlinear_roots=True`). It does not change the adjusted sandwich estimator itself,
 and a diagnostic failure does not mean the classical sandwich is valid instead. See
-[`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish.
+[`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish, or
+[`docs/diagnostics_tutorial.md`](docs/diagnostics_tutorial.md) for a practical guide to reading a
+`DiagnosticReport` and deciding what to do about it. Separately -- and not one of the checks
+above, since it requires a multi-run simulator experiment rather than a single `analyze_dataset`
+call -- `lifejacket.simulator_calibration.calibrate_and_classify` can validate a diagnostic
+threshold against a known ground truth; see `docs/diagnostics_tutorial.md`'s closing section for
+how to run one yourself.
 
 ## Linting/Formatting
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting, run automatically via [pre-commit](https://pre-commit.com/) before every commit.

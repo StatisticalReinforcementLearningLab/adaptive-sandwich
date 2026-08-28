@@ -53,6 +53,15 @@ class DiagnosticConfig:
     target_labels: list[str] | None = None
 
     root_error_tolerance_se: float = 0.01
+    # Unlike every other tolerance in this dataclass, this one is not an engineering guess and
+    # does not need simulator calibration: a healthy LU-based solve is backward-stable by
+    # construction, so backward_relative_residual sits near float64 machine epsilon (~1e-16)
+    # regardless of how ill-conditioned B_hat is -- confirmed empirically across condition
+    # numbers spanning twelve orders of magnitude (well-conditioned to near-exactly-singular).
+    # This is a smoke detector for a broken solve (e.g. a stale/mismatched bread_factored, or a
+    # bug in factor_bread/solve_with_bread), not a statistical judgment call -- 1e-6 is already
+    # about ten orders of magnitude looser than anything a healthy solve produces.
+    backward_residual_tolerance: float = 1e-6
     nonlinear_correction_tolerance_se: float = 0.10
     se_distortion_tolerance: float = 0.05
     mean_shift_tolerance_se: float = 0.10
@@ -77,6 +86,16 @@ class DiagnosticConfig:
     compute_leave_one_out_sensitivity: bool = False
     leave_one_out_top_k: int = 3
     report_subject_identifiers: bool = True
+    # n_eff is bounded below by 1 (it can never indicate fewer than "one equally influential
+    # subject"), so a purely relative floor like `influence_n_eff_min_fraction * n` can never fire
+    # for small n even in the most extreme single-subject-dominance case -- hence the separate
+    # absolute floor. Like every other tolerance in this dataclass (backward_residual_tolerance is
+    # the one exception -- see its comment), these are engineering guesses awaiting simulator
+    # calibration, not theorem-derived critical values; see docs/adr/0002-diagnostic-threshold-
+    # calibration-plan.md.
+    influence_n_eff_min_floor: float = 2.0
+    influence_n_eff_min_fraction: float = 0.1
+    influence_p_max_tolerance: float = 0.5
 
     drift_num_directions: int = 3
     drift_path_samples: tuple[float, ...] = (0.0, 0.5, 1.0)
@@ -109,6 +128,10 @@ class CheckResult:
 class DiagnosticReport:
     classification: str
     check_results: dict[str, CheckResult]
+    # Black-and-white input/data-hygiene correctness results (see run_input_checks), kept
+    # separate from check_results so a data-wiring failure is never conflated with a genuine
+    # statistical finding about the adjusted sandwich itself.
+    input_check_results: dict[str, CheckResult]
     metrics: dict[str, Any]
     tolerances_used: dict[str, Any]
     warnings: list[str]
@@ -185,6 +208,41 @@ def evaluate_g_tilde_batched(
 
 
 ###############################################################################
+# Section 1: input/data-hygiene checks -- black-and-white correctness questions about the
+# supplied data/functions (does a reconstruction match, does an equation average to zero to a
+# loose absolute tolerance), not numeric measurements of how appropriate the adjusted sandwich is
+# for this experiment. Kept as their own CheckResults, in DiagnosticReport.input_check_results,
+# never folded into check_results -- a data-wiring failure should never be conflated with a
+# genuine statistical finding just because both happen to raise/fail.
+###############################################################################
+
+
+def run_input_checks(
+    legacy_check_callables: Sequence[tuple[str, Callable[[], Any]]],
+) -> dict[str, CheckResult]:
+    """
+    Re-runs any supplied legacy lifejacket.input_checks functions, converting each one's hard
+    raise into its own failed CheckResult rather than propagating. This exists purely for
+    automatability: the main analyze_dataset pipeline's own call to these same functions can pop
+    an interactive confirmation prompt and raise, which has no sensible meaning in an unattended
+    context (e.g. a cluster job with nobody to answer "(y/n)") -- this gives the same underlying
+    fact a non-interactive, structured, always-present outcome instead.
+    """
+    results: dict[str, CheckResult] = {}
+    for check_name, check_callable in legacy_check_callables:
+        try:
+            check_callable()
+            results[check_name] = CheckResult(
+                name=check_name, status=CheckStatuses.PASSED
+            )
+        except Exception as exc:  # noqa: BLE001 - legacy checks raise assorted exception types
+            results[check_name] = CheckResult(
+                name=check_name, status=CheckStatuses.FAILED, message=str(exc)
+            )
+    return results
+
+
+###############################################################################
 # Section 2: implementation and root accuracy
 ###############################################################################
 
@@ -201,15 +259,17 @@ def check_root_and_implementation(
     V_hat: np.ndarray,
     config: DiagnosticConfig,
     *,
-    legacy_check_callables: Sequence[tuple[str, Callable[[], Any]]] = (),
     rng: np.random.Generator | None = None,
 ) -> CheckResult:
     """
     Section 2 (hard prerequisite gate). Computes the root-error correction in target standard-
-    error units, checks finiteness of g0/B_hat/M_hat, checks the backward residual of the linear
-    solve used to compute that correction, spot-checks the automatic derivative B_hat against a
-    directional finite difference of g_tilde, and re-runs any supplied legacy input_checks
-    functions, converting their hard raises into a failed CheckResult rather than propagating.
+    error units, checks finiteness of g0/B_hat/M_hat, hard-fails on an anomalously large backward
+    residual of the linear solve used to compute that correction (a software-correctness smoke
+    detector, not a statistical judgment call -- see the comment on
+    DiagnosticConfig.backward_residual_tolerance), and spot-checks the automatic derivative B_hat
+    against a directional finite difference of g_tilde. Purely numeric measurements of the
+    supplied estimating-function/derivative pair -- see run_input_checks for the separate,
+    black-and-white input/data-hygiene checks.
     """
     warnings: list[str] = []
     metrics: dict[str, Any] = {}
@@ -238,6 +298,15 @@ def check_root_and_implementation(
             np.linalg.norm(backward_residual) / backward_scale
         )
         metrics["backward_relative_residual"] = backward_relative_residual
+        if backward_relative_residual > config.backward_residual_tolerance:
+            status = CheckStatuses.FAILED
+            failure_reasons.append(
+                f"Backward relative residual of {backward_relative_residual:.4g} exceeds "
+                f"{config.backward_residual_tolerance:.4g} -- this indicates a broken linear "
+                "solve (e.g. a stale/mismatched bread_factored, or a bug in "
+                "factor_bread/solve_with_bread), not a statistical finding: a healthy LU solve "
+                "is backward-stable regardless of B_hat's conditioning."
+            )
 
         se_l = standard_errors_for_contrasts(V_hat, L)
         identified = se_l > 0
@@ -297,15 +366,6 @@ def check_root_and_implementation(
             )
             if status == CheckStatuses.PASSED:
                 status = CheckStatuses.WARNING
-
-    for check_name, check_callable in legacy_check_callables:
-        try:
-            check_callable()
-            metrics[f"legacy_check::{check_name}"] = "passed"
-        except Exception as exc:  # noqa: BLE001 - legacy checks raise assorted exception types
-            metrics[f"legacy_check::{check_name}"] = f"failed: {exc}"
-            status = CheckStatuses.FAILED
-            failure_reasons.append(f"Legacy check '{check_name}' failed: {exc}")
 
     return CheckResult(
         name="root_and_implementation",
@@ -1118,10 +1178,10 @@ def check_influence_concentration(
             "third_moment_concentration": L_c,
             "top_influential_subjects": top_subjects,
         }
-        # n_eff is bounded below by 1 (it can never indicate fewer than "one equally influential
-        # subject"), so a purely relative threshold like `n_eff < 0.1*n` can never fire for
-        # small n even in the most extreme single-subject-dominance case; p_max supplements it.
-        if n_eff < max(2.0, 0.1 * n) or p_max > 0.5:
+        n_eff_threshold = max(
+            config.influence_n_eff_min_floor, config.influence_n_eff_min_fraction * n
+        )
+        if n_eff < n_eff_threshold or p_max > config.influence_p_max_tolerance:
             warnings_list.append(
                 f"For target '{label}', an effective count of only {n_eff:.1f} out of {n} "
                 f"subjects drives the estimated variance (largest single share: {p_max:.1%})."
@@ -1417,6 +1477,8 @@ def run_diagnostic_suite(
     g0 = np.asarray(g_tilde(jnp.asarray(eta_hat)), dtype=np.float64)
     V_hat = np.asarray(joint_sandwich_matrix, dtype=np.float64)
 
+    input_check_results = run_input_checks(legacy_check_callables)
+
     check_results["root_and_implementation"] = check_root_and_implementation(
         g_tilde,
         eta_hat,
@@ -1428,11 +1490,12 @@ def run_diagnostic_suite(
         target_labels,
         V_hat,
         config,
-        legacy_check_callables=legacy_check_callables,
     )
 
-    hard_failed = (
-        check_results["root_and_implementation"].status == CheckStatuses.FAILED
+    hard_failed = check_results[
+        "root_and_implementation"
+    ].status == CheckStatuses.FAILED or any(
+        result.status == CheckStatuses.FAILED for result in input_check_results.values()
     )
 
     if not hard_failed:
@@ -1551,7 +1614,7 @@ def run_diagnostic_suite(
                 pi_and_weight_gradients_by_calendar_t=pi_and_weight_gradients_by_calendar_t,
             )
 
-    for result in check_results.values():
+    for result in list(check_results.values()) + list(input_check_results.values()):
         warnings_list.extend(f"[{result.name}] {w}" for w in result.warnings)
 
     classification = (
@@ -1563,6 +1626,7 @@ def run_diagnostic_suite(
     return DiagnosticReport(
         classification=classification,
         check_results=check_results,
+        input_check_results=input_check_results,
         metrics={name: result.metrics for name, result in check_results.items()},
         tolerances_used=dataclasses.asdict(config),
         warnings=warnings_list,

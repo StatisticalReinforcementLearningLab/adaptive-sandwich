@@ -62,10 +62,10 @@ above, wired up with generated pickles:
 
 This simulates a study and then calls `lifejacket analyze` on it, outputting
 to `tests/simulators_and_runners/simulated_data/` by default (gitignored).
-With default settings it will interactively ask you to confirm that skipping
-small-sample corrections is intentional; answer `y`, or pass
-`--suppress_interactive_data_checks=1` to skip all such prompts. See the
-script itself for all the flags it accepts.
+With default settings it will interactively ask you to confirm a handful of
+input checks (e.g. that the supplied study shape and function arguments look
+right); answer `y` at each, or pass `--suppress_interactive_data_checks=1` to
+skip all such prompts. See the script itself for all the flags it accepts.
 
 ### From Python
 `lifejacket analyze` is a thin wrapper around

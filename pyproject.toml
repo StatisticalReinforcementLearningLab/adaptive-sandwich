@@ -40,6 +40,11 @@ include = ["lifejacket*"]
 exclude = ["tests*"]
 
 [tool.pytest.ini_options]
+# Tests import both `tests.*` (needs the repo root on sys.path) and
+# `simulators_and_runners.*` (needs tests/ on sys.path, which pytest's
+# prepend import mode already provides). The root entry makes bare
+# `pytest` work like CI's `python -m pytest`.
+pythonpath = ["."]
 markers = [
     "slow: exercises a larger fixture; excludable with -m \"not slow\"",
 ]

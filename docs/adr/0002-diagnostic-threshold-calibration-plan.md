@@ -179,6 +179,73 @@ the offline threshold sweep — `local_nonlinearity`'s per-radius `a_by_target` 
 `theta_est`/`theta_variance_estimate` — into one tidy CSV/DataFrame. The actual threshold-sweep /
 ROC-curve analysis happens offline, locally, against that CSV — not on the cluster.
 
+## Analysis-plan revisions (2026-08-28, after the first submission wave)
+
+A critical re-review of the design after the first wave surfaced one genuine flaw and several
+analysis improvements. None require re-running anything — the data being collected already
+supports the corrected analysis — but the analysis must follow this section, not the original
+Track A/B text above, where they conflict.
+
+1. **Track A's answer key is `a^NL` (per-direction exact-vs-linear root displacement), NOT the
+   `se_ratios` band, and NOT `report.classification`.** Confirmed by direct null simulation: under
+   a *perfectly linear* estimating map, the exact check's `se_ratios` are sqrt generalized
+   eigenvalues of a sample covariance built from `num_exact_directions` antithetic pairs —
+   effective d.o.f. J, sqrt-eigenvalue noise ~ `0.5*sqrt(2/J)` per eigenvalue, maxed over
+   `dim(theta)` eigenvalues. Measured null failure rates of the `[0.95, 1.05]` gate: **100% at
+   J=50** (the experiment's setting), 99.9% at 150, 98.6% at 300, still 55% at 1000. So nearly
+   every Track A replicate will read `failed` on `se_ratios` regardless of actual linearity —
+   pure label noise. `a^NL` has no such problem: it compares each direction's continuation-solved
+   root against its own linear guess, paired, and is ~0 under linearity (confirmed ~1e-8 on the
+   affine test fixture whose `se_ratios` "failed" at 0.47). The aggregator now extracts
+   `a_nl_{median,p95,max}` per target; the threshold sweep for
+   `nonlinear_correction_tolerance_se` runs `a_{j,l}` against `a^NL` exceedance.
+   `mean_shift_se`/`quantile_shifts` remain secondary keys (they average over directions, so
+   their noise shrinks with J, unlike the eigenvalue extremes).
+2. **Follow-up code fix (post-experiment, deliberately not mid-flight):** the `se_ratios`
+   `[0.95, 1.05]` hard-fail gate in `check_exact_nonlinear_perturbations` is miscalibrated for
+   any practical `num_exact_directions` and should be replaced with J- and dim-dependent null
+   quantiles (simulate the Wishart null, as above) or dropped in favor of the mean-shift/
+   quantile-shift gates. Not changed now to avoid forking the running experiment's config.
+3. **Track B's primary outcome is continuous variance accuracy, not binary coverage.** Per
+   replicate: `log(adjusted_var_jj / empirical_var_jj)` where the empirical variance comes from
+   the cell's own replicate pool. Binary 95%-coverage failures are ~Bernoulli(0.05) under the
+   null (~50 events per 1000 replicates — weak power), and the blow-up phenomenon the thresholds
+   exist to catch is exactly an extreme-variance-estimate phenomenon that coverage alone provably
+   obscures (a paper-documented failure mode: 100% coverage with estimates 1000x too large).
+   Coverage stays as the secondary outcome.
+4. **Within-cell correlation analyses are required, not optional.** The influence-stress cell
+   (recruit_n=10) also stresses the linearization and bucket structure, so cross-cell contrasts
+   confound mechanisms; the calibration question ("does n_eff predict failure?") must be answered
+   within cells across replicates, with cross-cell as supporting evidence only.
+5. **Informative censoring from timeouts.** Timeouts correlate with nonlinearity (harder
+   replicates take more chord-Newton iterations), so analyzing only completed tasks censors
+   exactly the most-nonlinear tail — biasing the calibration optimistic. Per-cell completion
+   rates must be reported alongside results; residual non-completions at the raised 8h limit are
+   findings, not omissions.
+6. **Null-calibration byproduct:** the easy cell's `se_ratios` distribution across ~1700
+   replicates doubles as an empirical measurement of the exact check's false-positive rate at
+   J=50, validating (or correcting) the Wishart prediction above with real pipeline data.
+7. **n=10000 contingency:** if the memory probe shows the surrogate is impractical even at high
+   `--mem`, fall back to n=2000 x 100 replicates (comparable total subject-count for the truth
+   estimate, already within known-safe memory territory).
+8. **n=10000 probe results and consequent large-n design (probe job 42575297, 96G, TIMEOUT at
+   1h):** MaxRSS ~27 GiB on both tasks (so `--mem=48G` is right, not 16G or 96G); simulation
+   ~20 min + analysis ~10 min, `analysis.pkl` written by ~40 min. The timeout happened inside
+   the diagnostic suite: the action-probability reconstruction input-check alone ran **>28
+   minutes without finishing** at n=10000 -- a new, standalone scalability finding about the
+   default-on suite (never profiled at this scale; the n=100 cells are unaffected).
+   Consequences, all applied: (a) the large-n surrogate cells run `--run_diagnostics=0` -- they
+   exist only for the truth cross-check's mean theta, their diagnostics are never used by the
+   analysis plan, and skipping the suite removes the walltime hazard entirely (aggregator
+   updated to emit theta/se-only rows for report-less runs, `has_diagnostic_report` column
+   added); (b) two bugs found in the influence-stress large-n cell as originally scripted:
+   `recruit_n=10` copied verbatim from the n=100 cell would recruit only ~500 of 10000 subjects
+   within T=50 -- the surrogate must scale recruitment proportionally (`recruit_n=1000`, same
+   10 waves of 10%) -- and that staggering produces ~490 shape-buckets, the exact trigger for
+   the local-linearization diagnostic's JIT-compile blowup (24.7 min at n=100), which runs
+   regardless of `--run_diagnostics`; so that cell is probe-first (2 tasks @ 96G/4h,
+   `ads142_track_b_large_n_influence_probe.sh`) before its 30-seed submission.
+
 ## Resourcing — decided
 
 Track A's cost per cell scales with `n` and `num_exact_directions` (50 directions x up to 50

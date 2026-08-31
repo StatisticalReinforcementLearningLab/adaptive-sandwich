@@ -311,6 +311,34 @@ def cli():
     "suite. Only used when --run_diagnostics is True; DiagnosticConfig() defaults are used "
     "otherwise.",
 )
+@click.option(
+    "--percentile_bootstrap_draws",
+    type=int,
+    default=0,
+    help="If > 0, runs the refit percentile bootstrap (docs/adr/0003) with this many "
+    "Poisson(1)-multiplicity draws, re-solving the full RN-weighted joint estimating system "
+    "per draw, and adds percentile_bootstrap_ci / bootstrap_num_draws / "
+    "bootstrap_num_failed_draws to analysis.pkl (raw theta* draws go to debug_pieces.pkl). "
+    "0 (the default) = off; no behavior change. The reported interval is asymmetric around "
+    "theta_est by design -- downstream code must read percentile_bootstrap_ci rather than "
+    "reconstructing theta +/- c*SE. The adjusted sandwich variance is still reported "
+    "unchanged; this changes the interval, not the variance.",
+)
+@click.option(
+    "--percentile_bootstrap_alpha",
+    type=float,
+    default=0.05,
+    help="Percentile-bootstrap interval level: the reported interval is the "
+    "[alpha/2, 1-alpha/2] per-coordinate quantile range of the re-solved theta* draws.",
+)
+@click.option(
+    "--percentile_bootstrap_seed",
+    type=int,
+    default=None,
+    help="Seed for the Poisson multiplicity draws (np.random.default_rng(seed).poisson(1.0, "
+    "size=(draws, n)) -- the exact generation order is part of the contract so an independent "
+    "implementation can reproduce the draws). None = nondeterministic.",
+)
 def analyze_dataset_wrapper(**kwargs):
     """
     This function is a wrapper around analyze_dataset to facilitate command line use.
@@ -370,6 +398,203 @@ def analyze_dataset_wrapper(**kwargs):
     analyze_dataset(**kwargs)
 
 
+def _newton_refit(
+    stack_fn: Callable[[jnp.ndarray], jnp.ndarray] | None,
+    x0: jnp.ndarray,
+    max_iterations: int,
+    step_tolerance: float,
+    residual_reduction_tolerance: float = 1e-3,
+    stack_and_jacobian_fn: Callable[[jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]]
+    | None = None,
+) -> tuple[np.ndarray, bool, int]:
+    """
+    True-Newton root-find of stack_fn, re-differentiated at every iterate via one jax.vjp
+    forward pass plus a vmapped pullback over the output basis -- the exact manual-jacrev
+    pattern used to build the joint bread, per docs/adr/0003's implementation route (a chord
+    iteration on the ORIGINAL bread was deliberately rejected there: the draws that matter are
+    the ones that move into regions where the Jacobian changes, which is exactly where a frozen
+    Jacobian fails). Warm-started from x0 (the original solution).
+
+    Two convergence exits, both scale-portable (fixed absolute equation-space tolerances are
+    unusable here -- the residual carries the estimating equations' own reward-scale units, see
+    require_estimating_functions_sum_to_zero_se_standardized's history):
+      1. Parameter-space step: ||dx|| <= step_tolerance * (1 + ||x||). Handles the
+         all-multiplicities-one identity draw, which starts AT the root (where any
+         relative-to-initial-residual test degenerates: the first step is already negligible).
+      2. Residual reduction: ||g|| <= residual_reduction_tolerance * ||g_initial||. Handles
+         ill-conditioned draws where float32 evaluation noise puts a floor under ||dx|| that
+         criterion 1 never gets past even though the equation has been solved to a far finer
+         resolution than the draw's own perturbation scale.
+    Returns (x, converged, reason): reason is "step"/"residual_reduction" on success and
+    "nonfinite_residual"/"nonfinite_jacobian"/"singular_jacobian"/"nonfinite_iterate"/
+    "max_iterations" on failure -- the failure taxonomy is reported by
+    refit_percentile_bootstrap so a high failure rate is attributable (a singular Jacobian
+    means the draw left some parameter block unidentified, the ADR's "degenerate systems"
+    guardrail; expected occasionally at small n, where a Poisson draw can zero out most of an
+    early recruitment wave).
+    """
+    x = jnp.asarray(x0)
+    dimension = x.shape[0]
+    output_basis = jnp.eye(dimension)
+    initial_residual_norm = None
+    for _iteration in range(max_iterations):
+        if stack_and_jacobian_fn is not None:
+            # Fast path: one pre-compiled call returns both (see the jitted closure in
+            # analyze_dataset's bootstrap wiring -- structural precompute built once,
+            # jax.jacrev fused into the same compiled graph).
+            residual, jacobian_jax = stack_and_jacobian_fn(x)
+            pullback = None
+        else:
+            residual, pullback = jax.vjp(stack_fn, x)
+        residual64 = np.asarray(residual, dtype=np.float64)
+        if not np.all(np.isfinite(residual64)):
+            return np.asarray(x, dtype=np.float64), False, "nonfinite_residual"
+        residual_norm = float(np.linalg.norm(residual64))
+        if initial_residual_norm is None:
+            initial_residual_norm = residual_norm
+        elif residual_norm <= residual_reduction_tolerance * initial_residual_norm:
+            return np.asarray(x, dtype=np.float64), True, "residual_reduction"
+        if pullback is not None:
+            jacobian = np.asarray(jax.vmap(pullback)(output_basis)[0], dtype=np.float64)
+        else:
+            jacobian = np.asarray(jacobian_jax, dtype=np.float64)
+        if not np.all(np.isfinite(jacobian)):
+            return np.asarray(x, dtype=np.float64), False, "nonfinite_jacobian"
+        try:
+            step = np.linalg.solve(jacobian, -residual64)
+        except np.linalg.LinAlgError:
+            return np.asarray(x, dtype=np.float64), False, "singular_jacobian"
+        x = x + jnp.asarray(step)
+        x64 = np.asarray(x, dtype=np.float64)
+        if not np.all(np.isfinite(x64)):
+            return x64, False, "nonfinite_iterate"
+        if float(np.linalg.norm(step)) <= step_tolerance * (
+            1.0 + float(np.linalg.norm(x64))
+        ):
+            return x64, True, "step"
+    return np.asarray(x, dtype=np.float64), False, "max_iterations"
+
+
+def refit_percentile_bootstrap(
+    weighted_avg_stack_fn: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray],
+    flattened_solution: jnp.ndarray,
+    theta_dim: int,
+    num_subjects: int,
+    num_draws: int,
+    alpha: float,
+    seed: int | None,
+    *,
+    max_newton_iterations: int = 25,
+    newton_step_tolerance: float = 1e-4,
+    precomputed_multiplicities: np.ndarray | None = None,
+    stack_and_jacobian_fn: Callable[
+        [jnp.ndarray, jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]
+    ]
+    | None = None,
+) -> dict[str, Any]:
+    """
+    Refit percentile bootstrap over the RN-weighted joint estimating system (docs/adr/0003).
+    Per draw: per-subject multiplicities m_i ~ Poisson(1), re-solve the full weighted joint
+    system 0 = (1/n) sum_i m_i * stack_i(beta_1..beta_K, theta) for the WHOLE parameter vector
+    via _newton_refit, record theta*. The reported interval is the per-coordinate
+    [alpha/2, 1-alpha/2] percentile interval of the recorded theta* draws -- deliberately
+    percentile and NOT studentized/Wald-style: no interval of the form theta_hat +/- c*SE can
+    encode the asymmetry that recovers coverage here (validated externally; see the ADR's
+    coverage table and its "do not improve into" list).
+
+    weighted_avg_stack_fn(flattened_params, multiplicities) must evaluate the
+    multiplicity-weighted mean stack (the analyze_dataset wiring builds it on
+    get_avg_weighted_estimating_function_stacks_and_aux_values with
+    subject_multiplicities=...). Multiplicities are drawn as
+    np.random.default_rng(seed).poisson(1.0, size=(num_draws, num_subjects)) -- this exact
+    generation order is part of the contract so an independent reference implementation can
+    reproduce the draws from the same seed (ADR 0003's acceptance gate), and rows follow the
+    same subject order as the stacker's subject axis (subject_ids order).
+    precomputed_multiplicities overrides the drawing entirely (tests / reference comparisons).
+
+    Draws whose refit does not converge (or produces non-finite values) are dropped and
+    counted, per the ADR's guardrails; a warning is logged when more than 2% fail.
+    """
+    if precomputed_multiplicities is not None:
+        multiplicities = np.asarray(precomputed_multiplicities)
+        if multiplicities.shape != (num_draws, num_subjects):
+            raise ValueError(
+                f"precomputed_multiplicities has shape {multiplicities.shape}, expected "
+                f"{(num_draws, num_subjects)}."
+            )
+    else:
+        multiplicities = np.random.default_rng(seed).poisson(
+            1.0, size=(num_draws, num_subjects)
+        )
+    multiplicities = multiplicities.astype(np.float32)
+
+    theta_draws: list[np.ndarray] = []
+    num_failed = 0
+    failure_reasons: dict[str, int] = {}
+    for draw_index in range(num_draws):
+        draw_multiplicities = jnp.asarray(multiplicities[draw_index])
+        solution, converged, reason = _newton_refit(
+            lambda x: weighted_avg_stack_fn(x, draw_multiplicities),  # noqa: B023 - consumed before the next iteration
+            flattened_solution,
+            max_newton_iterations,
+            newton_step_tolerance,
+            stack_and_jacobian_fn=(
+                (
+                    lambda x: stack_and_jacobian_fn(x, draw_multiplicities)  # noqa: B023 - consumed before the next iteration
+                )
+                if stack_and_jacobian_fn is not None
+                else None
+            ),
+        )
+        if converged:
+            theta_draws.append(solution[-theta_dim:])
+        else:
+            num_failed += 1
+            failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+
+    draws_array = (
+        np.asarray(theta_draws)
+        if theta_draws
+        else np.empty((0, theta_dim), dtype=np.float64)
+    )
+    # Quantiles from too few surviving draws would be meaningless -- report NaN and let the
+    # failure count tell the story.
+    if draws_array.shape[0] >= max(10, int(0.5 * num_draws)):
+        percentile_ci = np.stack(
+            [
+                np.quantile(draws_array, alpha / 2.0, axis=0),
+                np.quantile(draws_array, 1.0 - alpha / 2.0, axis=0),
+            ],
+            axis=1,
+        )
+    else:
+        percentile_ci = np.full((theta_dim, 2), np.nan)
+        logger.warning(
+            "Refit percentile bootstrap: only %d of %d draws converged -- too few for "
+            "quantiles; reporting NaN interval.",
+            draws_array.shape[0],
+            num_draws,
+        )
+    if num_failed > 0.02 * num_draws:
+        logger.warning(
+            "Refit percentile bootstrap: %d of %d draws failed to converge (dropped and "
+            "counted; reasons: %s). A high failure rate is itself evidence of fragility "
+            "under resampling-scale perturbations -- though singular_jacobian failures at "
+            "small n are often just draws that zeroed out an early recruitment wave (the "
+            "corresponding update block is genuinely unidentified for that draw).",
+            num_failed,
+            num_draws,
+            failure_reasons,
+        )
+    return {
+        "percentile_bootstrap_ci": percentile_ci,
+        "bootstrap_num_draws": num_draws,
+        "bootstrap_num_failed_draws": num_failed,
+        "bootstrap_failure_reasons": failure_reasons,
+        "theta_draws": draws_array,
+    }
+
+
 def analyze_dataset(
     output_dir: pathlib.Path | str,
     analysis_df: pd.DataFrame,
@@ -405,6 +630,9 @@ def analyze_dataset(
     combine_updates_into_one_vmap: bool | None = None,
     run_diagnostics: bool = True,
     diagnostic_config: diagnostics.DiagnosticConfig | None = None,
+    percentile_bootstrap_draws: int = 0,
+    percentile_bootstrap_alpha: float = 0.05,
+    percentile_bootstrap_seed: int | None = None,
 ) -> None:
     """
     Analyzes a dataset to provide a parameter estimate and an estimate of its variance using  and classical sandwich estimators.
@@ -531,6 +759,23 @@ def analyze_dataset(
     diagnostic_config (lifejacket.diagnostics.DiagnosticConfig | None):
         Configuration for the diagnostic suite, used only when run_diagnostics is True. Defaults
         to DiagnosticConfig() when not supplied.
+    percentile_bootstrap_draws (int):
+        If > 0, runs the refit percentile bootstrap (docs/adr/0003): per draw, per-subject
+        Poisson(1) multiplicities reweight the same RN-weighted joint estimating system the
+        adjusted sandwich is built on, the full system is re-solved by Newton from the original
+        solution, and the [alpha/2, 1-alpha/2] per-coordinate quantiles of the re-solved theta*
+        draws are reported as percentile_bootstrap_ci in analysis.pkl (with
+        bootstrap_num_draws/bootstrap_num_failed_draws; raw draws go to debug_pieces.pkl). The
+        interval is asymmetric around theta_est by design -- that asymmetry is what recovers
+        coverage where the Wald interval undercovers (see the ADR's validation table). The
+        adjusted sandwich variance is reported unchanged: this adds an interval, it does not
+        change the variance. 0 (default) = off.
+    percentile_bootstrap_alpha (float):
+        Percentile-interval level (default 0.05 -> a 95% interval).
+    percentile_bootstrap_seed (int | None):
+        Seed for the multiplicity draws; the generation order
+        (np.random.default_rng(seed).poisson(1.0, size=(draws, n))) is part of the contract so
+        independent implementations can reproduce the draws. None = nondeterministic.
 
     Returns:
     dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
@@ -707,6 +952,171 @@ def analyze_dataset(
             adjusted_sandwich_var_estimate, np.maximum(adjusted_diagonal, 0)
         )
 
+    percentile_bootstrap_results = None
+    if percentile_bootstrap_draws > 0:
+        logger.info(
+            "Running refit percentile bootstrap: %d draws, alpha=%s (docs/adr/0003).",
+            percentile_bootstrap_draws,
+            percentile_bootstrap_alpha,
+        )
+
+        # Structural precompute built ONCE (the bootstrap calls the stack evaluation
+        # num_draws x Newton-iterations times, and rebuilding the per-subject/per-update
+        # bucket structure per call dominated wall-clock in the first version), then the
+        # evaluation AND its Jacobian compiled into one jax.jit graph. This mirrors
+        # compute_local_linearization_error_ratio's proven construction exactly -- including
+        # passing jit_arrays as a traced argument rather than closing over it (see that
+        # function's comments and _extract_diagnostic_jit_arrays' docstring for why), and
+        # including its LANDMINE: suppress_all_data_checks must stay hardcoded True inside the
+        # jitted trace (the data checks call np.asarray on tracers and would crash under
+        # jax.jit's abstract tracing).
+        _boot_subject_ids_np = np.asarray(subject_ids.tolist())
+        _boot_action_prob_layer = build_action_prob_layer_precompute(
+            _boot_subject_ids_np,
+            action_prob_func_args,
+            action_by_decision_time_by_subject_id,
+            policy_num_by_decision_time_by_subject_id,
+            beta_index_by_policy_num,
+            initial_policy_num,
+            action_prob_func_args_beta_index,
+        )
+        _boot_update_layer = build_update_layer_precompute(
+            _boot_subject_ids_np,
+            alg_update_func_args,
+            beta_index_by_policy_num,
+            alg_update_func_args_action_prob_times_index,
+            _boot_action_prob_layer,
+            alg_update_func_args_mask_index,
+            alg_update_func_args_ragged_indices,
+        )
+        _boot_inference_layer = build_inference_layer_precompute(
+            inference_func_args_by_subject_id,
+            inference_func_args_action_prob_index,
+            inference_action_prob_decision_times_by_subject_id,
+            _boot_action_prob_layer,
+            inference_func_args_mask_index,
+            inference_func_args_ragged_indices,
+        )
+        _boot_jit_arrays = _extract_diagnostic_jit_arrays(
+            _boot_action_prob_layer,
+            _boot_update_layer,
+            _boot_inference_layer,
+            alg_update_func_args_beta_index,
+            alg_update_func_args_previous_betas_index,
+            alg_update_func_args_action_prob_index,
+            inference_func_args_theta_index,
+            inference_func_args_action_prob_index,
+        )
+
+        def _weighted_avg_stack_with_layers(
+            flattened_x: jnp.ndarray,
+            subject_multiplicities: jnp.ndarray,
+            jit_arrays: _DiagnosticJitArrays,
+        ) -> jnp.ndarray:
+            action_prob_layer, update_layer, inference_layer = (
+                _rebuild_precomputes_from_jit_arrays(
+                    _boot_action_prob_layer,
+                    _boot_update_layer,
+                    _boot_inference_layer,
+                    jit_arrays,
+                    alg_update_func_args_beta_index,
+                    alg_update_func_args_previous_betas_index,
+                    alg_update_func_args_action_prob_index,
+                    inference_func_args_theta_index,
+                    inference_func_args_action_prob_index,
+                )
+            )
+            return get_avg_weighted_estimating_function_stacks_and_aux_values(
+                flattened_x,
+                beta_dim,
+                theta_dim,
+                subject_ids,
+                action_prob_func,
+                action_prob_func_args_beta_index,
+                alg_update_func,
+                alg_update_func_type,
+                alg_update_func_args_beta_index,
+                alg_update_func_args_action_prob_index,
+                alg_update_func_args_action_prob_times_index,
+                alg_update_func_args_previous_betas_index,
+                inference_func,
+                inference_func_type,
+                inference_func_args_theta_index,
+                inference_func_args_action_prob_index,
+                action_prob_func_args,
+                policy_num_by_decision_time_by_subject_id,
+                initial_policy_num,
+                beta_index_by_policy_num,
+                inference_func_args_by_subject_id,
+                inference_action_prob_decision_times_by_subject_id,
+                alg_update_func_args,
+                action_by_decision_time_by_subject_id,
+                True,  # suppress_all_data_checks -- LANDMINE, see comment above
+                True,  # suppress_interactive_data_checks
+                False,  # include_auxiliary_outputs
+                subject_multiplicities=subject_multiplicities,
+                precomputed_layers=(
+                    action_prob_layer,
+                    update_layer,
+                    inference_layer,
+                ),
+            )
+
+        @jax.jit
+        def _boot_stack_and_jacobian_jit(
+            flattened_x: jnp.ndarray,
+            subject_multiplicities: jnp.ndarray,
+            jit_arrays: _DiagnosticJitArrays,
+        ) -> tuple[jnp.ndarray, jnp.ndarray]:
+            residual = _weighted_avg_stack_with_layers(
+                flattened_x, subject_multiplicities, jit_arrays
+            )
+            jacobian = jax.jacrev(
+                lambda x: _weighted_avg_stack_with_layers(
+                    x, subject_multiplicities, jit_arrays
+                )
+            )(flattened_x)
+            return residual, jacobian
+
+        def _weighted_avg_stack(
+            flattened_x: jnp.ndarray, subject_multiplicities: jnp.ndarray
+        ) -> jnp.ndarray:
+            return jnp.asarray(
+                _weighted_avg_stack_with_layers(
+                    flattened_x, subject_multiplicities, _boot_jit_arrays
+                )
+            )
+
+        # The stack builder logs shape-bucket/phase INFO lines meant for the one real analysis
+        # call; the bootstrap calls it num_draws x Newton-iterations times -- dampen exactly
+        # like _diagnostics_g_tilde below does.
+        _root_logger = logging.getLogger()
+        _previous_level = _root_logger.level
+        _root_logger.setLevel(logging.WARNING)
+        try:
+            percentile_bootstrap_results = refit_percentile_bootstrap(
+                _weighted_avg_stack,
+                flatten_params(all_post_update_betas, theta_est),
+                theta_dim,
+                len(subject_ids),
+                percentile_bootstrap_draws,
+                percentile_bootstrap_alpha,
+                percentile_bootstrap_seed,
+                stack_and_jacobian_fn=lambda x, m: _boot_stack_and_jacobian_jit(
+                    x, m, _boot_jit_arrays
+                ),
+            )
+        finally:
+            _root_logger.setLevel(_previous_level)
+        logger.info(
+            "Refit percentile bootstrap interval (per theta coordinate):\n%s\n(%d/%d draws "
+            "converged)",
+            percentile_bootstrap_results["percentile_bootstrap_ci"],
+            percentile_bootstrap_results["bootstrap_num_draws"]
+            - percentile_bootstrap_results["bootstrap_num_failed_draws"],
+            percentile_bootstrap_results["bootstrap_num_draws"],
+        )
+
     logger.info("Writing results to file...")
     output_folder_abs_path = pathlib.Path(output_dir).resolve()
 
@@ -715,6 +1125,19 @@ def analyze_dataset(
         "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
     }
+    if percentile_bootstrap_results is not None:
+        analysis_dict["percentile_bootstrap_ci"] = percentile_bootstrap_results[
+            "percentile_bootstrap_ci"
+        ]
+        analysis_dict["bootstrap_num_draws"] = percentile_bootstrap_results[
+            "bootstrap_num_draws"
+        ]
+        analysis_dict["bootstrap_num_failed_draws"] = percentile_bootstrap_results[
+            "bootstrap_num_failed_draws"
+        ]
+        analysis_dict["bootstrap_failure_reasons"] = percentile_bootstrap_results[
+            "bootstrap_failure_reasons"
+        ]
     with open(output_folder_abs_path / "analysis.pkl", "wb") as f:
         pickle.dump(
             analysis_dict,
@@ -810,6 +1233,12 @@ def analyze_dataset(
         "per_subject_classical_corrections": per_subject_classical_corrections,
         "per_subject_adjusted_meat_adjustments": per_subject_adjusted_meat_contributions,
     }
+    if percentile_bootstrap_results is not None:
+        # Raw re-solved theta* draws, for diagnostics/offline analysis (docs/adr/0003) --
+        # deliberately in debug_pieces, not analysis.pkl (they can be large).
+        debug_pieces_dict["percentile_bootstrap_theta_draws"] = (
+            percentile_bootstrap_results["theta_draws"]
+        )
     with open(output_folder_abs_path / "debug_pieces.pkl", "wb") as f:
         pickle.dump(
             debug_pieces_dict,
@@ -1302,6 +1731,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     suppress_all_data_checks: bool,
     suppress_interactive_data_checks: bool,
     include_auxiliary_outputs: bool = True,
+    subject_multiplicities: jnp.ndarray | None = None,
     precomputed_layers: tuple[
         ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute
     ]
@@ -1687,6 +2117,21 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             )
 
     stacks = jnp.concatenate([algorithm_component, inference_component], axis=1)
+
+    if subject_multiplicities is not None:
+        # Refit-bootstrap path (docs/adr/0003): the average becomes a per-subject
+        # multiplicity-weighted mean, (1/n) sum_i m_i * stack_i. The RN weights inside stack_i
+        # come along automatically -- they are what keep the inference component mean-zero as
+        # beta varies over adaptively collected data, and forgetting them is the failure mode
+        # ADR 0003 singles out (it is invisible at unit multiplicities).
+        if include_auxiliary_outputs:
+            raise ValueError(
+                "subject_multiplicities is only supported with "
+                "include_auxiliary_outputs=False (the refit-bootstrap path needs only the "
+                "weighted mean stack; the sandwich auxiliary outputs are defined for the "
+                "unweighted analysis)."
+            )
+        return jnp.mean(subject_multiplicities[:, None] * stacks, axis=0)
 
     if not include_auxiliary_outputs:
         return jnp.mean(stacks, axis=0)

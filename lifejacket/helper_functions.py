@@ -287,6 +287,25 @@ def load_function_from_same_named_file(filename):
         ) from e
 
 
+def array_scale_absolute_tolerance(reference, relative_floor: float = 1e-6) -> float:
+    """
+    Absolute-tolerance floor for comparing two floating-point computations of the SAME
+    quantity, scaled to the array being compared: relative_floor * max|reference| (0.0 for an
+    all-zero or empty reference, where exact agreement is the right demand). Rounding error on
+    near-cancelling components scales with the magnitudes of the summands -- i.e. with the
+    quantity's own units, which for estimating-function outputs means the reward scale -- so
+    any FIXED absolute tolerance is either too tight at large scales (false alarms on healthy
+    data) or vacuous at small ones. Same bug class as the raw-units sum-to-zero tolerance
+    documented in docs/adr/0002's 2026-08-31 correction; rtol alone cannot replace this floor
+    because a component whose true value is exactly zero fails any pure-rtol comparison on any
+    nonzero noise.
+    """
+    reference = np.asarray(reference)
+    if reference.size == 0:
+        return 0.0
+    return float(relative_floor * np.max(np.abs(reference)))
+
+
 def confirm_input_check_result(message, suppress_interaction, error=None):
 
     if suppress_interaction:

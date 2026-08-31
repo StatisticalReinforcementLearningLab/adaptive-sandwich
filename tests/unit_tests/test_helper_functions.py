@@ -173,3 +173,54 @@ def test_append_new_block_row_to_block_lower_triangular_matrix_unequal_dims():
         ]
     )
     np.testing.assert_allclose(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# array_scale_absolute_tolerance: the shared scale-aware atol floor for comparing two float
+# computations of the same quantity (see docs/adr/0002's correction section for the raw-units
+# bug class it exists to prevent).
+# ---------------------------------------------------------------------------
+
+
+def test_array_scale_absolute_tolerance_tracks_the_reference_scale():
+    import numpy as np
+
+    from lifejacket.helper_functions import array_scale_absolute_tolerance
+
+    # A near-zero component with noise proportional to the array's magnitude: the exact
+    # situation the fixed atol=1e-7 mishandled. The scale-aware floor must accept it at ANY
+    # reward scale, because the noise and the tolerance grow together.
+    for scale in (1.0, 1e4, 1e8):
+        reference = np.array([scale, 0.0])
+        other = np.array([scale, 3e-7 * scale])
+        np.testing.assert_allclose(
+            reference,
+            other,
+            atol=array_scale_absolute_tolerance(reference),
+            rtol=1e-3,
+        )
+
+    # And the same comparison fails under the legacy fixed tolerance once the scale is large --
+    # the false alarm this replaces.
+    import pytest
+
+    with pytest.raises(AssertionError):
+        np.testing.assert_allclose(
+            np.array([1e8, 0.0]),
+            np.array([1e8, 3e-7 * 1e8]),
+            atol=1e-7,
+            rtol=1e-3,
+        )
+
+
+def test_array_scale_absolute_tolerance_degenerate_references():
+    import numpy as np
+
+    from lifejacket.helper_functions import array_scale_absolute_tolerance
+
+    # All-zero reference: exact agreement is the right demand (atol 0), and identical zeros
+    # still compare equal.
+    assert array_scale_absolute_tolerance(np.zeros(4)) == 0.0
+    np.testing.assert_allclose(np.zeros(4), np.zeros(4), atol=0.0, rtol=1e-3)
+    # Empty reference: nothing to compare, no crash.
+    assert array_scale_absolute_tolerance(np.array([])) == 0.0

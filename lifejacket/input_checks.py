@@ -13,6 +13,7 @@ from .calculate_derivatives import (
     group_user_args_by_shape,
 )
 from .helper_functions import (
+    array_scale_absolute_tolerance,
     confirm_input_check_result,
 )
 from .vmap_helpers import batch_args_by_subject, stack_batched_arg_lists_into_tensors
@@ -408,6 +409,10 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
         jnp.concatenate(actual_chunks) if actual_chunks else jnp.array([])
     )
 
+    # An ABSOLUTE tolerance is dimensionally correct here, unlike for estimating-function
+    # values: probabilities are unitless and bounded in (0, 1), so there is no reward-scale
+    # exposure, and 1e-6 leaves ~10x headroom over float32 evaluation noise at typical
+    # probabilities. Do not "fix" this to a relative/scale-aware tolerance.
     np.testing.assert_allclose(
         np.asarray(actual_action_probs, dtype="float64"),
         np.asarray(reconstructed_action_probs, dtype="float64"),
@@ -486,9 +491,14 @@ def require_action_prob_args_in_alg_update_func_correspond_to_analysis_df(
                 for decision_time in action_prob_times
             ]
 
+            # Explicit tolerances (previously np.allclose's silent defaults). Probabilities
+            # are unitless and bounded, so absolute+relative tolerances at these fixed values
+            # are dimensionally sound -- see the reconstruction check's comment above.
             assert np.allclose(
                 arg_action_probs.flatten(),
                 analysis_df_action_probs,
+                rtol=1e-5,
+                atol=1e-8,
             ), (
                 f"There is a mismatch for subject {subject_id} between the action probabilities supplied"
                 f" in the args to the algorithm update function at policy {policy_num} and those in"
@@ -1239,121 +1249,6 @@ def require_estimating_functions_sum_to_zero(
         )
 
 
-def require_RL_estimating_functions_sum_to_zero(
-    mean_estimating_function_stack: jnp.ndarray,
-    beta_dim: int,
-    suppress_interactive_data_checks: bool,
-):
-    """
-    This is a test that the correct loss/estimating functions have
-    been given for both the algorithm updates and inference. If that is true, then the
-    loss/estimating functions when evaluated should sum to approximately zero across subjects.  These
-    values have been stacked and averaged across subjects in mean_estimating_function_stack, which
-    we simply compare to the zero vector.  We can isolate components for each update and inference
-    by considering the dimensions of the beta vectors and the theta vector.
-
-    Inputs:
-    mean_estimating_function_stack:
-        The mean of the estimating function stack (a component for each algorithm update and
-        inference) across subjects. This should be a 1D array.
-    beta_dim:
-        The dimension of the beta vectors that parameterize the algorithm.
-    theta_dim:
-        The dimension of the theta vector that we estimate during after-study analysis.
-
-    Returns:
-    None
-    """
-
-    logger.info("Checking that RL estimating functions average to zero across subjects")
-
-    # Have a looser hard failure cutoff before the typical interactive check
-    try:
-        np.testing.assert_allclose(
-            mean_estimating_function_stack,
-            jnp.zeros(mean_estimating_function_stack.size),
-            atol=1e-2,
-        )
-    except AssertionError as e:
-        logger.info(
-            "RL estimating function stacks do not average to zero across subjects.  Drilling in to specific updates and inference component."
-        )
-        num_updates = (mean_estimating_function_stack.size) // beta_dim
-        for i in range(num_updates):
-            logger.info(
-                "Mean estimating function contribution for update %s:\n%s",
-                i + 1,
-                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
-            )
-        # TODO: We may need to email instead of failing here for monitoring algorithm.
-        raise e
-
-    try:
-        np.testing.assert_allclose(
-            mean_estimating_function_stack,
-            jnp.zeros(mean_estimating_function_stack.size),
-            atol=1e-5,
-        )
-    except AssertionError as e:
-        logger.info(
-            "RL estimating function stacks do not average to zero across subjects.  Drilling in to specific updates and inference component."
-        )
-        num_updates = (mean_estimating_function_stack.size) // beta_dim
-        for i in range(num_updates):
-            logger.info(
-                "Mean estimating function contribution for update %s:\n%s",
-                i + 1,
-                mean_estimating_function_stack[i * beta_dim : (i + 1) * beta_dim],
-            )
-        confirm_input_check_result(
-            f"\nEstimating functions do not average to within default tolerance of zero vector. Please decide if the following is a reasonable result, taking into account the above breakdown by update number and inference. If not, there are several possible reasons for failure mentioned in the contract. Results:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
-        )
-
-
-def require_joint_bread_inverse_is_true_inverse(
-    joint_bread_inverse_matrix,
-    joint_bread_matrix,
-    suppress_interactive_data_checks,
-):
-    """
-    Check that the product of the joint bread matrix and its inverse is
-    sufficiently close to the identity matrix.  This is a direct check that the
-    joint_bread_matrix we create is "well-conditioned".
-    """
-    should_be_identity = joint_bread_inverse_matrix @ joint_bread_matrix
-    identity = np.eye(joint_bread_matrix.shape[0])
-    try:
-        np.testing.assert_allclose(
-            should_be_identity,
-            identity,
-            rtol=1e-5,
-            atol=1e-5,
-        )
-    except AssertionError as e:
-        confirm_input_check_result(
-            f"\nJoint bread inverse is not exact inverse of the constructed matrix that was inverted to form it. This likely illustrates poor conditioning:\n{str(e)}\n\nContinue? (y/n)\n",
-            suppress_interactive_data_checks,
-            e,
-        )
-
-    # If we haven't already errored out, return some measures of how far off we are from identity
-    diff = should_be_identity - identity
-    logger.debug(
-        "Difference between should-be-identity produced by multiplying joint bread and its computed inverse and actual identity:\n%s",
-        diff,
-    )
-
-    diff_abs_max = np.max(np.abs(diff))
-    diff_frobenius_norm = np.linalg.norm(diff, "fro")
-
-    logger.info("Maximum abs element of difference: %s", diff_abs_max)
-    logger.info("Frobenius norm of difference: %s", diff_frobenius_norm)
-
-    return diff_abs_max, diff_frobenius_norm
-
-
 def require_threaded_algorithm_estimating_function_args_equivalent(
     algorithm_estimating_func,
     update_func_args_by_by_subject_id_by_policy_num,
@@ -1403,10 +1298,14 @@ def require_threaded_algorithm_estimating_function_args_equivalent(
                 )
             )
 
+            # atol is scaled to the compared values (estimating-function outputs carry the
+            # reward's units, so a fixed absolute tolerance false-alarms on healthy
+            # high-reward data) -- see array_scale_absolute_tolerance's docstring.
+            unthreaded_np = np.asarray(unthreaded_result)
             np.testing.assert_allclose(
-                np.asarray(unthreaded_result),
+                unthreaded_np,
                 np.asarray(threaded_result),
-                atol=1e-7,
+                atol=array_scale_absolute_tolerance(unthreaded_np),
                 rtol=1e-3,
             )
 
@@ -1454,8 +1353,13 @@ def require_threaded_inference_estimating_function_args_equivalent(
             )
         )
 
+        # The scale-aware atol floor also fixes this check's opposite latent fragility: with
+        # no atol at all, a component whose true value is exactly zero fails any pure-rtol
+        # comparison on any nonzero noise. See array_scale_absolute_tolerance's docstring.
+        unthreaded_np = np.asarray(unthreaded_result)
         np.testing.assert_allclose(
-            np.asarray(unthreaded_result),
+            unthreaded_np,
             np.asarray(threaded_result),
+            atol=array_scale_absolute_tolerance(unthreaded_np),
             rtol=1e-2,
         )

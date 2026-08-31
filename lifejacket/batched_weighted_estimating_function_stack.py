@@ -121,7 +121,11 @@ import jax.numpy as jnp
 import numpy as np
 
 from .calculate_derivatives import group_user_args_by_shape
-from .helper_functions import get_min_time_by_policy_num, get_radon_nikodym_weight
+from .helper_functions import (
+    array_scale_absolute_tolerance,
+    get_min_time_by_policy_num,
+    get_radon_nikodym_weight,
+)
 from .vmap_helpers import (
     build_batched_arg_lists_by_subject,
     stack_batched_arg_lists_into_tensors,
@@ -1872,7 +1876,6 @@ def _assert_original_and_threaded_bucket_results_agree(
     estimating_func: collections.abc.Callable,
     bucket: UpdateArgBucket,
     threaded_result: jnp.ndarray,
-    atol: float,
     rtol: float,
 ) -> None:
     """
@@ -1886,6 +1889,13 @@ def _assert_original_and_threaded_bucket_results_agree(
     instead of matching its own original,
     input_checks.require_threaded_inference_estimating_function_args_equivalent's
     looser rtol=1e-2, no-atol tolerance).
+
+    The absolute-tolerance floor is computed from the compared values
+    themselves (array_scale_absolute_tolerance): estimating-function outputs
+    carry the reward's units, so the previous FIXED atol=1e-7 could
+    false-alarm on healthy high-reward data, and the previous atol=0.0 on
+    the inference side failed any exactly-zero component on any nonzero
+    noise. See that helper's docstring.
     """
     original_call_args, original_in_axes = _assemble_call_args_and_in_axes(
         bucket.raw_arg_lists, {}
@@ -1896,10 +1906,11 @@ def _assert_original_and_threaded_bucket_results_agree(
     # Need to stop gradient here: threaded_result traces back to betas/theta,
     # which are being differentiated in the real jax.jacrev call this check
     # runs alongside, and np.asarray can't convert a traced value.
+    original_np = np.asarray(original_result)
     np.testing.assert_allclose(
-        np.asarray(original_result),
+        original_np,
         np.asarray(jax.lax.stop_gradient(threaded_result)),
-        atol=atol,
+        atol=array_scale_absolute_tolerance(original_np),
         rtol=rtol,
     )
 
@@ -1970,12 +1981,12 @@ def check_batched_algorithm_estimating_function_args_equivalent(
             result_idx += 1
             # Tolerance matches
             # input_checks.require_threaded_algorithm_estimating_function_args_equivalent
-            # exactly -- see _assert_original_and_threaded_bucket_results_agree.
+            # exactly -- see _assert_original_and_threaded_bucket_results_agree (the atol
+            # floor is computed from the compared values there).
             _assert_original_and_threaded_bucket_results_agree(
                 algorithm_estimating_func,
                 bucket,
                 threaded_result,
-                atol=1e-7,
                 rtol=1e-3,
             )
 
@@ -2022,9 +2033,10 @@ def check_batched_inference_estimating_function_args_equivalent(
         result_idx += 1
         # Tolerance matches
         # input_checks.require_threaded_inference_estimating_function_args_equivalent
-        # exactly (a looser rtol, no atol, than the algorithm-side check
-        # above -- NOT the same value, and previously copy-pasted wrong; see
+        # exactly (a looser rtol than the algorithm-side check above -- NOT
+        # the same value, and previously copy-pasted wrong; the atol floor is
+        # computed from the compared values; see
         # _assert_original_and_threaded_bucket_results_agree).
         _assert_original_and_threaded_bucket_results_agree(
-            inference_estimating_func, bucket, threaded_result, atol=0.0, rtol=1e-2
+            inference_estimating_func, bucket, threaded_result, rtol=1e-2
         )

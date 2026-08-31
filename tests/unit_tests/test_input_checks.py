@@ -275,3 +275,81 @@ def test_require_threaded_inference_estimating_function_args_equivalent_mismatch
             threaded_inference_func_args_by_subject_id,
             suppress_interactive_data_checks=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# require_estimating_functions_sum_to_zero_se_standardized: the residual is judged by how far
+# it displaces each stacked estimate in units of that estimate's own SE (portable across reward
+# scales), not by a raw-units absolute tolerance. Fixtures: 1 update (beta_dim=2) + theta_dim=2,
+# so the stack has 4 components; B and V are chosen so the expected statistic is hand-derivable.
+# ---------------------------------------------------------------------------
+
+
+def _sum_to_zero_fixture(se=0.1, bread_scale=100.0):
+    beta_dim, theta_dim = 2, 2
+    dim = beta_dim + theta_dim
+    B = np.eye(dim) * bread_scale
+    V = np.eye(dim) * se**2
+    return B, V, beta_dim, theta_dim
+
+
+def test_se_standardized_sum_to_zero_passes_where_raw_units_would_hard_fail():
+    # Steep equations (bread scale 100): a raw residual of 0.02 -- past the legacy hard gate of
+    # 1e-2 -- displaces each estimate by only 0.02/100 = 2e-4, i.e. 2e-3 of its SE. The legacy
+    # check raises on exactly this input; the SE-standardized one must pass it.
+    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
+    r = np.full(4, 0.02)
+
+    with pytest.raises(AssertionError):
+        input_checks.require_estimating_functions_sum_to_zero(
+            jnp.asarray(r), beta_dim, theta_dim, suppress_interactive_data_checks=True
+        )
+
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        jnp.asarray(r), B, V, beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )
+
+
+def test_se_standardized_sum_to_zero_hard_raises_with_update_attribution():
+    # Residual engineered to displace update-1's betas by 0.2 of their SE (past the 0.1 hard
+    # tolerance) while leaving inference untouched; the error must say which block.
+    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
+    displacement = np.array([0.2 * 0.1, 0.2 * 0.1, 0.0, 0.0])
+    r = B @ displacement
+
+    with pytest.raises(AssertionError, match="update 1"):
+        input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+            jnp.asarray(r),
+            B,
+            V,
+            beta_dim,
+            theta_dim,
+            suppress_interactive_data_checks=True,
+        )
+
+
+def test_se_standardized_sum_to_zero_soft_band_confirms_instead_of_raising():
+    # Displacement of 0.05 SE sits between soft (0.01) and hard (0.1): with interaction
+    # suppressed this must log-and-continue, never raise.
+    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
+    displacement = np.full(4, 0.05 * 0.1)
+    r = B @ displacement
+
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        jnp.asarray(r), B, V, beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )
+
+
+def test_se_standardized_sum_to_zero_excludes_zero_variance_components():
+    # A component with (numerically) zero variance is a rank/identification finding for
+    # bread_stability, not a sum-to-zero failure: a huge displacement confined to that
+    # component must not raise here.
+    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
+    V = V.copy()
+    V[0, 0] = 0.0
+    displacement = np.array([5.0, 0.0, 0.0, 0.0])
+    r = B @ displacement
+
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        jnp.asarray(r), B, V, beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )

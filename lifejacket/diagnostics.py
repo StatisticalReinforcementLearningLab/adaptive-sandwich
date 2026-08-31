@@ -82,6 +82,37 @@ class DiagnosticConfig:
     compute_exact_nonlinear_roots: bool = False
     num_exact_directions: int | None = None
 
+    # Frozen-score multiplier bootstrap (check_multiplier_bootstrap): re-solves the estimating
+    # equation shifted by s_b = (1/n) sum_i nu_{b,i} g_i(eta_hat) for iid mean-0/variance-1
+    # multipliers nu -- the generalized/weighted bootstrap for Z-estimators (Chatterjee & Bose
+    # 2005; Praestgaard-Wellner multipliers), with the multiplier-weighted score frozen at the
+    # observed root. Policy adaptivity propagates through the stacked eta-equations exactly as it
+    # does in the adjusted sandwich itself; the comparison of bootstrap SEs to sandwich SEs
+    # therefore isolates linearization/normal-approximation error, holding the stacked model
+    # fixed. Its acceptance band is simulated from the exact finite-draw null (see
+    # _simulate_perturbation_null_bands), NOT an engineering tolerance -- unlike most tolerances
+    # in this dataclass it needs no simulator calibration.
+    # "off" | "auto" | "always": "auto" runs the bootstrap only when check_local_nonlinearity's
+    # headline a_{j,l} exceeds bootstrap_screen_a_jl_threshold (or that check did not PASS), using
+    # the cheap check as a screen for the expensive one. The 0.05 default screen comes from the
+    # ADS-142 calibration experiment (docs/adr/0002): against the exact check's a^NL > 0.10
+    # answer key on the borderline cells, screening at 0.05 missed ~11% of exceedances while
+    # flagging ~54% of replicates; the default tolerance 0.10 missed ~67%.
+    multiplier_bootstrap: str = "off"
+    num_bootstrap_draws: int = 100
+    bootstrap_screen_a_jl_threshold: float = 0.05
+    # "rademacher" (default) | "mammen" | "gaussian". Mammen's two-point distribution also
+    # matches third moments (better for skewed per-subject contributions); "gaussian" reproduces
+    # sample_perturbation_directions' draws exactly and is mostly useful for A/B-ing the two.
+    bootstrap_multiplier_distribution: str = "rademacher"
+    # Monte Carlo sample count for the finite-draw null bands shared by the bootstrap check and
+    # check_exact_nonlinear_perturbations' se_ratios gate. The bands replace the former fixed
+    # [0.95, 1.05] se_ratios band, which ignored the J-direction sampling noise of the ensemble
+    # covariance and consequently failed 100.0% of 6,648 replicates -- including provably
+    # near-affine ones -- in the ADS-142 experiment (max-eigenvalue noise alone spans ~[0.81,
+    # 1.20] at J=50 under perfect linearity).
+    num_null_band_samples: int = 2000
+
     compute_influence_and_overlap_checks: bool = True
     compute_leave_one_out_sensitivity: bool = False
     leave_one_out_top_k: int = 3
@@ -740,6 +771,67 @@ def solve_exact_perturbation(
     }
 
 
+def _simulate_perturbation_null_bands(
+    converged_pattern: Sequence[tuple[float, int]],
+    dim: int,
+    confidence_level: float,
+    seed: int,
+    num_null_samples: int,
+) -> dict[str, float]:
+    """
+    Simulates the exact finite-draw null distribution of the ensemble statistics used by
+    check_exact_nonlinear_perturbations and check_multiplier_bootstrap, under H0 "the solved
+    perturbations are distributed exactly as their linear predictions": target-space rows are
+    sign_t * z_{j_t} with z_j iid N(0, V_L), replicating the observed (sign, direction) pattern
+    of converged trials -- antithetic pairing and convergence exclusions included, which is what
+    makes these bands honest at any J (the former fixed [0.95, 1.05] band was not; see the
+    num_null_band_samples comment on DiagnosticConfig). Every statistic banded here is invariant
+    under the whitening z -> V_L^{-1/2} z, so the simulation runs at V_L = I and applies to any
+    positive-definite V_L.
+
+    Returns two-sided bands: an envelope for the min/max sqrt-generalized-eigenvalue
+    "se_ratios" statistic, and a per-target SD-ratio band (Bonferroni-adjusted across the `dim`
+    targets, so the family-wise false-positive rate of the per-target gate is
+    1 - confidence_level).
+    """
+    unique_directions = sorted({j for _, j in converged_pattern})
+    if len(converged_pattern) < 3 or len(unique_directions) < 2:
+        return {
+            "se_ratio_lower": math.nan,
+            "se_ratio_upper": math.nan,
+            "per_target_sd_lower": math.nan,
+            "per_target_sd_upper": math.nan,
+            "num_null_samples": 0,
+        }
+    direction_index = {j: idx for idx, j in enumerate(unique_directions)}
+    signs = np.array([sign for sign, _ in converged_pattern])
+    rows_of = np.array([direction_index[j] for _, j in converged_pattern])
+
+    rng = np.random.default_rng(seed)
+    min_ratios = np.empty(num_null_samples)
+    max_ratios = np.empty(num_null_samples)
+    sd_samples = np.empty(num_null_samples)
+    for k in range(num_null_samples):
+        z = rng.standard_normal((len(unique_directions), dim))
+        rows = signs[:, None] * z[rows_of]
+        cov = np.atleast_2d(np.cov(rows, rowvar=False))
+        eigvals = np.linalg.eigvalsh(cov)
+        ratios = np.sqrt(np.clip(eigvals, 0.0, None))
+        min_ratios[k] = ratios[0]
+        max_ratios[k] = ratios[-1]
+        sd_samples[k] = float(np.std(rows[:, 0], ddof=1))
+
+    alpha = 1.0 - confidence_level
+    per_target_alpha = alpha / max(dim, 1)
+    return {
+        "se_ratio_lower": float(np.quantile(min_ratios, alpha / 2)),
+        "se_ratio_upper": float(np.quantile(max_ratios, 1 - alpha / 2)),
+        "per_target_sd_lower": float(np.quantile(sd_samples, per_target_alpha / 2)),
+        "per_target_sd_upper": float(np.quantile(sd_samples, 1 - per_target_alpha / 2)),
+        "num_null_samples": num_null_samples,
+    }
+
+
 def se_ratios_from_generalized_eigenvalues(
     nonlinear_cov: np.ndarray, linear_cov: np.ndarray
 ) -> np.ndarray:
@@ -790,6 +882,8 @@ def check_exact_nonlinear_perturbations(
     branch_change_flags: list[bool] = []
     nonfinite_flags: list[bool] = []
 
+    converged_pattern: list[tuple[float, int]] = []
+
     for sign in signs:
         for j in range(num_directions):
             delta_lin = sign * base_delta[j]
@@ -801,6 +895,15 @@ def check_exact_nonlinear_perturbations(
             branch_change_flags.append(solved["branch_change_suspected"])
             nonfinite_flags.append(solved["nonfinite_encountered"])
 
+            # Every ensemble statistic below is computed on CONVERGED trials only: a
+            # non-converged continuation's last iterate is solver debris, not an "exact"
+            # measurement, and including it poisons a^NL/se_ratios/mean-shift with values that
+            # can be astronomically large (observed up to ~1e34 SE in the ADS-142 experiment).
+            # Non-convergence is still fully accounted for via root_failure_fraction and the
+            # status logic below -- exclusion never hides it.
+            if not solved["converged"]:
+                continue
+            converged_pattern.append((sign, j))
             z_linear_rows.append(L @ delta_lin)
             z_nonlinear_rows.append(L @ solved["delta_nl"])
             e_j = solved["delta_nl"] - delta_lin
@@ -809,39 +912,8 @@ def check_exact_nonlinear_perturbations(
                     float(abs(contrast_row @ e_j) / (se if se > 0 else 1.0))
                 )
 
-    z_linear = np.array(z_linear_rows)
-    z_nonlinear = np.array(z_nonlinear_rows)
-    V_L_lin = L @ np.asarray(V_hat) @ L.T
-    nonlinear_cov = np.cov(z_nonlinear, rowvar=False)
-    nonlinear_cov = np.atleast_2d(nonlinear_cov)
-
-    warnings_list: list[str] = []
-    try:
-        se_ratios = se_ratios_from_generalized_eigenvalues(nonlinear_cov, V_L_lin)
-    except (scipy.linalg.LinAlgError, ValueError) as exc:
-        se_ratios = np.full(V_L_lin.shape[0], math.nan)
-        warnings_list.append(f"Generalized eigenvalue computation failed: {exc}")
-
-    try:
-        b_L = float(
-            np.linalg.norm(matrix_inv_sqrt(V_L_lin) @ (np.mean(z_nonlinear, axis=0)))
-        )
-    except np.linalg.LinAlgError:
-        b_L = math.nan
-
-    quantile_shifts: dict[str, dict[str, float]] = {}
-    for idx, label in enumerate(target_labels):
-        lin_col = z_linear[:, idx]
-        nl_col = z_nonlinear[:, idx]
-        se = se_l[idx] if se_l[idx] > 0 else 1.0
-        q_lo_lin, q_hi_lin = np.quantile(lin_col, [0.025, 0.975])
-        q_lo_nl, q_hi_nl = np.quantile(nl_col, [0.025, 0.975])
-        quantile_shifts[label] = {
-            "lower_shift_se": float((q_lo_nl - q_lo_lin) / se),
-            "upper_shift_se": float((q_hi_nl - q_hi_lin) / se),
-        }
-
     num_trials = len(convergence_flags)
+    num_converged = len(converged_pattern)
     num_root_failures = int(sum(1 for c in convergence_flags if not c))
     num_branch_changes = int(sum(branch_change_flags))
     num_domain_failures = int(sum(nonfinite_flags))
@@ -856,28 +928,126 @@ def check_exact_nonlinear_perturbations(
         num_domain_failures, num_trials, config.confidence_level
     )
 
-    status = CheckStatuses.PASSED
-    if failure_upper_bound > config.bad_direction_probability_target:
-        status = CheckStatuses.INDETERMINATE
-        warnings_list.append(
-            f"Nonlinear-root failure upper bound {failure_upper_bound:.4g} exceeds target "
-            f"{config.bad_direction_probability_target}."
-        )
-    se_ratio_ok = (
-        bool(np.all((se_ratios >= 0.95) & (se_ratios <= 1.05)))
-        if se_ratios.size
-        else False
+    warnings_list: list[str] = []
+    V_L_lin = L @ np.asarray(V_hat) @ L.T
+    # Health is judged on the OBSERVED failure fraction, not the Clopper-Pearson upper bound:
+    # at practical trial counts the upper bound sits above bad_direction_probability_target even
+    # with zero observed failures (0/200 -> ~1.5%), which would make a perfectly healthy solver
+    # read unhealthy purely for lack of certification power. The upper bound stays reported.
+    observed_failure_fraction = num_root_failures / num_trials if num_trials else 1.0
+    solver_unhealthy = (
+        observed_failure_fraction > config.bad_direction_probability_target
     )
-    if not se_ratio_ok:
-        status = CheckStatuses.FAILED
+
+    if num_converged >= 3:
+        z_linear = np.array(z_linear_rows)
+        z_nonlinear = np.array(z_nonlinear_rows)
+        nonlinear_cov = np.atleast_2d(np.cov(z_nonlinear, rowvar=False))
+        try:
+            se_ratios = se_ratios_from_generalized_eigenvalues(nonlinear_cov, V_L_lin)
+        except (scipy.linalg.LinAlgError, ValueError) as exc:
+            se_ratios = np.full(V_L_lin.shape[0], math.nan)
+            warnings_list.append(f"Generalized eigenvalue computation failed: {exc}")
+        try:
+            b_L = float(
+                np.linalg.norm(
+                    matrix_inv_sqrt(V_L_lin) @ (np.mean(z_nonlinear, axis=0))
+                )
+            )
+        except np.linalg.LinAlgError:
+            b_L = math.nan
+        quantile_shifts: dict[str, dict[str, float]] = {}
+        for idx, label in enumerate(target_labels):
+            lin_col = z_linear[:, idx]
+            nl_col = z_nonlinear[:, idx]
+            se = se_l[idx] if se_l[idx] > 0 else 1.0
+            q_lo_lin, q_hi_lin = np.quantile(lin_col, [0.025, 0.975])
+            q_lo_nl, q_hi_nl = np.quantile(nl_col, [0.025, 0.975])
+            quantile_shifts[label] = {
+                "lower_shift_se": float((q_lo_nl - q_lo_lin) / se),
+                "upper_shift_se": float((q_hi_nl - q_hi_lin) / se),
+            }
+    else:
+        se_ratios = np.full(V_L_lin.shape[0], math.nan)
+        b_L = math.nan
+        quantile_shifts = {
+            label: {"lower_shift_se": math.nan, "upper_shift_se": math.nan}
+            for label in target_labels
+        }
+        warnings_list.append(
+            f"Only {num_converged} of {num_trials} exact perturbation solves converged -- "
+            "too few for any ensemble statistic; the check is INDETERMINATE."
+        )
+
+    # The se_ratios gate is judged against a simulated finite-J null band for the exact
+    # converged (sign, direction) pattern, NOT a fixed tolerance: at any practical number of
+    # directions the min/max generalized eigenvalue carries substantial sampling noise under
+    # perfect linearity (see the num_null_band_samples comment on DiagnosticConfig).
+    null_bands = _simulate_perturbation_null_bands(
+        converged_pattern,
+        V_L_lin.shape[0],
+        config.confidence_level,
+        config.random_seed + 5,
+        config.num_null_band_samples,
+    )
+    se_ratio_band_evaluable = (
+        se_ratios.size > 0
+        and bool(np.all(np.isfinite(se_ratios)))
+        and not math.isnan(null_bands["se_ratio_lower"])
+    )
+    se_ratio_above = bool(
+        se_ratio_band_evaluable
+        and float(np.max(se_ratios)) > null_bands["se_ratio_upper"]
+    )
+    se_ratio_below = bool(
+        se_ratio_band_evaluable
+        and float(np.min(se_ratios)) < null_bands["se_ratio_lower"]
+    )
+    se_ratio_ok = (
+        (not se_ratio_above and not se_ratio_below) if se_ratio_band_evaluable else None
+    )
+
+    # An ABOVE-band se_ratio on the converged subset is trustworthy under censoring (the
+    # excluded directions are the hardest, so exclusion biases the spread DOWN); a BELOW-band
+    # ratio on a censored subset is exactly what that censoring produces on its own, so it only
+    # counts as a failure when the solver is healthy.
+    gates_failed = se_ratio_above or (se_ratio_below and not solver_unhealthy)
     if not math.isnan(b_L) and b_L > config.mean_shift_tolerance_se:
-        status = CheckStatuses.FAILED
+        gates_failed = True
     for shifts in quantile_shifts.values():
         if (
-            abs(shifts["lower_shift_se"]) > config.quantile_shift_tolerance_se
-            or abs(shifts["upper_shift_se"]) > config.quantile_shift_tolerance_se
+            not math.isnan(shifts["lower_shift_se"])
+            and not math.isnan(shifts["upper_shift_se"])
+            and (
+                abs(shifts["lower_shift_se"]) > config.quantile_shift_tolerance_se
+                or abs(shifts["upper_shift_se"]) > config.quantile_shift_tolerance_se
+            )
         ):
-            status = CheckStatuses.FAILED
+            gates_failed = True
+
+    # Status precedence: a FAILED verdict from the converged subset stands even when the solver
+    # is unhealthy (exclusion of the non-converged -- typically hardest -- directions biases the
+    # subset OPTIMISTIC, so a failure on it is trustworthy); a PASS on that same optimistic
+    # subset is not, hence INDETERMINATE.
+    if num_converged == 0 or num_converged < 3:
+        status = CheckStatuses.INDETERMINATE
+    elif gates_failed:
+        status = CheckStatuses.FAILED
+        if solver_unhealthy:
+            warnings_list.append(
+                "Distortion gates failed on the converged subset only; with "
+                f"{num_root_failures}/{num_trials} non-converged directions excluded the "
+                "subset is optimistically selected, so the failure is trustworthy."
+            )
+    elif solver_unhealthy:
+        status = CheckStatuses.INDETERMINATE
+        warnings_list.append(
+            f"Nonlinear-root failure fraction {observed_failure_fraction:.4g} exceeds target "
+            f"{config.bad_direction_probability_target}; gates passed on the converged subset "
+            "but that subset is optimistically selected."
+        )
+    else:
+        status = CheckStatuses.PASSED
 
     metrics = {
         "a_nl_by_target": {
@@ -886,9 +1056,14 @@ def check_exact_nonlinear_perturbations(
         },
         "se_ratios": se_ratios.tolist(),
         "se_ratios_within_tolerance": se_ratio_ok,
+        "se_ratio_null_band": [
+            null_bands["se_ratio_lower"],
+            null_bands["se_ratio_upper"],
+        ],
         "mean_shift_se": b_L,
         "quantile_shifts_se": quantile_shifts,
         "num_trials": num_trials,
+        "num_converged_trials": num_converged,
         "root_failure_fraction": num_root_failures / num_trials
         if num_trials
         else math.nan,
@@ -905,6 +1080,233 @@ def check_exact_nonlinear_perturbations(
 
     return CheckResult(
         name="exact_nonlinear_perturbation",
+        status=status,
+        metrics=metrics,
+        warnings=warnings_list,
+        message="",
+    )
+
+
+###############################################################################
+# Section 4b: frozen-score multiplier bootstrap. Reuses the continuation machinery above, but
+# with empirically-weighted score draws instead of Gaussian direction probes, and with a
+# self-calibrating verdict: bootstrap-vs-sandwich SE ratios judged against their own simulated
+# finite-draw null band. See the multiplier_bootstrap comment on DiagnosticConfig.
+###############################################################################
+
+
+def sample_multiplier_perturbations(
+    per_subject_stacks: np.ndarray,
+    bread_factored,
+    num_subjects: int,
+    num_draws: int,
+    seed: int,
+    distribution: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Frozen-score multiplier-bootstrap draws: s_b = (1/n) sum_i nu_{b,i} g_i(eta_hat) with iid
+    mean-0/variance-1 multipliers nu_{b,i} -- exactly sample_perturbation_directions'
+    construction ((W @ stacks)/n) with the Gaussian W replaced by empirical multipliers. Same
+    covariance M_hat/n; higher moments now inherited from the realized per-subject stacks
+    instead of imposed as Gaussian. Freezing the multiplier-weighted score at eta_hat (rather
+    than re-evaluating per-subject contributions at each candidate root) differs from the
+    textbook weighted bootstrap by a term of the same order as the bootstrap's own error, and is
+    what lets this run on per_subject_stacks alone. delta_lin = B^{-1} s as everywhere else.
+    """
+    rng = np.random.default_rng(seed)
+    if distribution == "rademacher":
+        nu = rng.choice(np.array([-1.0, 1.0]), size=(num_draws, num_subjects))
+    elif distribution == "mammen":
+        # Mammen (1993) two-point distribution: mean 0, variance 1, third moment 1.
+        sqrt5 = math.sqrt(5.0)
+        prob_low = (sqrt5 + 1.0) / (2.0 * sqrt5)
+        low, high = (1.0 - sqrt5) / 2.0, (1.0 + sqrt5) / 2.0
+        nu = np.where(rng.random(size=(num_draws, num_subjects)) < prob_low, low, high)
+    elif distribution == "gaussian":
+        nu = rng.standard_normal((num_draws, num_subjects))
+    else:
+        raise ValueError(
+            f"Unknown bootstrap_multiplier_distribution: {distribution!r} "
+            "(expected 'rademacher', 'mammen', or 'gaussian')."
+        )
+    stacks = np.asarray(per_subject_stacks, dtype=np.float64)
+    S = (nu @ stacks) / num_subjects
+    delta = solve_with_bread(bread_factored, S.T).T
+    return delta, S
+
+
+def check_multiplier_bootstrap(
+    g_tilde: Callable[[jnp.ndarray], jnp.ndarray],
+    eta_hat: jnp.ndarray,
+    g0: np.ndarray,
+    bread_factored,
+    per_subject_stacks: np.ndarray,
+    num_subjects: int,
+    L: np.ndarray,
+    target_labels: list[str],
+    V_hat: np.ndarray,
+    config: DiagnosticConfig,
+) -> CheckResult:
+    """
+    Solves the estimating equation under num_bootstrap_draws frozen-score multiplier
+    perturbations (paired +/- when configured) and compares the resulting bootstrap SE per
+    target against the adjusted sandwich's SE. Per-target ratios outside a simulated
+    finite-draw null band mean the nonlinearly-solved sampling distribution disagrees with the
+    sandwich's linearization: wider -> FAILED (the sandwich SE is understated -- the
+    anticonservative direction), narrower -> WARNING (overstated -- the conservative direction,
+    the blow-up phenomenon of docs/adr/0002). A high non-convergence rate across draws is
+    itself evidence of solver-level fragility under resampling-scale perturbations ->
+    INDETERMINATE.
+    """
+    num_draws = config.num_bootstrap_draws
+    base_delta, base_s = sample_multiplier_perturbations(
+        per_subject_stacks,
+        bread_factored,
+        num_subjects,
+        num_draws,
+        config.random_seed + 7,
+        config.bootstrap_multiplier_distribution,
+    )
+    signs = [1.0, -1.0] if config.paired_directions else [1.0]
+
+    se_l = standard_errors_for_contrasts(V_hat, L)
+    z_rows: list[np.ndarray] = []
+    converged_pattern: list[tuple[float, int]] = []
+    convergence_flags: list[bool] = []
+    nonfinite_flags: list[bool] = []
+
+    for sign in signs:
+        for j in range(num_draws):
+            delta_lin = sign * base_delta[j]
+            s_j = sign * base_s[j]
+            solved = solve_exact_perturbation(
+                g_tilde, eta_hat, g0, bread_factored, s_j, delta_lin, config
+            )
+            convergence_flags.append(solved["converged"])
+            nonfinite_flags.append(solved["nonfinite_encountered"])
+            if not solved["converged"]:
+                continue
+            converged_pattern.append((sign, j))
+            z_rows.append(L @ solved["delta_nl"])
+
+    num_trials = len(convergence_flags)
+    num_converged = len(converged_pattern)
+    num_root_failures = num_trials - num_converged
+    num_domain_failures = int(sum(nonfinite_flags))
+    failure_upper_bound = clopper_pearson_upper_bound(
+        num_root_failures, num_trials, config.confidence_level
+    )
+    domain_failure_upper_bound = clopper_pearson_upper_bound(
+        num_domain_failures, num_trials, config.confidence_level
+    )
+    # Observed fraction, not the Clopper-Pearson bound -- same rationale as in
+    # check_exact_nonlinear_perturbations.
+    observed_failure_fraction = num_root_failures / num_trials if num_trials else 1.0
+    solver_unhealthy = (
+        observed_failure_fraction > config.bad_direction_probability_target
+    )
+
+    warnings_list: list[str] = []
+    V_L = L @ np.asarray(V_hat) @ L.T
+
+    if num_converged >= 3:
+        z = np.array(z_rows)
+        bootstrap_se = np.std(z, axis=0, ddof=1)
+        se_ratio_by_target = {
+            label: float(bootstrap_se[idx] / se_l[idx]) if se_l[idx] > 0 else math.nan
+            for idx, label in enumerate(target_labels)
+        }
+        try:
+            b_L = float(np.linalg.norm(matrix_inv_sqrt(V_L) @ np.mean(z, axis=0)))
+        except np.linalg.LinAlgError:
+            b_L = math.nan
+    else:
+        bootstrap_se = np.full(len(target_labels), math.nan)
+        se_ratio_by_target = {label: math.nan for label in target_labels}
+        b_L = math.nan
+        warnings_list.append(
+            f"Only {num_converged} of {num_trials} bootstrap re-solves converged -- too few "
+            "for a bootstrap SE; the check is INDETERMINATE."
+        )
+
+    null_bands = _simulate_perturbation_null_bands(
+        converged_pattern,
+        L.shape[0],
+        config.confidence_level,
+        config.random_seed + 11,
+        config.num_null_band_samples,
+    )
+    band_lo = null_bands["per_target_sd_lower"]
+    band_hi = null_bands["per_target_sd_upper"]
+
+    ratios = np.array(
+        [se_ratio_by_target[label] for label in target_labels], dtype=np.float64
+    )
+    band_evaluable = bool(np.all(np.isfinite(ratios))) and not math.isnan(band_lo)
+    any_above = bool(band_evaluable and np.any(ratios > band_hi))
+    any_below = bool(band_evaluable and np.any(ratios < band_lo))
+    mean_shift_failed = not math.isnan(b_L) and b_L > config.mean_shift_tolerance_se
+
+    # Same precedence rationale as check_exact_nonlinear_perturbations: exclusions select the
+    # easy draws, so a FAILED verdict from the converged subset stands, but a PASS does not.
+    if num_converged < 3:
+        status = CheckStatuses.INDETERMINATE
+    elif any_above or mean_shift_failed:
+        status = CheckStatuses.FAILED
+        if any_above:
+            warnings_list.append(
+                "Bootstrap SEs exceed the sandwich SEs beyond the simulated null band: the "
+                "sandwich SE is likely understated (anticonservative) on this dataset."
+            )
+        if mean_shift_failed:
+            warnings_list.append(
+                f"Bootstrap mean shift {b_L:.4g} SE exceeds "
+                f"mean_shift_tolerance_se={config.mean_shift_tolerance_se}: the resampled "
+                "roots are systematically displaced (curvature-induced bias)."
+            )
+    elif solver_unhealthy:
+        status = CheckStatuses.INDETERMINATE
+        warnings_list.append(
+            f"Bootstrap re-solve failure fraction {observed_failure_fraction:.4g} exceeds "
+            f"target {config.bad_direction_probability_target}: the estimating equation is "
+            "fragile under resampling-scale perturbations, and the converged subset is "
+            "optimistically selected."
+        )
+    elif any_below:
+        status = CheckStatuses.WARNING
+        warnings_list.append(
+            "Bootstrap SEs fall below the sandwich SEs beyond the simulated null band: the "
+            "sandwich SE is likely overstated (conservative) on this dataset."
+        )
+    else:
+        status = CheckStatuses.PASSED
+
+    metrics = {
+        "bootstrap_se_by_target": {
+            label: float(bootstrap_se[idx]) for idx, label in enumerate(target_labels)
+        },
+        "sandwich_se_by_target": {
+            label: float(se_l[idx]) for idx, label in enumerate(target_labels)
+        },
+        "se_ratio_by_target": se_ratio_by_target,
+        "se_ratio_null_band": [band_lo, band_hi],
+        "mean_shift_se": b_L,
+        "num_draws": num_draws,
+        "num_trials": num_trials,
+        "num_converged_trials": num_converged,
+        "root_failure_fraction": num_root_failures / num_trials
+        if num_trials
+        else math.nan,
+        "root_failure_upper_bound": failure_upper_bound,
+        "domain_failure_fraction": num_domain_failures / num_trials
+        if num_trials
+        else math.nan,
+        "domain_failure_upper_bound": domain_failure_upper_bound,
+        "multiplier_distribution": config.bootstrap_multiplier_distribution,
+    }
+
+    return CheckResult(
+        name="multiplier_bootstrap",
         status=status,
         metrics=metrics,
         warnings=warnings_list,
@@ -1421,6 +1823,18 @@ def check_exploration_and_weights(
 ###############################################################################
 
 
+def _local_nonlinearity_headline_max(metrics: dict[str, Any]) -> float:
+    """The headline-radius max a_{j,l} over targets, from check_local_nonlinearity's metrics."""
+    headline_radius = metrics.get("headline_radius")
+    per_radius = metrics.get("per_radius", {})
+    if headline_radius not in per_radius:
+        return math.nan
+    a_by_target = per_radius[headline_radius].get("a_by_target", {})
+    maxima = [summary.get("max", math.nan) for summary in a_by_target.values()]
+    finite = [m for m in maxima if not math.isnan(m)]
+    return max(finite) if finite else math.nan
+
+
 def _combine_classification(check_results: dict[str, CheckResult]) -> str:
     statuses = [result.status for result in check_results.values()]
     if any(s == CheckStatuses.FAILED for s in statuses):
@@ -1512,6 +1926,37 @@ def run_diagnostic_suite(
             V_hat,
             config,
         )
+
+        if config.multiplier_bootstrap not in ("off", "auto", "always"):
+            raise ValueError(
+                f"Unknown multiplier_bootstrap mode: {config.multiplier_bootstrap!r} "
+                "(expected 'off', 'auto', or 'always')."
+            )
+        run_bootstrap = config.multiplier_bootstrap == "always"
+        if config.multiplier_bootstrap == "auto":
+            # The cheap a_{j,l} check screens for the expensive bootstrap: trigger on a headline
+            # exceedance of the screen threshold, or on any non-PASSED local-nonlinearity status
+            # (a rank-deficient or otherwise unusual local check is exactly when a
+            # linearization-free second opinion is worth its cost).
+            local_result = check_results["local_nonlinearity"]
+            headline = _local_nonlinearity_headline_max(local_result.metrics)
+            run_bootstrap = (
+                not math.isnan(headline)
+                and headline > config.bootstrap_screen_a_jl_threshold
+            ) or local_result.status != CheckStatuses.PASSED
+        if run_bootstrap:
+            check_results["multiplier_bootstrap"] = check_multiplier_bootstrap(
+                g_tilde,
+                eta_hat,
+                g0,
+                bread_factored,
+                per_subject_stacks,
+                num_subjects,
+                L,
+                target_labels,
+                V_hat,
+                config,
+            )
 
         if config.compute_exact_nonlinear_roots:
             check_results["exact_nonlinear_perturbation"] = (
@@ -1634,6 +2079,7 @@ def run_diagnostic_suite(
             "num_directions": config.num_directions,
             "num_exact_directions": config.num_exact_directions
             or config.num_directions,
+            "num_bootstrap_draws": config.num_bootstrap_draws,
         },
         target_labels=target_labels,
         rank_diagnostics=check_results.get(

@@ -711,3 +711,230 @@ def test_run_diagnostic_suite_is_reproducible_for_a_fixed_seed():
             "theta_0"
         ]["p_max"],
     )
+
+
+# ---------------------------------------------------------------------------
+# 8. Frozen-score multiplier bootstrap (check_multiplier_bootstrap) and the simulated
+#    finite-draw null bands it shares with check_exact_nonlinear_perturbations. Each test uses
+#    a map whose perturbed roots have a closed form, so the expected verdict is derivable, not
+#    tuned.
+# ---------------------------------------------------------------------------
+
+
+def _scalar_bootstrap_inputs(seed=0, n=50, stack_scale=3.0, b=1.0):
+    """1-D estimating problem: root at 0, bread [[b]], per-subject stacks ~ N(0, stack_scale^2).
+    Returns everything check_multiplier_bootstrap needs, with V_hat = M/(n b^2) exactly."""
+    rng = np.random.default_rng(seed)
+    stacks = rng.standard_normal((n, 1)) * stack_scale
+    M_hat = float((stacks.T @ stacks)[0, 0]) / n
+    B = np.array([[b]])
+    V_hat = np.array([[M_hat / (n * b * b)]])
+    return stacks, B, V_hat
+
+
+def test_multiplier_bootstrap_passes_on_affine_map():
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    g_tilde = _affine_map(B)
+    result = d.check_multiplier_bootstrap(
+        g_tilde,
+        jnp.zeros(1),
+        np.zeros(1),
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        np.eye(1),
+        ["theta_0"],
+        V_hat,
+        d.DiagnosticConfig(num_bootstrap_draws=100),
+    )
+    assert result.status == CheckStatuses.PASSED
+    ratio = result.metrics["se_ratio_by_target"]["theta_0"]
+    # For an affine map the bootstrap re-solve IS the linear solve, so the only deviation from
+    # 1.0 is the finite-draw noise the null band exists to absorb.
+    assert 0.8 < ratio < 1.2
+    assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
+    band_lo, band_hi = result.metrics["se_ratio_null_band"]
+    assert band_lo <= ratio <= band_hi
+
+
+def test_multiplier_bootstrap_fails_when_roots_inflate_relative_to_linearization():
+    # g(eta) = b*w*asinh(eta/w): B at the root is b, but the perturbed root w*sinh(s/(b*w))
+    # grows faster than the linear prediction s/b, so the true resampling distribution is wider
+    # than the sandwich's linearization claims -- the anticonservative direction.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+    sd_s = math.sqrt(float((stacks.T @ stacks)[0, 0]) / n / n)
+    w = (
+        sd_s / 0.8
+    )  # s/(b*w) has sd ~0.8 -> sinh inflates the SD by ~1.4x, far past the band
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ (w * jnp.arcsinh(eta / w))
+
+    result = d.check_multiplier_bootstrap(
+        g_tilde,
+        jnp.zeros(1),
+        np.zeros(1),
+        d.factor_bread(B),
+        stacks,
+        n,
+        np.eye(1),
+        ["theta_0"],
+        V_hat,
+        d.DiagnosticConfig(
+            num_bootstrap_draws=100,
+            nonlinear_solver_max_iterations=200,
+        ),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert result.metrics["se_ratio_by_target"]["theta_0"] > 1.2
+
+
+def test_multiplier_bootstrap_warns_when_sandwich_se_is_overstated():
+    # Affine map but a V_hat inflated 4x above the truth: bootstrap SEs land at ~half the
+    # sandwich SEs -- the conservative/blow-up direction reports WARNING, not FAILED.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    result = d.check_multiplier_bootstrap(
+        _affine_map(B),
+        jnp.zeros(1),
+        np.zeros(1),
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        np.eye(1),
+        ["theta_0"],
+        4.0 * V_hat,
+        d.DiagnosticConfig(num_bootstrap_draws=100),
+    )
+    assert result.status == CheckStatuses.WARNING
+    assert result.metrics["se_ratio_by_target"]["theta_0"] < 0.7
+
+
+def test_multiplier_bootstrap_indeterminate_when_resolves_fail():
+    # g(eta) = b*w*tanh(eta/w) has range (-b*w, b*w); multiplier draws routinely exceed it, so
+    # many re-solves cannot converge. That fragility must surface as INDETERMINATE (with the
+    # failure fraction reported), never as a confident PASS/FAIL from the surviving easy draws.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+    sd_s = math.sqrt(float((stacks.T @ stacks)[0, 0]) / n / n)
+    w = 0.5 * sd_s  # most draws lie outside the reachable range
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ (w * jnp.tanh(eta / w))
+
+    result = d.check_multiplier_bootstrap(
+        g_tilde,
+        jnp.zeros(1),
+        np.zeros(1),
+        d.factor_bread(B),
+        stacks,
+        n,
+        np.eye(1),
+        ["theta_0"],
+        V_hat,
+        d.DiagnosticConfig(num_bootstrap_draws=50),
+    )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["root_failure_fraction"] > 0.2
+
+
+def test_exact_check_passes_on_affine_map_with_few_directions():
+    # Regression test for the former fixed [0.95, 1.05] se_ratios band, which failed with
+    # certainty at practical direction counts (100% of 6,648 ADS-142 replicates, affine cells
+    # included) because it ignored the finite-J noise of the ensemble covariance. Under the
+    # simulated null band, a genuinely affine map must PASS even at J=8.
+    rng = np.random.default_rng(11)
+    d_total, n = 2, 60
+    B = np.eye(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+    report = d.run_diagnostic_suite(
+        _affine_map(B),
+        jnp.zeros(d_total),
+        B,
+        M_hat,
+        M_hat / n,
+        stacks,
+        beta_dim=0,
+        theta_dim=d_total,
+        num_subjects=n,
+        config=d.DiagnosticConfig(
+            num_directions=10,
+            compute_exact_nonlinear_roots=True,
+            num_exact_directions=8,
+        ),
+    )
+    exact = report.check_results["exact_nonlinear_perturbation"]
+    assert exact.status == CheckStatuses.PASSED
+    assert exact.metrics["se_ratios_within_tolerance"] is True
+    assert exact.metrics["num_converged_trials"] == exact.metrics["num_trials"]
+
+
+def test_exact_check_excludes_nonconverged_solves_and_reports_indeterminate():
+    # g(eta) = b*clip(eta, -cap, cap): EXACTLY linear inside its solvable range, saturated
+    # outside it. Directions whose targets are unreachable fail to converge; the converged ones
+    # are perfectly linear. The check must exclude the failures from a^NL (no solver debris in
+    # the ensemble statistics -- the converged-only a^NL is ~0 here) and report INDETERMINATE
+    # (a PASS from the optimistically-selected subset would be unearned; there is nothing to
+    # FAIL on).
+    stacks, B, V_hat = _scalar_bootstrap_inputs(seed=3)
+    n = stacks.shape[0]
+    sd_s = math.sqrt(float((stacks.T @ stacks)[0, 0]) / n / n)
+    cap = 0.7 * sd_s  # b = 1, so ~half the |s_j| draws exceed the reachable range
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ jnp.clip(eta, -cap, cap)
+
+    result = d.check_exact_nonlinear_perturbations(
+        g_tilde,
+        jnp.zeros(1),
+        np.zeros(1),
+        B,
+        d.factor_bread(B),
+        stacks,
+        n,
+        np.eye(1),
+        ["theta_0"],
+        V_hat,
+        d.DiagnosticConfig(num_exact_directions=15),
+    )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert 0 < result.metrics["num_converged_trials"] < result.metrics["num_trials"]
+    a_nl_max = result.metrics["a_nl_by_target"]["theta_0"]["max"]
+    assert math.isfinite(a_nl_max)
+    assert a_nl_max < 1e-3
+
+
+def test_multiplier_bootstrap_auto_mode_screens_on_local_nonlinearity():
+    rng = np.random.default_rng(21)
+    d_total, n = 2, 60
+    B = np.eye(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+
+    def run(mode):
+        return d.run_diagnostic_suite(
+            _affine_map(B),
+            jnp.zeros(d_total),
+            B,
+            M_hat,
+            M_hat / n,
+            stacks,
+            beta_dim=0,
+            theta_dim=d_total,
+            num_subjects=n,
+            config=d.DiagnosticConfig(
+                num_directions=10,
+                multiplier_bootstrap=mode,
+                num_bootstrap_draws=20,
+            ),
+        )
+
+    # Affine map: a_{j,l} ~ 0, local check PASSED -> the auto screen skips the bootstrap.
+    assert "multiplier_bootstrap" not in run("auto").check_results
+    always = run("always")
+    assert "multiplier_bootstrap" in always.check_results
+    assert always.check_results["multiplier_bootstrap"].status == CheckStatuses.PASSED
+    assert "multiplier_bootstrap" not in run("off").check_results

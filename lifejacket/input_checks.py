@@ -1019,6 +1019,131 @@ def require_valid_action_prob_times_given_if_index_supplied(
             )
 
 
+def require_estimating_functions_sum_to_zero_se_standardized(
+    mean_estimating_function_stack: jnp.ndarray,
+    joint_bread_matrix: np.ndarray,
+    joint_sandwich_matrix: np.ndarray,
+    beta_dim: int,
+    theta_dim: int,
+    suppress_interactive_data_checks: bool,
+    *,
+    soft_tolerance_se: float = 0.01,
+    hard_tolerance_se: float = 0.1,
+):
+    """
+    SE-standardized replacement for require_estimating_functions_sum_to_zero. Same underlying
+    question -- do the recorded parameters actually root the claimed update/inference equations
+    on the realized data (a value-level test of the stacked model of the algorithm) -- but the
+    residual is measured in units that matter and that are portable across reward scales:
+
+        displacement = B_hat^{-1} @ mean_stack        (how far the residual moves the estimates)
+        a_j = |displacement_j| / SE(component_j)      (in units of each component's own SE)
+
+    This is check_root_and_implementation's a_root construction extended from the theta targets
+    to EVERY stacked component (each update's betas and inference's theta), so an update-block
+    residual that barely moves theta still registers against that update's own beta SEs -- with
+    per-update attribution preserved in the failure breakdown.
+
+    Why not the raw absolute tolerance: the raw residual carries the estimating equations' own
+    (reward-scale) units, so any fixed atol is non-portable. Measured on real wave-2 ADS-142
+    runs, the raw max residual grew ~2e-5 -> ~2e-4 -> ~5e-3 as reward noise variance went
+    1 -> 10 -> 100 (crossing the legacy 5e-4 gate and brushing its 1e-2 hard gate on healthy
+    runs), while this statistic stayed flat at 4e-6..8e-5 across all three scales -- two-plus
+    orders of magnitude below soft_tolerance_se. See docs/adr/0002, correction 2026-08-31.
+
+    Components with (numerically) zero variance are excluded (a rank/identification problem for
+    the diagnostic suite's bread-stability check to flag, not a sum-to-zero question), mirroring
+    a_root's treatment.
+
+    Inputs beyond the legacy check's: joint_bread_matrix (B_hat for the full stacked system) and
+    joint_sandwich_matrix (B^-1 M B^-T / n, i.e. Cov(eta_hat) directly -- the same scaling
+    convention as everywhere in lifejacket.diagnostics).
+
+    Raises on a_max > hard_tolerance_se; interactively confirms on a_max > soft_tolerance_se.
+    """
+    logger.info(
+        "Checking that estimating functions average to zero across subjects "
+        "(SE-standardized displacement form)"
+    )
+    r = np.asarray(mean_estimating_function_stack, dtype=np.float64)
+    B = np.asarray(joint_bread_matrix, dtype=np.float64)
+    V = np.asarray(joint_sandwich_matrix, dtype=np.float64)
+    assert (r.size - theta_dim) % beta_dim == 0
+    num_updates = (r.size - theta_dim) // beta_dim
+
+    displacement = np.linalg.solve(B, r)
+    if not np.all(np.isfinite(displacement)):
+        raise AssertionError(
+            "Estimating-function residual displacement is nonfinite -- the joint bread matrix "
+            "is numerically singular or contains nonfinite values. See the diagnostic suite's "
+            "root_and_implementation/bread_stability checks; the sum-to-zero question cannot "
+            "be evaluated on this system."
+        )
+    se = np.sqrt(np.clip(np.diag(V), 0.0, None))
+    identified = se > 0
+    a = np.full(r.size, np.nan)
+    a[identified] = np.abs(displacement[identified]) / se[identified]
+    if not np.all(identified):
+        logger.info(
+            "%d of %d stacked components have (numerically) zero variance and are excluded "
+            "from the SE-standardized sum-to-zero check -- a rank/identification finding for "
+            "the diagnostic suite's bread_stability check, not a sum-to-zero failure.",
+            int((~identified).sum()),
+            r.size,
+        )
+
+    def _block_breakdown() -> str:
+        lines = []
+        for i in range(num_updates):
+            block = a[i * beta_dim : (i + 1) * beta_dim]
+            finite = block[np.isfinite(block)]
+            lines.append(
+                f"update {i + 1}: max displacement {np.max(finite):.4g} SE"
+                if finite.size
+                else f"update {i + 1}: all excluded"
+            )
+        tail = a[-theta_dim:]
+        finite = tail[np.isfinite(tail)]
+        lines.append(
+            f"inference: max displacement {np.max(finite):.4g} SE"
+            if finite.size
+            else "inference: all excluded"
+        )
+        return "\n".join(lines)
+
+    finite_a = a[np.isfinite(a)]
+    a_max = float(np.max(finite_a)) if finite_a.size else 0.0
+    if a_max > hard_tolerance_se:
+        logger.info(
+            "Estimating-function residual displaces estimates beyond the hard tolerance. "
+            "Per-block breakdown:\n%s",
+            _block_breakdown(),
+        )
+        raise AssertionError(
+            f"Estimating functions do not sum to zero: the residual displaces at least one "
+            f"stacked estimate by {a_max:.4g} of its own standard error "
+            f"(hard tolerance {hard_tolerance_se}). Per-block breakdown:\n{_block_breakdown()}"
+        )
+    if a_max > soft_tolerance_se:
+        logger.info(
+            "Estimating-function residual displacement exceeds the soft tolerance. "
+            "Per-block breakdown:\n%s",
+            _block_breakdown(),
+        )
+        confirm_input_check_result(
+            f"\nEstimating functions do not average to within tolerance of zero: the residual "
+            f"displaces at least one stacked estimate by {a_max:.4g} of its own standard error "
+            f"(soft tolerance {soft_tolerance_se}). Please decide if this is a reasonable "
+            f"result given the per-block breakdown above.\n\nContinue? (y/n)\n",
+            suppress_interactive_data_checks,
+        )
+    logger.info(
+        "Estimating functions sum to zero within tolerance (max SE-standardized "
+        "displacement %.4g).",
+        a_max,
+    )
+
+
 def require_estimating_functions_sum_to_zero(
     mean_estimating_function_stack: jnp.ndarray,
     beta_dim: int,
@@ -1026,6 +1151,12 @@ def require_estimating_functions_sum_to_zero(
     suppress_interactive_data_checks: bool,
 ):
     """
+    SUPERSEDED by require_estimating_functions_sum_to_zero_se_standardized (kept for backward
+    compatibility): this version compares the raw residual against fixed absolute tolerances,
+    which carry the estimating equations' own reward-scale units and are therefore non-portable
+    across deployments -- empirically documented to false-alarm on healthy high-noise runs
+    (docs/adr/0002).
+
     This is a test that the correct loss/estimating functions have
     been given for both the algorithm updates and inference. If that is true, then the
     loss/estimating functions when evaluated should sum to approximately zero across subjects.  These

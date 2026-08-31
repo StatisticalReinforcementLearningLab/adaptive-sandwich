@@ -1,6 +1,7 @@
 # 0002. Cluster experiment plan for calibrating enforced diagnostic thresholds
 
-- Status: Proposed
+- Status: Wave 2 complete; results and consequent decisions recorded below (2026-08-29);
+  follow-up experiments (undercoverage hunt, bootstrap validation) in flight
 - Date: 2026-08-27
 - Ticket: ADS-142
 
@@ -316,3 +317,144 @@ hand-picked the same way we're trying to avoid for `a_{j,l}` in the first place.
   (confirmed empirically across condition numbers spanning twelve orders of magnitude), so it's a
   software-correctness smoke detector, not an engineering tolerance needing simulator data — see
   `docs/diagnostics_tutorial.md` section 5, case F.
+
+## Results (2026-08-29, wave 2 essentially complete)
+
+Wave 2 (jobs 42600365/375/437/439 = Track A easy/medium/hard/hard-regularized,
+42600440/442/443 = Track B control/influence/bread at n=100, 42612539/40 + 42616376 = the
+n=10000 truth surrogates) delivered 9,883 aggregated runs (`aggregate_ads142_results.py`;
+snapshot CSVs `ads142_results*.csv` in `adjusted-sandwich-user` on the cluster). The only
+losses: 7 deterministic failures in the influence cell (below), one hard-cell timeout at 8h,
+and a residual handful of stragglers immaterial to any conclusion. Analysis followed the
+2026-08-28 revisions section (a^NL answer key, continuous variance accuracy, within-cell
+correlations).
+
+### Track A
+
+1. **The `se_ratios` `[0.95, 1.05]` gate failed 6,648/6,648 replicates** -- including both
+   effectively-linear cells -- empirically confirming the Wishart-null prediction of revision
+   #1 at full scale. Every `classification` from these runs reads `failed` and is unusable as
+   a label, as anticipated.
+2. **The grid came out bimodal.** The hard-regularized cell turned out to be the *most linear*
+   cell (`a^NL` median 0.046, 3.6% exceedance at 0.10): huge `lambda_` *damps* adaptivity and
+   *improves* bread conditioning (condition number ~56 vs. the control cell's ~1,500), so the
+   intended "bread stress" never materialized anywhere in the grid -- the influence cell is the
+   only true conditioning stress (up to ~1e14). Medium/hard cells saturate (100% exceedance on
+   both checks; `a^NL` medians ~92 and ~4e14, the latter dominated by solver debris -- see
+   finding 4).
+3. **`a_{j,l}` ranks scenarios essentially perfectly and replicates poorly.** Cell-median
+   ordering matches `a^NL` and true variance accuracy exactly; within-cell Spearman vs. `a^NL`
+   per-replicate maxima is only 0.17-0.35. Threshold sweep on the borderline cells (n=3,400,
+   answer key `a^NL > 0.10`, base rate 25%): the default 0.10 misses 67% of exceedances;
+   0.05 misses 11% while flagging 54%; 0.03 misses <1% while flagging 82%. There is no good
+   per-replicate operating point -- the ROC is intrinsically shallow.
+4. **The exact check's continuation solver collapses exactly where the check would matter**
+   (median replicate in the hard cell: ~all 100 directions non-converged; medium: ~25%), and
+   the implementation fed non-converged last iterates into every ensemble statistic, which is
+   where the 1e14-1e34 "a^NL" values came from. Additionally, per-replicate `a^NL` predicted
+   actual per-replicate variance accuracy nowhere (|rho| <= 0.19; <= 0.06 in the cells where
+   the solver was healthy). Both checks are scenario-level instruments, not per-dataset
+   verdicts; `docs/diagnostics.md`'s "supersedes the cheap check" claim was wrong and has been
+   revised to "corroborates at scenario level".
+
+### Track B
+
+5. **The mandatory ground-truth consistency gate produced its anticipated failure, in the
+   bread cell**: pool mean vs. n=10000 surrogate disagree at |z| up to 33, because a *fixed*
+   `lambda_=500` regularizes ~100x less at n=10000 than at n=100 -- theta* is genuinely
+   n-dependent under fixed-lambda regularization, exactly the scenario the plan said to report
+   rather than average over. Control passed cleanly (|z| <= 1.4); influence marginal
+   (|z| <= 2.9, expected: its recruit_n mechanism cannot be scale-matched). Consequence: the
+   bread and influence cells use pool-mean truth; the surrogate is valid only for control.
+6. **Nowhere in the 9,883-run grid did inference become anticonservative.** Empirical coverage
+   never fell below ~0.94 in any cell. Where things "fail", they fail conservative: the
+   influence cell reproduced the paper's variance blow-up (median 1.6-2.2x overestimation, p95
+   ~13x, 47% of replicates >2x inflated, coverage 0.94-0.98); the hard Track A cell reached
+   ~70x median overestimation with ~0.99 coverage. This has a sharp implication: **no
+   anticonservativeness-detecting threshold can be calibrated from this grid at all -- it
+   contains zero positive examples.**
+7. **`n_eff` is the strongest per-replicate signal the suite has** (within-influence-cell
+   Spearman -0.56 vs. per-replicate SE inflation; p_max +0.49; bread sensitivity +0.36). At the
+   default floor (`0.1*n` = 10): precision 0.73 / recall 0.59 against >2x inflation. `n_eff<5`:
+   precision 0.84 / recall 0.18. `p_max>0.5` (default): fires on 2% of replicates, recall 0.04
+   -- effectively inert. Bread sensitivity at a hypothetical `failed` tier (>0.20): recall 0.05.
+8. **The 7 influence-cell failures are a standalone finding**: seeds where the first policy
+   update (fit on ~10 subjects x 1 decision at steepness 5.0) yields NaN action probabilities,
+   crashing `rl_study_simulation.py` at decision time 2 -- the algorithm itself can emit NaN
+   probabilities under extreme adaptivity, before any lifejacket code runs. Deterministic per
+   seed; rerunning is pointless without an algorithm-side fix. 0.7% informative censoring of
+   exactly the most extreme replicates.
+
+### Decisions taken on these results (code landed with this update)
+
+- `check_exact_nonlinear_perturbations`: ensemble statistics now computed on **converged solves
+  only**; the fixed `se_ratios` band replaced by a **simulated finite-J null band** for the
+  observed converged pattern (`_simulate_perturbation_null_bands`); solver health judged on the
+  observed failure fraction (the Clopper-Pearson bound made zero-failure runs read unhealthy at
+  practical J); status precedence reworked so censored ensembles can FAIL trustworthily (the
+  censoring is optimistic) but can only PASS into `indeterminate`.
+- **New `check_multiplier_bootstrap`** (frozen-score generalized bootstrap for Z-estimators,
+  reusing the continuation machinery; `docs/diagnostics.md` section 3b): the per-dataset,
+  no-simulator verdict this experiment showed `a_{j,l}`/`a^NL` cannot provide. Verdict =
+  per-target bootstrap-vs-sandwich SE ratios against their own simulated null band
+  (self-calibrating, no engineering tolerance); above-band -> `failed` (anticonservative
+  direction), re-solve fragility -> `indeterminate`, below-band -> `warning` (the conservative
+  blow-up direction). `multiplier_bootstrap="auto"` uses `a_{j,l}` as the screen
+  (`bootstrap_screen_a_jl_threshold=0.05`, the measured 11%-miss / 54%-flag point) -- the
+  calibrated role finding 3 leaves for the cheap check.
+  On the "no policy replay" concern: the stacked system *is* the replay to first order --
+  multiplier perturbations propagate through the eta-equations into reconstructed action
+  probabilities along exactly the path the adjusted sandwich's cross-derivative bread terms
+  linearize. On representation misspecification (correction 2026-08-31, after a fair
+  pushback): the *value-level* fidelity of the stacked model IS detectable from one run, and
+  the input checks detect it -- each recorded eta_k must root the claimed update equations on
+  the realized data (sum-to-zero per update) and the claimed policy mapping must reproduce the
+  recorded action probabilities. The residual blind spot shared by sandwich and bootstrap is
+  *derivative-level* fidelity: a rule that agrees at the realized trajectory but responds
+  differently to perturbed data (e.g. a clip/projection inactive on the realized path) passes
+  both value checks with a wrong response model. Two consequences for the trust protocol:
+  (a) the sum-to-zero check needs an SE-standardized tolerance (its absolute atol=0.01 is the
+  documented non-portable one that crashed wave 1's hard cell and forced
+  --suppress_all_data_checks in every calibration run -- meaning the calibration evidence was
+  gathered with these checks off, harmless here since the representations were correct by
+  construction, but in production they are Layer 0 and must be on). DONE 2026-08-31:
+  `require_estimating_functions_sum_to_zero_se_standardized` measures the residual by the
+  SE-standardized displacement it induces (a_j = |(B^-1 r)_j| / SE_j over ALL stacked
+  components -- a_root's construction extended beyond the theta targets, with per-update
+  attribution; soft 0.01 SE / hard 0.1 SE), and `analyze_dataset` now calls it in place of the
+  raw-units version. Field-validated on wave-2 debug_pieces across reward-noise variances
+  1/10/100: the raw max residual grew 2e-5 -> 2e-4 -> ~5e-3 (crossing the legacy 5e-4 gate on
+  healthy runs), while the standardized statistic stayed flat at 4e-6..8e-5 -- two-plus orders
+  of magnitude inside tolerance at every scale; (b) future work: an
+  "update replay" check closing the derivative gap to first order -- perturb update-k's input
+  data slightly, re-run the actual algorithm update code, compare the realized eta shift
+  against the stacked model's derivative prediction.
+  The frozen-score approximation differs from the textbook weighted bootstrap at the same order
+  as the bootstrap's own error. Empirical falsification designed into the validation run below:
+  if the approximation broke at this scale it would undershoot empirical variance in the
+  influence cell specifically (where realized-eta randomness is largest).
+- `a_{j,l}` deliberately does **not** gain a gating status at any threshold (deferred decision
+  #1 from this ADR: answered no on the evidence of finding 3).
+- `bread_stability` keeps `indeterminate` as its ceiling (deferred decision #2: answered no --
+  finding 7's recall 0.05, and the blow-ups are conservative).
+- `n_eff`/`p_max` defaults stay, now documented with their measured operating characteristics
+  in `docs/diagnostics.md`.
+- `se_distortion_tolerance` was not re-tuned: in the only cell with real variance failure its
+  signal is dominated by `n_eff`, and its false-fire cost elsewhere is nil (sensitivities ~1e-4
+  in healthy cells).
+
+### Follow-up experiments (submitted from `adjusted-sandwich-user`)
+
+1. **Undercoverage hunt** (`ads142_undercoverage_hunt.sh`): 5 cells x 1000 seeds deliberately
+   aimed at anticonservativeness via the levers wave 2 never exercised (n=25; steepness 10 with
+   0.01/0.99 clipping = importance-weight tails; `delayed_1_dosage_paper` misspecification;
+   staggered recruitment x weight tails at n=50), plus one intermediate-nonlinearity Track A
+   cell (1700 seeds) to fill the empty `a^NL` in (0.1, 100) region of finding 3. Pool-mean truth
+   only. Either outcome is a deliverable: positive cells calibrate the thresholds that actually
+   matter; a failed hunt is a robustness statement about the adjusted sandwich.
+2. **Bootstrap validation** (`ads142_bootstrap_validation.sh`): 5 known-truth wave-2 cells x 50
+   seeds (same seed range = identical datasets), `multiplier_bootstrap="always"`. Expected per
+   cell if the method is sound: easy/control PASS with ratios ~1; medium WARNING-low (~0.82,
+   the known 1.5x conservatism); hard INDETERMINATE via re-solve fragility; influence
+   below-sandwich ratios tracking the known 1.6-2.2x overestimation -- the last being the
+   designed empirical test of the no-replay concern.

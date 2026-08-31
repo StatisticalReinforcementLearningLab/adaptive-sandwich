@@ -6,9 +6,11 @@ inference produced by `post_deployment_analysis.analyze_dataset`. It runs by def
 to disable it), does not change the adjusted sandwich estimator itself, and never automatically
 falls back to the classical sandwich when a check fails: failure of these checks means the
 current adjusted-Wald analysis lacks support, not that the classical sandwich is valid instead.
-The default `DiagnosticConfig()` only runs the cheap checks below; the expensive exact-
-nonlinear-perturbation and Jacobian-drift checks (`compute_exact_nonlinear_roots`) stay opt-in
-regardless of `run_diagnostics`.
+The default `DiagnosticConfig()` only runs the cheap checks below; the expensive checks stay
+opt-in regardless of `run_diagnostics`, each behind its own switch -- the exact-nonlinear-
+perturbation and Jacobian-drift checks behind `compute_exact_nonlinear_roots`, and the
+frozen-score multiplier bootstrap (section 3b) behind `multiplier_bootstrap`
+(`"off"`/`"auto"`/`"always"`; `"auto"` triggers it off the cheap `a_{j,l}` screen).
 
 The suite is organized around one idea: the adjusted sandwich can fail for different reasons,
 and a single number cannot certify all of them.
@@ -20,8 +22,9 @@ correct inputs -> adequate exploration -> stable moments and bread -> linearizat
 The `r_j`/`q_j`/`a_{j,l}` family of diagnostics (sections 2 below) examines mainly the
 linearization link. They cannot certify the others -- which is why the suite also reports
 exploration/importance-weight diagnostics, bread-stability diagnostics, and influence
-concentration, and why an exact nonlinear perturbation check exists as a stronger (and more
-expensive) alternative. Going further than any single-run check can -- validating against a
+concentration, why an exact nonlinear perturbation check exists as a measurement-grade (and more
+expensive) alternative, and why the multiplier bootstrap (section 3b) exists as the per-dataset
+verdict layer on the reported SEs themselves. Going further than any single-run check can -- validating against a
 simulator with known ground truth -- is possible too (`lifejacket.simulator_calibration`), but
 that is a genuinely different kind of activity (a multi-run experiment, not something a single
 `analyze_dataset` call produces) and is described in its own section at the end of this document,
@@ -35,6 +38,7 @@ not listed among the checks below.
 | `check_root_and_implementation` | An unsolved estimating equation, broken/inconsistent derivatives, non-finite inputs, a broken linear solve | Anything downstream of a correctly-solved root: overlap, bread conditioning, linearization, the CLT step |
 | `check_local_nonlinearity` (`r_j`, `c_j`, `a_{j,l}`) | Whether the first-order Taylor expansion of the estimating equation is adequate at the estimation scale, for the *reported contrasts specifically* | Whether the sampling distribution is actually close to normal (that's `check_influence_concentration`); overlap/positivity; whether *un-sampled* directions behave differently |
 | `check_exact_nonlinear_perturbations` | The same question as above, but exactly (via continuation) rather than via a one-step Taylor correction, plus the resulting distortion to the target's covariance, mean, and tail quantiles | Anything not captured by the sampled perturbation directions; with few directions, only a wide bound on the "bad direction" probability is achievable |
+| `check_multiplier_bootstrap` | Whether the sandwich SEs match a linearization-free, empirically-weighted (generalized bootstrap) estimate of the sampling distribution from this one dataset -- verdict judged against its own simulated finite-draw null band, no engineering tolerance | Derivative-level misspecification of the stacked representation: an update rule that matches the recorded trajectory at value level (so the sum-to-zero and reconstruction input checks pass) but responds differently to perturbed data, e.g. a constraint inactive on the realized path -- shared blind spot with the adjusted sandwich |
 | `check_jacobian_drift` (`rho_j`) | How much the Jacobian changes along a sampled path -- a heuristic input to a contraction-style error bound | Nothing rigorously: this is a *sampled path maximum*, never a certified supremum. `rho_j < 1` does not prove the nonlinear correction is small; `rho_j >= 1` does not by itself prove failure |
 | `check_bread_stability` | Numerical conditioning of the bread matrix and its blocks, and the sensitivity of target SEs to numerically negligible perturbations | Statistical identification as distinct from numerical conditioning (a well-conditioned-looking bread can still reflect weak identification if the *meat* is what's driving the standard error up) |
 | `check_influence_concentration` (`p_max`, `n_eff`, third-moment) | Whether the estimator's fluctuation is built from many small contributions (the premise the CLT approximation needs), or is dominated by a handful of subjects | It does not itself validate normality -- it only flags a specific, common way that a CLT approximation can fail |
@@ -76,12 +80,18 @@ message) rather than propagating. `post_deployment_analysis.analyze_dataset` wir
 diagnostic report gets a non-interactive, structured, always-present record of whether the
 supplied action-probability function reproduces the recorded probabilities -- useful in contexts
 (e.g. an unattended cluster job) where the main pipeline's own interactive confirmation prompt has
-no one to answer it. `input_checks.require_estimating_functions_sum_to_zero` is deliberately **not**
-also wired in here: it tests the same underlying question as `a_root_max` above (was the equation
-actually solved?), but with an arbitrary absolute tolerance rather than `a_root_max`'s
-SE-standardized, portable one (see "Why `r_j` and raw `q_j` have no universal threshold" below for
-why that distinction matters) -- re-running it here would be redundant, not an independent signal.
-It is still run unconditionally, interactively, by the main `analyze_dataset` pipeline itself.
+no one to answer it. The sum-to-zero check is deliberately **not** also wired in here, because
+the main `analyze_dataset` pipeline already runs it unconditionally (interactively) before the
+suite starts -- and, as of the ADS-142 follow-ups, in SE-standardized form:
+`input_checks.require_estimating_functions_sum_to_zero_se_standardized` judges the residual by
+the displacement it induces on every stacked estimate in units of that estimate's own SE
+(`a_j = |(B_hat^{-1} r)_j| / SE_j`, soft `0.01` / hard `0.1`, with per-update attribution).
+That is `a_root_max`'s construction extended beyond the theta targets to every update block, so
+it is both a portable replacement for the legacy raw-units version (whose absolute tolerances
+were reward-scale-dependent and false-alarmed on healthy high-noise runs -- see `docs/adr/0002`)
+and a genuine value-level test of the stacked model of the algorithm: the recorded `eta_k` must
+actually root the claimed update-`k` equations on the realized data. The legacy
+`require_estimating_functions_sum_to_zero` remains only for backward compatibility.
 
 Any `failed` entry in `input_check_results` short-circuits the rest of the suite exactly like a
 `failed` `root_and_implementation` does (`run_diagnostic_suite` sets `hard_failed = True` either
@@ -192,32 +202,103 @@ tractable. Reports per direction: `converged`, `nonfinite_encountered` (left the
 `||delta^{NL} - delta^{L}|| / ||delta^{L}|| > 5`, a heuristic flag for "this looks like a
 different root," not a proof).
 
-Aggregated across all directions:
+Aggregated across **converged** directions only (a non-converged continuation's last iterate is
+solver debris, not an "exact" measurement -- the ADS-142 calibration experiment observed such
+debris reaching `~1e34` SE when it was still allowed into these statistics; non-convergence
+remains fully visible via `root_failure_fraction` and the status logic below):
 
 - `a_nl_by_target[label]`: quantile summary of `a^{NL}_{j,l} = |l @ e_j| / se(l^T eta_hat)` where
-  `e_j = delta_j^{NL} - delta_j^{L}` -- supersedes the cheap `a_{j,l}` when available.
+  `e_j = delta_j^{NL} - delta_j^{L}`. It measures the same construct as the cheap `a_{j,l}`
+  without the one-step-Taylor approximation. Note what ADS-142 measured about both: they rank
+  *scenarios* (deployments/designs) by nonlinearity essentially identically, but their
+  per-replicate agreement is weak (within-cell Spearman 0.17-0.35 on per-direction maxima), and
+  neither predicted per-replicate variance accuracy in that experiment -- so treat `a^{NL}` as
+  corroborating `a_{j,l}` at scenario level, not as a per-dataset verdict that "supersedes" it.
 - `se_ratios`: `sqrt(lambda_k)` for the generalized eigenvalues of `Cov_j(L delta_j^{NL})` relative
   to `V_L = L @ V_hat @ L^T` (via `se_ratios_from_generalized_eigenvalues`, i.e.
   `scipy.linalg.eigh(nonlinear_cov, V_L)`) -- the nonlinear-to-linear standard-error ratio along
-  each identified target direction. `se_ratios_within_tolerance` is `True` only if every ratio
-  falls in `[0.95, 1.05]`.
+  each identified target direction. `se_ratios_within_tolerance` is judged against
+  `se_ratio_null_band`, a **simulated finite-J null band** (`_simulate_perturbation_null_bands`):
+  the exact distribution of the min/max ratio under perfect linearity for the observed
+  (sign, direction, converged) pattern, at `config.confidence_level`. A fixed band is not usable
+  here: at any practical direction count the extreme generalized eigenvalues of a J-draw sample
+  covariance carry large sampling noise under perfect linearity (the former fixed `[0.95, 1.05]`
+  band failed 100.0% of 6,648 ADS-142 replicates, provably-near-affine cells included).
 - `mean_shift_se`: `||V_L^{-1/2} @ mean_j(L @ delta_j^{NL})||` (via `matrix_inv_sqrt`) -- the
-  standardized nonlinear mean shift.
+  standardized nonlinear mean shift. With paired directions this is exactly `0` for a linear map
+  (the `+/-` pair cancels), so its fixed tolerance remains meaningful.
 - `quantile_shifts_se[label]`: the 2.5%/97.5% quantiles of the nonlinear draws minus the linear
-  draws, in SE units, for each scalar contrast.
+  draws, in SE units, for each scalar contrast -- also exactly `0` per direction for a linear map.
 - `root_failure_fraction`/`branch_change_fraction`/`domain_failure_fraction` and their
   Clopper-Pearson upper bounds (`root_failure_upper_bound`, etc., at `config.confidence_level`,
-  default `0.95`).
+  default `0.95`), plus `num_converged_trials`.
 
-**Status logic:** `indeterminate` if `root_failure_upper_bound > config.
-bad_direction_probability_target` (default `0.01` -- with few directions this is very easy to
-trip: even zero observed failures in 30 draws only bounds the failure probability below ~9%, so
-turning this check on with a small `num_exact_directions` will often read `indeterminate` on that
-basis alone, which is the honest answer, not a bug -- use `num_exact_directions >= ~300` for the
-`~1%` bound the task write-up references). `failed` if `se_ratios_within_tolerance` is `False`, or
-`mean_shift_se` exceeds `config.mean_shift_tolerance_se` (default `0.10`), or any quantile shift
-exceeds `config.quantile_shift_tolerance_se` (default `0.10`) in absolute value. `passed`
-otherwise.
+**Status logic** (precedence matters -- solver health is judged on the **observed** failure
+fraction vs. `config.bad_direction_probability_target`, not the Clopper-Pearson bound, which
+exceeds any small target at practical trial counts even with zero observed failures):
+`indeterminate` if fewer than 3 solves converged. Otherwise `failed` if a distortion gate fires
+on the converged subset -- `se_ratios` **above** the null band, `mean_shift_se >
+config.mean_shift_tolerance_se` (default `0.10`), or any quantile shift beyond
+`config.quantile_shift_tolerance_se` (default `0.10`); a below-band `se_ratios` also fails, but
+only when the solver is healthy, because convergence-censoring itself compresses the converged
+subset (the excluded directions are the hardest ones), making below-band readings on a censored
+ensemble an artifact. A `failed` from the converged subset stands even under heavy censoring --
+the same censoring argument makes it *optimistically* selected, so a failure on it is
+trustworthy, while a pass on it is not: gates passing with an unhealthy solver reads
+`indeterminate`. `passed` otherwise.
+
+### 3b. Frozen-score multiplier bootstrap -- `check_multiplier_bootstrap`
+
+Off by default (`config.multiplier_bootstrap = "off"`); `"always"` runs it unconditionally, and
+`"auto"` uses the cheap `a_{j,l}` check as a screen -- the bootstrap runs only when
+`check_local_nonlinearity`'s headline max exceeds `config.bootstrap_screen_a_jl_threshold`
+(default `0.05`, an ADS-142-calibrated screen: against the exact check's `a^NL > 0.10` key on
+the borderline cells it missed ~11% of exceedances while triggering on ~54% of replicates) or
+that check did not `pass` outright.
+
+This is the suite's answer to "certify this one dataset without a simulator." It draws
+`config.num_bootstrap_draws` (default `100`, paired `+/-`) multiplier vectors `nu_b` with iid
+mean-0/variance-1 entries (`config.bootstrap_multiplier_distribution`: `"rademacher"` default,
+`"mammen"` to match third moments, `"gaussian"` to reproduce the direction sampler exactly),
+forms the frozen-score bootstrap perturbation `s_b = (1/n) sum_i nu_{b,i} g_i(eta_hat)` from
+`per_subject_stacks`, and re-solves `g_tilde(eta_hat + delta) - g0 = s_b` with the same
+continuation/chord-Newton machinery as the exact check. This is the generalized (weighted)
+bootstrap for Z-estimators -- Chatterjee & Bose (2005), Praestgaard-Wellner multipliers -- with
+the multiplier-weighted score frozen at the observed root (a second-order approximation of the
+same size as the bootstrap's own error, and what lets it run from `per_subject_stacks` alone).
+
+Two things make it more than a rerun of the sandwich: the re-solve is **nonlinear** (no
+linearization to trust), and the draw is **empirical** (higher moments come from the realized
+per-subject contributions). Policy adaptivity needs no replay for the same reason the adjusted
+sandwich needs none: the algorithm's updates are estimating equations *inside* the stacked
+system, with action probabilities reconstructed as functions of `eta`, so a multiplier
+perturbation propagates through the eta-equations into every subject's contribution exactly
+along the path the sandwich's cross-derivative bread terms linearize. On misspecification of
+the stacked representation itself, the division of labor is: **value-level** fidelity is
+testable and tested by the input checks (each recorded `eta_k` must root the claimed update
+equations on the realized data -- the sum-to-zero check per update -- and the claimed policy
+mapping must reproduce the recorded action probabilities); the residual blind spot shared by
+the sandwich and this bootstrap is **derivative-level** fidelity -- an update rule that agrees
+with the model at the realized trajectory but responds differently to perturbed data (e.g. a
+clip or projection that was inactive on the realized path) passes the value checks while the
+bread's cross-terms are computed under the wrong response model. This check isolates
+linearization/normal-approximation error *given* that response model.
+
+Reported per target: `bootstrap_se_by_target` (SD of `l @ delta^{NL}_b` over converged draws),
+`sandwich_se_by_target`, and their ratio `se_ratio_by_target`, judged against
+`se_ratio_null_band` -- the same simulated finite-draw null band construction as in the exact
+check (per-target SD ratios, Bonferroni-adjusted across targets), so the verdict is
+self-calibrating: no engineering tolerance, no simulator.
+
+**Status logic:** `indeterminate` if fewer than 3 re-solves converged. `failed` if any target's
+ratio exceeds the band's upper edge (the bootstrap distribution is wider than the sandwich
+claims -- the **anticonservative** direction) or `mean_shift_se >
+config.mean_shift_tolerance_se` (systematic curvature-induced displacement of the resampled
+roots). Else `indeterminate` if the observed re-solve failure fraction exceeds
+`config.bad_direction_probability_target` -- fragility under resampling-scale perturbations is
+itself a finding, and the converged subset is optimistically selected. Else `warning` if any
+ratio falls below the band (sandwich SE overstated -- the **conservative** blow-up direction
+ADS-142 found to be the common failure mode). `passed` otherwise.
 
 ### 4. Jacobian drift -- `check_jacobian_drift` (`rho_j`)
 
@@ -268,6 +349,13 @@ number above is reported as a metric, and only two things drive the status: `ind
 (default `0.05`) -- i.e. the reported SEs are themselves numerically fragile at a scale well below
 real precision loss. `passed` otherwise.
 
+**Why there is deliberately no `failed` tier here:** the ADS-142 experiment asked whether a
+second, higher sensitivity threshold predicts actual per-replicate variance failure and measured
+a clear no -- in the cell where variance blow-ups actually occurred, `sensitivity > 0.20` caught
+only ~5% of >2x-inflated replicates (vs. `n_eff`'s ~59% at its default floor), and the blow-ups
+it does catch are *conservative* (empirical coverage never fell below ~0.94 anywhere in the
+9,883-run grid). `indeterminate` is the calibrated ceiling for this check, not a placeholder.
+
 ### 6. Influence concentration -- `check_influence_concentration`
 
 Runs when `config.compute_influence_and_overlap_checks` (default `True`). For each contrast `l`,
@@ -288,11 +376,18 @@ vectorized dot product. From `xi`, reports per target label in `by_target[label]
 **Status logic:** `warning` for any target with `n_eff < max(config.influence_n_eff_min_floor,
 config.influence_n_eff_min_fraction * n)` (defaults `2.0`/`0.1`) or `p_max >
 config.influence_p_max_tolerance` (default `0.5`). This check never hard-fails -- concentrated
-influence is evidence against the CLT premise, not proof that the estimator is wrong. Like every
-tolerance in this module except `backward_residual_tolerance`, these three are engineering
-guesses awaiting simulator calibration (see `docs/adr/0002-diagnostic-threshold-calibration-plan.md`),
-not theorem-derived critical values -- they only recently became overridable `DiagnosticConfig`
-fields at all (previously hardcoded literals in the function body).
+influence is evidence against the CLT premise, not proof that the estimator is wrong.
+
+These defaults now carry real calibration data (the ADS-142 experiment,
+`docs/adr/0002-diagnostic-threshold-calibration-plan.md`): `n_eff` was the strongest
+per-replicate predictor of variance blow-up the suite has (within-cell Spearman `-0.56` against
+per-replicate SE inflation in the influence-stressed cell) -- at the default floor (`0.1 * n`,
+i.e. `n_eff < 10` at `n = 100`) it flagged >2x-inflated variance estimates with precision 0.73
+and recall 0.59 across 993 replicates. `p_max` at its `0.5` default fired on ~2% of replicates
+with recall 0.04 -- essentially inert, and largely redundant with `n_eff` when tightened; treat
+its default as a last-resort tripwire rather than a calibrated gate. The blow-ups these
+thresholds catch were uniformly *conservative* in that experiment (over-wide CIs, coverage
+intact), which is why `warning` rather than a gating status remains the calibrated answer.
 
 **Optional leave-one-out sensitivity** (`config.compute_leave_one_out_sensitivity`, default
 `False`): for the union of the top `config.leave_one_out_top_k` (default `3`) most influential
@@ -362,7 +457,7 @@ the rescalings above (also verified directly in the test suite), because both th
 `q_j` cutoff cannot be -- though it is still an engineering tolerance, not a value derived from
 a theorem, unless it has been calibrated against a simulator for this specific deployment family.
 
-## Why the exact nonlinear perturbation check is stronger
+## Why the exact nonlinear perturbation check is stronger -- and what "stronger" does not mean
 
 `check_local_nonlinearity` uses one Newton-style correction (`c_j`) as an estimate of how far the
 true nonlinear root of the perturbed equation is from the linear guess. `check_exact_nonlinear_
@@ -376,6 +471,17 @@ roots` defaults to `False` and is meant to be turned on when the cheap diagnosti
 when a rigorous bad-direction-probability bound is wanted (`num_exact_directions` should be at
 least ~300 to bound that probability below ~1% with zero observed failures, per the
 Clopper-Pearson calculation in `lifejacket.simulator_calibration.clopper_pearson_upper_bound`).
+
+"Stronger" is a statement about *measurement* (no Taylor step), not about *verdicts*. The
+ADS-142 experiment measured both checks against 1,585-1,700-replicate empirical truth per
+scenario and found: the two agree closely on scenario-level severity ranking; both are weak
+per-replicate predictors of actual variance accuracy; and in severely nonlinear regimes the
+continuation solver itself stops converging (median replicate in the hardest cell: ~all
+directions failed), at which point this check's honest output is its failure fraction, not its
+distortion statistics. When a per-dataset verdict about the sandwich's SEs is the goal, prefer
+`check_multiplier_bootstrap` (section 3b), which solves the same kind of nonlinear system but
+compares against a self-calibrating null band -- and use `a_{j,l}`/this check for what they
+measure well: locating *where* (which deployments, which designs) nonlinearity lives.
 
 ## Why a passing local diagnostic does not establish the CLT step
 
@@ -410,8 +516,9 @@ unverified claim for a claim this package has no reason to think is better-found
 - `locally_supported`: the observed-data checks pass, but no end-to-end simulator calibration is
   available.
 - `failed`: a hard prerequisite (an input-check result, root/implementation, out-of-range
-  probabilities, non-finite values) or a material measured distortion (SE-ratio/mean-shift/
-  quantile-shift outside tolerance in the exact nonlinear check) failed.
+  probabilities, non-finite values) or a material measured distortion failed -- SE-ratio/
+  mean-shift/quantile-shift beyond its null band or tolerance in the exact nonlinear check, or
+  bootstrap SEs above their null band (sandwich SE understated) in `check_multiplier_bootstrap`.
 - `indeterminate`: weak identification, rank-deficient target covariance, unstable solves,
   insufficient perturbation directions, or inadequate simulator coverage prevent a conclusion
   either way.

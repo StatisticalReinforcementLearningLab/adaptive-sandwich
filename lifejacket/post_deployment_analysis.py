@@ -680,8 +680,14 @@ def analyze_dataset(
 
     theta_dim = len(theta_est)
     if not suppress_all_data_checks:
-        input_checks.require_estimating_functions_sum_to_zero(
+        # SE-standardized form: the residual is measured by how far it displaces each stacked
+        # estimate in units of that estimate's own SE, which is portable across reward scales --
+        # the legacy raw-units version false-alarmed on healthy high-noise runs (docs/adr/0002,
+        # correction 2026-08-31).
+        input_checks.require_estimating_functions_sum_to_zero_se_standardized(
             avg_estimating_function_stack,
+            raw_joint_bread_matrix,
+            joint_sandwich_matrix,
             beta_dim,
             theta_dim,
             suppress_interactive_data_checks,
@@ -874,13 +880,11 @@ def analyze_dataset(
                 len(subject_ids),
                 diagnostic_config or diagnostics.DiagnosticConfig(),
                 # Only the reconstruction check is re-run here: it has no numeric equivalent
-                # inside the diagnostic suite. require_estimating_functions_sum_to_zero (still run
-                # unconditionally above, interactively, as part of the main pipeline) is
-                # deliberately NOT also wired in here anymore -- check_root_and_implementation's
-                # own a_root_max already answers the same underlying question ("was the equation
-                # actually solved?"), and does so in SE-standardized, portable units rather than
-                # the legacy check's arbitrary absolute tolerances (the same non-portability
-                # problem discussed for r_j/q_j) -- so re-running it here was redundant, not an
+                # inside the diagnostic suite. The sum-to-zero check (run unconditionally above,
+                # interactively, as part of the main pipeline -- now in its SE-standardized
+                # displacement form, require_estimating_functions_sum_to_zero_se_standardized)
+                # is deliberately NOT also wired in here: the pipeline already hard-runs it
+                # before the suite starts, so re-running it would be redundant, not an
                 # independent signal.
                 legacy_check_callables=[
                     (

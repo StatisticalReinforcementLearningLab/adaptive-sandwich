@@ -938,3 +938,275 @@ def test_multiplier_bootstrap_auto_mode_screens_on_local_nonlinearity():
     assert "multiplier_bootstrap" in always.check_results
     assert always.check_results["multiplier_bootstrap"].status == CheckStatuses.PASSED
     assert "multiplier_bootstrap" not in run("off").check_results
+
+
+# ---------------------------------------------------------------------------
+# 10. check_exploration_and_weights -- the suite's only always-on hard gate besides
+#     root_and_implementation, previously with no direct coverage. Positivity/overlap
+#     enforcement lives HERE (the legacy input check was deliberately toothless and has been
+#     removed), so both directions of every gate get a case.
+# ---------------------------------------------------------------------------
+
+
+def _exploration_df(probs, active=None):
+    import pandas as pd
+
+    n = len(probs)
+    return pd.DataFrame(
+        {
+            "in_study": active if active is not None else [1] * n,
+            "calendar_t": [t % 2 for t in range(n)],
+            "action1prob": probs,
+        }
+    )
+
+
+def _run_exploration_check(df, config=None, **kwargs):
+    return d.check_exploration_and_weights(
+        df,
+        "in_study",
+        "calendar_t",
+        "action1prob",
+        config or d.DiagnosticConfig(),
+        **kwargs,
+    )
+
+
+def test_exploration_check_passes_on_interior_probabilities():
+    result = _run_exploration_check(_exploration_df([0.3, 0.7, 0.5, 0.4]))
+    assert result.status == CheckStatuses.PASSED
+    assert result.metrics["action_prob_global_min"] == 0.3
+    assert result.metrics["action_prob_global_max"] == 0.7
+
+
+def test_exploration_check_hard_fails_on_boundary_probability():
+    # Exactly 1.0 violates the OPEN interval requirement -- this is where positivity/overlap
+    # is actually enforced.
+    result = _run_exploration_check(_exploration_df([0.3, 1.0, 0.5, 0.4]))
+    assert result.status == CheckStatuses.FAILED
+    assert any("outside the open interval" in w for w in result.warnings)
+
+
+def test_exploration_check_hard_fails_on_nonfinite_probability():
+    result = _run_exploration_check(_exploration_df([0.3, float("nan"), 0.5, 0.4]))
+    assert result.status == CheckStatuses.FAILED
+    assert any("Nonfinite" in w for w in result.warnings)
+
+
+def test_exploration_check_ignores_inactive_rows():
+    # An out-of-range value on an INACTIVE row is not a violation: the policy never acted there.
+    result = _run_exploration_check(
+        _exploration_df([0.3, 5.0, 0.5, 0.4], active=[1, 0, 1, 1])
+    )
+    assert result.status == CheckStatuses.PASSED
+    assert result.metrics["action_prob_global_max"] == 0.5
+
+
+def test_exploration_check_enforces_supplied_design_bounds_in_both_directions():
+    config = d.DiagnosticConfig(exploration_floor=0.1, exploration_ceiling=0.9)
+    ok = _run_exploration_check(_exploration_df([0.1, 0.5, 0.9, 0.4]), config)
+    assert ok.status == CheckStatuses.PASSED
+    assert ok.metrics["fraction_at_or_near_floor"] == 0.25
+    assert ok.metrics["fraction_at_or_near_ceiling"] == 0.25
+
+    below = _run_exploration_check(_exploration_df([0.05, 0.5, 0.5, 0.4]), config)
+    assert below.status == CheckStatuses.FAILED
+    assert any("exploration_floor" in w for w in below.warnings)
+
+    above = _run_exploration_check(_exploration_df([0.5, 0.95, 0.5, 0.4]), config)
+    assert above.status == CheckStatuses.FAILED
+    assert any("exploration_ceiling" in w for w in above.warnings)
+
+
+def test_exploration_check_importance_weight_trajectories():
+    # Equal final weights across subjects -> normalized ESS is exactly 1; a nonfinite weight
+    # under perturbation is a hard fail.
+    df = _exploration_df([0.3, 0.7, 0.5, 0.4])
+    healthy = _run_exploration_check(
+        df, perturbed_weight_trajectories=[{0: {1: 2.0}, 1: {1: 2.0}}]
+    )
+    assert healthy.status == CheckStatuses.PASSED
+    assert healthy.metrics["ess_over_n_by_direction"]["median"] == 1.0
+
+    broken = _run_exploration_check(
+        df, perturbed_weight_trajectories=[{0: {1: float("inf")}, 1: {1: 2.0}}]
+    )
+    assert broken.status == CheckStatuses.FAILED
+    assert any("Nonfinite importance weight" in w for w in broken.warnings)
+
+
+# ---------------------------------------------------------------------------
+# 11. check_root_and_implementation -- the two documented failure modes that had doc snippets
+#     but no tests (docs/diagnostics_tutorial.md section 5, cases B and C).
+# ---------------------------------------------------------------------------
+
+
+def test_root_correction_beyond_tolerance_hard_fails():
+    # eta_hat = 0 is NOT a root of g(eta) = eta - [1, 0]; with se = 0.1 per contrast the
+    # implied correction is 10 SE -- far past root_error_tolerance_se = 0.01.
+    B = np.eye(2)
+    result = d.check_root_and_implementation(
+        lambda eta: B @ eta - jnp.array([1.0, 0.0]),
+        jnp.zeros(2),
+        np.array([-1.0, 0.0]),
+        B,
+        np.eye(2),
+        d.factor_bread(B),
+        np.eye(2),
+        ["theta_0", "theta_1"],
+        np.eye(2) * 0.01,  # se = 0.1 per contrast
+        d.DiagnosticConfig(),
+    )
+    assert result.status == CheckStatuses.FAILED
+    np.testing.assert_allclose(result.metrics["a_root_max"], 10.0, rtol=1e-3)
+
+
+def test_mismatched_supplied_derivative_warns_but_does_not_fail():
+    # g_tilde really is I @ eta, but the supplied "analytic" Jacobian says diag([1, 2]) -- the
+    # finite-difference spot check must flag it as a warning (g0 is exactly 0, isolating this
+    # from the root-error gate).
+    B_true = np.eye(2)
+    B_wrong = np.diag([1.0, 2.0])
+    result = d.check_root_and_implementation(
+        lambda eta: B_true @ eta,
+        jnp.zeros(2),
+        np.zeros(2),
+        B_wrong,
+        np.eye(2),
+        d.factor_bread(B_wrong),
+        np.eye(2),
+        ["theta_0", "theta_1"],
+        np.eye(2),
+        d.DiagnosticConfig(),
+    )
+    assert result.status == CheckStatuses.WARNING
+    assert result.metrics["finite_difference_max_relative_error"] > 0.01
+
+
+# ---------------------------------------------------------------------------
+# 12. check_bread_stability -- healthy pass and the rank/fragility indeterminate paths.
+# ---------------------------------------------------------------------------
+
+
+def test_bread_stability_passes_on_well_conditioned_system():
+    n = 50
+    result = d.check_bread_stability(
+        np.eye(2), np.eye(2), 0, 2, n, np.eye(2) / n, d.DiagnosticConfig()
+    )
+    assert result.status == CheckStatuses.PASSED
+    assert result.metrics["target_covariance_rank_estimate"] == 2
+    assert (
+        result.metrics["numerical_sensitivity_max_relative_se_change"]
+        < d.DiagnosticConfig().se_distortion_tolerance
+    )
+
+
+def test_bread_stability_indeterminate_on_rank_deficient_target_covariance():
+    n = 50
+    result = d.check_bread_stability(
+        np.eye(2), np.eye(2), 0, 2, n, np.diag([1.0, 0.0]) / n, d.DiagnosticConfig()
+    )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["target_covariance_rank_estimate"] < 2
+
+
+def test_bread_stability_flags_numerically_fragile_standard_errors():
+    # B = diag(1, 1e-5): the check's 1e-6 * ||B||-scale perturbation is ~10% of the small
+    # diagonal, so that component's SE moves far past se_distortion_tolerance -- the reported
+    # SEs are numerically fragile (the co-occurring near-degenerate V_hat is inherent to the
+    # construction; either indeterminate trigger is a correct diagnosis, and the sensitivity
+    # metric itself must register).
+    n = 50
+    B = np.diag([1.0, 1e-5])
+    M = np.eye(2)
+    V = np.linalg.solve(B, M) @ np.linalg.inv(B).T / n
+    result = d.check_bread_stability(B, M, 0, 2, n, V, d.DiagnosticConfig())
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert (
+        result.metrics["numerical_sensitivity_max_relative_se_change"]
+        > d.DiagnosticConfig().se_distortion_tolerance
+    )
+
+
+# ---------------------------------------------------------------------------
+# 13. check_jacobian_drift -- pass on an affine map, warn when the Jacobian moves by more than
+#     the contraction threshold (rho >= 1) within the sampled perturbation range.
+# ---------------------------------------------------------------------------
+
+
+def _drift_inputs(seed=5, n=25, stack_scale=5.0):
+    rng = np.random.default_rng(seed)
+    stacks = rng.standard_normal((n, 1)) * stack_scale
+    return stacks, np.array([[1.0]])
+
+
+def test_jacobian_drift_passes_on_affine_map():
+    stacks, B = _drift_inputs()
+    result = d.check_jacobian_drift(
+        _affine_map(B),
+        jnp.zeros(1),
+        B,
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        d.DiagnosticConfig(),
+    )
+    assert result.status == CheckStatuses.PASSED
+    assert result.metrics["rho_max"] < 0.1
+
+
+def test_jacobian_drift_warns_when_contraction_threshold_crossed():
+    # g(eta) = eta + 10*eta^2 has Dg = 1 + 20*eta: at sandwich-scale path points (~0.2 here)
+    # rho = |Dg - 1| = |20*eta| crosses 1 well inside the sampled range.
+    stacks, B = _drift_inputs()
+
+    def g_tilde(eta):
+        return eta + 10.0 * eta**2
+
+    result = d.check_jacobian_drift(
+        g_tilde,
+        jnp.zeros(1),
+        B,
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        d.DiagnosticConfig(),
+    )
+    assert result.status == CheckStatuses.WARNING
+    assert result.metrics["rho_max"] >= 1.0
+
+
+# ---------------------------------------------------------------------------
+# 14. check_multiplier_bootstrap's mean-shift gate -- the one bootstrap failure path without a
+#     direct test: even curvature displaces the resampled roots systematically, which no SE
+#     ratio can see.
+# ---------------------------------------------------------------------------
+
+
+def test_multiplier_bootstrap_fails_on_curvature_induced_mean_shift():
+    # g(eta) = eta + c*eta^2: the perturbed root (-1 + sqrt(1 + 4cs))/(2c) has mean
+    # ~ -c*Var(s) < 0 across +/- paired draws (the linear parts cancel; the quadratic bias
+    # does not), so mean_shift_se ~ c*sd(s) in target-SE units -- chosen here to clear the
+    # 0.10 gate decisively while SD distortion stays inside its null band.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+
+    def g_tilde(eta):
+        return eta + 0.8 * eta**2
+
+    result = d.check_multiplier_bootstrap(
+        g_tilde,
+        jnp.zeros(1),
+        np.zeros(1),
+        d.factor_bread(B),
+        stacks,
+        n,
+        np.eye(1),
+        ["theta_0"],
+        V_hat,
+        d.DiagnosticConfig(num_bootstrap_draws=100),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert (
+        result.metrics["mean_shift_se"] > d.DiagnosticConfig().mean_shift_tolerance_se
+    )

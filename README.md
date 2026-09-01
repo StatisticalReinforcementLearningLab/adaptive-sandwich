@@ -185,9 +185,17 @@ Hooks configured in `.pre-commit-config.yaml`:
 | `pytest-unit` | Run `tests/unit_tests` (excluding `slow`-marked tests) before every commit |
 
 ## Testing
-uv run python -m pytest
-uv run python -m pytest tests/unit_tests
-uv run python -m pytest tests/integration_tests
+
+```bash
+uv run python -m pytest                            # everything
+uv run python -m pytest tests/unit_tests           # fast, run before every commit
+uv run python -m pytest tests/integration_tests    # slower, real simulator runs
+```
+
+Both suites also run on every pull request (`.github/workflows/run_unit_tests_on_prs.yml`
+and `run_integration_tests_on_prs.yml`).
+
+The unit tests, but not the integration tests, will run on every commit once pre-commit is installed as described above.
 
 ### Performance benchmarks
 `tests/benchmarks` is a phase-timing + numerical-regression benchmark for
@@ -195,8 +203,18 @@ uv run python -m pytest tests/integration_tests
 always fast; "medium", matching `tests/integration_tests`' scale, marked
 `slow`). Run with `-s` to see the per-phase wall-clock breakdown:
 
-    python -m pytest tests/benchmarks -v -s              # both scales
-    python -m pytest tests/benchmarks -v -s -m "not slow" # small only, fast
+```bash
+uv run python -m pytest tests/benchmarks -v -s                # both scales
+uv run python -m pytest tests/benchmarks -v -s -m "not slow"  # small only, fast
+```
+
+**These report timings; they do not fail on them.** Nothing in `tests/benchmarks`
+compares a duration against a threshold or a stored baseline, so a run that got
+10x slower still passes — the numbers only mean something to a human reading the
+`-s` output, which is why they are not in CI. Wall-clock on a shared runner varies
+by more than the regressions worth catching, so the useful CI signal here would be
+deterministic work counters (how many times the structural precompute is built, how
+many `g_tilde` evaluations a fixed fixture takes) rather than seconds.
 
 See `docs/adr/0001-adaptive-sandwich-performance-plan.md` for why this exists
 (including a JIT compile-time regression it caught) and

@@ -81,9 +81,9 @@ def _peak_rss_mb() -> float:
 
 
 @contextlib.contextmanager
-def _dampened_stack_evaluation_logging():
+def _suppress_lifejacket_info_logging():
     """
-    Silences INFO-level logging for the duration of the block.
+    Silences this package's INFO-level logging for the duration of the block.
 
     get_avg_weighted_estimating_function_stacks_and_aux_values unconditionally logs
     shape-bucket-fan-out and phase-duration INFO lines that describe the ONE real analysis
@@ -93,13 +93,22 @@ def _dampened_stack_evaluation_logging():
     logging, and the bootstrap/diagnostic summaries and warnings, are unaffected -- WARNING and
     above still pass through, deliberately.
     """
-    root_logger = logging.getLogger()
-    previous_level = root_logger.level
-    root_logger.setLevel(logging.WARNING)
+    # Scoped to THIS PACKAGE's logger, never the root logger. Every module here does
+    # logging.getLogger(__name__), so "lifejacket" is the common ancestor of all of them and
+    # setting its level suppresses exactly this package's INFO lines (a child at the default
+    # NOTSET delegates upward to it) while leaving every other library, and the embedding
+    # application's own logging, untouched. Raising the ROOT level here instead would silently
+    # swallow unrelated INFO from anyone who calls analyze_dataset inside a larger program, and
+    # would re-break the package-logging policy adopted deliberately in 7bf274b ("no more
+    # configuring of root level loggers ... python usage will log nothing unless the user
+    # configures a logger").
+    package_logger = logging.getLogger(__name__.split(".")[0])
+    previous_level = package_logger.level
+    package_logger.setLevel(logging.WARNING)
     try:
         yield
     finally:
-        root_logger.setLevel(previous_level)
+        package_logger.setLevel(previous_level)
 
 
 @click.group()
@@ -424,6 +433,24 @@ def analyze_dataset_wrapper(**kwargs):
     analyze_dataset(**kwargs)
 
 
+# The closed set of _newton_refit exit reasons. Deliberately a Literal of plain strings rather
+# than an enum.Enum: these values are tallied into refit_percentile_bootstrap's
+# `bootstrap_failure_reasons` (typed `dict[str, int]`) and pickled into analysis.pkl, which the
+# cluster aggregation scripts read -- enum members would pickle as objects requiring the reader to
+# import lifejacket, and would break any consumer comparing against a plain string. A Literal keeps
+# the runtime values ordinary strings while still stating the closed set at the signature, so the
+# docstring's enumeration below cannot silently drift from the code.
+_NewtonRefitReason = typing.Literal[
+    "step",
+    "residual_reduction",
+    "nonfinite_residual",
+    "nonfinite_jacobian",
+    "singular_jacobian",
+    "nonfinite_iterate",
+    "max_iterations",
+]
+
+
 def _newton_refit(
     stack_fn: Callable[[jnp.ndarray], jnp.ndarray] | None,
     x0: jnp.ndarray,
@@ -433,7 +460,7 @@ def _newton_refit(
     stack_and_jacobian_fn: Callable[[jnp.ndarray], tuple[jnp.ndarray, jnp.ndarray]]
     | None = None,
     jacobian_row_chunk_size: int | None = None,
-) -> tuple[np.ndarray, bool, int]:
+) -> tuple[np.ndarray, bool, _NewtonRefitReason]:
     """
     True-Newton root-find of stack_fn, re-differentiated at every iterate by the same
     memory-bounded reverse-mode pass used to build the joint bread (compute_row_chunked_jacobian,
@@ -1207,7 +1234,7 @@ def analyze_dataset(
                     )
                 )
 
-            with _dampened_stack_evaluation_logging():
+            with _suppress_lifejacket_info_logging():
                 # Probe the jitted fast path once before handing it to every draw. This is the
                 # first place on the analysis path where jax.jit's abstract tracing of USER
                 # code is mandatory rather than best-effort, so a trace/compile failure has to
@@ -1428,7 +1455,7 @@ def analyze_dataset(
             def _diagnostics_g_tilde_jitted(
                 flattened_betas_and_theta: jnp.ndarray,
             ) -> jnp.ndarray:
-                with _dampened_stack_evaluation_logging():
+                with _suppress_lifejacket_info_logging():
                     return _diagnostics_eval_stack_jit(
                         flattened_betas_and_theta, _diagnostics_jit_arrays
                     )
@@ -1436,7 +1463,7 @@ def analyze_dataset(
             def _diagnostics_g_tilde_eager(
                 flattened_betas_and_theta: jnp.ndarray,
             ) -> jnp.ndarray:
-                with _dampened_stack_evaluation_logging():
+                with _suppress_lifejacket_info_logging():
                     return jnp.asarray(
                         _evaluate_avg_stack_on_shared_precompute(
                             flattened_betas_and_theta, _diagnostics_jit_arrays

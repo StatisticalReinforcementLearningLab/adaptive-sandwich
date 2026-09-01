@@ -443,16 +443,26 @@ def compute_row_chunked_jacobian(
 
     num_chunks = math.ceil(out_dim / effective_chunk_size)
     padded_out_dim = num_chunks * effective_chunk_size
-    # Rows out_dim..padded_out_dim-1 of a non-square jnp.eye are all zero --
-    # that is the padding described above, at no extra construction cost.
-    cotangent_chunks = jnp.eye(padded_out_dim, out_dim, dtype=outputs.dtype).reshape(
-        num_chunks, effective_chunk_size, *outputs.shape
-    )
 
-    def pull_back_chunk(cotangent_chunk):
+    def pull_back_chunk(chunk_index):
+        # Build THIS chunk's rows of the identity from the chunk index, rather than slicing a
+        # materialized (padded_out_dim, out_dim) one. That array is O(out_dim**2) and, as a
+        # lax.map operand, stays live for the whole scan -- an unbounded term inside the helper
+        # whose entire job is bounding memory, and one that grows in exactly the wrong
+        # direction: the auto policy shrinks chunk_size as out_dim rises (65536 // out_dim), so
+        # the ratio of the unbounded term to the bounded one grows like out_dim**3. Constructing
+        # per chunk keeps peak cotangent memory at chunk_size x out_dim, the intended bound.
+        # Rows at or past out_dim compare equal to nothing and come out all-zero, which is
+        # exactly the padding described above.
+        row_ids = chunk_index * effective_chunk_size + jnp.arange(effective_chunk_size)
+        cotangent_chunk = (
+            (row_ids[:, None] == jnp.arange(out_dim)[None, :])
+            .astype(outputs.dtype)
+            .reshape(effective_chunk_size, *outputs.shape)
+        )
         return jax.vmap(lambda cotangent: pullback(cotangent)[0])(cotangent_chunk)
 
-    jacobian_rows = jax.lax.map(pull_back_chunk, cotangent_chunks)
+    jacobian_rows = jax.lax.map(pull_back_chunk, jnp.arange(num_chunks))
     return jacobian_rows.reshape(padded_out_dim, *x.shape)[:out_dim].reshape(
         *outputs.shape, *x.shape
     )

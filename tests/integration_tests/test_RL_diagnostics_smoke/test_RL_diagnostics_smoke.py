@@ -1,4 +1,6 @@
+import os
 import pickle
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -7,6 +9,7 @@ from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
 )
 from tests.utils import get_abs_path
 
+from lifejacket import post_deployment_analysis
 from lifejacket.constants import CheckStatuses, DiagnosticClassifications
 from lifejacket.diagnostics import DiagnosticReport
 from lifejacket.helper_functions import load_function_from_same_named_file
@@ -311,3 +314,74 @@ def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):
     assert np.all(np.isnan(np.asarray(analysis["percentile_bootstrap_ci"])))
     assert analysis["bootstrap_num_draws"] == 4
     assert analysis["bootstrap_num_failed_draws"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Performance-regression guards, expressed as CALL COUNTS rather than wall-clock.
+#
+# tests/benchmarks measures timings but asserts nothing about them, so a run that
+# got 10x slower still passes there. Timing thresholds are not the fix: on a shared
+# CI runner the noise exceeds the regressions worth catching (this branch measured
+# the same change at 1.10x and 0.77x under load). Counting invocations of an
+# expensive operation is deterministic, machine-independent, and cannot flake.
+#
+# What these pin is a design CONTRACT, not an incidental number: the structural
+# precompute (the O(N*T) per-subject/per-update bucket construction) is built ONCE
+# per feature, not once per evaluation. The regression they exist to catch is real
+# and was shipped: the diagnostic suite's g_tilde closure rebuilt it on every call,
+# ~127 times per analysis, which is what made a 5-minute analysis take 3.6 hours.
+# Deltas rather than absolute counts, so a legitimate refactor of the base path
+# does not have to touch these.
+#
+# NOTE for anyone extending these: patch the name on post_deployment_analysis, not
+# on batched_weighted_estimating_function_stack. The former imports these builders
+# by name at module load, so patching the definition site intercepts nothing and
+# the test silently measures a call count of zero.
+# ---------------------------------------------------------------------------
+
+_MAX_EXTRA_PRECOMPUTE_BUILDS = 2
+
+
+def _count_update_layer_builds(output_dir, **overrides):
+    # analyze_dataset writes its pickles into output_dir but does not create it.
+    os.makedirs(output_dir, exist_ok=True)
+    with mock.patch.object(
+        post_deployment_analysis,
+        "build_update_layer_precompute",
+        wraps=post_deployment_analysis.build_update_layer_precompute,
+    ) as builder:
+        _run_masked_analyze_dataset(output_dir, **overrides)
+    return builder.call_count
+
+
+def test_diagnostic_suite_does_not_rebuild_the_precompute_per_evaluation(tmp_path):
+    # The suite evaluates g_tilde ~127 times at default settings. Turning it on must cost
+    # a CONSTANT number of extra precompute builds (measured: exactly one), not one per
+    # evaluation -- the difference between seconds and hours.
+    without = _count_update_layer_builds(
+        str(tmp_path / "without"), run_diagnostics=False
+    )
+    with_diagnostics = _count_update_layer_builds(
+        str(tmp_path / "with"), run_diagnostics=True
+    )
+    assert with_diagnostics - without <= _MAX_EXTRA_PRECOMPUTE_BUILDS, (
+        f"Running diagnostics added {with_diagnostics - without} structural precompute "
+        f"builds ({without} -> {with_diagnostics}). It must add a constant number, not one "
+        "per g_tilde evaluation; see _diagnostics_g_tilde's precomputed_layers wiring."
+    )
+
+
+def test_refit_bootstrap_precompute_does_not_scale_with_draw_count(tmp_path):
+    # Same contract on the other re-solving consumer: the interval re-solves the full
+    # system once per draw, and each of those must reuse one precompute rather than
+    # building its own.
+    no_draws = _count_update_layer_builds(
+        str(tmp_path / "none"), run_diagnostics=False, percentile_bootstrap_draws=0
+    )
+    with_draws = _count_update_layer_builds(
+        str(tmp_path / "six"), run_diagnostics=False, percentile_bootstrap_draws=6
+    )
+    assert with_draws - no_draws <= _MAX_EXTRA_PRECOMPUTE_BUILDS, (
+        f"6 bootstrap draws added {with_draws - no_draws} structural precompute builds "
+        f"({no_draws} -> {with_draws}); the count must not scale with the draw count."
+    )

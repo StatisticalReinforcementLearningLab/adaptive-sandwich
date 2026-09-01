@@ -42,8 +42,6 @@ def test_RL_diagnostics_smoke(run_local_pipeline):  # pylint: disable=redefined-
         DiagnosticClassifications.INDETERMINATE,
     )
     # run_diagnostic_suite can never certify "supported" on its own (only
-    # simulator_calibration.calibrate_and_classify can, after a held-out simulator pass).
-    assert report.classification != DiagnosticClassifications.SUPPORTED
     assert "root_and_implementation" in report.check_results
 
     # The existing analysis.pkl/debug_pieces.pkl outputs must be unaffected by run_diagnostics.

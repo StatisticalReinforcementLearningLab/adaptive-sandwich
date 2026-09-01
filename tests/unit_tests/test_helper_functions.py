@@ -347,3 +347,81 @@ def test_resolve_jacobian_row_chunk_size_is_one_shared_policy_object():
         post_deployment_analysis.resolve_jacobian_row_chunk_size
         is helper_functions.resolve_jacobian_row_chunk_size
     )
+
+
+# ---------------------------------------------------------------------------
+# clopper_pearson_upper_bound: moved here from the deleted simulator_calibration
+# module, which required a caller-supplied simulator and had no in-package callers.
+# This helper does: diagnostics.py reads it at six sites for the root-failure,
+# branch-change and domain-failure bounds.
+# ---------------------------------------------------------------------------
+
+
+def test_clopper_pearson_zero_failures_matches_the_closed_form():
+    import math
+
+    from lifejacket.helper_functions import clopper_pearson_upper_bound
+
+    # With no observed failures the bound reduces exactly to 1 - alpha**(1/n).
+    assert math.isclose(
+        clopper_pearson_upper_bound(0, 59, 0.95), 1 - 0.05 ** (1 / 59), rel_tol=1e-9
+    )
+    assert math.isclose(
+        clopper_pearson_upper_bound(0, 299, 0.95), 1 - 0.05 ** (1 / 299), rel_tol=1e-9
+    )
+    # More trials at the same confidence must tighten the bound.
+    assert clopper_pearson_upper_bound(0, 299, 0.95) < clopper_pearson_upper_bound(
+        0, 59, 0.95
+    )
+
+
+def test_clopper_pearson_legitimate_boundaries():
+    import math
+
+    from lifejacket.helper_functions import clopper_pearson_upper_bound
+
+    # Nothing observed: the bound is genuinely undefined, not 0 and not 1.
+    assert math.isnan(clopper_pearson_upper_bound(0, 0, 0.95))
+    # Everything failed: the bound really is 1.
+    assert clopper_pearson_upper_bound(10, 10, 0.95) == 1.0
+
+
+def test_clopper_pearson_rejects_inputs_that_would_read_as_good_news():
+    import pytest
+
+    from lifejacket.helper_functions import clopper_pearson_upper_bound
+
+    for bad_confidence in (0.0, 1.0, -0.5, 1.5):
+        with pytest.raises(ValueError, match="confidence_level"):
+            clopper_pearson_upper_bound(0, 10, bad_confidence)
+    # More failures than trials is an impossible observation; it used to return a
+    # legitimate-looking 1.0 and hide whatever miscounted upstream.
+    with pytest.raises(ValueError, match="num_failures"):
+        clopper_pearson_upper_bound(11, 10, 0.95)
+    with pytest.raises(ValueError, match="num_failures"):
+        clopper_pearson_upper_bound(-1, 10, 0.95)
+    # A negative trial count used to return nan, which callers propagate into a metric.
+    with pytest.raises(ValueError, match="num_trials"):
+        clopper_pearson_upper_bound(0, -5, 0.95)
+
+
+def test_clopper_pearson_warns_on_a_sub_50_percent_confidence_level(caplog):
+    import logging
+
+    from lifejacket.helper_functions import clopper_pearson_upper_bound
+
+    # 0.05 is a LEGAL confidence level, so this cannot be rejected -- but passing alpha where a
+    # confidence level belongs is the realistic mix-up, and it is dangerous because it returns a
+    # ~50x TIGHTER bound (0.0051 vs 0.2589 for 0 of 10) that reads as much stronger evidence.
+    # The value is still computed; the caller is told why it looks too good.
+    with caplog.at_level(logging.WARNING, logger="lifejacket.helper_functions"):
+        bound = clopper_pearson_upper_bound(0, 10, 0.05)
+    assert bound < clopper_pearson_upper_bound(0, 10, 0.95)
+    assert "confidence_level" in caplog.text
+    assert "alpha" in caplog.text
+
+    # A conventional level must not warn.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="lifejacket.helper_functions"):
+        clopper_pearson_upper_bound(0, 10, 0.95)
+    assert caplog.text == ""

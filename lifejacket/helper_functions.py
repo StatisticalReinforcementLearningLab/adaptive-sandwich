@@ -14,6 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import scipy.stats
 
 from .constants import (
     JACOBIAN_AUTO_MAX_CHUNK,
@@ -42,6 +43,72 @@ def log_phase_duration(phase_name: str):
     finally:
         elapsed = time.perf_counter() - start
         logger.info("Phase '%s' took %.3f seconds.", phase_name, elapsed)
+
+
+def clopper_pearson_upper_bound(
+    num_failures: int, num_trials: int, confidence_level: float = 0.95
+) -> float:
+    """
+    One-sided Clopper-Pearson upper confidence bound on a failure probability given
+    `num_failures` observed out of `num_trials` independent trials.
+
+    For num_failures == 0, this reduces exactly to `1 - alpha**(1/num_trials)` with
+    `alpha = 1 - confidence_level` (e.g. 0 failures in 59 directions bounds the failure
+    probability below ~5% at 95% confidence; 0 failures in 299 directions bounds it below ~1%).
+
+    The domain checks below are not defensive boilerplate: each bad input has a silent failure
+    mode that reads as GOOD NEWS -- a tighter or more legitimate-looking bound -- rather than an
+    obviously broken one, so none is allowed to pass quietly.
+      - An out-of-range confidence_level raises. A confidence_level below 0.5 cannot raise (0.05
+        is a legal level, and nothing here can distinguish "I meant 0.95" from "I want a 5%
+        bound"), so it WARNS instead: it is the shape of the alpha/confidence mix-up, which is
+        dangerous precisely because it returns a far TIGHTER bound -- (0 failures, 10 trials)
+        gives 0.0051 at 0.05 against the correct 0.2589 at 0.95, a 50x overstatement of how
+        well-bounded the failure rate is. This argument reaches here from a user-settable
+        DiagnosticConfig field, so it is reachable by configuration, not just a caller's slip.
+      - num_failures > num_trials raises; it previously returned 1.0, a legitimate-looking bound
+        for an impossible observation, hiding whatever miscounted upstream.
+      - A negative num_trials raises; it previously returned nan, which the callers propagate
+        into a reported metric rather than treat as an error.
+    The two LEGITIMATE boundary cases are handled after validation, not before it: zero trials
+    (nothing observed, so the bound is genuinely undefined -> nan) and all trials failing
+    (the bound really is 1.0).
+    """
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError(
+            "confidence_level must be strictly between 0 and 1 (it is a confidence level, "
+            f"not an alpha -- pass 0.95, not 0.05), got {confidence_level!r}."
+        )
+    if confidence_level < 0.5:
+        # Cannot be an error: 0.05 is a perfectly legal confidence level, so the range check
+        # above has no way to tell "I meant 0.95" from "I want a 5% bound". But a ONE-SIDED
+        # UPPER bound below 50% confidence is close to never what anyone wants, and it is the
+        # exact shape of the alpha/confidence mix-up -- which is dangerous precisely because it
+        # returns a TIGHTER, better-looking bound rather than an obviously broken one.
+        logger.warning(
+            "clopper_pearson_upper_bound called with confidence_level=%r, i.e. below 50%%. "
+            "This yields a much TIGHTER upper bound than a conventional level would (0 failures "
+            "in 10 trials gives %.4f here vs 0.2589 at 0.95), so it reads as far stronger "
+            "evidence than it is. If you meant to pass alpha, pass 1 - alpha instead.",
+            confidence_level,
+            float(scipy.stats.beta.ppf(confidence_level, 1, 10)),
+        )
+    if num_trials < 0:
+        raise ValueError(f"num_trials must be non-negative, got {num_trials!r}.")
+    if not 0 <= num_failures <= num_trials:
+        raise ValueError(
+            "num_failures must be between 0 and num_trials inclusive, got "
+            f"num_failures={num_failures!r} of num_trials={num_trials!r}."
+        )
+    if num_trials == 0:
+        return math.nan
+    if num_failures == num_trials:
+        return 1.0
+    return float(
+        scipy.stats.beta.ppf(
+            confidence_level, num_failures + 1, num_trials - num_failures
+        )
+    )
 
 
 def conditional_x_or_one_minus_x(x, condition):
@@ -463,8 +530,12 @@ def compute_row_chunked_jacobian(
         return jax.vmap(lambda cotangent: pullback(cotangent)[0])(cotangent_chunk)
 
     jacobian_rows = jax.lax.map(pull_back_chunk, jnp.arange(num_chunks))
+    # Concatenated shape tuple rather than two splats: identical for every non-degenerate case,
+    # but when fn(x) and x are BOTH 0-D the splats expand to nothing and this becomes a bare
+    # .reshape(), which relies on an incidental no-argument behavior instead of asking for the
+    # scalar shape explicitly.
     return jacobian_rows.reshape(padded_out_dim, *x.shape)[:out_dim].reshape(
-        *outputs.shape, *x.shape
+        outputs.shape + x.shape
     )
 
 

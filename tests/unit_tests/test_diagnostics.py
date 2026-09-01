@@ -642,10 +642,10 @@ def test_influence_concentration_thresholds_are_overridable():
 
 
 # ---------------------------------------------------------------------------
-# 11. Clopper-Pearson calculations are covered in test_simulator_calibration.py (shared helper).
+# 11. Clopper-Pearson calculations (shared helper, now in helper_functions).
 # ---------------------------------------------------------------------------
 
-from lifejacket.simulator_calibration import clopper_pearson_upper_bound  # noqa: E402
+from lifejacket.helper_functions import clopper_pearson_upper_bound  # noqa: E402
 
 
 def test_clopper_pearson_helper_reused_by_diagnostics_module():

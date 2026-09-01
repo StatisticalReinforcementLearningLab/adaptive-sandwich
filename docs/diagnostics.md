@@ -24,11 +24,7 @@ linearization link. They cannot certify the others -- which is why the suite als
 exploration/importance-weight diagnostics, bread-stability diagnostics, and influence
 concentration, why an exact nonlinear perturbation check exists as a measurement-grade (and more
 expensive) alternative, and why the multiplier bootstrap (section 3b) exists as the per-dataset
-verdict layer on the reported SEs themselves. Going further than any single-run check can -- validating against a
-simulator with known ground truth -- is possible too (`lifejacket.simulator_calibration`), but
-that is a genuinely different kind of activity (a multi-run experiment, not something a single
-`analyze_dataset` call produces) and is described in its own section at the end of this document,
-not listed among the checks below.
+verdict layer on the reported SEs themselves.
 
 ## What each check tests, and what it cannot test
 
@@ -44,10 +40,6 @@ not listed among the checks below.
 | `check_influence_concentration` (`p_max`, `n_eff`, third-moment) | Whether the estimator's fluctuation is built from many small contributions (the premise the CLT approximation needs), or is dominated by a handful of subjects | It does not itself validate normality -- it only flags a specific, common way that a CLT approximation can fail |
 | `check_exploration_and_weights` | Positivity/overlap, importance-weight concentration (ESS), and policy-score-derivative magnitude, evaluated at the estimate *and* under sandwich-scale perturbations | Whether the *supplied* exploration bounds are the deployment's real design bounds -- those must be supplied by the caller via `exploration_floor`/`exploration_ceiling` to be enforced as hard requirements |
 
-(`lifejacket.simulator_calibration.calibrate_and_classify` targets end-to-end behavior --bias,
-coverage, tail imbalance, diagnostic accuracy-- under a caller-supplied simulator, but it isn't a
-row in this table on purpose; see "Going further: validating against a simulator" at the end of
-this document for why.)
 
 ## The checks, in detail
 
@@ -701,7 +693,7 @@ Jacobian, which is what keeps hundreds of directions tractable), so `compute_exa
 roots` defaults to `False` and is meant to be turned on when the cheap diagnostic is ambiguous or
 when a rigorous bad-direction-probability bound is wanted (`num_exact_directions` should be at
 least ~300 to bound that probability below ~1% with zero observed failures, per the
-Clopper-Pearson calculation in `lifejacket.simulator_calibration.clopper_pearson_upper_bound`).
+Clopper-Pearson calculation in `lifejacket.helper_functions.clopper_pearson_upper_bound`).
 
 "Stronger" is a statement about *measurement* (no Taylor step), not about *verdicts*. The
 ADS-142 experiment measured both checks against ~1,660-replicate empirical truth per scenario
@@ -734,16 +726,12 @@ nothing about the *classical* sandwich, which relies on a different (and, under 
 adaptive/pooling design, generally false) assumption that the deployment's policy did not depend
 on past data. Silently reverting to the classical sandwich on diagnostic failure would trade one
 unverified claim for a claim this package has no reason to think is better-founded. This is why
-`run_diagnostic_suite`/`calibrate_and_classify` only ever report a classification for the
-*adjusted* analysis, and why the classification vocabulary is `supported` /
+`run_diagnostic_suite` only ever reports a classification for the
+*adjusted* analysis, and why the classification vocabulary is
 `locally_supported` / `failed` / `indeterminate` rather than a "use this sandwich instead" flag.
 
 ## Classification
 
-- `supported`: prerequisite and local checks pass, *and* `lifejacket.simulator_calibration.
-  calibrate_and_classify` has certified a low `P(inferential failure | diagnostics pass)` on a
-  held-out simulator sweep for this deployment family. `run_diagnostic_suite` alone can never
-  return this.
 - `locally_supported`: the observed-data checks pass, but no end-to-end simulator calibration is
   available.
 - `failed`: a hard prerequisite (an input-check result, root/implementation, out-of-range
@@ -781,72 +769,3 @@ operating characteristics the ADS-142 experiments measured for it (see the
 Uncalibrated warnings (radius-scaling exponents, `jacobian_drift`'s `rho`, exploration leading
 indicators) are reported but never move the verdict -- the experiments gave them no operating
 characteristics to gate on.
-
-## Going further: validating against a simulator (not one of the checks above)
-
-**This is not a single-run check, and deliberately isn't listed as one.** Every check above runs
-once, on one dataset, inside one `analyze_dataset`/`run_diagnostic_suite` call. Actually
-validating a diagnostic's threshold -- rather than trusting an engineering guess -- requires
-running the estimator many times against a simulator with a known ground truth, which is a
-different kind of activity: a standalone experiment you design and run, not a flag you pass to
-`analyze_dataset`. `lifejacket.simulator_calibration.calibrate_and_classify` is the tool for that
-experiment, not an eighth check in the suite.
-
-**The interface.** `calibrate_and_classify` is simulator-agnostic: it does not assume or invent
-any particular deployment model. You supply a `replay_fn(seed) -> DeploymentReplay` that replays
-recruitment, outcome generation, policy updates, action selection, estimation, and the adjusted
-sandwich calculation for one simulated deployment; it runs the diagnostic suite on every seed in
-`train_seeds` and `holdout_seeds`, and among *held-out* replays whose diagnostics pass, computes
-`P(inferential failure | diagnostics pass)` (via a caller-supplied `failure_predicate`) and its
-one-sided Clopper-Pearson upper confidence bound. Only when that bound is below the configured
-`risk_tolerance` does it return `supported`; any such claim is scoped to "within this simulator
-family," never a universal guarantee.
-
-**How to actually run one, for your own deployment family:**
-
-1. **Build `replay_fn`.** For each `seed`, run your simulator end-to-end and package a
-   `DeploymentReplay`: `diagnostic_kwargs` (unpacked directly into `run_diagnostic_suite` --
-   the same `g_tilde`/`B_hat`/`M_hat`/`joint_sandwich_matrix`/`per_subject_stacks`/etc. arguments
-   described throughout this document), `theta_hat`, `theta_variance_estimate`, and
-   `ground_truth_theta` if your simulator can supply one (not every simulator can -- an adaptive
-   design's estimand isn't always a fixed population constant; a common approach is a
-   cross-replicate Monte Carlo mean at the same `n`/`T` as the test seeds, treated as a separate
-   design decision, not something `calibrate_and_classify` picks for you).
-2. **Split `train_seeds`/`holdout_seeds`, and don't skip this.** `train_seeds` are available for
-   your own threshold-tuning but otherwise unused by the function; the reported bound is computed
-   *only* from `holdout_seeds`. Reusing training seeds for that bound would be circular.
-3. **Write your own `failure_predicate`.** The shipped `default_failure_predicate` is explicitly a
-   minimal, non-authoritative example (nonfinite/negative variance, or -- if you supplied
-   `ground_truth_theta` -- a coverage check against it). Match it to what "inferential failure"
-   actually means for your deployment. It is called as `failure_predicate(replay, config)` --
-   exactly two positional arguments, the second being the `DiagnosticConfig` the suite was just
-   run with -- so your predicate must accept that second argument even if it ignores it, and any
-   further knobs of your own should be bound with `functools.partial` rather than added as
-   positional parameters (which would just receive the config).
-4. **Call it and read `CalibrationResult`**: `classification`, `conditional_failure_rate_upper_bound`,
-   `per_replay_records` (per-seed detail for your own further analysis).
-
-**Honest scope.** This is inherently a multi-run, often computationally significant undertaking --
-each replay re-runs your full simulator, estimator, and diagnostic suite. `tests/unit_tests/
-test_simulator_calibration.py` exercises `calibrate_and_classify` against small in-process toy
-replays (affine estimating maps) -- the fastest way to validate the calibration/classification
-logic itself, but not a stand-in for a real experiment at real scale.
-
-This repository does contain a full deployment simulator
-(`tests/simulators_and_runners/rl_study_simulation.py`, driven by `run_local_synthetic.sh`), and
-`post_deployment_analysis.analyze_dataset` accepts `run_diagnostics`/`diagnostic_config` so the
-suite can be run against real simulated deployments end-to-end -- see
-`tests/integration_tests/test_RL_diagnostics_smoke`, which runs the simulator, the estimator,
-and the diagnostic suite together via the CLI and checks that `diagnostic_report.pkl` comes out
-sane. Wiring that same simulator directly into `calibrate_and_classify`'s in-process `replay_fn`
-contract would require exposing the estimator's internal bread/meat/`g_tilde` pieces from
-`analyze_dataset` for reuse (rather than only its pickled outputs), which this change
-deliberately does not do in order to avoid touching the core estimation pipeline more than
-necessary; a deployment wanting the full `calibrate_and_classify` treatment against this
-repository's simulator can build a `replay_fn` the same way `analyze_dataset` does internally,
-using the already-public helpers in `post_deployment_analysis`
-(`construct_beta_index_by_policy_num_map`, `construct_classical_and_adjusted_sandwiches`, etc.).
-For a real, cluster-scale worked example of exactly this kind of experiment (validating this
-package's own default tolerances, not a specific deployment's), see
-`docs/adr/0002-diagnostic-threshold-calibration-plan.md` -- the scenario-grid, ground-truth, and
-SLURM-mechanics design there generalizes directly to validating your own deployment family.

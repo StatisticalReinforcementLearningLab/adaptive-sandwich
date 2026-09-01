@@ -45,7 +45,13 @@ JACOBIAN_AUTO_MAX_CHUNK = 64
 
 
 class DiagnosticClassifications:
-    SUPPORTED = "supported"
+    # NOTE: "supported" was removed on 2026-09-01 along with lifejacket.simulator_calibration,
+    # which was its only producer. That module required the CALLER to supply a runnable
+    # simulator (a replay_fn), nothing in this package called it, and its Clopper-Pearson
+    # certificate silently assumed the caller's holdout seeds were unique and disjoint from
+    # the training seeds -- a deterministic replay_fn repeating one passing seed could issue a
+    # strong-looking certificate from a single independent replay. The decision-level vocabulary
+    # now lives in DiagnosticVerdicts, which run_diagnostic_suite can actually produce.
     LOCALLY_SUPPORTED = "locally_supported"
     FAILED = "failed"
     INDETERMINATE = "indeterminate"

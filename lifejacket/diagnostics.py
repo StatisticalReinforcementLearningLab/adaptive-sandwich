@@ -18,12 +18,12 @@ from .constants import (
     VerdictBases,
 )
 from .helper_functions import (
+    clopper_pearson_upper_bound,
     compute_row_chunked_jacobian,
     get_radon_nikodym_weight,
     matrix_inv_sqrt,
     resolve_jacobian_row_chunk_size,
 )
-from .simulator_calibration import clopper_pearson_upper_bound
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class DiagnosticConfig:
     """
     Configuration for the layered diagnostic suite in this module. All tolerances are
     engineering tolerances, not theorem-derived critical values, unless a particular deployment
-    has calibrated them via lifejacket.simulator_calibration against its own simulator.
+    has calibrated them against its own simulator.
     """
 
     random_seed: int = 0
@@ -3240,9 +3240,8 @@ def run_diagnostic_suite(
 ) -> DiagnosticReport:
     """
     Runs the full layered diagnostic suite and combines every check into one DiagnosticReport.
-    This function alone can never return DiagnosticClassifications.SUPPORTED -- that
-    classification is only available from simulator_calibration.calibrate_and_classify after a
-    held-out simulator pass, enforced here directly (not merely by convention).
+    The decision-level summary this pairs with is DiagnosticVerdicts (see _derive_verdict);
+    `classification` itself stays deliberately WARNING-blind.
     """
     config = config or DiagnosticConfig()
     warnings_list: list[str] = []

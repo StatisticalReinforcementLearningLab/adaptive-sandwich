@@ -59,7 +59,9 @@ Define the exact check's own "material distortion" condition (`se_ratios` outsid
 or `mean_shift_se`/`quantile_shift` above `0.10`) as the answer key, and, offline, sweep candidate
 `nonlinear_correction_tolerance_se` values against it to get a false-negative-rate curve (cheap
 check says fine, exact check says it isn't) with a Clopper-Pearson upper bound at each candidate
-threshold, reusing `simulator_calibration.clopper_pearson_upper_bound` directly.
+threshold, reusing `clopper_pearson_upper_bound` directly (it lived in `simulator_calibration`
+when this was written; that module was removed on 2026-09-01 and the helper now lives in
+`lifejacket.helper_functions`).
 
 This needs real variation in *how nonlinear* the estimating equation actually is across scenario
 cells — a grid where every cell is comfortably linear can't calibrate anything.

@@ -9,7 +9,7 @@ class SandwichFormationMethods:
     NAIVE = "naive"
 
 
-# Auto-mode heuristic for post_deployment_analysis.resolve_jacobian_row_chunk_size
+# Auto-mode heuristic for helper_functions.resolve_jacobian_row_chunk_size
 # (jacobian_row_chunk_size=None). HONESTY NOTE: out_dim (= num_updates *
 # beta_dim + theta_dim) is a single-variable PROXY for the true backward-pass
 # peak-memory driver -- the per-cotangent backward-graph footprint also grows
@@ -56,3 +56,36 @@ class CheckStatuses:
     WARNING = "warning"
     FAILED = "failed"
     INDETERMINATE = "indeterminate"
+
+
+class DiagnosticVerdicts:
+    """
+    The decision-level summary derived from the suite (DiagnosticReport.verdict) -- the four
+    outcomes the ADS-142 calibration experiments showed a single run can actually support
+    (docs/adr/0002, results sections), phrased as the answer to "can I report this CI?":
+
+    - CERTIFIED: report it. Everything gated passed; see DiagnosticReport.verdict_basis for
+      whether the multiplier bootstrap verified the SEs directly ("bootstrap") or the run was
+      quiet enough that the calibrated a_{j,l} screen never called for it ("screen").
+    - CONSERVATIVE: report it, with the caveat that its width is likely inflated -- the
+      calibrated conservatism signals fired (bootstrap SEs below their null band, and/or
+      influence concentration under its floor). Direction trustworthy, power wasted; the
+      ADR 0003 percentile refit bootstrap is the interval-level remedy.
+    - UNCERTIFIABLE: do not report it as validated. Something is unresolved -- re-solve
+      fragility, a censored ensemble, an unevaluable gate, or the screen called for the
+      bootstrap and it was not run. Empirically, every genuinely miscalibrated design in the
+      calibration grids landed here (or in INVALID) rather than falsely certifying.
+    - INVALID: do not report it. A hard prerequisite failed (input wiring, root/implementation,
+      positivity) or a measured failure occurred (a distortion gate, or a rank-deficient target
+      covariance -- the zero-width-CI collapse mode, 76/76 of which this condition caught).
+    """
+
+    CERTIFIED = "certified"
+    CONSERVATIVE = "conservative"
+    UNCERTIFIABLE = "uncertifiable"
+    INVALID = "invalid"
+
+
+class VerdictBases:
+    BOOTSTRAP = "bootstrap"
+    SCREEN = "screen"

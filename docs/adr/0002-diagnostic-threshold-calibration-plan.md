@@ -316,7 +316,7 @@ hand-picked the same way we're trying to avoid for `a_{j,l}` in the first place.
   different reason: it's pinned to float64 machine epsilon regardless of `B_hat`'s conditioning
   (confirmed empirically across condition numbers spanning twelve orders of magnitude), so it's a
   software-correctness smoke detector, not an engineering tolerance needing simulator data — see
-  `docs/diagnostics_tutorial.md` section 5, case F.
+  `docs/diagnostics_tutorial.md` section 5, case E.
 
 ## Results (2026-08-29, wave 2 essentially complete)
 
@@ -443,6 +443,33 @@ correlations).
   signal is dominated by `n_eff`, and its false-fire cost elsewhere is nil (sensitivities ~1e-4
   in healthy cells).
 
+### Which of this plan's thresholds are still thresholds (2026-08-31)
+
+Two of the quantities this plan named as calibration targets have since stopped being fixed
+tolerances, so the corresponding parts of the Track A/B text above and of the Aggregation section
+describe fields whose meaning has moved. Recorded here rather than edited into the historical
+plan:
+
+- **`mean_shift_se` is no longer judged against a fixed `0.10`.** Track A's answer key (above) and
+  revision #1's "secondary keys" both treat `mean_shift_se > 0.10` as a distortion condition. The
+  check now compares it against `max(simulated finite-draw null upper quantile,
+  config.mean_shift_tolerance_se)` and computes it on complete antithetic pairs only, so
+  `mean_shift_tolerance_se` is a practical-significance FLOOR under a self-calibrating band — the
+  same treatment `se_ratios` got from finding 1, and for the same reason: at the experiment's own
+  `J`, an unpaired `||mean_j(rows)||` is sampling noise of order `sqrt(chi2_dim / J)`, well above
+  `0.10`. It therefore joins `se_ratios` in the "not a calibration target" column. (Under intact
+  pairing the band is exactly `0` and the floor binds, so the answer key's behavior on the
+  paired wave-2 configs is unchanged.)
+- **`target_covariance_rank_estimate` now measures the target block, not the joint sandwich.**
+  The Aggregation section lists it as a Track B field; `check_bread_stability` now computes it
+  (and the new `target_covariance_dim`, plus `target_covariance_eigenvalues`) on `L @ V_hat @ L^T`
+  — the theta block by default — instead of on the full joint `V_hat`, whose healthy beta blocks
+  kept the rank gate unfireable at any real study scale. Wave-2 rows collected under the old
+  meaning are joint-sandwich ranks; re-derive rather than pool across the change.
+
+Neither change affects a decision recorded above: `se_distortion_tolerance` and the `n_eff`/
+`p_max` defaults, the only thresholds this experiment actually settled, are untouched.
+
 ### Follow-up experiments (submitted from `adjusted-sandwich-user`)
 
 1. **Undercoverage hunt** (`ads142_undercoverage_hunt.sh`): 5 cells x 1000 seeds deliberately
@@ -458,3 +485,162 @@ correlations).
    the known 1.5x conservatism); hard INDETERMINATE via re-solve fragility; influence
    below-sandwich ratios tracking the known 1.6-2.2x overestimation -- the last being the
    designed empirical test of the no-replay concern.
+
+### Round-2 results (2026-09-01): both follow-ups complete
+
+321 runs across 9 jobs (`ads142_validation_final.csv`). Two findings, the second of which
+supersedes an earlier reading of the partial data.
+
+**1. The no-policy-replay concern is refuted.** The influence cell at 25 draws (job 43197763)
+against its own 993-replicate pool (job 42600442, identical design: `delayed_1_action_dosage`,
+steepness 5.0, n=100, T=50, clips 0.1/0.9) gives bootstrap-SE-median / pool-truth-SD of
+**1.05, 1.32, 0.99, 1.31** across theta_0..3 -- no systematic undershoot, which is the opposite
+of what a missing policy replay predicts. On the clean cells the same ratio is 0.96-1.01. The
+bootstrap is also far better behaved in the tail than the estimator it audits: its p90/median
+is ~1.4x, while the sandwich's median SE of 0.047 sits against a **maximum of 1.1e4**. Below-band
+flags track genuine over-inflation (flagged runs' sandwich/truth median 2.09, IQR 1.76-2.69, vs
+1.59 unflagged); the 7 above-band trips track nothing real (their sandwich inflation is *lower*
+than average), i.e. small-J band noise, consistent with this grid containing no anticonservative
+cell.
+
+**2. Most FAILED verdicts in the fragile cells were artifacts of a defective gate, not findings.**
+The 2026-08-31 code review confirmed that the mean-shift statistic `b_L` was compared against a
+fixed 0.10 with no finite-draw null band, and that its antithetic pairing -- the only thing
+suppressing pure sampling noise -- is destroyed by asymmetric convergence censoring. Decomposing
+what actually drove each verdict: **24 of the influence cell's 50 failures and 16 of the medium
+cell's 34 were mean-shift-only, with no band violation at all.** Clean cells never misfire
+(mean-shift median 0.012, max 0.031, all 200 draws converged, pairing intact). Every one of the
+50 influence runs has a solver failure fraction above 10% (median 0.56, range 0.12-0.86), so
+once solver-unhealthy preempts the location gate that cell reads INDETERMINATE / cannot-certify
+rather than FAILED -- matching the hard cell and U5, both at 100% solver failure.
+
+Per-cell verdicts as recorded *before* the fix, for the record: clean cells 45/50 and 43/47
+passed; medium 34/36 failed; hard 34/39 indeterminate; influence 50/50 failed; U5 36/42
+indeterminate. The fix landed in `check_multiplier_bootstrap` is the simulated null band on
+`b_L` plus solver-health preemption -- **not** the coverage-derived ~0.5 SE retune this ADR
+speculated about earlier, which addressed the symptom rather than the missing band.
+
+## Addendum (2026-09-01): decision-level verdict field
+
+`DiagnosticReport` gains an additive `verdict` (`certified` / `conservative` / `uncertifiable`
+/ `invalid`) plus `verdict_basis` (`bootstrap` / `screen`) -- the single-run trust protocol
+these experiments calibrated, made machine-readable (`_derive_verdict` in `diagnostics.py`;
+vocabulary and evidence in `constants.DiagnosticVerdicts`). `classification` is unchanged and
+WARNING-blind by design; the verdict makes the calibrated conservative tier and the
+rank-deficiency collapse mode (pulled up to `invalid`) visible to automated consumers.
+`aggregate_ads142_results.py` extracts both columns, tolerant of pre-field reports.
+
+## Addendum (2026-09-01): re-solve performance work
+
+Recorded here because it touches the instrument this ADR's answer key is measured with, and
+because the runtime figures that motivated it are no longer current.
+
+**The premise moved before the work started.** The multi-hour bootstrap runs behind the ADS-142
+cluster jobs (whole-task medians of 3.3-3.6 h on the clean cells, 6.4-11.5 h on the fragile ones,
+against a 5 min no-bootstrap control) predate the fix that builds `post_deployment_analysis`'s
+diagnostics `g_tilde` closure once and jits it, instead of rebuilding the whole `O(n*T)`
+structural precompute on every call. Measured in-process against a faithful reconstruction of the
+pre-fix closure at `n=100`/`T=50`/`eta_dim=200`: `797 ms` per evaluation then, `1.4-2.6 ms` now.
+A 100-paired-draw check makes 8,027 evaluations, so the old closure projects `~1.8 h` for the
+check alone against the cluster's `~3.5 h` marginal for that cell -- close enough, at ~2x for a
+slower cluster core, that nothing else is needed to explain those rows. **Those per-cell hours
+are history; do not quote them as current cost.** (Separately, and unaffected by any of this: the
+n=10000 walltime finding in "Analysis-plan revisions", item 8, is about the input-check and
+main-analysis passes, not the bootstrap.)
+
+**Measured cost structure on the current code** (local: Apple-silicon laptop CPU, JAX CPU backend,
+float32; ratios transfer, absolute seconds may move ~2x on the cluster):
+
+- 100 paired draws (200 trials, 8,027 evaluations): `12.7 s` and `21.7 s` in two independent
+  harnesses -- identical evaluation counts, so the spread is machine load. 25 draws: `3.5-5.4 s`.
+  The suite with the bootstrap off: `6.6 s`.
+- `g_tilde` is 94-97% of the check; the cost model is exactly
+  `(trials) x (chord iterations) x (one g_tilde evaluation + one triangular solve)`.
+- Two premises in the original brief were wrong and are recorded so they are not re-derived: a
+  failing solve does **not** burn the `continuation_steps x max_iterations` ceiling (the
+  continuation exits at the first step that exhausts its budget; no observed solve exceeded 336
+  iterations), and cost peaks at *partial* fragility, not maximum -- 8,027 evaluations at a 0%
+  failure fraction, ~24,700 at 32%, ~21,600 at 97.5%, ~12,200 at 100%.
+
+**What landed.** Three changes, all in `lifejacket/diagnostics.py`:
+
+1. *Divergence abort* (`nonlinear_solver_divergence_abort=True`, with `blowup_factor=1e4`,
+   `stall_window=40`, `guard_factor=100.0`). Aborts a continuation step that blew past its own
+   best relative residual or stalled; an aborted solve is failed on the same control-flow path an
+   exhausted budget takes, so it is observationally identical to one downstream. Calibrated on
+   converging steps, since a false abort is the only way it can move an answer: zero false aborts
+   across ~152,000 converging steps in two independent corpora (33,351 on this repository's
+   fixtures, 118,563 synthetic), worst observed blow-up ratio `1.9`/`36.7` and worst stall run
+   `4`/`20`, i.e. ~270x and 2x margins. Measured saving, as a fraction of a check's `g_tilde`
+   evaluations: 0% below a 0.6 failure fraction, 0.1% from 0.6 to 0.95, and 20-66% median
+   (max 96%) at or above 0.95 -- i.e. it does nothing for the influence cell and everything it
+   does is in the hard/U5 regime. A
+   per-step iteration cap and a rate-extrapolation clause were both built, measured, and rejected
+   (the cap reclassifies converging steps; the rate clause had zero false aborts in-sample and
+   three out of sample).
+2. *Sequential early stop* (`perturbation_early_stop="starvation"`). Stops when
+   `converged_so_far + trials_remaining < 3`, the point at which the first status rung is settled
+   for every completion. Provably status-preserving, and provably capped at 2 skipped trials
+   (~1% at 100 paired draws, 4% at 25). On the 292 field runs with a bootstrap result it would
+   have fired on 70, all in the hard and U5 cells, for a mean saving of 0.61% of trials. It does
+   not compose with (3): batching can only test the predicate at a wave boundary, so at any wave
+   width above 2 the stop never fires. Irrelevant for this experiment's own runs, which should
+   leave batching off for the reason in (3) and therefore keep the stop live.
+3. *Batched lockstep re-solves* (`batched_bootstrap_resolves="off"` by default, with
+   `bootstrap_batch_width=50`, `bootstrap_batch_min_rows=4000`). ~1.5-1.75x end to end at 100
+   draws, ~2.6x excluding a one-time ~5-6 s XLA compile. Verdict-equivalent but not bit-identical
+   (XLA picks different float32 kernels per batch width: ~2.2 ULPs on `g_tilde`, ~1e-7 relative on
+   the SE ratios, ~1e-5 on the cancellation-dominated `mean_shift_se`), which is why it is opt-in
+   rather than merely guarded -- **this experiment's answer key is exactly the FAILED /
+   INDETERMINATE distinction, so calibration and validation runs should leave it off.**
+   End to end at 100 draws on the clean fixture it left `status`, the warnings and all 200
+   per-trial convergence flags identical.
+
+**Why the ADS-142 answer key is preserved.** `_derive_verdict` is a pure function of the check
+statuses (plus `bread_stability`'s target rank and `local_nonlinearity`'s headline `a_{j,l}`), so
+anything that preserves per-check status preserves `verdict`/`verdict_basis`. The early stop
+preserves status by construction; the abort is status-preserving iff it never aborts a solve that
+would have converged, which is what the margins above buy. The stronger stop the brief proposed --
+"stop once the solver is certainly unhealthy" -- was **rejected on this ADR's own data**:
+unhealthiness only confines the status to `{FAILED, INDETERMINATE}`, because the FAILED rung sits
+above the unhealthy rung so that a distortion measured on the optimistically-censored converged
+subset still counts. All 50 influence-cell runs were certainly unhealthy from the first trial
+(failure fractions 0.12-0.86) and all 50 nevertheless reported FAILED from that subset; across the
+292 runs the rule would have relabelled 119 (41%) from FAILED to INDETERMINATE, i.e. `invalid` to
+`uncertifiable`.
+
+**Honest reporting.** Both checks now report `num_planned_trials`, `early_stopped`,
+`early_stop_reason` and `num_divergence_aborted_trials`; `num_trials` is the executed count. The
+bootstrap adds `num_draws_executed` and `resolve_batch_width`, and
+`DiagnosticReport.monte_carlo_counts` adds `num_bootstrap_draws_executed`. One reported metric
+genuinely moves: a solve that would have gone non-finite *later* is now a root failure rather than
+a domain failure, so `domain_failure_fraction`/`_upper_bound` are lower bounds when
+`num_divergence_aborted_trials` is nonzero. No status rung reads either, but do not pool those
+columns across this change.
+
+**Pending, and not to be quoted as measured:**
+
+- Every number above is local. No cluster re-baseline of a clean and a fragile cell on the current
+  code has been run; extrapolating the historical per-cell hours by the measured ~500x collapse
+  (3.5 h -> ~25 s, 11.4 h -> ~82 s) assumes those cells' cost was likewise ~all `g_tilde` rebuild,
+  which is verified only on the clean cell.
+- No end-to-end run on a real ADS-142 fragile cell. The influence-cell fixture could not be pushed
+  through `analyze_dataset` locally -- it stalled on XLA compilation of
+  `compute_local_linearization_error_ratio`'s jit, on the *main analysis* path, not the
+  diagnostics one. At staggered/many-policy shapes some residual cluster wall clock may be
+  one-time compilation that no bootstrap change can touch; attribute it by measurement before
+  assuming otherwise.
+- The batched path's verdict-equivalence is measured on clean fixtures. The case that matters -- a
+  fragile ensemble with solves near the convergence boundary, where a ~5e-7 perturbation could
+  flip a convergence flag -- is unmeasured. That is the second reason it is off by default.
+- The abort's savings figures come from synthetic sweeps and this repository's fixtures; the
+  failure-*mode* mix (blow-up caught immediately vs. slow creep never caught) is what drives them
+  and could differ on the real stacked estimating function.
+- Not taken: `DiagnosticConfig.g_tilde_chunk_size` is still `1`, and
+  `evaluate_g_tilde_batched` still constructs its `jax.vmap` closure inside the chunk loop, so it
+  retraces per chunk. Measured 10-42x on that helper alone and 19% off the non-bootstrap suite at
+  `n=100`/`T=50` (`6.54 s` -> `5.29 s`), with classification, verdict and `local_nonlinearity`
+  status unchanged. It is orthogonal to all three changes above and is the cheapest remaining win;
+  it needs a test pinning `check_local_nonlinearity`'s status and the report's
+  `verdict`/`verdict_basis` across chunk sizes, since float32 reassociation moves `a_{j,l}` by
+  ~1e-6 relative and the `0.05` screen is what `verdict_basis` reads.

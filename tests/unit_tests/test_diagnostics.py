@@ -1,7 +1,10 @@
+import dataclasses
 import math
+import pickle
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from lifejacket import diagnostics as d
 from lifejacket.constants import CheckStatuses, DiagnosticClassifications
@@ -499,10 +502,15 @@ def test_ill_conditioned_bread_solves_stay_finite_and_are_flagged():
     )
     assert np.isfinite(result.metrics["full_bread_condition_number"])
     assert result.metrics["full_bread_condition_number"] > 1e5
-    assert result.status in (
-        CheckStatuses.WARNING,
-        CheckStatuses.INDETERMINATE,
-        CheckStatuses.PASSED,
+    # Both indeterminate triggers fire on this fixture and either alone is a correct diagnosis:
+    # V_hat = diag(1, 1e12)/n is rank 1 at rank_tolerance=1e-8, and the 1e-6*||B|| perturbation
+    # doubles the small diagonal entry, so the second SE moves enormously. check_bread_stability
+    # has no WARNING path at all -- PASSED or INDETERMINATE are its only outcomes.
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["target_covariance_rank_estimate"] < 2
+    assert (
+        result.metrics["numerical_sensitivity_max_relative_se_change"]
+        > d.DiagnosticConfig().se_distortion_tolerance
     )
 
     # The bread is never explicitly inverted in factor_bread/solve_with_bread (LU-based).
@@ -552,9 +560,12 @@ def test_continuation_failure_to_converge_within_iteration_budget():
     solved = d.solve_exact_perturbation(
         g_tilde, eta_hat, g0, bread_factored, s_j, delta_linear, config
     )
-    # With only a single continuation step and a single Newton iteration allowed, convergence
-    # to tight tolerance is not guaranteed for a strongly nonlinear map.
-    assert isinstance(solved["converged"], bool)
+    # With only a single continuation step and a single Newton iteration allowed, the one chord
+    # step lands nowhere near the root of this strongly nonlinear map: at the warm start d = 10
+    # the linear part exactly meets the target of 10 and the quadratic part leaves a residual of
+    # 5*10^2 = 500, and the iteration budget is exhausted before a second attempt.
+    assert not solved["converged"]
+    assert solved["final_residual_norm"] > 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -906,6 +917,188 @@ def test_exact_check_excludes_nonconverged_solves_and_reports_indeterminate():
     assert a_nl_max < 1e-3
 
 
+# ---------------------------------------------------------------------------
+# 8b. check_exact_nonlinear_perturbations' FAILURE directions. The branch's headline rewrite
+#     (fixed [0.95, 1.05] band -> simulated finite-draw null band) had coverage only for PASSED
+#     and INDETERMINATE, so every gate that can actually fail -- and the precedence rule that
+#     keeps a failure standing under an unhealthy solver -- was untested on the very check
+#     docs/adr/0002 uses as the answer key for calibrating the others.
+#
+#     Each test below isolates ONE gate: the other gates are either provably inert on its map
+#     (an odd map has no mean shift; an affine map has no quantile shift) or explicitly opened up
+#     via the config, so the assertion genuinely dies if the gate under test is disabled rather
+#     than being propped up by a sibling gate firing on the same fixture.
+# ---------------------------------------------------------------------------
+
+
+def _run_scalar_exact_check(g_tilde, stacks, B, V_hat, config):
+    return d.check_exact_nonlinear_perturbations(
+        g_tilde,
+        jnp.zeros(1),
+        np.zeros(1),
+        B,
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        np.eye(1),
+        ["theta_0"],
+        V_hat,
+        config,
+    )
+
+
+def test_exact_check_fails_when_se_ratios_exceed_the_null_band():
+    # Same inflating map as the bootstrap's anticonservative test: g(eta) = b*w*asinh(eta/w) has
+    # bread b at the root but exact roots w*sinh(s/(b*w)) that grow faster than the linearization
+    # predicts, so the ensemble covariance is wider than V_L. w is set so s/(b*w) has sd ~1.5,
+    # which puts the SE ratio far above the simulated band rather than just past its edge.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+    sd_s = math.sqrt(float((stacks.T @ stacks)[0, 0]) / n / n)
+    w = sd_s / 1.5
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ (w * jnp.arcsinh(eta / w))
+
+    result = _run_scalar_exact_check(
+        g_tilde,
+        stacks,
+        B,
+        V_hat,
+        # asinh is ODD, so the paired mean shift is exactly zero and that gate cannot fire here.
+        # The quantile gate is opened up so the se_ratios band is the only live gate left.
+        d.DiagnosticConfig(
+            num_exact_directions=15,
+            nonlinear_solver_max_iterations=200,
+            quantile_shift_tolerance_se=1e6,
+        ),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert result.metrics["se_ratios_within_tolerance"] is False
+    assert max(result.metrics["se_ratios"]) > result.metrics["se_ratio_null_band"][1]
+    assert result.metrics["mean_shift_se"] < result.metrics["mean_shift_threshold"]
+    # No solver debris: every direction converged, so the verdict is not a censoring artifact.
+    assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
+
+
+def test_exact_check_fails_when_se_ratios_fall_below_the_null_band():
+    # Affine map with a V_hat inflated 4x above the truth: the exact roots ARE the linear ones,
+    # so the ensemble is 2x narrower than the claimed target covariance. Unlike the bootstrap
+    # check (which calls the conservative direction a WARNING), the exact check treats a
+    # below-band ratio on a HEALTHY solver as a failure -- there is no censoring to blame it on.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    result = _run_scalar_exact_check(
+        _affine_map(B),
+        stacks,
+        B,
+        4.0 * V_hat,
+        d.DiagnosticConfig(num_exact_directions=15),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert min(result.metrics["se_ratios"]) < result.metrics["se_ratio_null_band"][0]
+    assert result.metrics["root_failure_fraction"] == 0.0
+
+
+def _bounded_even_bump_map(w, curvature):
+    """g(eta) = eta + c*w*(1 - exp(-(eta/w)^2)): monotone (hence globally solvable) for c < 1.16,
+    with a BOUNDED even part. Bounding the even part is what makes this the clean mean-shift
+    fixture: it displaces every solved root in the same direction (mean shift ~ 0.42*c SE) while
+    contributing almost no extra spread (SD inflation ~ sqrt(1 + 0.11*c^2)), so the SE-ratio gate
+    stays comfortably inside its null band and cannot stand in for the gate under test. A plain
+    quadratic cannot do this: its even part is unbounded, so it inflates the spread and blows up
+    the tail quantiles at least as fast as it shifts the mean -- and it has no root at all past
+    its branch point, which censors the ensemble asymmetrically."""
+
+    def g_tilde(eta):
+        return eta + curvature * w * (1.0 - jnp.exp(-((eta / w) ** 2)))
+
+    return g_tilde
+
+
+def test_exact_check_fails_on_curvature_induced_mean_shift():
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    w = math.sqrt(float(V_hat[0, 0]))
+
+    result = _run_scalar_exact_check(
+        _bounded_even_bump_map(w, 0.35),
+        stacks,
+        B,
+        V_hat,
+        # The quantile gate is opened up (a bounded even displacement necessarily moves the tail
+        # quantiles too) so that the mean-shift gate is the only thing that can produce FAILED.
+        d.DiagnosticConfig(
+            num_exact_directions=15,
+            nonlinear_solver_max_iterations=200,
+            quantile_shift_tolerance_se=1e6,
+        ),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert result.metrics["mean_shift_gate_evaluable"] is True
+    assert result.metrics["mean_shift_se"] > result.metrics["mean_shift_threshold"]
+    # Under intact antithetic pairing the simulated null band collapses to zero, so the floor
+    # config.mean_shift_tolerance_se is the binding threshold in this ordinary case.
+    assert result.metrics["mean_shift_threshold"] == pytest.approx(
+        d.DiagnosticConfig().mean_shift_tolerance_se
+    )
+    # The SE-ratio gate is NOT what failed here: the ratio sits inside its own null band.
+    band_lo, band_hi = result.metrics["se_ratio_null_band"]
+    assert band_lo < min(result.metrics["se_ratios"])
+    assert max(result.metrics["se_ratios"]) < band_hi
+    assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
+
+
+def test_exact_check_failed_verdict_stands_when_the_solver_is_unhealthy():
+    # Status-precedence rule: FAILED from the converged subset outranks the INDETERMINATE that a
+    # high non-convergence rate would otherwise produce, because excluding the non-converged
+    # directions selects the EASY ones and therefore biases the distortion measurement DOWN.
+    # Coordinate 0 inflates (asinh); coordinate 1 has bounded range (tanh) so a few draws are
+    # unreachable and the solve fails. The two stack columns are independent, so which draws are
+    # censored is unrelated to how much coordinate 0 inflates.
+    rng = np.random.default_rng(7)
+    n = 60
+    stacks = rng.standard_normal((n, 2)) * 3.0
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+    B = np.eye(2)
+    V_hat = M_hat / n
+    sd_s = np.sqrt(np.diag(V_hat))
+    w_inflating, w_bounded = sd_s[0] / 2.0, 1.3 * sd_s[1]
+
+    def g_tilde(eta):
+        return jnp.stack(
+            [
+                w_inflating * jnp.arcsinh(eta[0] / w_inflating),
+                w_bounded * jnp.tanh(eta[1] / w_bounded),
+            ]
+        )
+
+    result = d.check_exact_nonlinear_perturbations(
+        g_tilde,
+        jnp.zeros(2),
+        np.zeros(2),
+        B,
+        d.factor_bread(B),
+        stacks,
+        n,
+        np.eye(2),
+        ["theta_0", "theta_1"],
+        V_hat,
+        d.DiagnosticConfig(
+            num_exact_directions=15,
+            nonlinear_solver_max_iterations=200,
+            quantile_shift_tolerance_se=1e6,
+        ),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert (
+        result.metrics["root_failure_fraction"]
+        > d.DiagnosticConfig().bad_direction_probability_target
+    )
+    assert 0 < result.metrics["num_converged_trials"] < result.metrics["num_trials"]
+    assert max(result.metrics["se_ratios"]) > result.metrics["se_ratio_null_band"][1]
+    assert any("optimistically selected" in w for w in result.warnings)
+
+
 def test_multiplier_bootstrap_auto_mode_screens_on_local_nonlinearity():
     rng = np.random.default_rng(21)
     d_total, n = 2, 60
@@ -938,6 +1131,79 @@ def test_multiplier_bootstrap_auto_mode_screens_on_local_nonlinearity():
     assert "multiplier_bootstrap" in always.check_results
     assert always.check_results["multiplier_bootstrap"].status == CheckStatuses.PASSED
     assert "multiplier_bootstrap" not in run("off").check_results
+
+
+def test_multiplier_bootstrap_auto_mode_runs_on_a_headline_screen_exceedance():
+    # The screen's POSITIVE branch, isolated to the a_{j,l} trigger: c = 0.15 puts the headline
+    # a_{j,l} at ~0.074 -- above bootstrap_screen_a_jl_threshold (0.05) but below
+    # nonlinear_correction_tolerance_se (0.10), so check_local_nonlinearity itself still PASSES
+    # and the headline comparison is the only thing that can start the bootstrap.
+    rng = np.random.default_rng(21)
+    d_total, n = 2, 60
+    B = np.eye(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+
+    report = d.run_diagnostic_suite(
+        lambda eta: eta + 0.15 * eta**2,
+        jnp.zeros(d_total),
+        B,
+        M_hat,
+        M_hat / n,
+        stacks,
+        beta_dim=0,
+        theta_dim=d_total,
+        num_subjects=n,
+        config=d.DiagnosticConfig(
+            num_directions=10, multiplier_bootstrap="auto", num_bootstrap_draws=20
+        ),
+    )
+    local = report.check_results["local_nonlinearity"]
+    headline = d._local_nonlinearity_headline_max(local.metrics)
+    assert local.status == CheckStatuses.PASSED
+    assert (
+        d.DiagnosticConfig().bootstrap_screen_a_jl_threshold
+        < headline
+        < d.DiagnosticConfig().nonlinear_correction_tolerance_se
+    )
+    assert "multiplier_bootstrap" in report.check_results
+
+
+def test_multiplier_bootstrap_auto_mode_runs_when_the_local_check_does_not_pass():
+    # The screen's OTHER trigger: a perfectly affine map (headline a_{j,l} ~ 0, far below the
+    # screen threshold) whose target covariance is rank-deficient, so check_local_nonlinearity
+    # comes back INDETERMINATE. A non-PASSED local check is exactly when the linearization-free
+    # second opinion is worth its cost, so the bootstrap must run despite the ~0 headline.
+    rng = np.random.default_rng(23)
+    d_total, n = 2, 60
+    B = np.eye(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks[:, 1] = 0.0  # the second target has no identified variance
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+
+    report = d.run_diagnostic_suite(
+        _affine_map(B),
+        jnp.zeros(d_total),
+        B,
+        M_hat,
+        M_hat / n,
+        stacks,
+        beta_dim=0,
+        theta_dim=d_total,
+        num_subjects=n,
+        config=d.DiagnosticConfig(
+            num_directions=10, multiplier_bootstrap="auto", num_bootstrap_draws=20
+        ),
+    )
+    local = report.check_results["local_nonlinearity"]
+    assert local.status != CheckStatuses.PASSED
+    assert (
+        d._local_nonlinearity_headline_max(local.metrics)
+        < d.DiagnosticConfig().bootstrap_screen_a_jl_threshold
+    )
+    assert "multiplier_bootstrap" in report.check_results
 
 
 # ---------------------------------------------------------------------------
@@ -1177,36 +1443,882 @@ def test_jacobian_drift_warns_when_contraction_threshold_crossed():
 
 
 # ---------------------------------------------------------------------------
-# 14. check_multiplier_bootstrap's mean-shift gate -- the one bootstrap failure path without a
-#     direct test: even curvature displaces the resampled roots systematically, which no SE
-#     ratio can see.
+# 14. check_multiplier_bootstrap's mean-shift gate -- even curvature displaces the resampled
+#     roots systematically, which no SE ratio can see.
 # ---------------------------------------------------------------------------
 
 
-def test_multiplier_bootstrap_fails_on_curvature_induced_mean_shift():
-    # g(eta) = eta + c*eta^2: the perturbed root (-1 + sqrt(1 + 4cs))/(2c) has mean
-    # ~ -c*Var(s) < 0 across +/- paired draws (the linear parts cancel; the quadratic bias
-    # does not), so mean_shift_se ~ c*sd(s) in target-SE units -- chosen here to clear the
-    # 0.10 gate decisively while SD distortion stays inside its null band.
-    stacks, B, V_hat = _scalar_bootstrap_inputs()
-    n = stacks.shape[0]
-
-    def g_tilde(eta):
-        return eta + 0.8 * eta**2
-
-    result = d.check_multiplier_bootstrap(
+def _run_scalar_bootstrap(g_tilde, stacks, B, V_hat, config):
+    return d.check_multiplier_bootstrap(
         g_tilde,
         jnp.zeros(1),
         np.zeros(1),
         d.factor_bread(B),
         stacks,
-        n,
+        stacks.shape[0],
         np.eye(1),
         ["theta_0"],
         V_hat,
-        d.DiagnosticConfig(num_bootstrap_draws=100),
+        config,
+    )
+
+
+def test_multiplier_bootstrap_fails_on_curvature_induced_mean_shift():
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    w = math.sqrt(float(V_hat[0, 0]))
+
+    result = _run_scalar_bootstrap(
+        _bounded_even_bump_map(w, 0.35),
+        stacks,
+        B,
+        V_hat,
+        d.DiagnosticConfig(
+            num_bootstrap_draws=100, nonlinear_solver_max_iterations=200
+        ),
     )
     assert result.status == CheckStatuses.FAILED
-    assert (
-        result.metrics["mean_shift_se"] > d.DiagnosticConfig().mean_shift_tolerance_se
+    assert result.metrics["mean_shift_gate_evaluable"] is True
+    assert result.metrics["mean_shift_se"] > result.metrics["mean_shift_threshold"]
+    # The mean-shift gate is the sole trigger: the SE ratio stays inside its null band, and the
+    # solver is healthy (every draw is globally solvable), so neither the band gate nor the
+    # failure-fraction gate can be what produced this verdict.
+    band_lo, band_hi = result.metrics["se_ratio_null_band"]
+    assert band_lo < result.metrics["se_ratio_by_target"]["theta_0"] < band_hi
+    assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
+
+
+def test_multiplier_bootstrap_is_indeterminate_on_an_asymmetrically_censored_ensemble():
+    # BEHAVIOR CHANGE, deliberate: this fixture (g(eta) = eta + 0.8*eta^2) used to assert FAILED
+    # on a mean shift of 0.214 SE. That map has NO root once a draw passes its branch point, so
+    # ~27% of the re-solves fail and the surviving ensemble is asymmetrically censored -- roughly
+    # a third of the converged rows have lost their antithetic partner. The old mean shift was
+    # computed over those lone rows, where the linear part no longer cancels and selection on
+    # where the root landed masquerades as curvature; measured on complete +/- pairs only, the
+    # genuine displacement is ~0.088 SE, BELOW the practical-significance floor. The 27% failure
+    # fraction (and the below-band SE ratio it produces, itself a censoring artifact) is what
+    # this dataset actually demonstrates, and INDETERMINATE is the honest verdict. The real
+    # curvature-induced FAILED lives in the test above, on a globally solvable map.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+
+    result = _run_scalar_bootstrap(
+        lambda eta: eta + 0.8 * eta**2,
+        stacks,
+        B,
+        V_hat,
+        d.DiagnosticConfig(num_bootstrap_draws=100),
     )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert (
+        result.metrics["root_failure_fraction"]
+        > d.DiagnosticConfig().bad_direction_probability_target
+    )
+    # Rows whose antithetic partner did not converge are dropped from the location statistic.
+    assert (
+        result.metrics["mean_shift_num_rows"] < result.metrics["num_converged_trials"]
+    )
+    assert result.metrics["mean_shift_se"] <= result.metrics["mean_shift_threshold"]
+    assert any("complete +/- pairs only" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# 15. sample_multiplier_perturbations' multiplier distributions. The whole frozen-score bootstrap
+#     rests on nu being mean-0/variance-1: a typo in Mammen's two-point constants leaves the
+#     draws looking perfectly reasonable while every re-solve carries a systematic score offset,
+#     which no downstream assertion about SE ratios would notice.
+# ---------------------------------------------------------------------------
+
+
+def _recover_multipliers(distribution, num_subjects=200, num_draws=200, seed=0):
+    """Recovers the raw nu draws. With per-subject stacks == I_n and bread == I_n, the sampler's
+    s_b = (nu @ stacks)/n is exactly nu/n, so the multipliers are readable off its output."""
+    stacks = np.eye(num_subjects)
+    _, S = d.sample_multiplier_perturbations(
+        stacks,
+        d.factor_bread(np.eye(num_subjects)),
+        num_subjects,
+        num_draws,
+        seed,
+        distribution,
+    )
+    return S * num_subjects
+
+
+def test_multiplier_distributions_are_mean_zero_unit_variance():
+    for distribution in ("rademacher", "mammen", "gaussian"):
+        nu = _recover_multipliers(distribution)
+        # 40,000 draws: the sample mean's own sd is 0.005 and the sample variance's is ~0.007,
+        # so these margins are ~10 sd wide and cannot be tripped by Monte Carlo noise alone.
+        assert abs(float(nu.mean())) < 0.05, distribution
+        assert abs(float(nu.var(ddof=1)) - 1.0) < 0.05, distribution
+
+
+def test_mammen_multipliers_match_the_two_point_distribution():
+    nu = _recover_multipliers("mammen")
+    sqrt5 = math.sqrt(5.0)
+    support = np.unique(nu)
+    np.testing.assert_allclose(
+        sorted(support), [(1.0 - sqrt5) / 2.0, (1.0 + sqrt5) / 2.0], atol=1e-12
+    )
+    # Mammen's defining third property, and the one that pins the point masses: with mean 0 and
+    # variance 1 already fixed, E[nu^3] = 1 leaves exactly one two-point distribution, so this
+    # catches a swapped or mistyped prob_low that the first two moments alone would tolerate.
+    assert abs(float((nu**3).mean()) - 1.0) < 0.1
+
+
+def test_rademacher_multipliers_are_plus_or_minus_one():
+    np.testing.assert_allclose(
+        sorted(np.unique(_recover_multipliers("rademacher"))), [-1.0, 1.0]
+    )
+
+
+def test_unknown_multiplier_distribution_raises():
+    with pytest.raises(ValueError, match="Unknown bootstrap_multiplier_distribution"):
+        d.sample_multiplier_perturbations(
+            np.eye(4), d.factor_bread(np.eye(4)), 4, 2, 0, "student_t"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 16. leave_one_out_theta_sensitivity, driven through its only production caller.
+# ---------------------------------------------------------------------------
+
+
+def test_leave_one_out_shift_matches_the_closed_form_for_a_mean_estimator():
+    # Scalar mean estimator: g_i(theta) = theta - y_i, so B = [[1]] and stacks_i = theta_hat - y_i
+    # (which sum to zero at the root). Excluding subject i leaves an average of
+    # -(theta_hat - y_i)/(n-1), and one Newton step from theta_hat moves theta by
+    # +(theta_hat - y_i)/(n-1) -- i.e. away from the excluded subject's observation.
+    rng = np.random.default_rng(5)
+    n = 12
+    y = rng.standard_normal(n) * 2.0
+    theta_hat = float(y.mean())
+    stacks = (theta_hat - y).reshape(n, 1)
+    B = np.array([[1.0]])
+
+    result = d.check_influence_concentration(
+        stacks,
+        d.factor_bread(B),
+        np.array([[1.0]]),
+        ["theta_0"],
+        list(range(n)),
+        d.DiagnosticConfig(
+            compute_leave_one_out_sensitivity=True, leave_one_out_top_k=3
+        ),
+        B_hat=B,
+        theta_dim=1,
+    )
+
+    loo = result.metrics["leave_one_out_sensitivity"]
+    assert len(loo) == 3
+    # The subjects checked are the most influential ones: the largest |y_i - theta_hat|.
+    expected_subjects = set(np.argsort(-np.abs(y - theta_hat))[:3].tolist())
+    assert {entry["subject_id"] for entry in loo} == expected_subjects
+    for entry in loo:
+        i = entry["subject_id"]
+        np.testing.assert_allclose(
+            entry["one_step_theta_shift"][0],
+            (theta_hat - y[i]) / (n - 1),
+            rtol=1e-10,
+        )
+
+
+def test_leave_one_out_sensitivity_is_off_by_default():
+    stacks = np.arange(6.0).reshape(6, 1)
+    B = np.array([[1.0]])
+    result = d.check_influence_concentration(
+        stacks,
+        d.factor_bread(B),
+        np.array([[1.0]]),
+        ["theta_0"],
+        list(range(6)),
+        d.DiagnosticConfig(),
+        B_hat=B,
+        theta_dim=1,
+    )
+    assert "leave_one_out_sensitivity" not in result.metrics
+
+
+# ---------------------------------------------------------------------------
+# 17. REGRESSION: a g_tilde that is undefined off the observed point. Probing out to 1.5x the
+#     sandwich scale routinely leaves the domain of a log/logit/sqrt-shaped estimating function.
+#     The nonfinite rows used to reach solve_with_bread's check_finite=True LU solve, which
+#     raised out of the always-on local-nonlinearity check and destroyed the ENTIRE report --
+#     no diagnostic_report.pkl at all, from a condition the suite is supposed to measure.
+# ---------------------------------------------------------------------------
+
+
+def _censoring_inputs(seed=13, n=40, d_total=2):
+    rng = np.random.default_rng(seed)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+    return stacks, np.eye(d_total), M_hat, M_hat / n
+
+
+def _run_local_nonlinearity(g_tilde, stacks, B, V_hat, num_directions):
+    d_total = B.shape[0]
+    return d.check_local_nonlinearity(
+        g_tilde,
+        jnp.zeros(d_total),
+        np.zeros(d_total),
+        B,
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        np.eye(d_total),
+        [f"theta_{i}" for i in range(d_total)],
+        V_hat,
+        d.DiagnosticConfig(num_directions=num_directions),
+    )
+
+
+def _nan_off_the_root_map(d_total):
+    def g_tilde(eta):
+        at_root = jnp.all(eta == 0.0)
+        return jnp.where(at_root, jnp.zeros(d_total), jnp.full(d_total, jnp.nan))
+
+    return g_tilde
+
+
+def test_local_nonlinearity_censors_a_fully_undefined_neighborhood_without_raising():
+    stacks, B, _, V_hat = _censoring_inputs()
+    result = _run_local_nonlinearity(
+        _nan_off_the_root_map(B.shape[0]), stacks, B, V_hat, num_directions=6
+    )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["domain_censored_fraction"] == 1.0
+    assert result.metrics["num_domain_censored_probes"] == result.metrics["num_probes"]
+    assert any("undefined (nonfinite)" in w for w in result.warnings)
+
+
+def test_local_nonlinearity_downgrades_to_warning_under_partial_censoring():
+    # Undefined only in one half-space, so roughly a third of the headline-radius probes are lost
+    # while the rest stay perfectly affine: every surviving statistic is finite and clean, but a
+    # clean pass on an optimistically-selected subset is not a pass.
+    stacks, B, _, V_hat = _censoring_inputs()
+    cap = 0.5 * float(np.sqrt(V_hat[0, 0]))
+
+    def g_tilde(eta):
+        undefined = eta[0] > cap
+        return jnp.where(undefined, jnp.full(B.shape[0], jnp.nan), jnp.asarray(B) @ eta)
+
+    result = _run_local_nonlinearity(g_tilde, stacks, B, V_hat, num_directions=8)
+    assert result.status == CheckStatuses.WARNING
+    assert 0.0 < result.metrics["domain_censored_fraction"] < 1.0
+    assert any("undefined (nonfinite)" in w for w in result.warnings)
+    headline = result.metrics["per_radius"][result.metrics["headline_radius"]]
+    assert 0.0 < headline["domain_censored_fraction"] <= 0.5
+    # The surviving probes still support finite statistics -- censoring is reported, not fatal.
+    for summary in headline["a_by_target"].values():
+        assert math.isfinite(summary["max"])
+        assert math.isfinite(summary["exceedance_fraction"])
+
+
+def test_run_diagnostic_suite_survives_an_undefined_neighborhood():
+    # The report-destroying case end to end: previously this raised out of run_diagnostic_suite.
+    stacks, B, M_hat, V_hat = _censoring_inputs()
+    report = d.run_diagnostic_suite(
+        _nan_off_the_root_map(B.shape[0]),
+        jnp.zeros(B.shape[0]),
+        B,
+        M_hat,
+        V_hat,
+        stacks,
+        beta_dim=0,
+        theta_dim=B.shape[0],
+        num_subjects=stacks.shape[0],
+        config=d.DiagnosticConfig(num_directions=6),
+    )
+    assert isinstance(report, d.DiagnosticReport)
+    assert report.classification == DiagnosticClassifications.INDETERMINATE
+    assert (
+        report.check_results["local_nonlinearity"].status == CheckStatuses.INDETERMINATE
+    )
+    assert (
+        report.check_results["local_nonlinearity"].metrics["domain_censored_fraction"]
+        == 1.0
+    )
+
+
+# ---------------------------------------------------------------------------
+# 18. REGRESSION: the mean-shift gate's simulated null band. With unpaired draws b_L is raw
+#     sampling noise of size sqrt(chi2_dim / J) -- ~0.26 SE in one dimension at J = 15 -- which
+#     the former fixed 0.10 comparison read as curvature on provably affine maps (16 of 20 seeds).
+# ---------------------------------------------------------------------------
+
+
+def test_mean_shift_gate_does_not_fire_on_an_affine_map_with_unpaired_directions():
+    seeds = range(8)
+    observed = []
+    for seed in seeds:
+        stacks, B, V_hat = _scalar_bootstrap_inputs(seed=seed)
+        result = _run_scalar_exact_check(
+            _affine_map(B),
+            stacks,
+            B,
+            V_hat,
+            d.DiagnosticConfig(random_seed=seed, paired_directions=False),
+        )
+        metrics = result.metrics
+        assert metrics["mean_shift_gate_evaluable"] is True
+        # Without antithetic cancellation the band -- not the fixed floor -- is what binds.
+        assert (
+            metrics["mean_shift_threshold"]
+            > 2 * d.DiagnosticConfig().mean_shift_tolerance_se
+        )
+        assert metrics["mean_shift_threshold"] == pytest.approx(
+            metrics["mean_shift_null_upper"]
+        )
+        observed.append(
+            (
+                metrics["mean_shift_se"] > metrics["mean_shift_threshold"],
+                metrics["mean_shift_se"] > d.DiagnosticConfig().mean_shift_tolerance_se,
+            )
+        )
+
+    # The band's nominal false-positive rate is 5%, so a lone exceedance across eight seeds is
+    # expected behavior rather than a defect; the old fixed comparison fired on most of them.
+    assert sum(exceeds_band for exceeds_band, _ in observed) <= 1
+    assert sum(exceeds_old_fixed for _, exceeds_old_fixed in observed) >= 4
+
+
+def test_mean_shift_floor_binds_under_intact_antithetic_pairing():
+    # The other half of the contract: with complete +/- pairs the linear parts cancel identically,
+    # so the simulated null band collapses to zero and config.mean_shift_tolerance_se -- the
+    # practical-significance floor -- is the threshold that actually governs the ordinary case.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    result = _run_scalar_exact_check(
+        _affine_map(B), stacks, B, V_hat, d.DiagnosticConfig()
+    )
+    assert result.status == CheckStatuses.PASSED
+    assert result.metrics["mean_shift_null_upper"] < 1e-9
+    assert result.metrics["mean_shift_threshold"] == pytest.approx(
+        d.DiagnosticConfig().mean_shift_tolerance_se
+    )
+    assert result.metrics["mean_shift_num_rows"] == result.metrics["num_trials"]
+
+
+# ---------------------------------------------------------------------------
+# 19. REGRESSION: check_bread_stability's rank gate is judged on the TARGET covariance
+#     (L V_hat L^T), not on the full joint sandwich. Judging it on the joint sandwich made the
+#     gate unfireable at any real study scale: the healthy beta blocks alone keep the joint rank
+#     well above theta_dim no matter how singular the theta block is.
+# ---------------------------------------------------------------------------
+
+
+def _joint_with_singular_theta_block(beta_dim=3, num_updates=2, theta_dim=2, n=50):
+    d_total = beta_dim * num_updates + theta_dim
+    V = np.eye(d_total) / n
+    V[-1, -1] = 0.0  # the last theta contrast is not identified
+    return np.eye(d_total), np.eye(d_total), V, beta_dim, theta_dim, n
+
+
+def test_bread_stability_rank_gate_fires_on_a_singular_theta_block_with_healthy_betas():
+    B, M, V, beta_dim, theta_dim, n = _joint_with_singular_theta_block()
+    config = d.DiagnosticConfig()
+    L, _ = d.default_contrast_matrix(B.shape[0] - theta_dim, theta_dim, config)
+
+    result = d.check_bread_stability(B, M, beta_dim, theta_dim, n, V, config, L=L)
+
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["target_covariance_dim"] == theta_dim
+    assert result.metrics["target_covariance_rank_estimate"] < theta_dim
+    assert len(result.metrics["target_covariance_eigenvalues"]) == theta_dim
+    assert any("rank estimate" in w for w in result.warnings)
+    # Why the old full-joint computation could never see this: the beta blocks are healthy and
+    # full-rank, so the joint spectrum has 7 of 8 nonzero eigenvalues -- comfortably above
+    # theta_dim = 2 -- and the gate stayed silent while a target contrast was unidentified.
+    joint_eigvals = np.linalg.eigvalsh(V)
+    joint_rank = int(
+        np.sum(joint_eigvals > config.rank_tolerance * joint_eigvals.max())
+    )
+    assert joint_rank > theta_dim
+
+
+def test_bread_stability_rank_gate_is_judged_on_the_supplied_contrast():
+    B, M, V, beta_dim, theta_dim, n = _joint_with_singular_theta_block()
+    config = d.DiagnosticConfig()
+
+    def single_contrast(index):
+        L = np.zeros((1, B.shape[0]))
+        L[0, index] = 1.0
+        return d.check_bread_stability(B, M, beta_dim, theta_dim, n, V, config, L=L)
+
+    identified = single_contrast(-2)
+    assert identified.metrics["target_covariance_dim"] == 1
+    assert identified.metrics["target_covariance_rank_estimate"] == 1
+    assert identified.status == CheckStatuses.PASSED
+
+    unidentified = single_contrast(-1)
+    assert unidentified.metrics["target_covariance_dim"] == 1
+    assert unidentified.metrics["target_covariance_rank_estimate"] == 0
+    assert unidentified.status == CheckStatuses.INDETERMINATE
+
+
+# ---------------------------------------------------------------------------
+# 20. REGRESSION: an unevaluable distortion gate is never a pass. One non-identified target used
+#     to disable the SE band for EVERY target (an all-or-nothing np.all(isfinite(ratios))), so a
+#     healthy target's SE went uncompared and the check still reported PASSED.
+# ---------------------------------------------------------------------------
+
+
+def _one_dead_target_inputs(seed=17, n=50):
+    """Two targets, the second with identically zero per-subject contributions -- hence zero
+    sandwich SE, an unevaluable ratio, and a singular target covariance."""
+    rng = np.random.default_rng(seed)
+    stacks = np.zeros((n, 2))
+    stacks[:, 0] = rng.standard_normal(n) * 3.0
+    stacks[:, 0] -= stacks[:, 0].mean()
+    M_hat = (stacks.T @ stacks) / n
+    return stacks, np.eye(2), M_hat / n
+
+
+def _run_two_target_bootstrap(g_tilde, stacks, B, V_hat, config):
+    return d.check_multiplier_bootstrap(
+        g_tilde,
+        jnp.zeros(2),
+        np.zeros(2),
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        np.eye(2),
+        ["live", "dead"],
+        V_hat,
+        config,
+    )
+
+
+def test_multiplier_bootstrap_is_indeterminate_when_a_target_cannot_be_compared():
+    stacks, B, V_hat = _one_dead_target_inputs()
+    result = _run_two_target_bootstrap(
+        _affine_map(B), stacks, B, V_hat, d.DiagnosticConfig(num_bootstrap_draws=60)
+    )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["se_ratio_band_unevaluable_targets"] == ["dead"]
+    assert any("no identified target variance" in w for w in result.warnings)
+    # The healthy target WAS compared and sits inside its band; the verdict is INDETERMINATE
+    # because of the target that could not be compared at all, not because of this one.
+    band_lo, band_hi = result.metrics["se_ratio_null_band"]
+    assert band_lo < result.metrics["se_ratio_by_target"]["live"] < band_hi
+
+
+def test_multiplier_bootstrap_still_fails_on_a_healthy_target_beside_a_dead_one():
+    # The hole the all-or-nothing gate left open: an above-band ratio on the identified target
+    # must produce FAILED even though a sibling target has no SE to compare against.
+    stacks, B, V_hat = _one_dead_target_inputs()
+    w = math.sqrt(float(V_hat[0, 0])) / 1.5
+
+    def g_tilde(eta):
+        return jnp.stack([w * jnp.arcsinh(eta[0] / w), eta[1]])
+
+    result = _run_two_target_bootstrap(
+        g_tilde,
+        stacks,
+        B,
+        V_hat,
+        d.DiagnosticConfig(num_bootstrap_draws=60, nonlinear_solver_max_iterations=200),
+    )
+    assert result.status == CheckStatuses.FAILED
+    assert result.metrics["se_ratio_band_unevaluable_targets"] == ["dead"]
+    assert (
+        result.metrics["se_ratio_by_target"]["live"]
+        > result.metrics["se_ratio_null_band"][1]
+    )
+    assert any("anticonservative" in w for w in result.warnings)
+
+
+def test_exact_check_is_indeterminate_when_the_se_ratio_gate_cannot_be_evaluated():
+    # A singular target covariance makes the generalized eigenproblem unsolvable (scipy's eigh
+    # needs a positive-definite B), so no se_ratios exist to compare against the null band.
+    # Nothing was measured, so nothing passed.
+    stacks, B, V_hat = _one_dead_target_inputs()
+    result = d.check_exact_nonlinear_perturbations(
+        _affine_map(B),
+        jnp.zeros(2),
+        np.zeros(2),
+        B,
+        d.factor_bread(B),
+        stacks,
+        stacks.shape[0],
+        np.eye(2),
+        ["live", "dead"],
+        V_hat,
+        d.DiagnosticConfig(num_exact_directions=10),
+    )
+    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["se_ratios_within_tolerance"] is None
+    assert all(math.isnan(ratio) for ratio in result.metrics["se_ratios"])
+    assert result.metrics["root_failure_fraction"] == 0.0
+    assert any("could not be evaluated" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# 21. check_jacobian_drift's memory bound. Its num_directions * len(drift_path_samples) reverse-
+#     mode Jacobians of the whole stacked system are the most backward-pass-expensive thing in
+#     the suite; chunking them must not change a single reported number.
+# ---------------------------------------------------------------------------
+
+
+def test_jacobian_drift_is_invariant_to_the_row_chunk_size():
+    rng = np.random.default_rng(5)
+    n, dim = 25, 3
+    stacks = rng.standard_normal((n, dim)) * 5.0
+    B = np.eye(dim)
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ eta + 0.5 * eta**2
+
+    def rho_at(chunk_size):
+        return d.check_jacobian_drift(
+            g_tilde,
+            jnp.zeros(dim),
+            B,
+            d.factor_bread(B),
+            stacks,
+            n,
+            d.DiagnosticConfig(jacobian_row_chunk_size=chunk_size),
+        ).metrics["rho_by_direction"]
+
+    unchunked = rho_at(None)  # auto: below the auto policy's threshold, so unchunked
+    # 0 forces unchunked, 1/2 do not divide out_dim = 3, 3 is exactly out_dim, 8 exceeds it.
+    for chunk_size in (0, 1, 2, 3, 8):
+        np.testing.assert_allclose(rho_at(chunk_size), unchunked, rtol=1e-7, atol=1e-9)
+
+
+def test_jacobian_drift_rejects_a_negative_row_chunk_size():
+    stacks, B = _drift_inputs()
+    with pytest.raises(ValueError, match="non-negative"):
+        d.check_jacobian_drift(
+            _affine_map(B),
+            jnp.zeros(1),
+            B,
+            d.factor_bread(B),
+            stacks,
+            stacks.shape[0],
+            d.DiagnosticConfig(jacobian_row_chunk_size=-1),
+        )
+
+
+def test_diagnostic_config_resolves_a_missing_chunk_size_from_an_older_pickle():
+    # DiagnosticConfig instances are pickled alongside cluster runs (analyze_dataset's
+    # --diagnostic_config_pickle path), so a config written before this field existed must still
+    # answer for it -- and still round-trip through dataclasses.asdict into tolerances_used.
+    stale = pickle.loads(pickle.dumps(d.DiagnosticConfig()))
+    stale.__dict__.pop("jacobian_row_chunk_size")
+    assert stale.jacobian_row_chunk_size is None
+    assert "jacobian_row_chunk_size" in dataclasses.asdict(stale)
+
+
+# ---------------------------------------------------------------------------
+# 9. DiagnosticReport.verdict -- the decision-level summary (certified / conservative /
+#    uncertifiable / invalid). Unit tests pin the precedence ladder of _derive_verdict with
+#    synthetic CheckResults; suite-level tests confirm the wiring end-to-end on an affine map.
+# ---------------------------------------------------------------------------
+
+from lifejacket.constants import DiagnosticVerdicts, VerdictBases  # noqa: E402
+
+
+def _cr(name, status, metrics=None):
+    return d.CheckResult(name=name, status=status, metrics=metrics or {})
+
+
+def test_derive_verdict_precedence_ladder():
+    config = d.DiagnosticConfig()
+    passed_local = _cr("local_nonlinearity", CheckStatuses.PASSED)
+
+    # Any FAILED check -> invalid.
+    verdict, _ = d._derive_verdict(
+        {
+            "exploration_and_weights": _cr(
+                "exploration_and_weights", CheckStatuses.FAILED
+            )
+        },
+        {},
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.INVALID
+
+    # Rank-deficient target covariance -> invalid even with every status clean (the
+    # zero-width-CI collapse mode: bread_stability reads indeterminate at worst, but the rank
+    # metric is the condition that identified 76/76 collapses in the undercoverage hunt).
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "bread_stability": _cr(
+                "bread_stability",
+                CheckStatuses.INDETERMINATE,
+                {"target_covariance_rank_estimate": 1},
+            ),
+        },
+        {},
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.INVALID
+
+    # Indeterminate (fragility/censoring) without rank deficiency -> uncertifiable.
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _cr(
+                "multiplier_bootstrap", CheckStatuses.INDETERMINATE
+            ),
+        },
+        {},
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.UNCERTIFIABLE
+
+    # The screen called for the bootstrap (local not PASSED) and it never ran -> uncertifiable:
+    # no verdict layer means no verdict, not a pass.
+    verdict, _ = d._derive_verdict(
+        {"local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.WARNING)},
+        {},
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.UNCERTIFIABLE
+
+    # Calibrated conservatism signals -> conservative (bootstrap below-band WARNING here;
+    # influence WARNING is the other path).
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _cr("multiplier_bootstrap", CheckStatuses.WARNING),
+        },
+        {},
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CONSERVATIVE
+
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "influence_concentration": _cr(
+                "influence_concentration", CheckStatuses.WARNING
+            ),
+        },
+        {},
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CONSERVATIVE
+
+    # Quiet run, no bootstrap needed -> certified via the screen.
+    verdict, basis = d._derive_verdict(
+        {"local_nonlinearity": passed_local}, {}, False, 2, config
+    )
+    assert (verdict, basis) == (DiagnosticVerdicts.CERTIFIED, VerdictBases.SCREEN)
+
+
+def test_suite_verdict_certified_by_bootstrap_on_affine_map():
+    rng = np.random.default_rng(31)
+    d_total, n = 2, 60
+    B = np.eye(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+
+    report = d.run_diagnostic_suite(
+        _affine_map(B),
+        jnp.zeros(d_total),
+        B,
+        M_hat,
+        M_hat / n,
+        stacks,
+        beta_dim=0,
+        theta_dim=d_total,
+        num_subjects=n,
+        config=d.DiagnosticConfig(
+            num_directions=10,
+            multiplier_bootstrap="always",
+            num_bootstrap_draws=40,
+        ),
+    )
+    assert report.verdict == DiagnosticVerdicts.CERTIFIED
+    assert report.verdict_basis == VerdictBases.BOOTSTRAP
+    # classification is untouched by the verdict layer.
+    assert report.classification == DiagnosticClassifications.LOCALLY_SUPPORTED
+
+
+def test_suite_verdict_certified_by_screen_when_bootstrap_not_called_for():
+    rng = np.random.default_rng(32)
+    d_total, n = 2, 60
+    B = np.eye(d_total)
+    stacks = rng.standard_normal((n, d_total))
+    stacks -= stacks.mean(axis=0)
+    M_hat = (stacks.T @ stacks) / n
+
+    report = d.run_diagnostic_suite(
+        _affine_map(B),
+        jnp.zeros(d_total),
+        B,
+        M_hat,
+        M_hat / n,
+        stacks,
+        beta_dim=0,
+        theta_dim=d_total,
+        num_subjects=n,
+        config=d.DiagnosticConfig(num_directions=10, multiplier_bootstrap="auto"),
+    )
+    assert "multiplier_bootstrap" not in report.check_results
+    assert report.verdict == DiagnosticVerdicts.CERTIFIED
+    assert report.verdict_basis == VerdictBases.SCREEN
+
+
+# ---------------------------------------------------------------------------
+# The two re-solve optimizations that ship ON by default (divergence abort,
+# starvation early stop). Both are verdict-preservation claims, and the whole
+# point of each is that it changes cost and NOTHING else -- so every test here
+# asserts equality against the same run with the optimization disabled, rather
+# than asserting any particular status. Adversarial review found these shipped
+# with zero coverage; a regression in either is invisible without these.
+# ---------------------------------------------------------------------------
+
+
+def _abort_flag_configs(**overrides):
+    """The same config with the abort on and off, so a test can diff the two runs."""
+    on = d.DiagnosticConfig(nonlinear_solver_divergence_abort=True, **overrides)
+    off = d.DiagnosticConfig(nonlinear_solver_divergence_abort=False, **overrides)
+    return on, off
+
+
+def test_divergence_abort_does_not_reclassify_converging_solves():
+    # The abort's ONLY licence is that it fires on solves that were going to fail anyway. If it
+    # ever turns a converged trial into a failed one it moves the failure fraction, which moves
+    # the status -- so the converged COUNT is the thing to pin, on a map curved enough that a
+    # good fraction of solves genuinely struggle.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ (eta + 0.6 * eta**2)
+
+    def run(config):
+        return d.check_multiplier_bootstrap(
+            g_tilde,
+            jnp.zeros(1),
+            np.zeros(1),
+            d.factor_bread(B),
+            stacks,
+            n,
+            np.eye(1),
+            ["theta_0"],
+            V_hat,
+            config,
+        )
+
+    on_config, off_config = _abort_flag_configs(
+        num_bootstrap_draws=40, nonlinear_solver_max_iterations=60
+    )
+    with_abort, without_abort = run(on_config), run(off_config)
+
+    # An abort can only ever turn converged into failed, so an unchanged count is proof of zero
+    # false aborts rather than mere evidence of them.
+    assert (
+        with_abort.metrics["num_converged_trials"]
+        == without_abort.metrics["num_converged_trials"]
+    )
+    assert with_abort.status == without_abort.status
+    # And the ensemble statistics the verdict is actually read off are untouched. Keyed by
+    # target label, so compare per label rather than as an array.
+    with_ratios = with_abort.metrics["se_ratio_by_target"]
+    without_ratios = without_abort.metrics["se_ratio_by_target"]
+    assert set(with_ratios) == set(without_ratios)
+    for label, ratio in with_ratios.items():
+        np.testing.assert_allclose(ratio, without_ratios[label])
+
+
+def test_divergence_abort_is_reported_and_can_be_switched_off():
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+
+    def g_tilde(eta):
+        return jnp.asarray(B) @ jnp.tanh(eta * 8.0)
+
+    def run(config):
+        return d.check_multiplier_bootstrap(
+            g_tilde,
+            jnp.zeros(1),
+            np.zeros(1),
+            d.factor_bread(B),
+            stacks,
+            n,
+            np.eye(1),
+            ["theta_0"],
+            V_hat,
+            config,
+        )
+
+    on_config, off_config = _abort_flag_configs(
+        num_bootstrap_draws=30, nonlinear_solver_max_iterations=50
+    )
+    with_abort, without_abort = run(on_config), run(off_config)
+
+    # The count is reported either way, and the escape hatch really does disable the mechanism.
+    assert "num_divergence_aborted_trials" in with_abort.metrics
+    assert without_abort.metrics["num_divergence_aborted_trials"] == 0
+    assert with_abort.metrics["num_divergence_aborted_trials"] >= 0
+
+
+def test_starvation_early_stop_preserves_status_and_reports_truncation():
+    # The stop may only fire once the maximum still-attainable converged count has fallen below
+    # the three trials any ensemble statistic needs. On a map where nothing converges it should
+    # fire, report the truncation honestly, and reach the same status as the untruncated run.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    n = stacks.shape[0]
+
+    def g_tilde(eta):
+        # Wildly oscillatory: the chord solve cannot land anywhere.
+        return jnp.asarray(B) @ jnp.sin(eta * 400.0)
+
+    def run(mode):
+        return d.check_multiplier_bootstrap(
+            g_tilde,
+            jnp.zeros(1),
+            np.zeros(1),
+            d.factor_bread(B),
+            stacks,
+            n,
+            np.eye(1),
+            ["theta_0"],
+            V_hat,
+            d.DiagnosticConfig(
+                num_bootstrap_draws=20,
+                nonlinear_solver_max_iterations=8,
+                perturbation_early_stop=mode,
+            ),
+        )
+
+    stopped, full = run("starvation"), run("off")
+
+    assert stopped.status == full.status
+    assert stopped.metrics["num_planned_trials"] == full.metrics["num_planned_trials"]
+    if stopped.metrics["early_stopped"]:
+        # A truncated ensemble must never masquerade as a complete one.
+        assert stopped.metrics["num_trials"] < stopped.metrics["num_planned_trials"]
+        assert stopped.metrics["early_stop_reason"] == d.EARLY_STOP_REASON_STARVATION
+        assert stopped.metrics["num_draws_executed"] <= 20
+        # It can only ever skip the last MIN_CONVERGED_TRIALS_FOR_ENSEMBLE - 1 trials.
+        skipped = stopped.metrics["num_planned_trials"] - stopped.metrics["num_trials"]
+        assert skipped <= d.MIN_CONVERGED_TRIALS_FOR_ENSEMBLE - 1
+
+
+def test_batched_bootstrap_resolves_auto_is_refused():
+    # Batching is known to change verdicts on reachable fixtures, so "auto" must never select
+    # it -- only an explicit "always" may reach the driver.
+    config = d.DiagnosticConfig(batched_bootstrap_resolves="auto")
+    assert d._resolve_bootstrap_batch_width(config, num_planned_trials=1000) == 0
+    always = d.DiagnosticConfig(batched_bootstrap_resolves="always")
+    assert d._resolve_bootstrap_batch_width(always, num_planned_trials=1000) > 0
+    off = d.DiagnosticConfig(batched_bootstrap_resolves="off")
+    assert d._resolve_bootstrap_batch_width(off, num_planned_trials=1000) == 0

@@ -79,7 +79,8 @@ class CalibrationResult:
 
 def default_failure_predicate(
     replay: DeploymentReplay,
-    se_distortion_tolerance: float = 0.05,
+    config: Any = None,
+    *,
     coverage_tolerance: float = 0.05,
     nominal_coverage: float = 0.95,
 ) -> bool:
@@ -88,6 +89,19 @@ def default_failure_predicate(
     variance estimates, or (when ground truth is available) a contrast falling outside its
     nominal-coverage interval more often than tolerance allows. Callers should generally supply
     their own predicate matched to what "inferential failure" means for their deployment.
+
+    The predicate contract is fixed by how `calibrate_and_classify` calls it: exactly two
+    positional arguments, `(replay, config)`, where `config` is the same DiagnosticConfig the
+    diagnostic suite was run with. Every predicate must accept that second argument even if, as
+    here, it ignores it. The remaining knobs are therefore keyword-only -- a predicate whose
+    second *positional* parameter was a tolerance would silently receive the config object
+    instead -- so override them by binding them up front:
+    `functools.partial(default_failure_predicate, coverage_tolerance=0.10)` still presents the
+    required two-positional-argument surface.
+
+    `coverage_tolerance` is a fraction taken *within* one replay, across the components of theta;
+    for scalar theta it degenerates to "any miss is a failure", which makes the conditional rate
+    `calibrate_and_classify` bounds the per-replay non-coverage rate itself.
     """
     variance = np.asarray(replay.theta_variance_estimate, dtype=np.float64)
     if not np.all(np.isfinite(variance)) or np.any(np.diag(variance) < 0):
@@ -122,6 +136,12 @@ def calibrate_and_classify(
     Returns `DiagnosticClassifications.SUPPORTED` only when that upper bound is below
     `risk_tolerance`; otherwise `DiagnosticClassifications.LOCALLY_SUPPORTED`. This is the ONLY
     place in the package that classification can ever be `SUPPORTED`.
+
+    `failure_predicate` is invoked as `failure_predicate(replay, config)` -- exactly two
+    positional arguments, the second being the DiagnosticConfig the suite was just run with, so
+    a predicate can key its judgment off the same tolerances the diagnostics used. Predicates
+    needing further knobs should bind them with `functools.partial` rather than adding
+    positional parameters, which would just receive the config.
     """
     from . import (
         diagnostics as diagnostics_module,  # deferred: avoids a circular import

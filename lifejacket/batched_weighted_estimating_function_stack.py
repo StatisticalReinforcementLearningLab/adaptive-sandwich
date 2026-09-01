@@ -122,10 +122,10 @@ import numpy as np
 
 from .calculate_derivatives import group_user_args_by_shape
 from .helper_functions import (
-    array_scale_absolute_tolerance,
     get_min_time_by_policy_num,
     get_radon_nikodym_weight,
 )
+from .input_checks import require_original_and_threaded_results_agree
 from .vmap_helpers import (
     build_batched_arg_lists_by_subject,
     stack_batched_arg_lists_into_tensors,
@@ -1877,6 +1877,7 @@ def _assert_original_and_threaded_bucket_results_agree(
     bucket: UpdateArgBucket,
     threaded_result: jnp.ndarray,
     rtol: float,
+    context: str,
 ) -> None:
     """
     Shared comparison step for both check_batched_*_equivalent functions:
@@ -1890,12 +1891,14 @@ def _assert_original_and_threaded_bucket_results_agree(
     input_checks.require_threaded_inference_estimating_function_args_equivalent's
     looser rtol=1e-2, no-atol tolerance).
 
-    The absolute-tolerance floor is computed from the compared values
-    themselves (array_scale_absolute_tolerance): estimating-function outputs
-    carry the reward's units, so the previous FIXED atol=1e-7 could
-    false-alarm on healthy high-reward data, and the previous atol=0.0 on
-    the inference side failed any exactly-zero component on any nonzero
-    noise. See that helper's docstring.
+    The comparison itself -- including the per-component absolute-tolerance
+    floor computed from the original values -- is
+    input_checks.require_original_and_threaded_results_agree, the same one
+    the unbatched checks in that module use, so this module's tolerances
+    cannot drift from theirs either. See its docstring for why a fixed atol
+    (the previous 1e-7) false-alarms on healthy high-reward data and why a
+    zero one (the previous inference-side 0.0) fails an exactly-zero
+    component on any nonzero noise.
     """
     original_call_args, original_in_axes = _assemble_call_args_and_in_axes(
         bucket.raw_arg_lists, {}
@@ -1906,12 +1909,11 @@ def _assert_original_and_threaded_bucket_results_agree(
     # Need to stop gradient here: threaded_result traces back to betas/theta,
     # which are being differentiated in the real jax.jacrev call this check
     # runs alongside, and np.asarray can't convert a traced value.
-    original_np = np.asarray(original_result)
-    np.testing.assert_allclose(
-        original_np,
+    require_original_and_threaded_results_agree(
+        np.asarray(original_result),
         np.asarray(jax.lax.stop_gradient(threaded_result)),
-        atol=array_scale_absolute_tolerance(original_np),
         rtol=rtol,
+        context=context,
     )
 
 
@@ -1988,6 +1990,11 @@ def check_batched_algorithm_estimating_function_args_equivalent(
                 bucket,
                 threaded_result,
                 rtol=1e-3,
+                context=(
+                    "Algorithm estimating function args are not equivalent after threading "
+                    f"for update {u + 1} (policy number {policy_num}), subjects "
+                    f"{bucket.subject_ids_in_order}."
+                ),
             )
 
 
@@ -2038,5 +2045,12 @@ def check_batched_inference_estimating_function_args_equivalent(
         # computed from the compared values; see
         # _assert_original_and_threaded_bucket_results_agree).
         _assert_original_and_threaded_bucket_results_agree(
-            inference_estimating_func, bucket, threaded_result, rtol=1e-2
+            inference_estimating_func,
+            bucket,
+            threaded_result,
+            rtol=1e-2,
+            context=(
+                "Inference estimating function args are not equivalent after threading for "
+                f"subjects {bucket.subject_ids_in_order}."
+            ),
         )

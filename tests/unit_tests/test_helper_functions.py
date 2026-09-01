@@ -1,4 +1,7 @@
+import jax
+import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from lifejacket import helper_functions
 
@@ -176,51 +179,171 @@ def test_append_new_block_row_to_block_lower_triangular_matrix_unequal_dims():
 
 
 # ---------------------------------------------------------------------------
-# array_scale_absolute_tolerance: the shared scale-aware atol floor for comparing two float
-# computations of the same quantity (see docs/adr/0002's correction section for the raw-units
-# bug class it exists to prevent).
+# compute_row_chunked_jacobian: the package-wide memory-bounded reverse-mode Jacobian. Same
+# quantity as jax.jacrev, with the output cotangent basis walked in chunks so peak memory
+# scales with chunk_size rather than out_dim. Two call sites depend on it (the bootstrap's
+# per-iterate Newton Jacobian inside a jax.jit trace, and the diagnostic suite's Jacobian-drift
+# check), so the properties pinned here are: exactness at every chunk size, the padding path
+# for a chunk size that does not divide out_dim, and -- the one most easily lost in a refactor
+# -- that the chunk loop does NOT unroll under jit.
 # ---------------------------------------------------------------------------
 
 
-def test_array_scale_absolute_tolerance_tracks_the_reference_scale():
-    import numpy as np
+def _nonlinear_map(v):
+    # R^5 -> R^7, deliberately non-square and with every output row depending on a different
+    # mix of inputs, so a mis-sliced or mis-ordered chunk cannot pass by symmetry.
+    return jnp.stack(
+        [
+            v[0] ** 2 + jnp.sin(v[1]),
+            v[1] * v[2],
+            jnp.exp(0.3 * v[0]) + v[3],
+            jnp.tanh(v[2]) - v[4],
+            v[0] * v[1] * v[2],
+            jnp.log1p(v[3] ** 2),
+            v[4] ** 3,
+        ]
+    )
 
-    from lifejacket.helper_functions import array_scale_absolute_tolerance
 
-    # A near-zero component with noise proportional to the array's magnitude: the exact
-    # situation the fixed atol=1e-7 mishandled. The scale-aware floor must accept it at ANY
-    # reward scale, because the noise and the tolerance grow together.
-    for scale in (1.0, 1e4, 1e8):
-        reference = np.array([scale, 0.0])
-        other = np.array([scale, 3e-7 * scale])
-        np.testing.assert_allclose(
-            reference,
-            other,
-            atol=array_scale_absolute_tolerance(reference),
-            rtol=1e-3,
+_NONLINEAR_MAP_POINT = jnp.array([0.3, -0.7, 0.5, 1.1, -0.2])
+
+
+# out_dim is 7, so 2/3/4/5/6 all leave a short final chunk (the padding path), 7 is exactly one
+# chunk, and 8/100 exceed the output dimension entirely.
+@pytest.mark.parametrize("chunk_size", [1, 2, 3, 4, 5, 6, 7, 8, 100])
+def test_compute_row_chunked_jacobian_matches_jacrev_at_every_chunk_size(chunk_size):
+    expected = jax.jacrev(_nonlinear_map)(_NONLINEAR_MAP_POINT)
+    chunked = helper_functions.compute_row_chunked_jacobian(
+        _nonlinear_map, _NONLINEAR_MAP_POINT, chunk_size
+    )
+
+    assert chunked.shape == expected.shape
+    # Not exact equality: lax.map's body is compiled while eager jacrev is not, so XLA is free
+    # to fuse the two differently (measured ~1 ulp in float64, ~5e-7 in the float32 jax runs by
+    # default here). The tolerance is float32 noise, several orders below any real chunking bug,
+    # which would misplace whole rows.
+    np.testing.assert_allclose(
+        np.asarray(chunked), np.asarray(expected), rtol=1e-6, atol=1e-6
+    )
+
+
+@pytest.mark.parametrize("chunk_size", [None, 0])
+def test_compute_row_chunked_jacobian_unchunked_requests_take_the_jacrev_path(
+    chunk_size,
+):
+    # None and 0 are documented to return jax.jacrev's result verbatim (no vjp/lax.map
+    # machinery at all), so here -- and only here -- bitwise agreement is the contract.
+    np.testing.assert_array_equal(
+        np.asarray(
+            helper_functions.compute_row_chunked_jacobian(
+                _nonlinear_map, _NONLINEAR_MAP_POINT, chunk_size
+            )
+        ),
+        np.asarray(jax.jacrev(_nonlinear_map)(_NONLINEAR_MAP_POINT)),
+    )
+
+
+def test_compute_row_chunked_jacobian_final_short_chunk_keeps_its_real_rows():
+    # A short final chunk is padded with all-zero cotangent rows whose all-zero Jacobian rows
+    # are then dropped. Off-by-one in that drop returns the PADDING instead of the last real
+    # rows -- which is silent, because zeros are a plausible-looking Jacobian block. out_dim=7
+    # with chunk_size=4 puts rows 4..6 in the padded chunk.
+    expected = np.asarray(jax.jacrev(_nonlinear_map)(_NONLINEAR_MAP_POINT))
+    chunked = np.asarray(
+        helper_functions.compute_row_chunked_jacobian(
+            _nonlinear_map, _NONLINEAR_MAP_POINT, 4
+        )
+    )
+
+    assert np.all(np.any(expected[4:] != 0.0, axis=1)), (
+        "fixture no longer has nonzero trailing Jacobian rows, so it cannot detect padding "
+        "leaking into the result"
+    )
+    assert np.all(np.any(chunked[4:] != 0.0, axis=1))
+    np.testing.assert_allclose(chunked[4:], expected[4:], rtol=1e-6, atol=1e-6)
+
+
+def test_compute_row_chunked_jacobian_is_correct_inside_a_jit_trace():
+    # The bootstrap's Newton Jacobian calls this from inside @jax.jit, so tracing it must work
+    # and give the same answer. Compared against a jitted jacrev, not an eager one: comparing a
+    # compiled result against an uncompiled one folds XLA fusion differences into the tolerance
+    # for no reason.
+    expected = jax.jit(jax.jacrev(_nonlinear_map))(_NONLINEAR_MAP_POINT)
+    chunked = jax.jit(
+        lambda v: helper_functions.compute_row_chunked_jacobian(_nonlinear_map, v, 3)
+    )(_NONLINEAR_MAP_POINT)
+
+    np.testing.assert_allclose(
+        np.asarray(chunked), np.asarray(expected), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_compute_row_chunked_jacobian_does_not_unroll_the_chunk_loop():
+    # THE regression this helper exists for. A Python `for` loop over the chunks passes every
+    # numerical test above and fails only this one: under jax.jit it unrolls into num_chunks
+    # copies of the backward graph, whose intermediates XLA may keep live simultaneously --
+    # reinstating exactly the peak-memory blowup the chunking was added to prevent (real 24GB
+    # OOM crashes at oralytics scale; docs/adr/0001).
+    def wide_map(v):
+        return jnp.concatenate(
+            [jnp.sin(v * (i + 1.0)) + v[0] * v[1] for i in range(15)]
         )
 
-    # And the same comparison fails under the legacy fixed tolerance once the scale is large --
-    # the false alarm this replaces.
-    import pytest
+    point = jnp.array([0.4, -0.6, 0.9, 0.1])
+    out_dim = int(wide_map(point).shape[0])
 
-    with pytest.raises(AssertionError):
-        np.testing.assert_allclose(
-            np.array([1e8, 0.0]),
-            np.array([1e8, 3e-7 * 1e8]),
-            atol=1e-7,
-            rtol=1e-3,
+    jaxprs = {
+        chunk_size: jax.make_jaxpr(
+            lambda v, c=chunk_size: helper_functions.compute_row_chunked_jacobian(
+                wide_map, v, c
+            )
+        )(point)
+        for chunk_size in (1, out_dim // 4, out_dim)
+    }
+
+    for chunk_size, jaxpr in jaxprs.items():
+        assert "scan[" in str(jaxpr), (
+            f"chunk_size={chunk_size} produced no scan primitive -- the chunk loop is not "
+            "jax.lax.map any more"
+        )
+    # The count of TOP-LEVEL equations, not the printed length: the chunk shapes appear in the
+    # jaxpr's type annotations, so the text differs harmlessly between chunk sizes while the
+    # graph structure does not. 60 chunks of 1 row and 1 chunk of 60 rows must trace to the
+    # same number of equations, the scan body holding the one backward pass either way; a
+    # Python loop over the chunks traces to one copy per chunk (measured here: 350 equations
+    # at 1 chunk against 12746 at 60).
+    equation_counts = {
+        chunk_size: len(jaxpr.jaxpr.eqns) for chunk_size, jaxpr in jaxprs.items()
+    }
+    assert len(set(equation_counts.values())) == 1, equation_counts
+
+
+def test_compute_row_chunked_jacobian_rejects_inputs_it_cannot_chunk():
+    with pytest.raises(ValueError, match="non-negative"):
+        helper_functions.compute_row_chunked_jacobian(
+            _nonlinear_map, _NONLINEAR_MAP_POINT, -1
+        )
+    # The flat output basis is only well-defined for a single array in and a single array out;
+    # a pytree must say so rather than failing somewhere inside jnp.eye.
+    with pytest.raises(TypeError, match="pytree"):
+        helper_functions.compute_row_chunked_jacobian(
+            lambda p: p["a"] * 2.0, {"a": jnp.ones(3)}, 2
+        )
+    with pytest.raises(TypeError, match="single array"):
+        helper_functions.compute_row_chunked_jacobian(
+            lambda v: {"a": v * 2.0}, _NONLINEAR_MAP_POINT, 2
         )
 
 
-def test_array_scale_absolute_tolerance_degenerate_references():
-    import numpy as np
+def test_resolve_jacobian_row_chunk_size_is_one_shared_policy_object():
+    # The auto policy moved here from post_deployment_analysis so diagnostics.py could import it
+    # without a cycle; that module keeps a re-export for its own call site and for the existing
+    # tests in test_post_deployment_analysis.py. If the re-export silently disappears those
+    # would break far from the cause, and, worse, a second copy of the policy could be
+    # reintroduced there without anything noticing.
+    from lifejacket import post_deployment_analysis
 
-    from lifejacket.helper_functions import array_scale_absolute_tolerance
-
-    # All-zero reference: exact agreement is the right demand (atol 0), and identical zeros
-    # still compare equal.
-    assert array_scale_absolute_tolerance(np.zeros(4)) == 0.0
-    np.testing.assert_allclose(np.zeros(4), np.zeros(4), atol=0.0, rtol=1e-3)
-    # Empty reference: nothing to compare, no crash.
-    assert array_scale_absolute_tolerance(np.array([])) == 0.0
+    assert (
+        post_deployment_analysis.resolve_jacobian_row_chunk_size
+        is helper_functions.resolve_jacobian_row_chunk_size
+    )

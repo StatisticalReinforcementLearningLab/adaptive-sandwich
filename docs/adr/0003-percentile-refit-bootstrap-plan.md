@@ -14,8 +14,9 @@ counted with a reason taxonomy (`singular_jacobian` at small n is usually a draw
 out an early recruitment wave, leaving that update block genuinely unidentified); the
 structural precompute is built once and the (stack, Jacobian) evaluation is jax.jit-compiled,
 mirroring the local-linearization diagnostic's construction — n=200 x 300 draws runs in
-seconds. The §3 coverage benchmark on the stored cluster grids remains a documented benchmark,
-not CI.)
+seconds. §3's coverage benchmark has now RUN, end-to-end through `lifejacket analyze` rather
+than through the reference implementation — see "Coverage benchmark result" below; it remains a
+documented benchmark, not CI.)
 
 This document is a self-contained implementation brief. The empirical work
 behind it lives in the `adjusted-sandwich-user` repo (two-stage
@@ -152,13 +153,36 @@ that same function with per-subject multiplicities:
   percentile_bootstrap_alpha: float = 0.05, percentile_bootstrap_seed: int | None)`
   — 0 means off (default; no behavior change for existing users).
 - CLI: `--percentile_bootstrap_draws`, `--percentile_bootstrap_alpha`,
-  `--percentile_bootstrap_seed` on `lifejacket analyze`.
+  `--percentile_bootstrap_seed` on `lifejacket analyze`. The seed is
+  `click.IntRange(min=0)`: `np.random.default_rng` raises on a negative seed,
+  and rejecting a typo'd command line at the boundary is worth more than the
+  hours of cluster compute that would otherwise precede the failure.
 - Outputs added to the analysis dict when enabled:
   `percentile_bootstrap_ci` (theta_dim × 2), `bootstrap_num_draws`,
-  `bootstrap_num_failed_draws`; optionally the raw `theta*` draws in the
-  debug-pieces output for diagnostics.
+  `bootstrap_num_failed_draws`, `bootstrap_failure_reasons` (the reason
+  taxonomy, counted), and `bootstrap_error`; the raw `theta*` draws go to the
+  debug-pieces output as `percentile_bootstrap_theta_draws`.
 - Log a warning if more than ~2% of draws fail to converge or produce
   degenerate systems.
+- **The bootstrap is best-effort, like the diagnostic suite.** The adjusted
+  sandwich is fully computed before it runs but nothing has been written yet,
+  so an unguarded failure here would discard the whole analysis over an added
+  interval. Instead the block is guarded: the failure is logged, the interval
+  comes back all-NaN with `bootstrap_num_failed_draws == bootstrap_num_draws`,
+  and `bootstrap_error` carries a `"Type: message"` string (it is `None` on a
+  bootstrap that ran to completion, however many individual draws failed).
+  Downstream code can therefore distinguish "the bootstrap failed" from "the
+  bootstrap was not requested" — the keys are absent entirely in the latter
+  case — and must not read the NaN interval as a finding.
+- The per-iterate Newton Jacobian is memory-bounded by the package-wide
+  chunking policy: `analyze_dataset` resolves its `jacobian_row_chunk_size`
+  once against the flattened solution's dimension and threads it into both the
+  jitted `(stack, Jacobian)` fast path and `_newton_refit`'s eager fallback,
+  which build their Jacobians with
+  `helper_functions.compute_row_chunked_jacobian` rather than a bare
+  `jax.jacrev`/`vmap(pullback)`. The fast path is probed once up front; if that
+  graph will not trace or compile, the bootstrap logs a downgrade and runs the
+  eager path on the identical draws instead of failing.
 
 ### Numerical guardrails
 
@@ -187,6 +211,39 @@ that same function with per-subject multiplicities:
    stored config A n=250 replications, percentile coverage ≈ 0.95 (0.9510
    observed) vs Wald 0.9260; on the n=250 control, unchanged (0.9510 vs
    0.9530).
+
+### Coverage benchmark result (2026-09-01)
+
+Step 3 above has now run through lifejacket's own `analyze_dataset`/`lifejacket analyze`
+path, rather than through `two_stage_refit_bootstrap.py`. This is a different claim from
+step 2: step 2 showed the two implementations agree draw-for-draw on a shared fixture
+(2.4e-8 median relative difference), while this shows the shipped code delivers the
+coverage over 1000 fresh replications per arm. Config A, soft clip, n=250, 300 draws per
+replication, exact target theta* = 3.3783359435623384; jobs 43487413 (adaptive) and
+43487414 (fixed-policy control), 1000/1000 analyses readable in both.
+
+| arm | Wald | percentile refit bootstrap | mean Wald width | mean percentile width |
+| --- | --- | --- | --- | --- |
+| adaptive n=250 | 0.9260 [0.910, 0.942] | **0.9460** [0.932, 0.960] | 1.6176 | 1.4717 |
+| fixed-policy control n=250 | 0.9530 [0.940, 0.966] | 0.9490 [0.935, 0.963] | 1.2249 | 1.2095 |
+
+Reading:
+- Both Wald figures reproduce this ADR's reference table EXACTLY (0.9260 and 0.9530),
+  which is the evidence that the benchmark reproduces the intended design rather than
+  some neighbouring configuration.
+- The adaptive arm's percentile coverage, 0.9460, sits below the 0.9510 recorded above,
+  but that reference came from a different 1000-replication draw through the reference
+  implementation; at 1000 reps the Monte Carlo standard error is ~0.007, the two
+  intervals overlap heavily, and the difference is not evidence of disagreement.
+- **The percentile interval is NARROWER than Wald on the adaptive arm (1.4717 vs 1.6176,
+  ~9% narrower) while covering better.** The undercoverage was never a width problem —
+  it is the miss-direction geometry described in §1, and the asymmetric interval fixes it
+  without buying coverage with width.
+- The control is the negative control and behaves: coverage unchanged and width within
+  1.3% of Wald, so the method adds no spurious width where the adaptive correction is zero.
+- Robustness: **zero failed refits** across 2000 replications x 300 draws = 600,000 Newton
+  refits. The failure taxonomy exists for small-n draws that zero an early recruitment
+  wave; nothing in this grid hit it.
 
 ## Consequences
 

@@ -11,8 +11,18 @@ import numpy as np
 import scipy.linalg
 from jax import numpy as jnp
 
-from .constants import CheckStatuses, DiagnosticClassifications
-from .helper_functions import get_radon_nikodym_weight, matrix_inv_sqrt
+from .constants import (
+    CheckStatuses,
+    DiagnosticClassifications,
+    DiagnosticVerdicts,
+    VerdictBases,
+)
+from .helper_functions import (
+    compute_row_chunked_jacobian,
+    get_radon_nikodym_weight,
+    matrix_inv_sqrt,
+    resolve_jacobian_row_chunk_size,
+)
 from .simulator_calibration import clopper_pearson_upper_bound
 
 logger = logging.getLogger(__name__)
@@ -64,6 +74,11 @@ class DiagnosticConfig:
     backward_residual_tolerance: float = 1e-6
     nonlinear_correction_tolerance_se: float = 0.10
     se_distortion_tolerance: float = 0.05
+    # Not a standalone cutoff: the mean-shift gate of the exact and bootstrap checks compares
+    # b_L against max(this, the simulated finite-draw null upper quantile), so this is the
+    # absolute practical-significance FLOOR (a displacement under a tenth of a target SE is not
+    # worth reporting however detectable it becomes at large J) while the band absorbs the
+    # finite-draw noise. See _evaluate_mean_shift_gate.
     mean_shift_tolerance_se: float = 0.10
     quantile_shift_tolerance_se: float = 0.10
     bad_direction_probability_target: float = 0.01
@@ -79,6 +94,169 @@ class DiagnosticConfig:
     # regardless of any float64 casts applied to the *linear algebra* around them. A tolerance
     # tighter than ~1e-5 relative is generally unreachable at float32 precision.
     nonlinear_solver_tolerance: float = 1e-5
+
+    # Divergence abort for the chord-Newton inner loop of solve_exact_perturbation. A
+    # continuation step only ever fails by exhausting nonlinear_solver_max_iterations, so a step
+    # that has visibly left the region where the frozen bread models g_tilde still pays the full
+    # iteration budget before being counted as a failure. These two clauses stop such a step
+    # early; an aborted step is treated EXACTLY as an exhausted one (converged=False, the solve
+    # fails), which is what makes the saving verdict-neutral -- see the correctness argument in
+    # solve_exact_perturbation's docstring.
+    #
+    # Both are calibrated against measured margins on CONVERGING continuation steps, since the
+    # only way this can change a verdict is by aborting a step that would have converged:
+    #   blowup_factor  -- worst r_k / (best r seen so far in the step) ever observed inside a
+    #                     step that then converged: 1.9 on this repository's diagnostic fixtures
+    #                     (33,351 converging steps) and 36.7 on an independent synthetic sweep of
+    #                     logistic/cubic/tanh systems (118,563 converging steps). 1e4 is a ~270x
+    #                     margin on the worse of the two. A chord step that overshoots its own
+    #                     best by four orders of magnitude has left the region where the frozen
+    #                     B_hat models g_tilde at all.
+    #   stall_window   -- longest run of consecutive iterations with no new best residual inside
+    #                     a step that then converged: 4 here, 20 on the synthetic sweep (a
+    #                     genuine plateau that rose for 20 iterations and then collapsed to
+    #                     convergence). 40 is a 2x margin on the worse sample. DO NOT lower this
+    #                     toward 25 to buy a few percent: that cuts the margin to 1.25x, and a
+    #                     false abort silently converts a converged draw into a root failure,
+    #                     which moves the failure fraction and can flip a check's status. Set it
+    #                     to 0 to disable the stall clause and keep only the blow-up one, whose
+    #                     margin is three orders wider.
+    #   guard_factor   -- neither clause is evaluated while the step's best relative residual is
+    #                     already within guard_factor * nonlinear_solver_tolerance. At float32
+    #                     the residual noise floor sits about an order below the tolerance, so a
+    #                     step can legitimately bounce inside a few multiples of it for a dozen
+    #                     iterations before dipping under; the guard removes that entire
+    #                     mechanism for one to two percentage points of saving.
+    # A per-step ITERATION CAP was measured and rejected: converging steps routinely use the full
+    # 50 (p95 = 34-41), so no cap below the existing budget is safe. So was a rate-extrapolation
+    # ("this contraction rate cannot reach tolerance in the iterations left") clause: it had zero
+    # false aborts in-sample and three out of sample, on steps whose residual creeps for five
+    # iterations and then collapses.
+    #
+    # NOT a proof, only a measurement -- ~152,000 converging steps with zero false aborts across
+    # two independent corpora, and then on real study data rather than synthetic fixtures: the two
+    # ADS-142 cells this was most likely to break, run paired with the flag on and off over the
+    # same seeds (A_hard jobs 43585039/43585044, B_influence 43585041/43585045; 40 paired seeds,
+    # 796 aborts fired). Zero differences in verdict, classification or any check status, and
+    # num_converged_trials identical on both arms -- which is the strong form of the claim, since
+    # an abort can only ever turn a converged trial into a failed one, so an unchanged count is
+    # proof of zero false aborts rather than evidence of them. 18 of the 20 influence-cell seeds
+    # land on FAILED-from-a-censored-subset (verdict `invalid`), i.e. the precedence path an
+    # unsound abort or early stop would have destroyed is the one the corpus mostly exercises.
+    # Set nonlinear_solver_divergence_abort=False to restore the exhaust-the-budget behavior
+    # exactly.
+    nonlinear_solver_divergence_abort: bool = True
+    nonlinear_solver_divergence_blowup_factor: float = 1e4
+    nonlinear_solver_divergence_stall_window: int = 40
+    nonlinear_solver_divergence_guard_factor: float = 100.0
+
+    # Sequential early stop for the re-solve ensembles of check_exact_nonlinear_perturbations and
+    # check_multiplier_bootstrap. "starvation" (default) | "off".
+    #
+    # "starvation" stops the trial loop as soon as the converged count that is still ATTAINABLE
+    # falls below the 3 that every ensemble statistic needs -- i.e. converged_so_far +
+    # trials_remaining <= 2. That predicate is provably status-preserving (see the argument at the
+    # stop itself) and therefore verdict-preserving, which is why it is on by default: it is pure
+    # saving. It is also provably worth very little -- it can never skip more than 2 trials of the
+    # planned ensemble (1% at 100 paired draws, 4% at 25) -- and it fires only on runs where
+    # essentially nothing converges. It is here for the guarantee and the honest accounting
+    # (num_planned_trials / early_stopped / early_stop_reason), not for the speed.
+    #
+    # The tempting stronger rule -- "stop once the solver is CERTAINLY unhealthy" -- is NOT
+    # implemented, because it is not verdict-preserving. Unhealthiness only confines the status to
+    # {FAILED, INDETERMINATE}: the FAILED rung deliberately sits ABOVE the unhealthy rung in both
+    # checks, so a distortion measured on the optimistically-selected converged subset still
+    # counts. In the ADS-142 influence cell every one of 50 cluster runs was certainly unhealthy
+    # from the first trial (failure fractions 0.12-0.86) and every one of them nevertheless
+    # reported FAILED from its converged subset; stopping on unhealthiness would have turned 50
+    # INVALID verdicts into 50 UNCERTIFIABLE ones. Anything unrecognized here is treated as
+    # "starvation" rather than raising: the sound stop cannot change an answer, so a typo in this
+    # field must not be able to either.
+    perturbation_early_stop: str = "starvation"
+
+    # Batched lockstep re-solves for check_multiplier_bootstrap's ensemble (see
+    # solve_exact_perturbations_batched). "off" (default) | "auto" | "always".
+    #
+    # The serial loop spends essentially all of its time inside one g_tilde evaluation per
+    # chord-Newton iteration, dispatched one row at a time. The batched driver advances a whole
+    # wave of draws' chord iterations together, so each generation of the wave is ONE vmap'd
+    # g_tilde call instead of up to bootstrap_batch_width separate ones. Each draw's trajectory is
+    # untouched -- the driver only changes which rows share a kernel launch -- so the ensemble is
+    # verdict-equivalent. Measured on the real n=100/T=50 pipeline fixture (eta_dim 200, 100 paired
+    # draws): identical status, identical warnings, and an identical converged (sign, draw) pattern
+    # -- the same 200 of 200 trials converged, not merely the same count.
+    #
+    # It is NOT bit-identical, and that is why it is OFF by default rather than merely guarded.
+    # XLA selects different float32 kernels per batch width, so a vmap'd g_tilde differs from a
+    # one-row-at-a-time g_tilde by a couple of float32 ULPs. On that same fixture nine floats moved
+    # at all: the SE ratios and bootstrap SEs by 2e-8 to 1.4e-7 relative (float32 eps), and
+    # mean_shift_se -- a difference of means, so cancellation-dominated -- by 1.4e-5 relative,
+    # which is 2.2e-7 ABSOLUTE against a gate threshold of at least 0.1. That perturbation is far
+    # below every tolerance the checks compare against,
+    # but it is not nothing: a solve sitting simultaneously at the convergence tolerance AND at its
+    # last permitted iteration could in principle flip converged/failed. Nothing in the measured
+    # corpora came near that double boundary (the closest non-accepting final residual was 1.4x the
+    # tolerance), but "measured, not proved" is the wrong default for a calibration campaign whose
+    # answer key is exactly which runs FAIL, so opting in is deliberate. It also means a report's
+    # numbers are reproducible only against the same setting of this field --
+    # metrics["resolve_batch_width"] records which path actually ran.
+    #
+    # "auto" additionally applies the break-even guard below; "always" batches whenever there is
+    # more than one trial, which is what an equivalence test wants. Anything unrecognized is
+    # treated as "off": unlike perturbation_early_stop -- where the unrecognized value falls
+    # through to a stop that provably cannot change an answer -- a typo here must not be able to
+    # silently move the arithmetic, so it falls back to the reference path.
+    #
+    # KNOWN UNSOUND -- do not enable without reading this. Adversarial review (2026-09-01)
+    # produced a reproducible counterexample in which flipping ONLY this knob moves
+    # check_multiplier_bootstrap from `indeterminate` to `failed`, the classification likewise,
+    # and the verdict from `uncertifiable` to `invalid`, on identical data and seed. The cause is
+    # NOT the driver -- that was verified to replay the serial chord-Newton arithmetic exactly
+    # over 25 adversarial shapes -- but the float32 error budget: the equivalence argument was
+    # measured against |g| (~1e-7 relative), while the accept/reject test compares
+    # `g_val - g0 - lam*s_j`, a residual four to five orders SMALLER, where the vmap reduction
+    # reorder is worth 0.4-2.7%. A solve sitting near the tolerance can therefore flip
+    # converged/failed, which moves the failure fraction and with it the status.
+    # It is also SLOWER in every timing taken on the repo's own benchmark fixture (25 draws:
+    # 4.98 s serial vs 25.27 s batched; 100 draws: 13.84 s vs 16.70 s), because the pinned vmap
+    # width pays for padded rows and an XLA compile the measured ~1.7x dispatch win never repays.
+    # Fixing it means giving the accept test hysteresis wide enough to swallow the reorder, not
+    # tightening the batching. Until then "auto" is refused outright (see
+    # _resolve_bootstrap_batch_width) and only an explicit "always" reaches the driver.
+    batched_bootstrap_resolves: str = "off"
+    # Trials per wave AND the pinned vmap width (one number deliberately: they are the same
+    # buffer). Throughput per row is nearly flat from 25 to 200 at eta_dim 200, so this is chosen
+    # for memory rather than for speed. Memory is the real ceiling:
+    # every batch row carries its own copy of the full O(n*T) stacked intermediate, so peak usage
+    # scales with width -- this is the same construct whose unchunked form is recorded in
+    # lifejacket/constants.py as having exhausted a 24GB machine. Lower it if a design is wide;
+    # raising it past ~100 buys nothing measurable.
+    bootstrap_batch_width: int = 50
+    # Break-even guard for "auto", as a projected count of live g_tilde row-evaluations
+    # (trials x continuation_steps x a measured median of 4 chord iterations per step). Batching
+    # buys one XLA compile of the vmap'd g_tilde -- measured 5-6 s, essentially independent of the
+    # width -- which is only repaid above a few thousand rows. At the default 100 paired draws the
+    # bootstrap projects ~8,000 rows and batches; check_exact_nonlinear_perturbations' default 15
+    # paired directions project ~1,200 and would not, which is why the batched driver is wired into
+    # the bootstrap only.
+    #
+    # The guard is deliberately a pure function of the PLAN'S SHAPE and nothing else. The obvious
+    # improvement -- time one g_tilde call and decide from measured cost -- would make the choice
+    # of arithmetic depend on machine load, i.e. it could make two runs of the same seed on the
+    # same data report different last digits and, at a boundary, a different verdict. A slow
+    # decision that is deterministic beats a sharp one that is not. The consequence to know about:
+    # the row count alone cannot see how expensive a row IS, so a study whose g_tilde is trivially
+    # cheap can clear this threshold and still not repay its compile. Raise the threshold, or set
+    # batched_bootstrap_resolves to "off", for such a study.
+    bootstrap_batch_min_rows: int = 4000
+
+    # All eight fields above take plain immutable defaults deliberately: @dataclass installs those
+    # as CLASS attributes, so a DiagnosticConfig pickled before they existed (analyze_dataset's
+    # --diagnostic_config_pickle path ships configs alongside cluster runs) still answers for them
+    # by class-attribute fallback and still round-trips through dataclasses.asdict into
+    # tolerances_used -- exactly as jacobian_row_chunk_size does. A default_factory here would
+    # break that, since dataclasses removes those from the class namespace.
+
     compute_exact_nonlinear_roots: bool = False
     num_exact_directions: int | None = None
 
@@ -102,8 +280,10 @@ class DiagnosticConfig:
     num_bootstrap_draws: int = 100
     bootstrap_screen_a_jl_threshold: float = 0.05
     # "rademacher" (default) | "mammen" | "gaussian". Mammen's two-point distribution also
-    # matches third moments (better for skewed per-subject contributions); "gaussian" reproduces
-    # sample_perturbation_directions' draws exactly and is mostly useful for A/B-ing the two.
+    # matches third moments (better for skewed per-subject contributions); "gaussian" matches
+    # sample_perturbation_directions' multiplier LAW but not its draws (that sampler draws from
+    # jax.random, this one from np.random.default_rng, so a shared seed gives different streams),
+    # and is mostly useful for A/B-ing the two distributions.
     bootstrap_multiplier_distribution: str = "rademacher"
     # Monte Carlo sample count for the finite-draw null bands shared by the bootstrap check and
     # check_exact_nonlinear_perturbations' se_ratios gate. The bands replace the former fixed
@@ -130,6 +310,15 @@ class DiagnosticConfig:
 
     drift_num_directions: int = 3
     drift_path_samples: tuple[float, ...] = (0.0, 0.5, 1.0)
+    # Memory bound on check_jacobian_drift's reverse-mode Jacobians of the whole stacked system,
+    # resolved by the package-wide helper_functions.resolve_jacobian_row_chunk_size policy that
+    # also governs the sandwich's own backward pass: None (auto) chunks only once the output
+    # dimension is large enough for an unchunked backward pass to be a memory risk, 0 forces the
+    # plain unchunked jax.jacrev, a positive int caps how many output rows are pulled back at
+    # once. This matters here more than anywhere else in the suite: the check takes
+    # drift_num_directions * len(drift_path_samples) full Jacobians, and the unchunked pass is
+    # the one that crashed a 24GB machine at out_dim ~1500 (see lifejacket/constants.py).
+    jacobian_row_chunk_size: int | None = None
 
     exploration_floor: float | None = None
     exploration_ceiling: float | None = None
@@ -143,7 +332,27 @@ class DiagnosticConfig:
     # would silently round away to zero and this check would be a no-op.
     bread_perturbation_relative_scale: float = 1e-6
 
-    g_tilde_chunk_size: int = 1
+    # Rows of `deltas` evaluated per vmap call in evaluate_g_tilde_batched. Was 1, which meant one
+    # vmap dispatch per perturbation -- measured at 0.346 s for 30 rows against 0.035 s at 30, and
+    # ~19% of the whole non-bootstrap suite (6.54 s -> 5.29 s at cluster scale; the win is already
+    # saturated by 30, with 120 no better).
+    #
+    # Raising this changes the vmap WIDTH, hence the float32 reduction order -- the same class of
+    # change that made batched re-solves flip a verdict (see batched_bootstrap_resolves), and the
+    # concern is sharper here than it looks, because the Taylor remainder R = g_plus - g0 - B_delta
+    # is a near-cancellation, so an absolute perturbation of g_plus is a much larger RELATIVE
+    # perturbation of R. So it was validated rather than assumed, exactly as the divergence abort
+    # was: bit-identical metrics across 39 local-nonlinearity fixtures (including maps whose
+    # g_tilde genuinely reduces over 400 subjects, since a row-wise toy map cannot exhibit the
+    # effect at all), and then on the real jitted closure at study scale -- ADS-142 A_hard, 20
+    # paired seeds at chunk 1 vs 30, zero differences in verdict, classification or any check
+    # status (cluster jobs 43618469/43618470).
+    #
+    # Memory is the ceiling, as everywhere else in this package: every row in flight carries its
+    # own copy of the full O(n*T) stacked intermediate. At the default num_directions the delta
+    # matrix is ~30 rows, so 30 is one chunk rather than a large buffer; a wide study that is
+    # memory-tight should lower this, the same way jacobian_row_chunk_size exists for the bread.
+    g_tilde_chunk_size: int = 30
 
 
 @dataclasses.dataclass
@@ -169,6 +378,15 @@ class DiagnosticReport:
     monte_carlo_counts: dict[str, int]
     target_labels: list[str]
     rank_diagnostics: dict[str, Any]
+    # Decision-level summary derived from the check results (see _derive_verdict and the
+    # DiagnosticVerdicts docstring): "certified" / "conservative" / "uncertifiable" /
+    # "invalid", plus how a certification was earned ("bootstrap" vs "screen"). Unlike
+    # `classification` -- whose vocabulary is preserved for backward compatibility and whose
+    # WARNING-blindness is deliberate -- the verdict makes the calibrated conservative tier
+    # visible to automated consumers. Defaults keep reports pickled before this field existed
+    # loadable (they simply carry empty strings).
+    verdict: str = ""
+    verdict_basis: str = ""
 
 
 ###############################################################################
@@ -231,10 +449,17 @@ def evaluate_g_tilde_batched(
     deltas = jnp.asarray(deltas)
     eta_hat = jnp.asarray(eta_hat)
     num_rows = deltas.shape[0]
+    # Build the vmap ONCE, outside the loop. Constructing it inside gave every chunk a fresh
+    # lambda, which jax cannot match against its trace cache, so each chunk paid a full retrace
+    # of g_tilde -- ~20% of this function's cost at the default chunk_size of 1, where there is
+    # one chunk per row. This is a pure dispatch win and changes NOTHING about the arithmetic:
+    # same chunk widths, same reduction order within each chunk, one trace instead of N. (It is
+    # deliberately not the same kind of change as raising chunk_size, which alters the vmap WIDTH
+    # and therefore the float32 reduction order -- see the note on g_tilde_chunk_size.)
+    evaluate_chunk = jax.vmap(lambda d: g_tilde(eta_hat + d))
     outputs = []
     for start in range(0, num_rows, max(1, chunk_size)):
-        chunk = deltas[start : start + chunk_size]
-        outputs.append(jax.vmap(lambda d: g_tilde(eta_hat + d))(chunk))
+        outputs.append(evaluate_chunk(deltas[start : start + chunk_size]))
     return np.asarray(jnp.concatenate(outputs, axis=0))
 
 
@@ -448,6 +673,15 @@ def evaluate_taylor_remainder_and_correction(
       r_j = ||R_j|| / ||B_hat @ delta_j||               (retained equation-space diagnostic)
       c_j solving B_hat @ c_j = -R_j                     (first nonlinear parameter correction)
       q_j = ||c_j|| / ||delta_j||                        (secondary; no universal threshold)
+
+    Rows where g_tilde is undefined at eta_hat + delta_j (any nonfinite output) are CENSORED:
+    r_j/c_j/q_j come back as NaN, and the returned boolean "finite" mask marks them so the caller
+    can report a domain-censoring fraction. Such rows must never reach solve_with_bread: its LU
+    solve is check_finite=True, so one nonfinite row would raise on the whole stacked right-hand
+    side and take every other direction's measurement -- and, since this runs inside the
+    always-on local-nonlinearity check, the entire diagnostic report -- down with it. Probing out
+    to 1.5x the sandwich scale routinely leaves the domain of a log/logit/sqrt-shaped estimating
+    function, so a censored row is an expected outcome to be reported, not an error.
     """
     B = np.asarray(B_hat, dtype=np.float64)
     g0 = np.asarray(g0, dtype=np.float64)
@@ -456,15 +690,20 @@ def evaluate_taylor_remainder_and_correction(
     g_plus = evaluate_g_tilde_batched(g_tilde, eta_hat, deltas, chunk_size=chunk_size)
     B_delta = (B @ deltas.T).T
     R = g_plus - g0 - B_delta
+    finite = np.all(np.isfinite(R), axis=1)
 
+    B_delta_norms = np.linalg.norm(B_delta, axis=1)
     r = np.divide(
         np.linalg.norm(R, axis=1),
-        np.linalg.norm(B_delta, axis=1),
+        B_delta_norms,
         out=np.full(R.shape[0], np.inf),
-        where=np.linalg.norm(B_delta, axis=1) > 0,
+        where=B_delta_norms > 0,
     )
+    r[~finite] = math.nan
 
-    c = solve_with_bread(bread_factored, -R.T).T
+    c = np.full((R.shape[0], B.shape[0]), math.nan)
+    if np.any(finite):
+        c[finite] = solve_with_bread(bread_factored, -R[finite].T).T
     delta_norms = np.linalg.norm(deltas, axis=1)
     q = np.divide(
         np.linalg.norm(c, axis=1),
@@ -472,8 +711,17 @@ def evaluate_taylor_remainder_and_correction(
         out=np.full(c.shape[0], np.inf),
         where=delta_norms > 0,
     )
+    q[~finite] = math.nan
 
-    return {"R": R, "r": r, "c": c, "q": q, "g_plus": g_plus, "B_delta": B_delta}
+    return {
+        "R": R,
+        "r": r,
+        "c": c,
+        "q": q,
+        "g_plus": g_plus,
+        "B_delta": B_delta,
+        "finite": finite,
+    }
 
 
 def _quantile_summary(values: np.ndarray) -> dict[str, float]:
@@ -557,6 +805,8 @@ def check_local_nonlinearity(
     }
     r_by_radius: dict[float, np.ndarray] = {}
     q_by_radius: dict[float, np.ndarray] = {}
+    # (censored probes, total probes) per radius; see evaluate_taylor_remainder_and_correction.
+    censoring_by_radius: dict[float, tuple[int, int]] = {}
 
     for radius in config.perturbation_radii:
         sign_results = []
@@ -576,8 +826,13 @@ def check_local_nonlinearity(
         r_all = np.concatenate([res["r"] for res in sign_results])
         q_all = np.concatenate([res["q"] for res in sign_results])
         c_all = np.concatenate([res["c"] for res in sign_results], axis=0)
+        finite_all = np.concatenate([res["finite"] for res in sign_results])
         r_by_radius[radius] = r_all
         q_by_radius[radius] = q_all
+        censoring_by_radius[radius] = (
+            int(np.sum(~finite_all)),
+            int(finite_all.size),
+        )
 
         a_all_by_target = {}
         for label, contrast_row, se in zip(target_labels, L, se_l, strict=False):
@@ -602,28 +857,43 @@ def check_local_nonlinearity(
                 "target_dim": joint_correction["target_dim"],
                 "rank_deficient": joint_correction["rank_deficient"],
             },
+            "num_probes": censoring_by_radius[radius][1],
+            "num_domain_censored_probes": censoring_by_radius[radius][0],
+            "domain_censored_fraction": (
+                censoring_by_radius[radius][0] / censoring_by_radius[radius][1]
+                if censoring_by_radius[radius][1]
+                else math.nan
+            ),
         }
+        # Exceedance rates are computed over the EVALUABLE probes only: counting a censored
+        # probe as a non-exceedance would let domain failures dilute the rate toward zero.
         for label, a in a_all_by_target.items():
-            exceed = a > config.nonlinear_correction_tolerance_se
-            frac = float(np.mean(exceed)) if a.size else 0.0
+            evaluable = a[np.isfinite(a)]
+            exceed = evaluable > config.nonlinear_correction_tolerance_se
+            frac = float(np.mean(exceed)) if evaluable.size else math.nan
             per_radius[radius]["a_by_target"][label]["exceedance_fraction"] = frac
             per_radius[radius]["a_by_target"][label]["exceedance_upper_bound"] = (
                 clopper_pearson_upper_bound(
-                    int(np.sum(exceed)), a.size, config.confidence_level
+                    int(np.sum(exceed)), int(evaluable.size), config.confidence_level
                 )
-                if a.size
+                if evaluable.size
                 else math.nan
             )
 
         if config.paired_directions:
             plus_c, minus_c = sign_results[0]["c"], sign_results[1]["c"]
-            even_part = 0.5 * (plus_c + minus_c)
-            odd_part = 0.5 * (plus_c - minus_c)
-            per_radius[radius]["paired_even_norm_median"] = float(
-                np.median(np.linalg.norm(even_part, axis=1))
+            even_norms = np.linalg.norm(0.5 * (plus_c + minus_c), axis=1)
+            odd_norms = np.linalg.norm(0.5 * (plus_c - minus_c), axis=1)
+            paired_evaluable = np.isfinite(even_norms) & np.isfinite(odd_norms)
+            per_radius[radius]["paired_even_norm_median"] = (
+                float(np.median(even_norms[paired_evaluable]))
+                if np.any(paired_evaluable)
+                else math.nan
             )
-            per_radius[radius]["paired_odd_norm_median"] = float(
-                np.median(np.linalg.norm(odd_part, axis=1))
+            per_radius[radius]["paired_odd_norm_median"] = (
+                float(np.median(odd_norms[paired_evaluable]))
+                if np.any(paired_evaluable)
+                else math.nan
             )
 
     # Below this floor, r_j/a_{j,l} are dominated by float32 roundoff rather than genuine
@@ -631,6 +901,11 @@ def check_local_nonlinearity(
     # check entirely rather than warn on it (this is exactly the affine-map case, where r_j and
     # a_{j,l} should be ~0 at every radius and there is no power law to observe).
     _scaling_noise_floor = 1e-4
+    # Domain-censoring limits at the headline radius, past which the surviving probes are too few
+    # or too selected to characterize the neighborhood at all. Three matches the minimum ensemble
+    # size the exact/bootstrap checks require before they will compute any ensemble statistic.
+    _min_evaluable_probes = 3
+    _severe_censored_fraction = 0.5
 
     warnings_list: list[str] = []
     radii_sorted = sorted(config.perturbation_radii)
@@ -690,10 +965,43 @@ def check_local_nonlinearity(
             "Mahalanobis correction is reported on an identified subspace only."
         )
 
+    total_censored = sum(censored for censored, _ in censoring_by_radius.values())
+    total_probes = sum(probes for _, probes in censoring_by_radius.values())
+    headline_censored, headline_probes = censoring_by_radius[headline_radius]
+    headline_evaluable = headline_probes - headline_censored
+    # Domain censoring is never allowed to read as clean. The probes that survived are exactly
+    # the directions in which g_tilde stayed defined -- the well-behaved ones -- so every summary
+    # above is computed on an optimistically selected subset: a measured exceedance on it still
+    # stands, but a clean pass on it does not (the same precedence the exact and bootstrap checks
+    # apply to their non-converged directions). Once too few probes survive at the headline
+    # radius, or most of them are gone, the subset cannot support any verdict at all.
+    if total_censored:
+        warnings_list.append(
+            f"g_tilde was undefined (nonfinite) at {total_censored} of {total_probes} probe "
+            f"points ({headline_censored}/{headline_probes} at the headline radius "
+            f"{headline_radius}); those directions are censored from every statistic above, "
+            "which selects toward the well-behaved part of the neighborhood."
+        )
+        if (
+            headline_evaluable < _min_evaluable_probes
+            or headline_censored > _severe_censored_fraction * headline_probes
+        ):
+            status = CheckStatuses.INDETERMINATE
+        elif status == CheckStatuses.PASSED:
+            status = CheckStatuses.WARNING
+
     return CheckResult(
         name="local_nonlinearity",
         status=status,
-        metrics={"per_radius": per_radius, "headline_radius": headline_radius},
+        metrics={
+            "per_radius": per_radius,
+            "headline_radius": headline_radius,
+            "num_probes": total_probes,
+            "num_domain_censored_probes": total_censored,
+            "domain_censored_fraction": (
+                total_censored / total_probes if total_probes else math.nan
+            ),
+        },
         warnings=warnings_list,
         message="",
     )
@@ -718,6 +1026,32 @@ def solve_exact_perturbation(
     from the linear solution, using a chord (fixed-Jacobian) Newton iteration built on the same
     B_hat factorization used everywhere else in the suite (never a re-differentiated Jacobian --
     that would make this check far more expensive than the rest of the suite combined).
+
+    DIVERGENCE ABORT (config.nonlinear_solver_divergence_abort, on by default). A continuation
+    step can only fail by exhausting nonlinear_solver_max_iterations, so without this a step that
+    has demonstrably left the chord method's basin still pays its whole budget. Two clauses stop
+    it early -- the iterate blew four orders of magnitude past its own best residual, or it has
+    gone stall_window iterations without a new best -- and an aborted step is failed exactly as an
+    exhausted one is.
+
+    Why that is verdict-neutral: both callers consume only "converged" (which gates every
+    ensemble contribution), "delta_nl" (read only when converged), "nonfinite_encountered" (a
+    reported metric -- no status rung reads it) and "branch_change_suspected" (which is
+    `converged and ...`, hence False for any failure). So an aborted solve is OBSERVATIONALLY
+    IDENTICAL to one that exhausted its budget, and the abort can move a status only by aborting
+    a solve that would eventually have converged -- which is what the deliberately wide margins on
+    DiagnosticConfig buy, and why that field documents the measured margins rather than a
+    rationale.
+
+    One honest caveat, and it is not small on some maps: a solve that would have gone non-finite
+    at a LATER iteration is now recorded as a root failure rather than a domain failure, so
+    domain_failure_fraction / domain_failure_upper_bound become lower bounds (both are reported,
+    neither is gated by any status rung). Measured on the diagnostic fixtures, this erases the
+    domain-failure count entirely on POLYNOMIAL maps -- an entire function whose "domain failure"
+    was really float64 overflow of a divergent iterate two iterations after the blow-up clause
+    fires, which arguably makes the new label the accurate one -- while leaving it untouched on
+    bounded maps, where failures stall rather than blow up. The checks report
+    num_divergence_aborted_trials next to it so the shift is attributable rather than silent.
     """
     d = np.array(delta_linear, dtype=np.float64)
     g0 = np.asarray(g0, dtype=np.float64)
@@ -726,15 +1060,29 @@ def solve_exact_perturbation(
     nonfinite_encountered = False
     converged = True
     final_residual_norm = math.nan
+    aborted = False
+    abort_reason = ""
     # Scale convergence relative to the FULL perturbation ||s_j||, not the current lambda-scaled
     # target: using ||lam * s_j|| as the denominator would make the "relative" residual blow up
     # spuriously at small lambda, since the absolute floating-point noise floor in g_tilde's
     # output does not shrink proportionally to lambda.
     full_scale = max(float(np.linalg.norm(s_j)), 1e-12)
+    abort_enabled = config.nonlinear_solver_divergence_abort
+    blowup_factor = config.nonlinear_solver_divergence_blowup_factor
+    stall_window = config.nonlinear_solver_divergence_stall_window
+    abort_guard = (
+        config.nonlinear_solver_divergence_guard_factor
+        * config.nonlinear_solver_tolerance
+    )
 
     for lam in lambdas:
         target = lam * s_j
         step_converged = False
+        # The abort's state is PER CONTINUATION STEP: the target moves at every lambda, so the
+        # residual legitimately jumps when a step begins, and a best carried over from the
+        # previous step would be an unreachable bar that reads as an instant stall.
+        best_relative_norm = math.inf
+        iterations_since_best = 0
         for _ in range(config.nonlinear_solver_max_iterations):
             g_val = np.asarray(g_tilde(jnp.asarray(eta_hat) + jnp.asarray(d)))
             total_iterations += 1
@@ -744,13 +1092,31 @@ def solve_exact_perturbation(
             residual = g_val - g0 - target
             residual_norm = float(np.linalg.norm(residual))
             final_residual_norm = residual_norm
-            if residual_norm / full_scale < config.nonlinear_solver_tolerance:
+            relative_norm = residual_norm / full_scale
+            if relative_norm < config.nonlinear_solver_tolerance:
                 step_converged = True
                 break
+            # Tested only AFTER the tolerance test, so a step that has just converged can never be
+            # aborted, and final_residual_norm is already assigned either way.
+            if relative_norm < best_relative_norm:
+                best_relative_norm = relative_norm
+                iterations_since_best = 0
+            else:
+                iterations_since_best += 1
+                if abort_enabled and best_relative_norm > abort_guard:
+                    if relative_norm > blowup_factor * best_relative_norm:
+                        aborted, abort_reason = True, "blowup"
+                    elif stall_window > 0 and iterations_since_best >= stall_window:
+                        aborted, abort_reason = True, "stall"
+                    if aborted:
+                        break
             d = d - solve_with_bread(bread_factored, residual)
         if nonfinite_encountered:
             converged = False
             break
+        # An abort leaves step_converged False, so it falls through here and fails the solve on
+        # exactly the same path an exhausted iteration budget takes -- no separate control flow,
+        # which is what keeps the two observationally identical.
         if not step_converged:
             converged = False
             break
@@ -766,8 +1132,447 @@ def solve_exact_perturbation(
         "nonfinite_encountered": nonfinite_encountered,
         "final_residual_norm": final_residual_norm,
         "num_iterations": total_iterations,
+        # Reported so an aborted solve stays distinguishable from one that genuinely exhausted its
+        # iteration budget, even though nothing downstream is allowed to treat them differently.
+        "aborted": aborted,
+        "abort_reason": abort_reason,
         "branch_change_suspected": branch_change_suspected,
         "discrepancy_ratio": discrepancy_ratio,
+    }
+
+
+# Per-trial states of the batched lockstep driver below. FAILED covers both an exhausted iteration
+# budget and a divergence abort, exactly as solve_exact_perturbation's single `converged` flag does
+# -- the two are deliberately indistinguishable downstream (see its docstring); which one occurred
+# is reported separately via "aborted"/"abort_reason".
+_TRIAL_RUNNING = 0
+_TRIAL_CONVERGED = 1
+_TRIAL_FAILED = 2
+_TRIAL_NONFINITE = 3
+
+# Median chord-Newton iterations per continuation step on clean data, measured across the
+# repository's benchmark fixtures at three scales (per-step min 3 / median 4 / max 6 at
+# n=100/T=50). Used only to project a row count for the "auto" break-even guard, never in a
+# numerical path: an under-projection costs a serial run, never a wrong answer.
+_MEDIAN_ITERATIONS_PER_CONTINUATION_STEP = 4
+
+
+def _make_batched_g_tilde_evaluator(
+    g_tilde: Callable[[jnp.ndarray], jnp.ndarray],
+    eta_hat: jnp.ndarray,
+    batch_width: int,
+) -> Callable[[np.ndarray], Any]:
+    """
+    Builds the ONE jitted, vmap'd g_tilde the batched driver calls for the life of a check, and
+    pays its compile up front on a probe block so the first real wave is not charged for it.
+
+    Hoisting this is not a tidiness preference, it is most of the optimization. jax.jit caches its
+    compiled executable on the identity of the wrapped callable plus the argument shape, so a
+    FRESH jax.jit(jax.vmap(lambda ...)) object retraces and recompiles from scratch -- measured 4.4
+    s even at a width XLA had already compiled for an earlier object. Constructing the evaluator
+    per wave, or per chord iteration, therefore trades the entire win away in recompiles; that is
+    exactly the mistake evaluate_g_tilde_batched makes today by building its vmap inside the chunk
+    loop, which is why that helper is slower than not batching at chunk_size 1.
+
+    For the same reason the width is PINNED: XLA compiles per distinct input shape at 5-6 s a
+    shape, essentially independent of the width itself, so compacting the active set down to its
+    exact live count each iteration (17 distinct widths on a clean ensemble, 77 on a fragile one)
+    would cost 100-470 s of compilation to save a couple of seconds of padded rows. The driver
+    compacts by gathering live rows into the low slots of this fixed-width buffer instead.
+    """
+    eta_j = jnp.asarray(eta_hat)
+
+    @jax.jit
+    def evaluate(block):
+        return jax.vmap(lambda row: g_tilde(eta_j + row))(block)
+
+    # Probe at the exact call shape the driver uses -- a float64 numpy block handed through
+    # jnp.asarray, which truncates to float32 here just as solve_exact_perturbation's own
+    # jnp.asarray(d) does (this repository does not enable x64; see nonlinear_solver_tolerance).
+    # Anything but that shape/dtype would buy a second compile. Zero rows evaluate g_tilde at
+    # eta_hat itself, which is in-domain by construction -- it is the observed root.
+    probe = jnp.asarray(
+        np.zeros((batch_width, int(np.shape(eta_j)[0])), dtype=np.float64)
+    )
+    jax.block_until_ready(evaluate(probe))
+    return evaluate
+
+
+def solve_exact_perturbations_batched(
+    batch_eval: Callable[[np.ndarray], Any],
+    g0: np.ndarray,
+    bread_factored,
+    s_rows: np.ndarray,
+    delta_linear_rows: np.ndarray,
+    config: DiagnosticConfig,
+    *,
+    batch_width: int,
+) -> list[dict[str, Any]]:
+    """
+    Lockstep driver for a wave of perturbation re-solves: solves solve_exact_perturbation's problem
+    for every row of (s_rows, delta_linear_rows) at once, returning one result dict per row in the
+    SAME ORDER and with the same keys, so a caller's loop body needs no other change.
+
+    WHAT IT CHANGES, AND WHAT IT CANNOT. A draw's chord-Newton trajectory depends only on its own
+    iterate, its own continuation index, and the frozen bread factorization that every draw already
+    shares (bread_factored is computed once per suite run and passed in -- the serial path was
+    never re-factoring per draw). So the sequence of (evaluation point, residual, tolerance test,
+    continuation advance, divergence test, chord update) this driver performs for row r is exactly
+    the sequence solve_exact_perturbation performs for that row. Only the SCHEDULE differs: which
+    rows share a kernel launch, and hence when each row's iteration is executed relative to other
+    rows'. converged, nonfinite_encountered, aborted, num_iterations and delta_nl are therefore the
+    serial values, and the ensemble the caller assembles from them is the serial ensemble.
+
+    Two things make that an equivalence rather than an identity, both measured and both far below
+    every tolerance any status rung compares against:
+      * g_tilde under vmap is not bitwise the same program as g_tilde on one row. XLA picks
+        different float32 kernels per batch width; measured 9.5e-7 absolute on a max|g| of 3.6,
+        ~2.2 float32 ULPs, which propagates to ~1e-7 relative on the SE ratios and ~1e-5 on
+        mean_shift_se (a difference of means, so cancellation-dominated). End to end at 100 draws
+        this left status, warnings and all 200 per-trial convergence flags identical.
+      * the batched residual norm and the batched triangular solve reassociate float64 reductions
+        (measured 1.7e-14 on the solve), seven orders below the float32 noise floor above.
+    Iteration COUNTS can drift by one on a step whose accepting residual sits a hair under the
+    tolerance line (measured 1,990 vs 1,988 over 50 solves); no metric reports them, but do not
+    assert equality on num_iterations.
+
+    THE CONTINUATION LADDER ADVANCES PER ROW, not in lockstep across rows: a single batch routinely
+    holds rows sitting at different lambdas, each multiplied by its own s_j to form its own target.
+    Advancing the ladder in lockstep instead -- waiting for the slowest row at every lambda -- was
+    measured at 427 batched calls where per-row needs 259 on a fragile ensemble (69.7% vs 50.0%
+    padding waste), and ties on clean data. The extra cost is one (width, dim) elementwise multiply
+    per generation, which is free next to a g_tilde evaluation.
+
+    ACTIVE-SET COMPACTION is by index gather into a buffer of PINNED width: terminated rows stop
+    consuming batch width (their slots are filled with zeros and their outputs sliced away before
+    any test), but the shape handed to XLA never changes, so no iteration can trigger a recompile.
+    See _make_batched_g_tilde_evaluator for why compacting to the exact live count instead would
+    cost far more than the padding it saves. Padding is safe by construction rather than by
+    convention: a zero row evaluates g_tilde at eta_hat, the observed root, so a padded slot can
+    neither go non-finite nor manufacture a domain failure even if it were read.
+    """
+    delta_linear_rows = np.asarray(delta_linear_rows, dtype=np.float64)
+    s_rows = np.asarray(s_rows, dtype=np.float64)
+    num_rows, dim = delta_linear_rows.shape
+    if num_rows > batch_width:
+        raise ValueError(
+            f"solve_exact_perturbations_batched got {num_rows} rows for a pinned batch width of "
+            f"{batch_width}; the caller must split the ensemble into waves of at most that width."
+        )
+    g0 = np.asarray(g0, dtype=np.float64)
+    lambdas = np.linspace(0.0, 1.0, config.continuation_steps + 1)[1:]
+    num_steps = int(lambdas.size)
+    max_iterations = int(config.nonlinear_solver_max_iterations)
+
+    d_cur = np.array(delta_linear_rows, dtype=np.float64)
+    lam_idx = np.zeros(num_rows, dtype=np.int64)
+    iters_at_step = np.zeros(num_rows, dtype=np.int64)
+    total_iterations = np.zeros(num_rows, dtype=np.int64)
+    final_residual_norm = np.full(num_rows, math.nan)
+    aborted = np.zeros(num_rows, dtype=bool)
+    abort_reasons = [""] * num_rows
+    # Per-continuation-step abort state, reset whenever a row advances a lambda -- the target moves
+    # there, so the residual legitimately jumps and a best carried across the boundary would read
+    # as an instant stall. Same reset points as the serial loop's, which re-initialises them at the
+    # top of each `for lam in lambdas`.
+    best_relative_norm = np.full(num_rows, math.inf)
+    iters_since_best = np.zeros(num_rows, dtype=np.int64)
+    # Same convention as the serial solver: scale by the FULL ||s_j||, never the lambda-scaled
+    # target, so the relative residual does not blow up spuriously at small lambda.
+    full_scale = np.maximum(np.linalg.norm(s_rows, axis=1), 1e-12)
+
+    # Degenerate plans, kept faithful to the serial function rather than to this loop's structure:
+    # with no continuation steps its `for lam in lambdas` never runs and every solve is trivially
+    # converged at its warm start, and with no iteration budget every step fails before evaluating
+    # g_tilde even once.
+    if num_steps == 0:
+        state = np.full(num_rows, _TRIAL_CONVERGED, dtype=np.int8)
+    elif max_iterations <= 0:
+        state = np.full(num_rows, _TRIAL_FAILED, dtype=np.int8)
+    else:
+        state = np.full(num_rows, _TRIAL_RUNNING, dtype=np.int8)
+
+    tolerance = config.nonlinear_solver_tolerance
+    abort_enabled = config.nonlinear_solver_divergence_abort
+    blowup_factor = config.nonlinear_solver_divergence_blowup_factor
+    stall_window = config.nonlinear_solver_divergence_stall_window
+    abort_guard = (
+        config.nonlinear_solver_divergence_guard_factor
+        * config.nonlinear_solver_tolerance
+    )
+
+    block = np.zeros((batch_width, dim), dtype=np.float64)
+    while True:
+        take = np.flatnonzero(state == _TRIAL_RUNNING)
+        if take.size == 0:
+            break
+        # The compaction step: live rows gathered into the low slots, the dead tail zeroed (so a
+        # stale iterate from a row that has already terminated is never re-evaluated), the shape
+        # left alone.
+        block[: take.size] = d_cur[take]
+        block[take.size :] = 0.0
+        g_vals = np.asarray(batch_eval(jnp.asarray(block)), dtype=np.float64)[
+            : take.size
+        ]
+        total_iterations[take] += 1
+
+        finite = np.all(np.isfinite(g_vals), axis=1)
+        # A non-finite evaluation breaks the serial loop BEFORE the chord update, so d_cur must not
+        # move for these rows -- their delta_nl is the last in-domain iterate, as it is serially.
+        state[take[~finite]] = _TRIAL_NONFINITE
+        live = take[finite]
+        if live.size == 0:
+            continue
+
+        residual = (
+            g_vals[finite]
+            - g0[None, :]
+            - lambdas[lam_idx[live]][:, None] * s_rows[live]
+        )
+        residual_norm = np.linalg.norm(residual, axis=1)
+        # Assigned on every finite iteration including the accepting one, exactly where the serial
+        # loop assigns it: before the tolerance test, so a row that converges still reports the
+        # residual it converged at, and a row whose very first evaluation is non-finite keeps NaN.
+        final_residual_norm[live] = residual_norm
+        relative_norm = residual_norm / full_scale[live]
+
+        accepted = relative_norm < tolerance
+        advanced = live[accepted]
+        # An accepted iteration ends the step BEFORE the chord update (the serial loop breaks), so
+        # again d_cur must not move for these rows.
+        lam_idx[advanced] += 1
+        iters_at_step[advanced] = 0
+        best_relative_norm[advanced] = math.inf
+        iters_since_best[advanced] = 0
+        state[advanced[lam_idx[advanced] >= num_steps]] = _TRIAL_CONVERGED
+
+        stepping = ~accepted
+        continuing = live[stepping]
+        if continuing.size == 0:
+            continue
+        continuing_relative = relative_norm[stepping]
+        # The divergence test, in the serial function's exact order: a row that set a new best is
+        # never tested (its `if` branch has no abort), and a row that did not is tested against the
+        # best it failed to beat.
+        improved = continuing_relative < best_relative_norm[continuing]
+        best_relative_norm[continuing[improved]] = continuing_relative[improved]
+        iters_since_best[continuing[improved]] = 0
+        iters_since_best[continuing[~improved]] += 1
+
+        updating = np.ones(continuing.size, dtype=bool)
+        if abort_enabled:
+            testable = ~improved & (best_relative_norm[continuing] > abort_guard)
+            blowup = testable & (
+                continuing_relative > blowup_factor * best_relative_norm[continuing]
+            )
+            stalled = (
+                testable
+                & ~blowup
+                & bool(stall_window > 0)
+                & (iters_since_best[continuing] >= stall_window)
+            )
+            for position in np.flatnonzero(blowup | stalled):
+                row = int(continuing[position])
+                aborted[row] = True
+                abort_reasons[row] = "blowup" if blowup[position] else "stall"
+                state[row] = _TRIAL_FAILED
+            updating = ~(blowup | stalled)
+
+        stepped = continuing[updating]
+        if stepped.size == 0:
+            continue
+        # One triangular solve for the whole wave against the shared frozen factorization -- the
+        # chord method's defining property is that this factorization never changes, so sharing it
+        # across rows is what the method already assumes rather than an approximation introduced
+        # here.
+        d_cur[stepped] -= solve_with_bread(
+            bread_factored, residual[stepping][updating].T
+        ).T
+        # Counted AFTER the update, because the serial loop's last permitted pass applies its chord
+        # update and only then falls out of range(max_iterations) with the step unconverged.
+        iters_at_step[stepped] += 1
+        state[stepped[iters_at_step[stepped] >= max_iterations]] = _TRIAL_FAILED
+
+    results: list[dict[str, Any]] = []
+    for row in range(num_rows):
+        converged = bool(state[row] == _TRIAL_CONVERGED)
+        discrepancy_ratio = float(
+            np.linalg.norm(d_cur[row] - delta_linear_rows[row])
+            / (np.linalg.norm(delta_linear_rows[row]) + 1e-300)
+        )
+        results.append(
+            {
+                "delta_nl": d_cur[row],
+                "converged": converged,
+                "nonfinite_encountered": bool(state[row] == _TRIAL_NONFINITE),
+                "final_residual_norm": float(final_residual_norm[row]),
+                "num_iterations": int(total_iterations[row]),
+                "aborted": bool(aborted[row]),
+                "abort_reason": abort_reasons[row],
+                "branch_change_suspected": converged and discrepancy_ratio > 5.0,
+                "discrepancy_ratio": discrepancy_ratio,
+            }
+        )
+    return results
+
+
+def _resolve_bootstrap_batch_width(
+    config: DiagnosticConfig, num_planned_trials: int
+) -> int:
+    """
+    Pinned batch/wave width for check_multiplier_bootstrap's re-solve ensemble, or 0 for the serial
+    reference path. See DiagnosticConfig.batched_bootstrap_resolves.
+
+    "auto" is DELIBERATELY NOT ACCEPTED HERE, and is rejected rather than honored: adversarial
+    review found a reproducible fixture on which enabling batching moves the check from
+    `indeterminate` to `failed` and the verdict from `uncertifiable` to `invalid` on identical
+    data and seed. Nothing that can silently change a verdict may select itself. The mode is kept
+    reachable only as an explicit "always" so the driver stays testable and fixable.
+    """
+    if config.batched_bootstrap_resolves == "auto":
+        logger.warning(
+            "batched_bootstrap_resolves='auto' is disabled: batched re-solves are known to "
+            "change verdicts on reachable fixtures (see the field's docstring), so they may "
+            "never be selected automatically. Re-solving serially."
+        )
+        return 0
+    if config.batched_bootstrap_resolves != "always":
+        if config.batched_bootstrap_resolves != "off":
+            # Falls back to the reference path rather than raising -- an unrecognized value here is
+            # a performance knob, and failing a whole analysis over it would be worse than running
+            # it the slow way -- but says so, since silently ignoring the request is exactly how
+            # someone concludes the optimization "does nothing".
+            logger.warning(
+                "Unknown batched_bootstrap_resolves mode %r (expected 'off', 'auto' or "
+                "'always'); the bootstrap will re-solve serially.",
+                config.batched_bootstrap_resolves,
+            )
+        return 0
+    width = min(int(config.bootstrap_batch_width), num_planned_trials)
+    # A width of 1 is not batching at all -- it is the serial schedule paying for a vmap and a
+    # compile -- so it falls back to the reference path. Widths of 2 or 3 are reachable only from
+    # an ensemble too small to produce any statistic in the first place (both checks need three
+    # converged trials), so they are allowed rather than special-cased. Note that XLA selects a
+    # different float32 kernel at widths 1-2 than at 8 and above, which is a further reason not to
+    # tune this knob down to save memory: prefer fewer, wider waves.
+    if width < 2:
+        return 0
+    if config.batched_bootstrap_resolves == "auto":
+        projected_rows = (
+            num_planned_trials
+            * config.continuation_steps
+            * _MEDIAN_ITERATIONS_PER_CONTINUATION_STEP
+        )
+        if projected_rows < config.bootstrap_batch_min_rows:
+            return 0
+    return width
+
+
+# Minimum converged trials any ensemble statistic in this module can be computed from, and the
+# first status rung of BOTH re-solve checks: below it they are INDETERMINATE no matter what else
+# the ensemble looks like. The sequential early stop below is sound only because it reproduces
+# this exact number, so the two must never drift apart.
+MIN_CONVERGED_TRIALS_FOR_ENSEMBLE = 3
+
+EARLY_STOP_REASON_STARVATION = "max_attainable_converged_below_minimum"
+
+
+def _starvation_early_stop_reached(
+    config: DiagnosticConfig,
+    num_converged: int,
+    num_executed: int,
+    num_planned: int,
+) -> bool:
+    """
+    The only PROVABLY status-preserving sequential stop for the two re-solve ensembles: fire when
+    the converged count that is still attainable has fallen below the minimum any ensemble
+    statistic needs, i.e. num_converged + (num_planned - num_executed) <= 2.
+
+    SOUNDNESS. Let c be the converged count so far, k the executed trials, N the planned trials,
+    and R = N - k the remaining ones. Every completion of the ensemble -- every assignment of
+    "failed" or "converged with row z" to the R trials not yet run -- ends with a converged count
+    C_final <= c + R. If c + R < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE then C_final is below that
+    minimum for EVERY completion, so the first status rung of both checks fires first and the
+    status is INDETERMINATE whatever the remaining draws would have done. Since
+    _combine_classification and _derive_verdict are pure functions of the check statuses, the
+    classification, verdict and verdict_basis are unchanged too. The re-solves skipped were
+    therefore pure cost.
+
+    MAXIMALITY -- why nothing more aggressive is offered. Suppose instead c < 3 <= c + R and some
+    target has a nonzero sandwich SE. Two completions give two different statuses: if every
+    remaining trial fails the status is INDETERMINATE, while if 3 - c of them converge with
+    arbitrarily large rows, the per-target SD ratio exceeds any finite null band and the status is
+    FAILED. So no rule that cannot see the future outcomes may stop there. In particular
+    "the solver is certainly unhealthy" is NOT a stopping condition: unhealthiness only confines
+    the status to {FAILED, INDETERMINATE}, because both checks deliberately rank the FAILED rung
+    ABOVE the unhealthy rung so that a distortion measured on the optimistically-selected
+    converged subset still counts (see the precedence comments at each status block). And no
+    a-priori bound on a converged row exists to appeal to instead -- a converged solve satisfies
+    only a residual tolerance, which is exactly why these checks carry a branch_change_suspected
+    concept at all.
+
+    Consequently the stop can never skip more than MIN_CONVERGED_TRIALS_FOR_ENSEMBLE - 1 = 2 of
+    the N trials, and only on ensembles that were headed for INDETERMINATE anyway. It is on by
+    default because it is free and provably invisible, not because it is fast.
+
+    The `num_executed >= 1` guard keeps a degenerate plan (N <= 2, i.e. a single unpaired
+    direction) from producing an ensemble with zero executed trials, whose reported failure
+    fraction and Clopper-Pearson bounds would be NaN rather than merely wide.
+    """
+    if config.perturbation_early_stop == "off":
+        return False
+    return (
+        num_executed >= 1
+        and num_converged + (num_planned - num_executed)
+        < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE
+    )
+
+
+def _resolve_accounting_metrics_and_warnings(
+    warnings_list: list[str],
+    *,
+    trial_noun: str,
+    early_stop_reason: str,
+    num_planned_trials: int,
+    num_trials: int,
+    num_converged: int,
+    num_divergence_aborts: int,
+    num_root_failures: int,
+) -> dict[str, Any]:
+    """
+    The honest-accounting half of the two cost optimizations, shared by both re-solve checks: what
+    the run actually did, as metrics plus warnings, so a truncated or abort-shortened ensemble can
+    never be mistaken for a complete one.
+
+    num_trials is already the EXECUTED count in both callers (they measure the flag lists, not the
+    plan), so root_failure_fraction and every Clopper-Pearson bound are computed on what was really
+    run -- wider under an early stop, never narrower. num_planned_trials is what makes the
+    truncation legible next to it; DiagnosticReport.monte_carlo_counts carries the same
+    distinction at report level.
+    """
+    if early_stop_reason:
+        warnings_list.append(
+            f"Stopped after {num_trials} of {num_planned_trials} planned {trial_noun}: at most "
+            f"{num_converged + num_planned_trials - num_trials} could have converged, below the "
+            f"{MIN_CONVERGED_TRIALS_FOR_ENSEMBLE} required for any ensemble statistic, so the "
+            "check is INDETERMINATE for every possible completion of the ensemble. Trial counts "
+            "and failure fractions below describe the truncated ensemble, not the plan."
+        )
+    if num_divergence_aborts:
+        warnings_list.append(
+            f"{num_divergence_aborts} of {num_root_failures} non-converged {trial_noun} were "
+            "stopped early by the divergence detector (the iterate blew past its own best "
+            "residual, or stalled); they are counted as root failures exactly as an exhausted "
+            "iteration budget would be. domain_failure_fraction is therefore a LOWER bound here: "
+            "a diverging iterate that would have overflowed to a non-finite g_tilde a few "
+            "iterations later is now counted as a root failure instead, which is the more "
+            "accurate description of it but is not the number an unaborted run would report."
+        )
+    return {
+        "num_planned_trials": num_planned_trials,
+        "early_stopped": bool(early_stop_reason),
+        "early_stop_reason": early_stop_reason,
+        "num_divergence_aborted_trials": num_divergence_aborts,
     }
 
 
@@ -789,10 +1594,15 @@ def _simulate_perturbation_null_bands(
     under the whitening z -> V_L^{-1/2} z, so the simulation runs at V_L = I and applies to any
     positive-definite V_L.
 
-    Returns two-sided bands: an envelope for the min/max sqrt-generalized-eigenvalue
-    "se_ratios" statistic, and a per-target SD-ratio band (Bonferroni-adjusted across the `dim`
-    targets, so the family-wise false-positive rate of the per-target gate is
-    1 - confidence_level).
+    Returns two-sided bands for the two SPREAD statistics -- an envelope for the min/max
+    sqrt-generalized-eigenvalue "se_ratios" statistic, and a per-target SD-ratio band
+    (Bonferroni-adjusted across the `dim` targets, so the family-wise false-positive rate of the
+    per-target gate is 1 - confidence_level) -- plus a one-sided upper quantile for the LOCATION
+    statistic ||mean_j(rows)||, which is the same b_L = ||V_L^{-1/2} mean_j(z_j)|| the callers
+    compute (only large values of a norm are evidence against H0, hence one-sided). That last
+    band is what makes b_L honest at finite J: with unpaired draws mean_j(z_j) is pure sampling
+    noise of size sqrt(chi2_dim / J) -- about 0.26 in one dimension at J = 15, which no fixed
+    tenth-of-an-SE tolerance can distinguish from real curvature-induced displacement.
     """
     unique_directions = sorted({j for _, j in converged_pattern})
     if len(converged_pattern) < 3 or len(unique_directions) < 2:
@@ -801,6 +1611,7 @@ def _simulate_perturbation_null_bands(
             "se_ratio_upper": math.nan,
             "per_target_sd_lower": math.nan,
             "per_target_sd_upper": math.nan,
+            "mean_shift_upper": math.nan,
             "num_null_samples": 0,
         }
     direction_index = {j: idx for idx, j in enumerate(unique_directions)}
@@ -811,6 +1622,7 @@ def _simulate_perturbation_null_bands(
     min_ratios = np.empty(num_null_samples)
     max_ratios = np.empty(num_null_samples)
     sd_samples = np.empty(num_null_samples)
+    mean_norms = np.empty(num_null_samples)
     for k in range(num_null_samples):
         z = rng.standard_normal((len(unique_directions), dim))
         rows = signs[:, None] * z[rows_of]
@@ -820,6 +1632,7 @@ def _simulate_perturbation_null_bands(
         min_ratios[k] = ratios[0]
         max_ratios[k] = ratios[-1]
         sd_samples[k] = float(np.std(rows[:, 0], ddof=1))
+        mean_norms[k] = float(np.linalg.norm(rows.mean(axis=0)))
 
     alpha = 1.0 - confidence_level
     per_target_alpha = alpha / max(dim, 1)
@@ -828,8 +1641,130 @@ def _simulate_perturbation_null_bands(
         "se_ratio_upper": float(np.quantile(max_ratios, 1 - alpha / 2)),
         "per_target_sd_lower": float(np.quantile(sd_samples, per_target_alpha / 2)),
         "per_target_sd_upper": float(np.quantile(sd_samples, 1 - per_target_alpha / 2)),
+        "mean_shift_upper": float(np.quantile(mean_norms, confidence_level)),
         "num_null_samples": num_null_samples,
     }
+
+
+def _mean_shift_ensemble(
+    z_rows: np.ndarray,
+    converged_pattern: Sequence[tuple[float, int]],
+    paired_directions: bool,
+) -> tuple[np.ndarray, list[tuple[float, int]]]:
+    """
+    The sub-ensemble the LOCATION statistic b_L = ||V_L^{-1/2} mean_j(z_j)|| is computed on:
+    every converged row when directions are drawn unpaired, but only the directions that survived
+    with BOTH signs when they are drawn antithetically. Returns (rows, pattern) so the caller can
+    simulate the matching null band.
+
+    Restricting to complete pairs is what keeps the mean shift a measurement of curvature rather
+    than an artifact of convergence/domain censoring. Inside a complete pair the linear parts
+    cancel identically -- 0.5(z_+ + z_-) is the even (curvature) part and nothing else -- so
+    dropping WHOLE pairs can only remove curvature signal, never manufacture it, which puts this
+    statistic on the same footing as the spread gates: censoring the hardest directions biases it
+    DOWN, so an exceedance measured on the survivors is trustworthy. A LONE surviving row instead
+    contributes its full sampling fluctuation to the mean, and since whether a solve converged is
+    correlated with where its root landed, that contribution is selection wearing curvature's
+    clothes -- it is exactly what manufactured spurious mean-shift failures out of asymmetrically
+    censored ensembles.
+    """
+    rows = np.asarray(z_rows)
+    if not paired_directions:
+        return rows, list(converged_pattern)
+    signs_by_direction: dict[int, set[float]] = {}
+    for sign, direction in converged_pattern:
+        signs_by_direction.setdefault(direction, set()).add(sign)
+    keep = np.array(
+        [len(signs_by_direction[direction]) == 2 for _, direction in converged_pattern],
+        dtype=bool,
+    )
+    pattern = [
+        entry
+        for entry, keep_it in zip(converged_pattern, keep, strict=False)
+        if keep_it
+    ]
+    return rows[keep] if rows.size else rows, pattern
+
+
+def _mean_shift_null_upper(
+    null_bands: dict[str, float],
+    mean_shift_pattern: Sequence[tuple[float, int]],
+    converged_pattern: Sequence[tuple[float, int]],
+    dim: int,
+    seed: int,
+    config: DiagnosticConfig,
+) -> float:
+    """
+    The null upper quantile for b_L. When the mean-shift sub-ensemble is the whole converged
+    ensemble -- every antithetic pair intact, or unpaired draws -- the band already simulated for
+    the spread statistics applies verbatim; only a pair-censored ensemble needs its own (smaller)
+    pattern simulated.
+    """
+    if len(mean_shift_pattern) == len(converged_pattern):
+        return null_bands["mean_shift_upper"]
+    return _simulate_perturbation_null_bands(
+        mean_shift_pattern,
+        dim,
+        config.confidence_level,
+        seed,
+        config.num_null_band_samples,
+    )["mean_shift_upper"]
+
+
+def _evaluate_mean_shift_gate(
+    b_L: float,
+    mean_shift_null_upper: float,
+    num_dropped_rows: int,
+    solver_unhealthy: bool,
+    config: DiagnosticConfig,
+    warnings_list: list[str],
+) -> tuple[float, bool, bool]:
+    """
+    The shared mean-shift gate of check_exact_nonlinear_perturbations and
+    check_multiplier_bootstrap: returns (threshold, gate_evaluable, gate_failed) for the b_L
+    computed on _mean_shift_ensemble's rows, appending an explanatory warning whenever an
+    exceedance is observed but deliberately not gated on.
+
+    b_L is compared against max(simulated finite-draw null upper quantile,
+    config.mean_shift_tolerance_se). The band is what makes the comparison honest at finite J:
+    with unpaired draws b_L is raw sampling noise of size sqrt(chi2_dim / J) -- about 0.26 SE in
+    one dimension at the default J = 15, which the former fixed 0.10 comparison read as a failure
+    on a provably affine map. config.mean_shift_tolerance_se survives as the absolute
+    practical-significance FLOOR (a displacement below a tenth of a target SE is not worth
+    reporting however many draws make it detectable), and it is the binding threshold in the
+    ordinary antithetic case, where the null band collapses to exactly 0 because every complete
+    pair cancels.
+
+    With unpaired draws there is no cancellation to lean on, so censoring CAN manufacture a
+    location shift that the null band -- which replicates the observed pattern but still treats
+    the rows as an unselected sample -- cannot absorb; there, and only there, an unhealthy solver
+    suppresses the gate. The caller turns a suppressed or unevaluable gate into INDETERMINATE,
+    never into a pass.
+    """
+    if math.isnan(mean_shift_null_upper):
+        return math.nan, False, False
+    threshold = max(mean_shift_null_upper, config.mean_shift_tolerance_se)
+    if num_dropped_rows:
+        warnings_list.append(
+            f"{num_dropped_rows} converged row(s) whose antithetic partner did not converge were "
+            "excluded from the mean-shift statistic, which is computed on complete +/- pairs "
+            "only; the remaining pairs under-represent the most curved directions."
+        )
+    evaluable = not math.isnan(b_L) and (
+        config.paired_directions or not solver_unhealthy
+    )
+    if evaluable:
+        return threshold, True, bool(b_L > threshold)
+
+    if not math.isnan(b_L) and b_L > threshold:
+        warnings_list.append(
+            f"Mean shift {b_L:.4g} SE exceeds its null threshold {threshold:.4g}, but the "
+            "directions are unpaired and the solver is unhealthy, so the displacement cannot be "
+            "separated from the censoring of non-converged directions (there is no antithetic "
+            "partner left to cancel the linear part against); the mean-shift gate was not "
+            "applied."
+        )
+    return threshold, False, False
 
 
 def se_ratios_from_generalized_eigenvalues(
@@ -863,6 +1798,23 @@ def check_exact_nonlinear_perturbations(
     Section 4/6: solves the exact nonlinear perturbation for each of num_exact_directions
     (paired +/- when configured), reports a^{NL}_{j,l}, generalized-eigenvalue SE-ratios, mean
     shift, quantile shift, and Clopper-Pearson upper bounds on failure/branch-change fractions.
+
+    The ensemble may be shorter than the plan: the sequential early stop (see
+    _starvation_early_stop_reached) abandons the remaining directions once no completion of the
+    ensemble could reach a computable statistic. That is status-preserving by construction, and
+    what actually ran is reported as num_planned_trials / num_trials / early_stopped rather than
+    left to be inferred from the config. Individual solves may also end early via the divergence
+    abort, which is counted as an ordinary root failure -- see solve_exact_perturbation.
+
+    This check re-solves SERIALLY and has no batched path, unlike check_multiplier_bootstrap. That
+    is a cost decision, not an oversight: batching buys one XLA compile of the vmap'd g_tilde
+    (measured 5-6 s, flat in width) which needs a few thousand live row-evaluations to repay, and
+    this check's default ensemble -- 15 paired directions, ~1,200 rows -- is well under it, so
+    batching it in isolation measures SLOWER. Keeping it serial also leaves the shared
+    solve_exact_perturbation exercised by a caller on every run. If num_exact_directions is ever
+    raised into the hundreds this becomes worth revisiting, with its own equivalence campaign: this
+    check accumulates more per-trial state than the bootstrap does (z_linear_rows, a_nl_by_target),
+    all of it order-sensitive.
     """
     num_directions = config.num_exact_directions or config.num_directions
     base_delta, base_s = sample_perturbation_directions(
@@ -881,11 +1833,27 @@ def check_exact_nonlinear_perturbations(
     convergence_flags: list[bool] = []
     branch_change_flags: list[bool] = []
     nonfinite_flags: list[bool] = []
+    num_divergence_aborts = 0
 
     converged_pattern: list[tuple[float, int]] = []
+    num_planned_trials = num_directions * len(signs)
+    early_stop_reason = ""
 
     for sign in signs:
+        if early_stop_reason:
+            break
         for j in range(num_directions):
+            # Evaluated BEFORE this trial is solved, so the counts it reads are exactly the (c, k)
+            # of the soundness argument in _starvation_early_stop_reached: every trial from here
+            # on is skipped, and the check is INDETERMINATE for every completion of the ensemble.
+            if _starvation_early_stop_reached(
+                config,
+                len(converged_pattern),
+                len(convergence_flags),
+                num_planned_trials,
+            ):
+                early_stop_reason = EARLY_STOP_REASON_STARVATION
+                break
             delta_lin = sign * base_delta[j]
             s_j = sign * base_s[j]
             solved = solve_exact_perturbation(
@@ -894,6 +1862,7 @@ def check_exact_nonlinear_perturbations(
             convergence_flags.append(solved["converged"])
             branch_change_flags.append(solved["branch_change_suspected"])
             nonfinite_flags.append(solved["nonfinite_encountered"])
+            num_divergence_aborts += int(solved["aborted"])
 
             # Every ensemble statistic below is computed on CONVERGED trials only: a
             # non-converged continuation's last iterate is solver debris, not an "exact"
@@ -929,6 +1898,16 @@ def check_exact_nonlinear_perturbations(
     )
 
     warnings_list: list[str] = []
+    accounting_metrics = _resolve_accounting_metrics_and_warnings(
+        warnings_list,
+        trial_noun="perturbation directions",
+        early_stop_reason=early_stop_reason,
+        num_planned_trials=num_planned_trials,
+        num_trials=num_trials,
+        num_converged=num_converged,
+        num_divergence_aborts=num_divergence_aborts,
+        num_root_failures=num_root_failures,
+    )
     V_L_lin = L @ np.asarray(V_hat) @ L.T
     # Health is judged on the OBSERVED failure fraction, not the Clopper-Pearson upper bound:
     # at practical trial counts the upper bound sits above bad_direction_probability_target even
@@ -939,7 +1918,7 @@ def check_exact_nonlinear_perturbations(
         observed_failure_fraction > config.bad_direction_probability_target
     )
 
-    if num_converged >= 3:
+    if num_converged >= MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
         z_linear = np.array(z_linear_rows)
         z_nonlinear = np.array(z_nonlinear_rows)
         nonlinear_cov = np.atleast_2d(np.cov(z_nonlinear, rowvar=False))
@@ -948,11 +1927,18 @@ def check_exact_nonlinear_perturbations(
         except (scipy.linalg.LinAlgError, ValueError) as exc:
             se_ratios = np.full(V_L_lin.shape[0], math.nan)
             warnings_list.append(f"Generalized eigenvalue computation failed: {exc}")
+        mean_shift_rows, mean_shift_pattern = _mean_shift_ensemble(
+            z_nonlinear, converged_pattern, config.paired_directions
+        )
         try:
-            b_L = float(
-                np.linalg.norm(
-                    matrix_inv_sqrt(V_L_lin) @ (np.mean(z_nonlinear, axis=0))
+            b_L = (
+                float(
+                    np.linalg.norm(
+                        matrix_inv_sqrt(V_L_lin) @ (np.mean(mean_shift_rows, axis=0))
+                    )
                 )
+                if len(mean_shift_rows)
+                else math.nan
             )
         except np.linalg.LinAlgError:
             b_L = math.nan
@@ -970,6 +1956,7 @@ def check_exact_nonlinear_perturbations(
     else:
         se_ratios = np.full(V_L_lin.shape[0], math.nan)
         b_L = math.nan
+        mean_shift_pattern = list(converged_pattern)
         quantile_shifts = {
             label: {"lower_shift_se": math.nan, "upper_shift_se": math.nan}
             for label in target_labels
@@ -990,21 +1977,50 @@ def check_exact_nonlinear_perturbations(
         config.random_seed + 5,
         config.num_null_band_samples,
     )
+    # The band itself is unavailable only when the converged pattern is too thin to simulate;
+    # se_ratios are separately unavailable when the generalized eigenproblem failed (a singular
+    # V_L_lin). Either way the gate is UNEVALUABLE, which the status logic below turns into
+    # INDETERMINATE -- never into a pass.
+    se_ratio_band_available = not math.isnan(
+        null_bands["se_ratio_lower"]
+    ) and not math.isnan(null_bands["se_ratio_upper"])
+    evaluable_se_ratios = se_ratios[np.isfinite(se_ratios)]
     se_ratio_band_evaluable = (
         se_ratios.size > 0
-        and bool(np.all(np.isfinite(se_ratios)))
-        and not math.isnan(null_bands["se_ratio_lower"])
+        and evaluable_se_ratios.size == se_ratios.size
+        and se_ratio_band_available
     )
     se_ratio_above = bool(
-        se_ratio_band_evaluable
-        and float(np.max(se_ratios)) > null_bands["se_ratio_upper"]
+        se_ratio_band_available
+        and evaluable_se_ratios.size > 0
+        and float(np.max(evaluable_se_ratios)) > null_bands["se_ratio_upper"]
     )
     se_ratio_below = bool(
-        se_ratio_band_evaluable
-        and float(np.min(se_ratios)) < null_bands["se_ratio_lower"]
+        se_ratio_band_available
+        and evaluable_se_ratios.size > 0
+        and float(np.min(evaluable_se_ratios)) < null_bands["se_ratio_lower"]
     )
     se_ratio_ok = (
         (not se_ratio_above and not se_ratio_below) if se_ratio_band_evaluable else None
+    )
+
+    mean_shift_null_upper = _mean_shift_null_upper(
+        null_bands,
+        mean_shift_pattern,
+        converged_pattern,
+        V_L_lin.shape[0],
+        config.random_seed + 6,
+        config,
+    )
+    mean_shift_threshold, mean_shift_gate_evaluable, mean_shift_failed = (
+        _evaluate_mean_shift_gate(
+            b_L,
+            mean_shift_null_upper,
+            len(converged_pattern) - len(mean_shift_pattern),
+            solver_unhealthy,
+            config,
+            warnings_list,
+        )
     )
 
     # An ABOVE-band se_ratio on the converged subset is trustworthy under censoring (the
@@ -1012,7 +2028,7 @@ def check_exact_nonlinear_perturbations(
     # ratio on a censored subset is exactly what that censoring produces on its own, so it only
     # counts as a failure when the solver is healthy.
     gates_failed = se_ratio_above or (se_ratio_below and not solver_unhealthy)
-    if not math.isnan(b_L) and b_L > config.mean_shift_tolerance_se:
+    if mean_shift_failed:
         gates_failed = True
     for shifts in quantile_shifts.values():
         if (
@@ -1029,7 +2045,7 @@ def check_exact_nonlinear_perturbations(
     # is unhealthy (exclusion of the non-converged -- typically hardest -- directions biases the
     # subset OPTIMISTIC, so a failure on it is trustworthy); a PASS on that same optimistic
     # subset is not, hence INDETERMINATE.
-    if num_converged == 0 or num_converged < 3:
+    if num_converged == 0 or num_converged < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
         status = CheckStatuses.INDETERMINATE
     elif gates_failed:
         status = CheckStatuses.FAILED
@@ -1046,6 +2062,23 @@ def check_exact_nonlinear_perturbations(
             f"{config.bad_direction_probability_target}; gates passed on the converged subset "
             "but that subset is optimistically selected."
         )
+    elif not (se_ratio_band_evaluable and mean_shift_gate_evaluable):
+        # An unevaluable gate is not a pass -- the same convention this check already applies to
+        # an ensemble too small for any statistic at all.
+        unevaluable = [
+            name
+            for name, ok in (
+                ("se_ratios", se_ratio_band_evaluable),
+                ("mean_shift", mean_shift_gate_evaluable),
+            )
+            if not ok
+        ]
+        status = CheckStatuses.INDETERMINATE
+        warnings_list.append(
+            f"Distortion gate(s) {', '.join(unevaluable)} could not be evaluated on this "
+            "ensemble (typically a singular target covariance), so no comparison against their "
+            "null bands was performed; the check is INDETERMINATE rather than passed."
+        )
     else:
         status = CheckStatuses.PASSED
 
@@ -1061,9 +2094,14 @@ def check_exact_nonlinear_perturbations(
             null_bands["se_ratio_upper"],
         ],
         "mean_shift_se": b_L,
+        "mean_shift_null_upper": mean_shift_null_upper,
+        "mean_shift_threshold": mean_shift_threshold,
+        "mean_shift_gate_evaluable": mean_shift_gate_evaluable,
+        "mean_shift_num_rows": len(mean_shift_pattern),
         "quantile_shifts_se": quantile_shifts,
         "num_trials": num_trials,
         "num_converged_trials": num_converged,
+        **accounting_metrics,
         "root_failure_fraction": num_root_failures / num_trials
         if num_trials
         else math.nan,
@@ -1157,6 +2195,21 @@ def check_multiplier_bootstrap(
     the blow-up phenomenon of docs/adr/0002). A high non-convergence rate across draws is
     itself evidence of solver-level fragility under resampling-scale perturbations ->
     INDETERMINATE.
+
+    The ensemble may be shorter than the plan: the sequential early stop (see
+    _starvation_early_stop_reached) abandons the remaining draws once no completion of the
+    ensemble could reach a computable bootstrap SE. That is status-preserving by construction, and
+    what actually ran is reported as num_planned_trials / num_trials / num_draws_executed /
+    early_stopped rather than left to be inferred from the config. Individual re-solves may also
+    end early via the divergence abort, which is counted as an ordinary root failure -- see
+    solve_exact_perturbation.
+
+    The ensemble is re-solved one trial at a time by default. With
+    config.batched_bootstrap_resolves enabled it is re-solved in waves that advance their
+    chord-Newton iterations together (solve_exact_perturbations_batched), which replaces up to
+    bootstrap_batch_width separate g_tilde calls per iteration with one vmap'd call. Each draw's
+    trajectory is unchanged, so the ensemble and its status are the same; the arithmetic is not
+    bitwise the same, and metrics["resolve_batch_width"] records which path ran.
     """
     num_draws = config.num_bootstrap_draws
     base_delta, base_s = sample_multiplier_perturbations(
@@ -1174,16 +2227,105 @@ def check_multiplier_bootstrap(
     converged_pattern: list[tuple[float, int]] = []
     convergence_flags: list[bool] = []
     nonfinite_flags: list[bool] = []
+    num_divergence_aborts = 0
+    num_batched_trials = 0
+    num_planned_trials = num_draws * len(signs)
+    early_stop_reason = ""
 
-    for sign in signs:
-        for j in range(num_draws):
-            delta_lin = sign * base_delta[j]
-            s_j = sign * base_s[j]
-            solved = solve_exact_perturbation(
-                g_tilde, eta_hat, g0, bread_factored, s_j, delta_lin, config
+    # Trials in ENUMERATION ORDER (sign-major, draw-minor), materialized once so the wave loop
+    # below can slice it. This order is load-bearing well past readability: np.std/np.cov over the
+    # converged rows, _mean_shift_ensemble's pair matching and _simulate_perturbation_null_bands'
+    # reconstruction from converged_pattern all consume the rows in the order they were appended,
+    # so results must be consumed in plan order even when they were COMPUTED together. That is why
+    # the batched driver returns a list positionally matched to its input rows rather than, say, a
+    # dict keyed by completion.
+    trial_plan = [(sign, j) for sign in signs for j in range(num_draws)]
+    resolve_batch_width = _resolve_bootstrap_batch_width(config, num_planned_trials)
+    batch_eval = None
+    if resolve_batch_width:
+        try:
+            batch_eval = _make_batched_g_tilde_evaluator(
+                g_tilde, eta_hat, resolve_batch_width
             )
+        except Exception:
+            # Not every g_tilde survives jit+vmap (a closure with host-side control flow on its
+            # argument, a callback, a shape the tracer cannot handle). The check must still
+            # produce a result -- a bootstrap that does not run is an UNCERTIFIABLE verdict, i.e.
+            # a materially different report -- so the serial reference path is always reachable.
+            logger.warning(
+                "Batched bootstrap re-solves are enabled but g_tilde could not be compiled at "
+                "batch width %d; falling back to the serial reference path.",
+                resolve_batch_width,
+                exc_info=True,
+            )
+            resolve_batch_width = 0
+    # Wave = the pinned batch width, so a wave is exactly one buffer's worth of trials, and 1 when
+    # serial -- which makes the loop below the original per-trial loop line for line, including
+    # where the early stop is evaluated.
+    wave_size = resolve_batch_width or 1
+
+    for wave_start in range(0, num_planned_trials, wave_size):
+        # Evaluated BEFORE the next wave is re-solved, so the counts it reads are exactly the
+        # (c, k) of the soundness argument in _starvation_early_stop_reached: every trial from
+        # here on is skipped, and the check is INDETERMINATE for every completion of the ensemble.
+        # Serially this is per trial and identical to the pre-batching behaviour. Batched, it can
+        # only be tested at wave boundaries, where the remaining count is a multiple of the wave
+        # width -- so with any wave wider than 2 the predicate is effectively unreachable and the
+        # stop simply does not fire. That costs nothing to speak of (the stop can never skip more
+        # than 2 trials of the plan) and stays honest either way: the metrics report what actually
+        # ran, and under batching that is the whole plan.
+        if _starvation_early_stop_reached(
+            config,
+            len(converged_pattern),
+            len(convergence_flags),
+            num_planned_trials,
+        ):
+            early_stop_reason = EARLY_STOP_REASON_STARVATION
+            break
+        wave = trial_plan[wave_start : wave_start + wave_size]
+        s_wave = np.array([sign * base_s[j] for sign, j in wave])
+        delta_wave = np.array([sign * base_delta[j] for sign, j in wave])
+        solved_wave = None
+        if batch_eval is not None:
+            try:
+                solved_wave = solve_exact_perturbations_batched(
+                    batch_eval,
+                    g0,
+                    bread_factored,
+                    s_wave,
+                    delta_wave,
+                    config,
+                    batch_width=resolve_batch_width,
+                )
+            except Exception:
+                logger.warning(
+                    "Batched bootstrap re-solves failed after %d of %d trials; the remaining "
+                    "trials use the serial reference path, so this ensemble mixes the two "
+                    "(verdict-equivalent, but not numerically homogeneous).",
+                    len(convergence_flags),
+                    num_planned_trials,
+                    exc_info=True,
+                )
+                batch_eval = None
+            else:
+                num_batched_trials += len(wave)
+        if solved_wave is None:
+            solved_wave = [
+                solve_exact_perturbation(
+                    g_tilde,
+                    eta_hat,
+                    g0,
+                    bread_factored,
+                    s_wave[index],
+                    delta_wave[index],
+                    config,
+                )
+                for index in range(len(wave))
+            ]
+        for (sign, j), solved in zip(wave, solved_wave, strict=True):
             convergence_flags.append(solved["converged"])
             nonfinite_flags.append(solved["nonfinite_encountered"])
+            num_divergence_aborts += int(solved["aborted"])
             if not solved["converged"]:
                 continue
             converged_pattern.append((sign, j))
@@ -1207,23 +2349,52 @@ def check_multiplier_bootstrap(
     )
 
     warnings_list: list[str] = []
+    accounting_metrics = _resolve_accounting_metrics_and_warnings(
+        warnings_list,
+        trial_noun="re-solves",
+        early_stop_reason=early_stop_reason,
+        num_planned_trials=num_planned_trials,
+        num_trials=num_trials,
+        num_converged=num_converged,
+        num_divergence_aborts=num_divergence_aborts,
+        num_root_failures=num_root_failures,
+    )
+    if resolve_batch_width and num_batched_trials < num_trials:
+        warnings_list.append(
+            f"Batched re-solves stopped after {num_batched_trials} of {num_trials} executed "
+            "trials and the rest fell back to the serial solver (see the logged exception): this "
+            "ensemble mixes the two arithmetics. They agree to well within every tolerance below, "
+            "but the run is not reproducible against either path alone."
+        )
     V_L = L @ np.asarray(V_hat) @ L.T
 
-    if num_converged >= 3:
+    if num_converged >= MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
         z = np.array(z_rows)
         bootstrap_se = np.std(z, axis=0, ddof=1)
         se_ratio_by_target = {
             label: float(bootstrap_se[idx] / se_l[idx]) if se_l[idx] > 0 else math.nan
             for idx, label in enumerate(target_labels)
         }
+        mean_shift_rows, mean_shift_pattern = _mean_shift_ensemble(
+            z, converged_pattern, config.paired_directions
+        )
         try:
-            b_L = float(np.linalg.norm(matrix_inv_sqrt(V_L) @ np.mean(z, axis=0)))
+            b_L = (
+                float(
+                    np.linalg.norm(
+                        matrix_inv_sqrt(V_L) @ np.mean(mean_shift_rows, axis=0)
+                    )
+                )
+                if len(mean_shift_rows)
+                else math.nan
+            )
         except np.linalg.LinAlgError:
             b_L = math.nan
     else:
         bootstrap_se = np.full(len(target_labels), math.nan)
         se_ratio_by_target = {label: math.nan for label in target_labels}
         b_L = math.nan
+        mean_shift_pattern = list(converged_pattern)
         warnings_list.append(
             f"Only {num_converged} of {num_trials} bootstrap re-solves converged -- too few "
             "for a bootstrap SE; the check is INDETERMINATE."
@@ -1242,14 +2413,53 @@ def check_multiplier_bootstrap(
     ratios = np.array(
         [se_ratio_by_target[label] for label in target_labels], dtype=np.float64
     )
-    band_evaluable = bool(np.all(np.isfinite(ratios))) and not math.isnan(band_lo)
-    any_above = bool(band_evaluable and np.any(ratios > band_hi))
-    any_below = bool(band_evaluable and np.any(ratios < band_lo))
-    mean_shift_failed = not math.isnan(b_L) and b_L > config.mean_shift_tolerance_se
+    # Per-target evaluation over the FINITE ratios only. A single non-identified target (se_l == 0
+    # -> NaN ratio) must not disable the band gate for every other target, which is what an
+    # all-or-nothing np.all(np.isfinite(ratios)) did: it let every healthy target's SE go
+    # uncompared and still reported PASSED.
+    band_available = not math.isnan(band_lo) and not math.isnan(band_hi)
+    evaluable_ratios = ratios[np.isfinite(ratios)]
+    any_above = bool(
+        band_available and evaluable_ratios.size and np.any(evaluable_ratios > band_hi)
+    )
+    any_below = bool(
+        band_available and evaluable_ratios.size and np.any(evaluable_ratios < band_lo)
+    )
+    unevaluable_targets = [
+        label
+        for label, ratio in zip(target_labels, ratios, strict=False)
+        if not np.isfinite(ratio)
+    ]
+    band_evaluable = (
+        band_available and not unevaluable_targets and len(target_labels) > 0
+    )
+    mean_shift_null_upper = _mean_shift_null_upper(
+        null_bands,
+        mean_shift_pattern,
+        converged_pattern,
+        L.shape[0],
+        config.random_seed + 13,
+        config,
+    )
+    mean_shift_threshold, mean_shift_gate_evaluable, mean_shift_failed = (
+        _evaluate_mean_shift_gate(
+            b_L,
+            mean_shift_null_upper,
+            len(converged_pattern) - len(mean_shift_pattern),
+            solver_unhealthy,
+            config,
+            warnings_list,
+        )
+    )
+
+    narrower_than_band_message = (
+        "Bootstrap SEs fall below the sandwich SEs beyond the simulated null band: the "
+        "sandwich SE is likely overstated (conservative) on this dataset."
+    )
 
     # Same precedence rationale as check_exact_nonlinear_perturbations: exclusions select the
     # easy draws, so a FAILED verdict from the converged subset stands, but a PASS does not.
-    if num_converged < 3:
+    if num_converged < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
         status = CheckStatuses.INDETERMINATE
     elif any_above or mean_shift_failed:
         status = CheckStatuses.FAILED
@@ -1260,8 +2470,9 @@ def check_multiplier_bootstrap(
             )
         if mean_shift_failed:
             warnings_list.append(
-                f"Bootstrap mean shift {b_L:.4g} SE exceeds "
-                f"mean_shift_tolerance_se={config.mean_shift_tolerance_se}: the resampled "
+                f"Bootstrap mean shift {b_L:.4g} SE exceeds its null threshold "
+                f"{mean_shift_threshold:.4g} (the simulated finite-draw null band, floored at "
+                f"mean_shift_tolerance_se={config.mean_shift_tolerance_se}): the resampled "
                 "roots are systematically displaced (curvature-induced bias)."
             )
     elif solver_unhealthy:
@@ -1272,12 +2483,32 @@ def check_multiplier_bootstrap(
             "fragile under resampling-scale perturbations, and the converged subset is "
             "optimistically selected."
         )
+    elif not (band_evaluable and mean_shift_gate_evaluable):
+        # An unevaluable gate is not a pass: with no SE comparison performed for some target (or
+        # no evaluable mean-shift comparison at all) there is nothing left to have passed.
+        status = CheckStatuses.INDETERMINATE
+        if unevaluable_targets or not band_available:
+            warnings_list.append(
+                "The bootstrap-vs-sandwich SE band could not be evaluated for "
+                + (
+                    f"target(s) {', '.join(unevaluable_targets)} (no identified target "
+                    "variance to compare against)"
+                    if unevaluable_targets
+                    else "any target (the null band itself is unavailable)"
+                )
+                + "; no SE comparison was performed for those targets, so the check is "
+                "INDETERMINATE rather than passed."
+            )
+        if not mean_shift_gate_evaluable:
+            warnings_list.append(
+                "The bootstrap mean-shift gate could not be evaluated on this ensemble, so the "
+                "check is INDETERMINATE rather than passed."
+            )
+        if any_below:
+            warnings_list.append(narrower_than_band_message)
     elif any_below:
         status = CheckStatuses.WARNING
-        warnings_list.append(
-            "Bootstrap SEs fall below the sandwich SEs beyond the simulated null band: the "
-            "sandwich SE is likely overstated (conservative) on this dataset."
-        )
+        warnings_list.append(narrower_than_band_message)
     else:
         status = CheckStatuses.PASSED
 
@@ -1290,10 +2521,25 @@ def check_multiplier_bootstrap(
         },
         "se_ratio_by_target": se_ratio_by_target,
         "se_ratio_null_band": [band_lo, band_hi],
+        "se_ratio_band_unevaluable_targets": unevaluable_targets,
         "mean_shift_se": b_L,
+        "mean_shift_null_upper": mean_shift_null_upper,
+        "mean_shift_threshold": mean_shift_threshold,
+        "mean_shift_gate_evaluable": mean_shift_gate_evaluable,
+        "mean_shift_num_rows": len(mean_shift_pattern),
         "num_draws": num_draws,
+        # Distinct multiplier draws actually re-solved. Under the sign-major trial order an early
+        # stop truncates the SECOND sign block first, so this equals num_draws unless the stop
+        # landed inside the first block.
+        "num_draws_executed": min(num_trials, num_draws),
         "num_trials": num_trials,
         "num_converged_trials": num_converged,
+        # Which re-solve path produced this ensemble: 0 for the serial reference solver, otherwise
+        # the pinned lockstep batch width. Reported because the two are verdict-equivalent but not
+        # bit-identical (see DiagnosticConfig.batched_bootstrap_resolves), so reproducing a run's
+        # last digits means reproducing this number too.
+        "resolve_batch_width": resolve_batch_width,
+        **accounting_metrics,
         "root_failure_fraction": num_root_failures / num_trials
         if num_trials
         else math.nan,
@@ -1345,12 +2591,25 @@ def check_jacobian_drift(
         config.random_seed + 2,
     )
 
+    # This check takes num_directions * len(drift_path_samples) reverse-mode Jacobians of the
+    # WHOLE stacked system -- the single most backward-pass-expensive thing in the suite, and
+    # exactly the pass that is known to exhaust memory at real study scale. Resolve the chunk
+    # size once (rather than per Jacobian) so the auto heuristic logs its decision once.
+    jacobian_row_chunk_size = resolve_jacobian_row_chunk_size(
+        config.jacobian_row_chunk_size, int(B.shape[0])
+    )
+
     rho_by_direction = []
     for delta in base_delta:
         max_norm = 0.0
         for t in config.drift_path_samples:
             point = jnp.asarray(eta_hat) + t * jnp.asarray(delta)
-            jac = np.asarray(jax.jacrev(g_tilde)(point), dtype=np.float64)
+            jac = np.asarray(
+                compute_row_chunked_jacobian(
+                    g_tilde, point, chunk_size=jacobian_row_chunk_size
+                ),
+                dtype=np.float64,
+            )
             diff = jac - B
             X = solve_with_bread(bread_factored, diff)
             op_norm = float(np.linalg.norm(X, ord=2))
@@ -1408,12 +2667,22 @@ def check_bread_stability(
     num_subjects: int,
     V_hat: np.ndarray,
     config: DiagnosticConfig,
+    *,
+    L: np.ndarray | None = None,
 ) -> CheckResult:
     """
     Section 8. Reports per-update diagonal-block and theta-block singular values/condition
     numbers, off-diagonal coupling magnitudes, target-covariance rank/eigenvalues, and the
     sensitivity of target SEs to a numerically negligible perturbation of B_hat. Does not
     hard-code a universal condition-number threshold: conditioning is reported, not judged, here.
+
+    `L` is the target selector (the suite always supplies it); the target covariance whose rank
+    is judged is L @ V_hat @ L^T, falling back to the theta block of V_hat when no selector is
+    given. It is emphatically NOT the full joint V_hat: the joint sandwich's rank is generically
+    at least theta_dim even when the theta target block is exactly singular, because the healthy
+    beta blocks supply that rank on their own -- judging identification on it made this gate
+    unfireable at any real study scale (beta_total ~4000 vs. theta_dim ~5) and reported
+    beta-block eigenvalues, in beta's units, under a "target covariance" name.
     """
     B = np.asarray(B_hat, dtype=np.float64)
     M = np.asarray(M_hat, dtype=np.float64)
@@ -1447,10 +2716,21 @@ def check_bread_stability(
         float(full_svals[0] / full_svals[-1]) if full_svals[-1] > 0 else math.inf
     )
 
-    eigvals_V = np.linalg.eigvalsh(np.asarray(V_hat))
-    max_eig = float(eigvals_V.max()) if eigvals_V.size else math.nan
+    V = np.asarray(V_hat, dtype=np.float64)
+    target_covariance = (
+        np.atleast_2d(
+            np.asarray(L, dtype=np.float64) @ V @ np.asarray(L, dtype=np.float64).T
+        )
+        if L is not None
+        else V[-theta_dim:, -theta_dim:]
+    )
+    target_dim = target_covariance.shape[0]
+    eigvals_target = np.linalg.eigvalsh(target_covariance)
+    max_eig = float(eigvals_target.max()) if eigvals_target.size else math.nan
     rank_estimate = (
-        int(np.sum(eigvals_V > config.rank_tolerance * max_eig)) if max_eig > 0 else 0
+        int(np.sum(eigvals_target > config.rank_tolerance * max_eig))
+        if max_eig > 0
+        else 0
     )
 
     rel_scale = config.bread_perturbation_relative_scale
@@ -1473,11 +2753,11 @@ def check_bread_stability(
 
     warnings_list = []
     status = CheckStatuses.PASSED
-    if rank_estimate < theta_dim:
+    if rank_estimate < target_dim:
         status = CheckStatuses.INDETERMINATE
         warnings_list.append(
-            f"Target covariance rank estimate {rank_estimate} < theta_dim {theta_dim}; "
-            "identification of some contrasts may be weak."
+            f"Target covariance rank estimate {rank_estimate} < target dimension "
+            f"{target_dim}; identification of some contrasts may be weak."
         )
     if sensitivity_max > config.se_distortion_tolerance:
         warnings_list.append(
@@ -1499,8 +2779,12 @@ def check_bread_stability(
             "off_diagonal_beta_to_theta_norm": off_diag_beta_to_theta,
             "off_diagonal_theta_to_beta_norm": off_diag_theta_to_beta,
             "full_bread_condition_number": full_cond,
-            "target_covariance_eigenvalues": eigvals_V.tolist(),
+            # Eigenvalues of the TARGET covariance (L V_hat L^T, or the theta block of V_hat when
+            # no selector was supplied) -- not of the joint sandwich, whose beta blocks dominate
+            # the spectrum and carry different units.
+            "target_covariance_eigenvalues": eigvals_target.tolist(),
             "target_covariance_rank_estimate": rank_estimate,
+            "target_covariance_dim": target_dim,
             "numerical_sensitivity_max_relative_se_change": sensitivity_max,
         },
         warnings=warnings_list,
@@ -1844,6 +3128,89 @@ def _combine_classification(check_results: dict[str, CheckResult]) -> str:
     return DiagnosticClassifications.LOCALLY_SUPPORTED
 
 
+def _derive_verdict(
+    check_results: dict[str, CheckResult],
+    input_check_results: dict[str, CheckResult],
+    hard_failed: bool,
+    theta_dim: int,
+    config: DiagnosticConfig,
+) -> tuple[str, str]:
+    """
+    Maps the check results onto the decision-level verdict (see DiagnosticVerdicts) -- the
+    single-run trust protocol the ADS-142 calibration experiments support, made machine-readable.
+    Deliberately additive: `classification` and every check's own status are unchanged; this is
+    a pure function of them (plus two metrics reads).
+
+    Precedence, and the evidence behind each rung:
+
+    1. INVALID -- any hard/measured failure, or a rank-deficient target covariance
+       (`bread_stability`'s `target_covariance_rank_estimate < theta_dim`). The rank condition
+       is pulled up to INVALID rather than left in UNCERTIFIABLE because it identified 76/76 of
+       the zero-width-interval collapses in the undercoverage hunt -- runs whose CIs miss with
+       certainty.
+    2. UNCERTIFIABLE -- any indeterminate check (re-solve fragility, censored ensembles,
+       unevaluable gates), or the a_{j,l} screen called for the multiplier bootstrap and it did
+       not run (`multiplier_bootstrap="off"`, or the report predates the check): the calibrated
+       division of labor makes the bootstrap the verdict layer once the screen trips, so its
+       absence there means no verdict was reached, not a pass.
+    3. CONSERVATIVE -- nothing failed or unresolved, but a calibrated conservatism signal fired:
+       the bootstrap's below-band WARNING (sandwich SE overstated), or
+       `influence_concentration`'s WARNING (its n_eff floor has measured precision 0.73 /
+       recall 0.59 for a >2x-inflated variance, and the inflation it predicts is conservative).
+    4. CERTIFIED -- everything else, with `verdict_basis` recording how: "bootstrap" (the
+       linearization-free SE comparison ran and passed) or "screen" (the run was quiet enough
+       that the screen never called for it -- every screen-quiet design in the calibration grids
+       was well-calibrated). On the clean validation cells the bootstrap's SEs tracked the
+       replicate-pool truth to ratios of 0.96-1.01; on the influence cell -- the design built to
+       falsify the no-policy-replay concern -- the per-coordinate ratios were 1.05 / 1.32 / 0.99
+       / 1.31, i.e. no systematic undershoot. See docs/adr/0002's round-2 validation results.
+
+    Warnings outside the calibrated set (scaling exponents, jacobian-drift rho, exploration
+    leading indicators) do not move the verdict: they are reported for reading, and the
+    experiments gave them no operating characteristics to gate on.
+    """
+    any_failed = (
+        hard_failed
+        or any(r.status == CheckStatuses.FAILED for r in check_results.values())
+        or any(r.status == CheckStatuses.FAILED for r in input_check_results.values())
+    )
+    bread = check_results.get("bread_stability")
+    rank_estimate = (
+        bread.metrics.get("target_covariance_rank_estimate") if bread else None
+    )
+    rank_deficient = rank_estimate is not None and rank_estimate < theta_dim
+    if any_failed or rank_deficient:
+        return DiagnosticVerdicts.INVALID, ""
+
+    if any(r.status == CheckStatuses.INDETERMINATE for r in check_results.values()):
+        return DiagnosticVerdicts.UNCERTIFIABLE, ""
+
+    bootstrap = check_results.get("multiplier_bootstrap")
+    local = check_results.get("local_nonlinearity")
+    headline = _local_nonlinearity_headline_max(local.metrics) if local else math.nan
+    screen_quiet = (
+        local is not None
+        and local.status == CheckStatuses.PASSED
+        and (math.isnan(headline) or headline <= config.bootstrap_screen_a_jl_threshold)
+    )
+    if bootstrap is None and not screen_quiet:
+        return DiagnosticVerdicts.UNCERTIFIABLE, ""
+
+    influence = check_results.get("influence_concentration")
+    conservative = (
+        bootstrap is not None and bootstrap.status == CheckStatuses.WARNING
+    ) or (influence is not None and influence.status == CheckStatuses.WARNING)
+    if conservative:
+        return DiagnosticVerdicts.CONSERVATIVE, ""
+
+    basis = (
+        VerdictBases.BOOTSTRAP
+        if bootstrap is not None and bootstrap.status == CheckStatuses.PASSED
+        else VerdictBases.SCREEN
+    )
+    return DiagnosticVerdicts.CERTIFIED, basis
+
+
 def run_diagnostic_suite(
     g_tilde: Callable[[jnp.ndarray], jnp.ndarray],
     eta_hat: jnp.ndarray,
@@ -1985,7 +3352,7 @@ def run_diagnostic_suite(
             )
 
         check_results["bread_stability"] = check_bread_stability(
-            B_hat_np, M_hat, beta_dim, theta_dim, num_subjects, V_hat, config
+            B_hat_np, M_hat, beta_dim, theta_dim, num_subjects, V_hat, config, L=L
         )
 
         if config.compute_influence_and_overlap_checks:
@@ -2067,6 +3434,27 @@ def run_diagnostic_suite(
         if hard_failed
         else _combine_classification(check_results)
     )
+    verdict, verdict_basis = _derive_verdict(
+        check_results, input_check_results, hard_failed, theta_dim, config
+    )
+
+    # These are the PLANNED Monte Carlo sizes -- what the config asked for. The re-solve checks can
+    # legitimately execute fewer trials than planned (the sequential early stop of
+    # _starvation_early_stop_reached), so the executed count is reported alongside rather than
+    # letting the plan stand in for it; per-check metrics carry the same distinction as
+    # num_planned_trials / num_trials / early_stopped.
+    monte_carlo_counts = {
+        "num_directions": config.num_directions,
+        "num_exact_directions": config.num_exact_directions or config.num_directions,
+        "num_bootstrap_draws": config.num_bootstrap_draws,
+    }
+    bootstrap_result = check_results.get("multiplier_bootstrap")
+    if bootstrap_result is not None:
+        monte_carlo_counts["num_bootstrap_draws_executed"] = int(
+            bootstrap_result.metrics.get(
+                "num_draws_executed", config.num_bootstrap_draws
+            )
+        )
 
     return DiagnosticReport(
         classification=classification,
@@ -2075,14 +3463,11 @@ def run_diagnostic_suite(
         metrics={name: result.metrics for name, result in check_results.items()},
         tolerances_used=dataclasses.asdict(config),
         warnings=warnings_list,
-        monte_carlo_counts={
-            "num_directions": config.num_directions,
-            "num_exact_directions": config.num_exact_directions
-            or config.num_directions,
-            "num_bootstrap_draws": config.num_bootstrap_draws,
-        },
+        monte_carlo_counts=monte_carlo_counts,
         target_labels=target_labels,
         rank_diagnostics=check_results.get(
             "bread_stability", CheckResult(name="", status="", metrics={})
         ).metrics,
+        verdict=verdict,
+        verdict_basis=verdict_basis,
     )

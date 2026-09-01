@@ -6,15 +6,26 @@ to `analysis.pkl`. `docs/diagnostics.md` is the full technical reference (every 
 default tolerance, what each check can and can't rule out); this is the practical companion --
 what to actually look at, in what order, and what to do about what you find.
 
-## 1. The one field to look at first: `classification`
+## 1. The two fields to look at first: `verdict`, then `classification`
 
 ```python
 import pickle
 report = pickle.load(open("diagnostic_report.pkl", "rb"))
-report.classification
+report.verdict, report.verdict_basis, report.classification
 ```
 
-Four possible values:
+**`report.verdict` is the decision-level answer to "can I report this CI?"** in four values --
+`certified` (report it; `verdict_basis` says whether the multiplier bootstrap verified the SEs
+or the run was quiet enough that the calibrated screen never called for it), `conservative`
+(report it, width likely inflated -- the one finding `classification` structurally cannot
+surface, because warnings never move it), `uncertifiable` (no verdict was reached -- fragility,
+censoring, or the screen called for the bootstrap and it didn't run), and `invalid` (something
+failed, or the target covariance is rank-deficient -- the zero-width-CI mode). Each value's
+meaning is backed by the ADS-142 operating characteristics (see `docs/diagnostics.md`'s
+"Verdict" section and the `DiagnosticVerdicts` docstring). Reports pickled before this field
+existed carry an empty string -- fall back to reading `classification` plus `warnings` there.
+
+`classification` remains the compatibility-stable field, with four possible values:
 
 - **`failed`** -- a hard prerequisite broke: an `input_check_results` entry failed (section 4.1),
   `root_and_implementation` broke, out-of-range action probabilities, non-finite values, or a
@@ -22,12 +33,17 @@ Four possible values:
   check's gates, or `check_multiplier_bootstrap` finding bootstrap SEs above their null band
   (the sandwich SE understated -- the anticonservative direction). Stop and look at
   `check_results`/`input_check_results` before trusting anything else in the report.
-- **`indeterminate`** -- weak/degenerate identification, an unstable solve, or (for the opt-in
+- **`indeterminate`** -- weak/degenerate identification, an unstable solve, `g_tilde` undefined at
+  too many of the local-nonlinearity probe points (section 3), or (for the opt-in
   re-solving checks) continuation/bootstrap re-solves that actually failed to converge -- which
   is itself a fragility finding about the estimating equation, not merely missing information
-  (see section 4.6). Not proof of wrongness, but not resolvable from this dataset: in the
-  ADS-142 experiments, every genuinely miscalibrated design landed here rather than falsely
-  passing.
+  (see section 4.6) -- or a gate the check could not evaluate at all, which by design reads
+  `indeterminate` rather than `passed`. Not proof of wrongness, but not resolvable from this
+  dataset. Treat it as "cannot certify," not "probably fine": the status logic is deliberately
+  built so that a miscalibrated design cannot slip through as a pass on an optimistically
+  selected subset. That is a design property, not yet a measured one -- the bootstrap-validation
+  experiment that would put numbers behind it is still in flight (`docs/adr/0002`, "Follow-up
+  experiments").
 - **`locally_supported`** -- everything on-by-default passed. This is the ceiling
   `run_diagnostic_suite` can reach on its own, **always** -- read the next paragraph before
   treating it as "safe."
@@ -60,12 +76,13 @@ a genuine statistical finding (e.g. the root wasn't actually solved) can look id
 | `classification == "failed"`, an entry in `input_check_results` is the culprit | That entry's `.message` | A data/wiring bug (e.g. action probabilities that can't be reconstructed from the supplied function) -- section 4.1. Not a statistical finding at all; fix the data/wiring before looking at anything else. |
 | `classification == "failed"`, `root_and_implementation` is the culprit | `metrics["a_root_max"]`, `metrics["backward_relative_residual"]` | The estimating equation wasn't actually solved, the derivative doesn't match the function, or (if `backward_relative_residual` is the one that's large) the *linear solve itself* is broken -- see section 5's case E. All are implementation bugs, not statistics questions -- fix before looking at anything else. |
 | `classification == "failed"`, `exploration_and_weights` is the culprit | `action_prob_global_min`/`_max`, `fraction_at_or_near_floor`/`_ceiling` | A recorded action probability left `(0, 1)`, or violated a design bound you supplied. A real positivity/overlap violation, not a numerical artifact. |
-| `classification == "indeterminate"`, `bread_stability` is the culprit | `target_covariance_rank_estimate` vs. `theta_dim`, `numerical_sensitivity_max_relative_se_change` | Either the target is weakly identified (rank-deficient `V_hat`), or the reported SEs themselves move under a numerically negligible perturbation of the bread -- a fragility problem distinct from identification. |
+| `classification == "indeterminate"`, `bread_stability` is the culprit | `target_covariance_rank_estimate` vs. `target_covariance_dim`, `numerical_sensitivity_max_relative_se_change` | Either the target is weakly identified (a rank-deficient *target* covariance `L @ V_hat @ L^T`, not the full joint `V_hat` -- which is why this gate can actually fire at real study scale), or the reported SEs themselves move under a numerically negligible perturbation of the bread -- a fragility problem distinct from identification. |
 | `classification == "locally_supported"`, but `warnings` is non-empty | Which check's name prefixes each warning string | `local_nonlinearity` and `influence_concentration` warnings never change the classification (see section 3, and section 4.4 for influence_concentration specifically -- it has *no* path to anything but `PASSED`/`WARNING` at all) -- read them yourself, they're the two checks most likely to have something real to say even when nothing "failed." |
-| You turned on the expensive checks and got `indeterminate` from `exact_nonlinear_perturbation` | `root_failure_fraction`/`num_converged_trials` vs. `num_trials` | Some continuation solves actually failed (the status is driven by the *observed* failure fraction -- zero observed failures no longer reads `indeterminate` at small direction counts). The distortion statistics you do get were computed on the converged subset only, which is optimistically selected -- treat them as a lower bound on trouble. `root_failure_upper_bound` (Clopper-Pearson) is still reported if you want the certified bound; ~300+ directions for a ~1% one. |
-| `multiplier_bootstrap` is `failed` | `se_ratio_by_target` vs. `se_ratio_null_band`, `mean_shift_se` | Bootstrap SEs sit above the null band (the sandwich SE is likely *understated* on this dataset -- the dangerous direction), or the resampled roots are systematically displaced (curvature bias). Do not report the interval as-is. |
+| You turned on the expensive checks and got `indeterminate` from `exact_nonlinear_perturbation` | `root_failure_fraction`/`num_converged_trials` vs. `num_trials`, then `mean_shift_gate_evaluable` and the warnings | Either some continuation solves actually failed (the status is driven by the *observed* failure fraction -- zero observed failures no longer reads `indeterminate` at small direction counts), or a distortion gate could not be evaluated at all (typically a singular target covariance), which is deliberately not a pass. The distortion statistics you do get were computed on the converged subset only, which is optimistically selected -- treat them as a lower bound on trouble. `root_failure_upper_bound` (Clopper-Pearson) is still reported if you want the certified bound; ~300+ directions for a ~1% one. |
+| `multiplier_bootstrap` is `failed` | `se_ratio_by_target` vs. `se_ratio_null_band`, `mean_shift_se` vs. `mean_shift_threshold` | Bootstrap SEs sit above the null band for at least one identified target (the sandwich SE is likely *understated* on this dataset -- the dangerous direction), or the resampled roots are systematically displaced (curvature bias). Do not report the interval as-is. |
 | `multiplier_bootstrap` is `warning` | `se_ratio_by_target` below the band | Bootstrap SEs sit *below* the sandwich's: the sandwich is likely overstating uncertainty (the conservative blow-up direction ADS-142 found to be the common failure mode). The interval's direction is trustworthy; its width is inflated. |
-| `multiplier_bootstrap` is `indeterminate` | `root_failure_fraction` | The equation would not re-solve under resampling-scale perturbations -- fragility is the finding. In ADS-142, every genuinely anticonservative design landed here; treat as "cannot certify," not "probably fine." |
+| `multiplier_bootstrap` is `indeterminate` | `root_failure_fraction`, `se_ratio_band_unevaluable_targets`, `mean_shift_gate_evaluable` | Either the equation would not re-solve under resampling-scale perturbations (fragility is the finding), or a gate could not be fully evaluated -- e.g. a target with no identified sandwich SE to compare against, so no SE comparison was performed for it. Both read as "cannot certify," not "probably fine": the check is built never to pass on an unevaluated or optimistically censored comparison. Whether that design property translates into catching real anticonservative designs is what the in-flight bootstrap-validation experiment (`docs/adr/0002`, "Follow-up experiments") is meant to measure -- wave 2 itself contained no anticonservative cells to test it on. |
+| A re-solve check ran fewer trials than you configured (`num_trials` < `num_planned_trials`, or `monte_carlo_counts["num_bootstrap_draws_executed"]` < `num_bootstrap_draws`) | `early_stopped`, `early_stop_reason`, and the warning naming the truncation | The sequential early stop fired: too few trials could still converge to compute any ensemble statistic, so the status was already `indeterminate` for every possible completion. Deliberate and verdict-preserving, not a crash or a timeout -- section 4.6. The reported fractions and Clopper-Pearson bounds are computed on what actually ran, so they are wider, never narrower. |
 
 ## 3. `a_{j,l}` vs. `r_j`/`q_j` -- the headline metric and its raw ingredients
 
@@ -116,6 +133,20 @@ them (the code already doesn't).** They're still useful for three things:
    they aren't portable to someone else's differently-scaled implementation of the same model --
    useful for tracking drift within a single deployment's own codebase.
 
+**Check `domain_censored_fraction` before reading any of the three.** The check probes out to
+`1.5x` the sandwich scale, which routinely leaves the domain of a log/logit/sqrt-shaped estimating
+function. A probe where `g_tilde` returns a nonfinite value is *censored* rather than fatal
+(before, one such probe raised out of the always-on check and you got no `diagnostic_report.pkl`
+at all), and `check_local_nonlinearity` reports `num_probes`/`num_domain_censored_probes`/
+`domain_censored_fraction` at the top level of its metrics and per radius. Every quantile,
+exceedance fraction, and Clopper-Pearson bound above is then computed over the surviving probes
+only -- which are exactly the directions where the map stayed well-behaved, so a clean-looking
+summary on a censored ensemble is optimistically selected. Any censoring at all attaches a warning
+and downgrades a `passed` to `warning`; the check goes `indeterminate` once the headline radius
+has fewer than 3 surviving probes or more than half of them censored. So this is the second way
+`local_nonlinearity` can reach a gating status (the first being the joint-Mahalanobis
+rank-deficiency condition) -- the size of `a_{j,l}` itself still never gates.
+
 ## 4. What the rest of the suite is actually for
 
 The technical spec (`docs/diagnostics.md`) tells you the formula for each check; here's the
@@ -128,9 +159,15 @@ practical "why would I care" for each one, in the order they run. (`lifejacket.s
 `check_results`. Takes `(name, callable)` pairs -- the same legacy `lifejacket.input_checks`
 functions the main `analyze_dataset` pipeline already runs -- and converts each one's hard raise
 into its own `failed` `CheckResult` rather than propagating, giving an otherwise-interactive check
-(one that can pop a `(y/n)` confirmation prompt) a non-interactive, structured, always-present
-outcome instead. `analyze_dataset` wires in
-`input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed` here.
+(one that can pop a `(y/n)` confirmation prompt) a non-interactive, structured outcome instead.
+`analyze_dataset` wires in
+`input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed` here -- but only
+when `suppress_all_data_checks=False`, the same gate its own direct input-check calls obey. With
+checks suppressed the callable is not wired in at all (the suite must not re-run, let alone
+hard-fail on, a check you explicitly turned off), and `analyze_dataset` writes an `indeterminate`
+entry under the same name with the message `"Not run: suppress_all_data_checks=True."` instead.
+**So `input_check_results` is not a passed/failed dict**: read an `indeterminate` entry there as
+"not run," not as a finding.
 
 **Why it's separate from every numbered check below.** These are questions about whether the
 *supplied data and functions* are wired together correctly -- not numeric measurements of how
@@ -143,7 +180,8 @@ example.
 
 **The sum-to-zero check isn't wired in here, on purpose -- and it's now SE-standardized.** The
 main `analyze_dataset` pipeline runs
-`require_estimating_functions_sum_to_zero_se_standardized` unconditionally (interactively): the
+`require_estimating_functions_sum_to_zero_se_standardized` (interactively, and like every other
+input check only when `suppress_all_data_checks=False`): the
 residual is judged by the displacement it induces on every stacked estimate in units of that
 estimate's own SE (`a_j = |(B_hat^{-1} r)_j| / SE_j`, soft 0.01 / hard 0.1), replacing the
 legacy raw-units version whose absolute tolerances were reward-scale-dependent and documented to
@@ -151,7 +189,7 @@ false-alarm on healthy high-noise runs (docs/adr/0002). This is `a_root_max`'s c
 extended beyond the theta targets to every update block, with per-update attribution -- so it is
 a genuine value-level test of the stacked model of the algorithm (do the recorded parameters
 actually root the claimed update equations on the real data?), not just a rerun of the root
-check. It isn't duplicated into this dict because the pipeline already hard-runs it before the
+check. It isn't duplicated into this dict because the pipeline already runs it before the
 suite ever starts.
 
 ### 4.2 `check_root_and_implementation` -- is the thing I built actually correct?
@@ -216,8 +254,9 @@ changes *when* `WARNING` fires, not what it does once it does.** Combined with
 this means **`check_influence_concentration` can never move `classification` away from
 `locally_supported`, no matter how concentrated the influence is or how strict you set the
 thresholds** -- not via any escalation path at all, which is actually a stronger statement than the
-one that applies to `a_{j,l}` (that check at least has an unrelated rank-deficiency condition that
-can reach `INDETERMINATE`). A `p_max` of `0.99` and an `n_eff` of `1.01` will read
+one that applies to `a_{j,l}` (that check at least has two conditions unrelated to the size of
+`a_{j,l}` -- rank deficiency and severe domain censoring -- that can reach `INDETERMINATE`).
+A `p_max` of `0.99` and an `n_eff` of `1.01` will read
 `locally_supported` with a warning attached, same as a perfectly healthy result would with no
 warning. **You have to read `warnings`/`by_target` yourself** -- this is deliberate (the docstring
 is explicit that "concentrated influence is evidence against the CLT premise, not proof that the
@@ -242,7 +281,8 @@ about to blow up my variance?
   outside them is *also* a hard `failed`. This is where positivity/overlap is actually enforced.
 - **Leading indicators, reported only, no threshold at all:** `ess_over_n_by_direction`/
   `max_cumulative_weight_by_direction` (importance-weight concentration under
-  `num_directions`-many sandwich-scale perturbations of beta) and
+  `min(config.num_directions, 5)`-many sandwich-scale perturbations of beta -- the cap is in
+  `run_diagnostic_suite`, which draws these separately from the local-nonlinearity directions) and
   `policy_score_gradient_norm_summary` (if gradients are supplied). There is deliberately no cutoff
   on these -- the "right" ESS threshold is as deployment-specific as `a_{j,l}`'s tolerance, and
   isn't calibrated by this package at all. Watch them the same way you'd watch `r_j`/`q_j`
@@ -270,17 +310,27 @@ toothless once this one existed to actually do the job, and has since been remov
 All opt-in, because each costs real root-solves (or a real re-differentiation) per draw or
 direction -- but they have *separate* switches: the bootstrap has its own
 `multiplier_bootstrap` mode (`"off"`/`"auto"`/`"always"`; `"auto"` triggers off the cheap
-`a_{j,l}` screen), while the exact/Jacobian pair share `compute_exact_nonlinear_roots=True`.
-When you want a per-dataset verdict on the reported SEs, reach for the **bootstrap first** --
-that's the calibrated recommendation from ADS-142, where `a_{j,l}` and the exact check ranked
-*designs* by severity well but neither predicted per-dataset error-bar accuracy, while the
-bootstrap matched known truth within ~4% on clean cells and refused to certify every genuinely
-miscalibrated design. The exact check remains the right instrument for *measuring* nonlinearity
-itself (research/design questions rather than certification).
+`a_{j,l}` screen or a non-`pass` local-nonlinearity check), while the exact/Jacobian pair share
+`compute_exact_nonlinear_roots=True`.
+When you want a per-dataset verdict on the reported SEs, reach for the **bootstrap first**. That
+recommendation comes from the *design* rationale ADS-142 recorded (`docs/adr/0002`, results
+section and the decisions taken on them): `a_{j,l}` ranked *designs* by severity essentially
+perfectly while replicating poorly within a cell, and the exact check's `a^NL` predicted
+per-replicate variance accuracy nowhere (`|rho| <= 0.19`, and `<= 0.06` where the continuation
+solver was healthy) -- so neither is a per-dataset verdict. That is why the bootstrap was written:
+it re-solves nonlinearly and judges
+against a self-calibrating null band rather than an engineering tolerance, so it is the only
+instrument in the suite built to answer "is *this* dataset's SE right." Its empirical validation
+is still pending: the `ads142_bootstrap_validation.sh` run against five known-truth wave-2 cells
+is listed as in flight, with expected-per-cell outcomes only, not measured ones. The exact check
+remains the right instrument for *measuring* nonlinearity itself (research/design questions rather
+than certification).
 
 **`check_exact_nonlinear_perturbations`** solves the perturbed equation exactly via continuation
 (`solve_exact_perturbation`: chord-Newton against the *same* fixed `B_hat` factorization, never
-re-differentiated, which is what makes hundreds of directions tractable) instead of a one-step
+re-differentiated, which is what makes hundreds of directions tractable; each continuation step
+runs to its iteration budget, its residual tolerance, or the divergence abort described at the end
+of this section) instead of a one-step
 Taylor correction, then reports `se_ratios` (generalized-eigenvalue nonlinear-to-linear SE ratios),
 `mean_shift_se`, `quantile_shifts_se`, and Clopper-Pearson upper bounds on root-failure/branch-change/
 domain-failure fractions. Ensemble statistics are computed on **converged** solves only, and the
@@ -289,20 +339,79 @@ converged pattern, not a fixed band -- the former hardcoded `[0.95, 1.05]` band 
 finite-direction sampling noise of the ensemble covariance and failed 100% of the ADS-142
 experiment's 6,648 replicates, near-affine cells included (`docs/adr/0002`, results section).
 Three-tier status logic: `failed` if a distortion gate fires on the converged subset
-(above-band `se_ratios`; `mean_shift_se`/either quantile shift beyond `mean_shift_tolerance_se`/
-`quantile_shift_tolerance_se`, both `0.10` by default; below-band `se_ratios` counts only when
+(above-band `se_ratios`; `mean_shift_se` above `mean_shift_threshold`; either quantile shift
+beyond `quantile_shift_tolerance_se`, `0.10` by default; below-band `se_ratios` counts only when
 the solver is healthy, since convergence-censoring itself compresses the ensemble);
 `indeterminate` if too few solves converged, or gates pass but the observed failure fraction
 exceeds `config.bad_direction_probability_target` (a pass on the optimistically-censored subset
-is unearned; a failure on it is trustworthy); `passed` otherwise.
+is unearned; a failure on it is trustworthy), or a gate could not be evaluated at all -- an
+unevaluable `se_ratios` comparison (singular target covariance) or mean-shift gate is
+`indeterminate`, never `passed`; `passed` otherwise.
+
+`mean_shift_se` is no longer compared against the fixed `mean_shift_tolerance_se`. It is measured
+on complete `+/-` pairs only and compared against `mean_shift_threshold =
+max(mean_shift_null_upper, config.mean_shift_tolerance_se)` -- the simulated finite-draw null
+quantile of the same statistic, floored at the configured tolerance. Under intact antithetic
+pairing the null band is exactly `0` and the `0.10` floor is what binds (so nothing changes for
+the ordinary case); with unpaired draws the band is what stops raw sampling noise -- about `0.26`
+SE in one dimension at the default `J = 15` -- from reading as curvature. `mean_shift_null_upper`,
+`mean_shift_threshold`, `mean_shift_gate_evaluable`, and `mean_shift_num_rows` are all reported so
+you can see which of the two bound.
 
 **`check_multiplier_bootstrap`** (see `docs/diagnostics.md` section 3b) reuses the same
 continuation machinery to re-solve the equation under frozen-score multiplier-bootstrap draws
 and compares bootstrap SEs against the sandwich SEs, judged against their own simulated null
-band -- the per-dataset, no-simulator verdict. `multiplier_bootstrap="auto"` runs it only when
-the cheap `a_{j,l}` screen (`bootstrap_screen_a_jl_threshold`, default `0.05`) trips, which is
-the calibrated division of labor: `a_{j,l}` locates suspicious datasets cheaply, the bootstrap
-delivers the verdict.
+band -- the per-dataset, no-simulator verdict. The band is applied **per target, over the targets
+whose ratio is finite**: an unidentified target (zero sandwich SE) is listed in
+`se_ratio_band_unevaluable_targets` and blocks a `passed`, but no longer silences the comparison
+for its identified siblings. It shares the exact check's banded mean-shift gate verbatim.
+`multiplier_bootstrap="auto"` runs it only when
+the cheap `a_{j,l}` screen (`bootstrap_screen_a_jl_threshold`, default `0.05`) trips **or**
+`check_local_nonlinearity` did not `pass` outright, which is the calibrated division of labor:
+the cheap checks locate suspicious datasets, the bootstrap delivers the verdict.
+
+**What the bootstrap actually costs now, and why you may have heard otherwise.** If you remember
+this check turning a five-minute analysis into a multi-hour one, that memory predates a fix to how
+`analyze_dataset` builds the `g_tilde` closure it hands the suite: it used to rebuild the entire
+`O(n*T)` structural precompute on *every* call, and the bootstrap makes thousands of them. The
+closure is now built once and jitted. Measured locally at the pipeline's own `n=100`/`T=50`
+fixture (`eta_dim=200`), one evaluation costs `1.4-2.6 ms` against `797 ms` for a faithful
+reconstruction of the old closure, and the whole 100-paired-draw check -- 8,027 evaluations --
+runs in `12.7-21.7 s` (two independent local harnesses; the spread is machine load, the evaluation
+count is identical) against a projected `~1.8 h` under the old closure. Twenty-five draws is
+`3.5-5.4 s`; the same suite with the bootstrap off is `6.6 s`. These are **laptop** numbers (JAX
+CPU backend, float32), not FASRC cluster numbers -- expect absolute seconds to move by roughly a
+factor of two, and see `docs/diagnostics.md` section 3c for the knobs, the divergence abort's
+measured margins, and what is still pending re-measurement on the cluster. Practical consequence:
+`multiplier_bootstrap="always"` is no longer a decision you need to schedule around at this scale.
+
+**Two things stop a re-solve early, and both report themselves.** The chord-Newton loop aborts a
+continuation step that has visibly left the method's basin -- the iterate blew four orders of
+magnitude past its own best residual, or went 40 iterations without a new best
+(`nonlinear_solver_divergence_abort`, on by default). An aborted solve is counted as an ordinary
+root failure, exactly as one that exhausted its iteration budget is, and
+`num_divergence_aborted_trials` says how many there were. It saves nothing on healthy solves; it
+is worth 20-66% of a check's evaluations only in cells where nearly everything fails. The
+thresholds are wide because the only way this can change an answer is by aborting a solve that
+would have converged: zero false aborts across ~152,000 converging continuation steps in two
+independent corpora, with a ~270x margin on the blow-up clause and 2x on the stall clause. That is
+a measurement, not a proof -- if you are staring at a failure fraction you cannot explain, setting
+`nonlinear_solver_divergence_abort=False` restores exhaust-the-budget behavior exactly and is the
+first thing to toggle.
+
+Separately, `perturbation_early_stop="starvation"` (the default) abandons the remaining trials
+once too few could still converge to compute any ensemble statistic. **If you see `num_trials`
+below `num_planned_trials`, that is deliberate, not a crash or a timeout.** Look for
+`early_stopped: True` and `early_stop_reason: "max_attainable_converged_below_minimum"`, plus a
+warning naming the truncation; the bootstrap also reports `num_draws_executed`, and
+`monte_carlo_counts["num_bootstrap_draws_executed"]` sits next to the planned
+`num_bootstrap_draws`. It fires only when `converged_so_far + trials_remaining < 3`, at which
+point the first status rung (`indeterminate` below 3 converged solves) is already settled for
+every possible completion -- so the status, and therefore the `verdict`, is exactly what running
+the full plan would have produced. Every failure fraction and Clopper-Pearson bound is computed
+against what actually ran, so they are *wider* than a full plan's, never narrower. It can never
+skip more than 2 trials, so it is there for the guarantee and the honest counts, not for speed;
+set it to `"off"` if you would rather always execute the whole plan.
 
 **`check_jacobian_drift`** samples the true Jacobian `D g_tilde` at a few points along a few
 perturbation paths and reports `rho_max = max_j rho_j` where
@@ -317,7 +426,13 @@ path maximum*, never a certified supremum -- `rho_max < 1` doesn't prove the con
 actually holds over the whole relevant neighborhood, only over the points it happened to sample.
 This check can also never reach `INDETERMINATE`/`FAILED` -- same structural ceiling as
 `check_influence_concentration` (section 4.4), just gated behind the expensive opt-in rather than
-being on by default.
+being on by default. One operational knob worth knowing about: these are full reverse-mode
+Jacobians of the whole stacked system (`drift_num_directions * len(drift_path_samples)` of them),
+the single most backward-pass-expensive thing in the suite and the pass most likely to exhaust
+memory at real study scale, so `DiagnosticConfig.jacobian_row_chunk_size` bounds it with the same
+auto policy as the sandwich's own backward pass -- `None` (the default) chunks only once the
+output dimension is large enough for it to matter, `0` forces the unchunked `jax.jacrev`, and a
+positive int caps the output rows pulled back at once. It changes memory, never numbers.
 
 ## 5. Reproducing `check_root_and_implementation`'s failure modes
 
@@ -461,7 +576,7 @@ from lifejacket import diagnostics
 
 config = diagnostics.DiagnosticConfig(
     nonlinear_correction_tolerance_se=0.10,   # the one tolerance with a portable meaning -- see section 3
-    multiplier_bootstrap="auto",              # recommended: bootstrap verdict when the a_jl screen trips (section 4.6)
+    multiplier_bootstrap="auto",              # recommended: bootstrap verdict when a cheap check flags the run (section 4.6)
     contrast_matrix=my_L,                     # optional: defaults to the identity on theta otherwise
     target_labels=["marginal_effect"],        # must match contrast_matrix's row count if supplied
 )
@@ -479,10 +594,21 @@ identity-on-`theta` default.
 **Q: My classification is `locally_supported` with zero warnings. Am I done?**
 A: You've cleared everything checkable from one dataset without a simulator. If this result is
 going into a paper or a real decision, that's the point to run the multiplier bootstrap
-(`multiplier_bootstrap="always"`, or `"auto"` to let the `a_{j,l}` screen decide) rather than
-stop here -- section 4.6. In the ADS-142 calibration, designs that read clean on the cheap
-checks were uniformly well-calibrated, so a quiet report plus a passing bootstrap is as strong
-as single-run evidence gets.
+(`multiplier_bootstrap="always"`, or `"auto"` to let the cheap screens decide) rather than
+stop here -- section 4.6. A quiet report plus a passing bootstrap is the strongest thing this
+package can say from a single run, but note what is behind each half: the cheap checks' operating
+characteristics were measured in ADS-142, while the bootstrap's own validation run is still in
+flight (`docs/adr/0002`, "Follow-up experiments"), so its passing verdict currently rests on its
+construction -- a self-calibrating null band against a nonlinear re-solve -- rather than on
+measured accuracy.
+
+**Q: Isn't the multiplier bootstrap too slow to just turn on?**
+A: Not any more, and if you were told otherwise the advice predates the fix that stopped
+`analyze_dataset` rebuilding its whole `g_tilde` precompute on every call. Measured locally at
+`n=100`/`T=50`, the default 100-paired-draw check is `12.7-21.7 s` next to a `6.6 s` suite; the
+same work projects to `~1.8 h` under the old closure. See section 4.6 for the caveats (laptop, not
+cluster; fragile-cell re-measurement on the cluster still pending) and `docs/diagnostics.md`
+section 3c for the knobs.
 
 **Q: Can I just lower `nonlinear_correction_tolerance_se` to make warnings go away?**
 A: You can, but know what the number can and can't do: the ADS-142 calibration
@@ -523,17 +649,20 @@ A: So a data-hygiene bug can never be mistaken for a statistical finding just by
 
 Most tolerances in `DiagnosticConfig` began as documented engineering guesses; the ADS-142
 cluster experiments (`docs/adr/0002-diagnostic-threshold-calibration-plan.md`, results and
-correction sections -- ~27,000 simulated deployments) have since put real operating
+correction sections -- 9,883 aggregated runs in the wave-2 grid, with an undercoverage hunt and a
+bootstrap-validation run still in flight) have since put real operating
 characteristics behind the on-by-default ones. The short version: `n_eff`'s default floor has
 measured precision 0.73 / recall 0.59 for 2x-inflated variance (kept warning-level on purpose:
 the failures it predicts are conservative); `p_max`'s 0.5 default is essentially inert;
 `a_{j,l}`'s 0.10 is a design-severity gauge whose calibrated per-dataset role is the 0.05
 bootstrap screen; `check_bread_stability` deliberately keeps `indeterminate` as its ceiling
 (a `failed` tier was measured and rejected); the exact check's and bootstrap's ensemble gates
-are simulated exact nulls, not tolerances at all; and `backward_residual_tolerance` and the
-sum-to-zero displacement gates are correctness smoke detectors pinned to machine behavior. Read
-the ADR before changing a default -- it records not just the values but the evidence and the
-decisions taken on it.
+are simulated exact nulls rather than tolerances (`mean_shift_tolerance_se` survives only as the
+practical-significance floor under that check's null band); and `backward_residual_tolerance` and
+the sum-to-zero displacement gates are correctness smoke detectors pinned to machine behavior.
+Read the ADR before changing a default -- it records not just the values but the evidence and the
+decisions taken on it, and it is explicit about which of them are measured and which are still
+awaiting their experiment.
 
 ## 10. Going further: validating against a simulator (not one of the checks above)
 
@@ -558,12 +687,19 @@ family," never a universal guarantee.
 `confidence_level` (default `0.95`) are plain arguments to `calibrate_and_classify` itself, not
 `DiagnosticConfig` fields -- a different call surface for a different situation. The failure
 definition is even more caller-controlled: you supply `failure_predicate`, and the shipped
-`default_failure_predicate` is explicitly "a minimal, non-authoritative example" with its *own*
-three parameters (`se_distortion_tolerance=0.05`/`coverage_tolerance=0.05`/`nominal_coverage=0.95`).
-**Watch out for the name collision**: `default_failure_predicate`'s `se_distortion_tolerance`
-shares a name (and, coincidentally, a default value) with `DiagnosticConfig.se_distortion_tolerance`
-(`check_bread_stability`'s tolerance) but is a completely independent parameter of a completely
-different function -- overriding one never touches the other.
+`default_failure_predicate` is explicitly "a minimal, non-authoritative example."
+
+**Mind the predicate's calling convention.** `calibrate_and_classify` invokes it as
+`failure_predicate(replay, config)` -- exactly two positional arguments, the second being the
+`DiagnosticConfig` the suite was just run with -- so
+`default_failure_predicate(replay, config=None, *, coverage_tolerance=0.05,
+nominal_coverage=0.95)` makes its two remaining tolerances **keyword-only** on purpose: a
+predicate whose second *positional* parameter was a tolerance would silently be handed the config
+object instead. Override them by binding them up front,
+`functools.partial(default_failure_predicate, coverage_tolerance=0.10)`, which still presents the
+required two-positional-argument surface. (`coverage_tolerance` is a fraction taken *within* one
+replay across the components of theta; for scalar theta it degenerates to "any miss is a
+failure.")
 
 **How to actually run one, for your own deployment family:**
 
@@ -578,7 +714,9 @@ different function -- overriding one never touches the other.
    your own threshold-tuning but otherwise unused by the function; the reported bound is computed
    *only* from `holdout_seeds`. Reusing training seeds for that bound would be circular.
 3. **Write your own `failure_predicate`** matched to what "inferential failure" actually means for
-   your deployment -- don't just keep the shipped default, it's explicitly a placeholder.
+   your deployment -- don't just keep the shipped default, it's explicitly a placeholder. It must
+   accept `(replay, config)` positionally (see the calling convention above) even if it ignores
+   the config.
 4. **Call it and read `CalibrationResult`**: `classification`, `conditional_failure_rate_upper_bound`,
    `per_replay_records` (per-seed detail for your own further analysis).
 

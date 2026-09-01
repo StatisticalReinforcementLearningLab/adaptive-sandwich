@@ -1,13 +1,16 @@
 import pickle
 
 import numpy as np
+import pytest
 from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
     run_local_pipeline,
 )
 from tests.utils import get_abs_path
 
-from lifejacket.constants import DiagnosticClassifications
+from lifejacket.constants import CheckStatuses, DiagnosticClassifications
 from lifejacket.diagnostics import DiagnosticReport
+from lifejacket.helper_functions import load_function_from_same_named_file
+from lifejacket.post_deployment_analysis import analyze_dataset
 
 
 def test_RL_diagnostics_smoke(run_local_pipeline):  # pylint: disable=redefined-outer-name
@@ -122,10 +125,27 @@ def test_RL_percentile_bootstrap_smoke(run_local_pipeline):  # pylint: disable=r
     # At n=20 with recruit_n=10, a Poisson draw occasionally zeroes out most of the first
     # recruitment wave, leaving that update's block genuinely unidentified -- those draws
     # correctly fail as singular_jacobian and are dropped and counted (docs/adr/0003's
-    # degenerate-systems guardrail; at this seed, 3 of 20). What must hold: a large majority of
-    # draws converge, and every failure is of the degenerate kind rather than a solver bug.
-    assert analysis["bootstrap_num_failed_draws"] <= 5
+    # degenerate-systems guardrail). What must hold: a large majority of draws converge, and
+    # every failure is of the degenerate kind rather than a solver bug.
+    #
+    # The allowance is 4, not a round fraction of the draws: the multiplicities come from a
+    # fixed numpy seed, so WHICH draws are degenerate is deterministic, and 3 of 20 fail here.
+    # The one spare draw is headroom for a marginal draw flipping on cross-platform float32
+    # differences (the same noise tests/utils.py documents for CI-vs-macOS), not slack for a
+    # convergence regression -- 5 of 20 was loose enough to absorb one silently.
+    assert analysis["bootstrap_num_failed_draws"] <= 4
+    # And the taxonomy, not just the count: _newton_refit distinguishes a genuinely
+    # unidentified draw (singular_jacobian) from nonfinite_residual / nonfinite_jacobian /
+    # nonfinite_iterate / max_iterations, all of which are solver or wiring failures rather
+    # than degenerate data and none of which this allowance covers.
     assert set(analysis["bootstrap_failure_reasons"]) <= {"singular_jacobian"}
+    assert (
+        sum(analysis["bootstrap_failure_reasons"].values())
+        == analysis["bootstrap_num_failed_draws"]
+    )
+    # The bootstrap block is best-effort and records its own failures rather than aborting the
+    # analysis, so a completed run has to be distinguished from a recorded failure explicitly.
+    assert analysis["bootstrap_error"] is None
     assert np.all(np.isfinite(ci))
     assert np.all(ci[:, 0] < ci[:, 1])
     assert np.all(ci[:, 0] <= theta_est) and np.all(theta_est <= ci[:, 1])
@@ -138,3 +158,158 @@ def test_RL_percentile_bootstrap_smoke(run_local_pipeline):  # pylint: disable=r
         theta_est.shape[0],
     )
     assert np.all(np.isfinite(draws))
+
+
+# ---------------------------------------------------------------------------
+# analyze_dataset end-to-end on a MASK-AWARE study (alg_update_func_args_mask_index >= 0), the
+# shape-bucket-consolidation configuration real deployments use. The simulator pipeline above
+# cannot produce one -- run_local_synthetic.sh has no mask wiring -- so these drive
+# analyze_dataset directly on tests/benchmarks' own real, genuinely-ragged fixture data with
+# the mask-aware alg_update_func the combine_updates_into_one_vmap benchmark already uses.
+# Everything below runs the real estimator; nothing here is a simulator run.
+# ---------------------------------------------------------------------------
+
+BENCHMARK_FUNCTIONS_DIR = get_abs_path(
+    __file__, "../../simulators_and_runners/functions_to_pass_to_analysis"
+)
+BENCHMARK_FIXTURE_DIR = get_abs_path(__file__, "../../benchmarks/fixtures/small")
+# RL_least_squares_loss_regularized_masked's argument positions: the per-decision-time history
+# args are ragged, and the validity mask is appended as the 11th (index 10) argument.
+MASKED_RAGGED_INDICES = (1, 2, 3, 4, 5, 6)
+MASKED_MASK_INDEX = 10
+
+
+def _run_masked_analyze_dataset(output_dir, **overrides):
+    with open(f"{BENCHMARK_FIXTURE_DIR}/study_df.pkl", "rb") as f:
+        study_df = pickle.load(f)
+    with open(f"{BENCHMARK_FIXTURE_DIR}/pi_args.pkl", "rb") as f:
+        action_prob_func_args = pickle.load(f)
+    with open(f"{BENCHMARK_FIXTURE_DIR}/rl_update_args.pkl", "rb") as f:
+        alg_update_func_args = pickle.load(f)
+
+    kwargs = {
+        "output_dir": output_dir,
+        "analysis_df": study_df,
+        "action_prob_func": load_function_from_same_named_file(
+            f"{BENCHMARK_FUNCTIONS_DIR}/synthetic_get_action_1_prob_generalized_logistic.py"
+        ),
+        "action_prob_func_args": action_prob_func_args,
+        "action_prob_func_args_beta_index": 0,
+        "alg_update_func": load_function_from_same_named_file(
+            f"{BENCHMARK_FUNCTIONS_DIR}/RL_least_squares_loss_regularized_masked.py"
+        ),
+        "alg_update_func_type": "loss",
+        "alg_update_func_args": alg_update_func_args,
+        "alg_update_func_args_beta_index": 0,
+        "alg_update_func_args_action_prob_index": 5,
+        "alg_update_func_args_action_prob_times_index": 6,
+        "alg_update_func_args_previous_betas_index": -1,
+        "alg_update_func_args_mask_index": MASKED_MASK_INDEX,
+        "alg_update_func_args_ragged_indices": MASKED_RAGGED_INDICES,
+        "inference_func": load_function_from_same_named_file(
+            f"{BENCHMARK_FUNCTIONS_DIR}/synthetic_get_least_squares_loss_inference_no_action_centering.py"
+        ),
+        "inference_func_type": "loss",
+        "inference_func_args_theta_index": 0,
+        "theta_calculation_func": load_function_from_same_named_file(
+            f"{BENCHMARK_FUNCTIONS_DIR}/synthetic_estimate_theta_least_squares_no_action_centering.py"
+        ),
+        "active_col_name": "in_study",
+        "action_col_name": "action",
+        "policy_num_col_name": "policy_num",
+        "calendar_t_col_name": "calendar_t",
+        "subject_id_col_name": "user_id",
+        "action_prob_col_name": "action1prob",
+        "reward_col_name": "reward",
+        "suppress_interactive_data_checks": True,
+        "suppress_all_data_checks": True,
+        "form_adjusted_meat_adjustments_explicitly": False,
+        "run_diagnostics": False,
+    }
+    kwargs.update(overrides)
+    return analyze_dataset(**kwargs)
+
+
+def _load_pickle(output_dir, name):
+    with open(f"{output_dir}/{name}", "rb") as f:
+        return pickle.load(f)
+
+
+@pytest.mark.parametrize("suppress_all_data_checks", [True, False])
+def test_diagnostic_suite_runs_on_a_mask_aware_study(
+    tmp_path, suppress_all_data_checks
+):
+    """
+    Regression: the diagnostic suite silently produced NO report at all for every study
+    analyzed with alg_update_func_args_mask_index >= 0. The suite's g_tilde re-evaluated the
+    estimating-function stack WITHOUT the mask/ragged indices, so the mask-aware
+    alg_update_func was called one argument short inside jax.vmap; the resulting TypeError hit
+    the suite's blanket best-effort except and was logged as a warning.
+
+    That is why this asserts the REPORT EXISTS rather than that nothing raised: on the buggy
+    code analyze_dataset returned perfectly normally and wrote analysis.pkl and
+    debug_pieces.pkl -- only diagnostic_report.pkl was missing, which is exactly what made the
+    defect survive.
+
+    Parametrized over suppress_all_data_checks because the second finding fixed here lives on
+    the same path: with checks suppressed the suite must not re-run (and hard-fail on) the
+    reconstruction input check the caller explicitly turned off, and a suppressed check must
+    not be indistinguishable from a passing one in the report.
+    """
+    _run_masked_analyze_dataset(
+        tmp_path,
+        run_diagnostics=True,
+        suppress_all_data_checks=suppress_all_data_checks,
+    )
+
+    report = _load_pickle(tmp_path, "diagnostic_report.pkl")
+    assert isinstance(report, DiagnosticReport)
+    assert report.classification != DiagnosticClassifications.FAILED
+    # The suite actually ran its statistical checks rather than short-circuiting on a failed
+    # input check (which forces FAILED and skips every one of them).
+    assert "root_and_implementation" in report.check_results
+    assert (
+        report.check_results["root_and_implementation"].status == CheckStatuses.PASSED
+    )
+    assert len(report.check_results) >= 5
+
+    reconstruction_check = report.input_check_results[
+        "action_probabilities_reconstructed"
+    ]
+    if suppress_all_data_checks:
+        # Recorded as not-run, not omitted and not silently "passed".
+        assert reconstruction_check.status == CheckStatuses.INDETERMINATE
+        assert "suppress_all_data_checks" in reconstruction_check.message
+    else:
+        assert reconstruction_check.status == CheckStatuses.PASSED
+
+
+def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):
+    """
+    The bootstrap runs after the adjusted sandwich is computed but BEFORE anything is written,
+    so an unguarded failure there threw away a completed analysis over an added interval. A
+    negative seed is the cheapest way to make the bootstrap block itself (not an individual
+    draw) fail: np.random.default_rng rejects it immediately.
+
+    Note the CLI now rejects a negative --percentile_bootstrap_seed at the boundary via
+    click.IntRange(min=0); this exercises the library entry point, where the guard has to be
+    the try/except rather than argument parsing.
+    """
+    result = _run_masked_analyze_dataset(
+        tmp_path, percentile_bootstrap_draws=4, percentile_bootstrap_seed=-1
+    )
+
+    assert "theta_est" in result
+    analysis = _load_pickle(tmp_path, "analysis.pkl")
+    assert "theta_est" in analysis
+    assert np.all(np.isfinite(np.asarray(analysis["theta_est"])))
+    assert np.all(np.isfinite(np.asarray(analysis["adjusted_sandwich_var_estimate"])))
+    _load_pickle(tmp_path, "debug_pieces.pkl")
+
+    # The failure is RECORDED, not silently swallowed: a NaN interval alone would be
+    # indistinguishable from a bootstrap whose draws all failed to converge.
+    assert analysis["bootstrap_error"] is not None
+    assert "ValueError" in analysis["bootstrap_error"]
+    assert np.all(np.isnan(np.asarray(analysis["percentile_bootstrap_ci"])))
+    assert analysis["bootstrap_num_draws"] == 4
+    assert analysis["bootstrap_num_failed_draws"] == 4

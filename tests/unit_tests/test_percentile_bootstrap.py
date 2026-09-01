@@ -129,3 +129,144 @@ def test_refit_reports_nan_interval_when_too_few_draws_converge():
     )
     assert result["bootstrap_num_failed_draws"] == 6
     assert np.all(np.isnan(result["percentile_bootstrap_ci"]))
+
+
+# ---------------------------------------------------------------------------
+# jacobian_row_chunk_size: the per-iterate Newton Jacobian is the same reverse-mode pass that
+# builds the joint bread, re-run once per iteration per draw, so it obeys the package-wide
+# memory-bounding policy (helper_functions.compute_row_chunked_jacobian). Chunking must be a
+# pure memory decision: the draws, and therefore the interval, cannot depend on it. The system
+# below is 5-dimensional on purpose -- chunk sizes 2 and 3 leave a short final chunk, which is
+# where the basis padding is dropped and where an off-by-one would silently substitute zero
+# rows into the Newton step.
+# ---------------------------------------------------------------------------
+
+_CHUNKING_SYSTEM_MATRIX = jnp.asarray(
+    np.diag(np.full(5, 3.0)) + 0.4 * np.random.default_rng(11).normal(size=(5, 5))
+)
+
+
+def _coupled_residual(x):
+    # Dense, non-symmetric, and genuinely nonlinear, so every Jacobian row differs and a
+    # misplaced row changes the step rather than cancelling out.
+    return _CHUNKING_SYSTEM_MATRIX @ x + 0.1 * x**2
+
+
+def test_newton_refit_chunked_jacobian_matches_the_unchunked_path():
+    target = jnp.asarray(np.linspace(-1.0, 1.0, 5))
+
+    def stack_fn(x):
+        return _coupled_residual(x) - target
+
+    unchunked, converged, _ = pda._newton_refit(stack_fn, jnp.zeros(5), 25, 1e-6)
+    assert converged
+
+    for chunk_size in (1, 2, 3, 5, 9):
+        chunked, chunk_converged, _ = pda._newton_refit(
+            stack_fn,
+            jnp.zeros(5),
+            25,
+            1e-6,
+            jacobian_row_chunk_size=chunk_size,
+        )
+        assert chunk_converged, f"chunk_size={chunk_size} failed to converge"
+        np.testing.assert_allclose(
+            chunked,
+            unchunked,
+            rtol=1e-5,
+            atol=1e-6,
+            err_msg=f"chunk_size={chunk_size} reached a different root",
+        )
+
+
+def _chunking_bootstrap_fixture():
+    num_subjects, num_draws = 12, 12
+    rng = np.random.default_rng(4)
+    per_subject_targets = jnp.asarray(rng.normal(size=(num_subjects, 5)))
+
+    def weighted_avg_stack_fn(x, multiplicities):
+        # mean_i m_i * (f(x) - y_i) -- the multiplicity-weighted mean stack shape
+        # refit_percentile_bootstrap's contract requires, with a different root per draw.
+        return jnp.mean(
+            multiplicities[:, None]
+            * (_coupled_residual(x)[None, :] - per_subject_targets),
+            axis=0,
+        )
+
+    solution, converged, _ = pda._newton_refit(
+        lambda x: weighted_avg_stack_fn(x, jnp.ones(num_subjects)),
+        jnp.zeros(5),
+        25,
+        1e-8,
+    )
+    assert converged
+    return {
+        "weighted_avg_stack_fn": weighted_avg_stack_fn,
+        "flattened_solution": jnp.asarray(solution),
+        "num_subjects": num_subjects,
+        "num_draws": num_draws,
+        "multiplicities": np.random.default_rng(19).poisson(
+            1.0, size=(num_draws, num_subjects)
+        ),
+    }
+
+
+def test_refit_percentile_bootstrap_is_unchanged_by_jacobian_row_chunking():
+    fixture = _chunking_bootstrap_fixture()
+
+    def run(chunk_size):
+        return pda.refit_percentile_bootstrap(
+            fixture["weighted_avg_stack_fn"],
+            fixture["flattened_solution"],
+            theta_dim=2,
+            num_subjects=fixture["num_subjects"],
+            num_draws=fixture["num_draws"],
+            alpha=0.05,
+            seed=None,
+            precomputed_multiplicities=fixture["multiplicities"],
+            jacobian_row_chunk_size=chunk_size,
+        )
+
+    unchunked = run(None)
+    chunked = run(3)  # does not divide the 5-row output basis
+
+    assert unchunked["bootstrap_num_failed_draws"] == 0
+    assert chunked["bootstrap_num_failed_draws"] == 0
+    np.testing.assert_allclose(
+        chunked["theta_draws"], unchunked["theta_draws"], rtol=1e-5, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        chunked["percentile_bootstrap_ci"],
+        unchunked["percentile_bootstrap_ci"],
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_refit_percentile_bootstrap_forwards_the_chunk_size_to_every_refit(monkeypatch):
+    # The equivalence above would also pass if the chunk size were dropped on the floor, since
+    # dropping it just means "unchunked" -- the memory bound, which is the whole point, would
+    # be silently gone. So pin the plumbing directly.
+    fixture = _chunking_bootstrap_fixture()
+    observed = []
+    real_newton_refit = pda._newton_refit
+
+    def _spy(*args, **kwargs):
+        observed.append(kwargs.get("jacobian_row_chunk_size"))
+        return real_newton_refit(*args, **kwargs)
+
+    monkeypatch.setattr(pda, "_newton_refit", _spy)
+
+    pda.refit_percentile_bootstrap(
+        fixture["weighted_avg_stack_fn"],
+        fixture["flattened_solution"],
+        theta_dim=2,
+        num_subjects=fixture["num_subjects"],
+        num_draws=3,
+        alpha=0.05,
+        seed=None,
+        precomputed_multiplicities=fixture["multiplicities"][:3],
+        jacobian_row_chunk_size=4,
+    )
+
+    assert observed == [4, 4, 4]

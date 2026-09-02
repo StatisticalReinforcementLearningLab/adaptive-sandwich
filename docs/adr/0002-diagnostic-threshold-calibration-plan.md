@@ -1,7 +1,8 @@
 # 0002. Cluster experiment plan for calibrating enforced diagnostic thresholds
 
-- Status: Wave 2 complete; results and consequent decisions recorded below (2026-08-29);
-  follow-up experiments (undercoverage hunt, bootstrap validation) in flight
+- Status: Wave 2 complete; results and consequent decisions recorded below (2026-08-29).
+  Both follow-ups (undercoverage hunt, bootstrap validation) are COMPLETE -- see "Round-2
+  results" below (2026-09-01)
 - Date: 2026-08-27
 - Ticket: ADS-142
 
@@ -489,6 +490,26 @@ Neither change affects a decision recorded above: `se_distortion_tolerance` and 
    designed empirical test of the no-replay concern.
 
 ### Round-2 results (2026-09-01): both follow-ups complete
+
+**0. The undercoverage hunt found its positive, and it is not the one the suite can predict.**
+U5 (staggered recruitment x weight-tail clips 0.05/0.95 at n=50, job 42805193) is the **first
+anticonservative cell in the whole program**: coverage 0.838-0.895 against nominal 0.95. Every
+other hunt arm (U1-U4) overcovered, i.e. was conservative, with log variance ratios up to +4.6.
+U5's undercoverage decomposes into two mechanisms that matter very differently for the suite:
+
+- **9.5% collapsed-SE replicates** (reported SE exactly 0, joint bread condition number ~1e12).
+  These miss with certainty, and the existing gates caught **all** of them -- they read
+  `indeterminate`/`failed`, never `locally_supported`. This is the mode the verdict field's
+  INVALID rung keys on via the rank-deficient target covariance.
+- **A residual 11.3% miss rate among the non-collapsed replicates**, and this is the hard part:
+  **72 of those 82 misses read `locally_supported`**, and no signal the suite currently computes
+  predicts them -- `n_eff` included. The mechanism is weight-tail truncation, which leaves the
+  linearization, the bread, and the influence distribution all looking healthy.
+
+The honest reading is that the suite reliably catches the *catastrophic* undercoverage mode and
+does not catch the *subtle* one. That residual is the open calibration target; nothing in this
+round closes it, and no threshold in this ADR should be read as if it did.
+
 
 321 runs across 9 jobs (`ads142_validation_final.csv`). Two findings, the second of which
 supersedes an earlier reading of the partial data.

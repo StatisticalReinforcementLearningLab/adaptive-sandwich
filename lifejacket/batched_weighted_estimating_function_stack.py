@@ -352,9 +352,15 @@ def assert_no_intra_window_gaps(precompute: ActionProbLayerPrecompute) -> None:
         window = precompute.active_mask[n, lo : hi + 1]
         if not window.all():
             gap_cols = np.nonzero(~window)[0] + lo
+            # A bare str from an object-dtype subject-id column has no .item(); numpy scalars
+            # do. Guarded so this error path reports the id instead of raising AttributeError
+            # over it. (diagnostics.py uses the same hasattr idiom for the same reason.)
+            reported_subject_id = precompute.subject_ids[n]
             violations.append(
                 (
-                    precompute.subject_ids[n].item(),
+                    reported_subject_id.item()
+                    if hasattr(reported_subject_id, "item")
+                    else reported_subject_id,
                     [precompute.time_values[c].item() for c in gap_cols],
                 )
             )
@@ -1111,53 +1117,26 @@ def build_inference_layer_precompute(
     inference_func_args_action_prob_index: int,
     inference_action_prob_decision_times_by_subject_id: dict[Any, Any],
     action_prob_layer: ActionProbLayerPrecompute,
-    inference_func_args_mask_index: int = -1,
-    inference_func_args_ragged_indices: tuple[int, ...] = (),
 ) -> InferenceLayerPrecompute:
     """
     One-time, plain-numpy precompute. Every subject has a real (never-())
     inference-args tuple, so this layer needs shape-bucketing but no
     valid_* mask.
 
-    If inference_func_args_mask_index >= 0 (opt-in; default -1 preserves
-    today's exact-shape bucketing with zero change), self-pads every
-    inference_func_args_ragged_indices position the same way
-    build_update_layer_precompute does for the algorithm side -- see
-    self_pad_ragged_args_and_build_mask's own docstring for the padding
-    rationale and constraints. inference_action_prob_decision_times_by_subject_id
-    is NOT one of inference_func_args_by_subject_id's own positions (a
-    structural difference from the algorithm side, where action-prob-times
-    IS one of the args tuple's positions) -- it must be self-padded in sync,
-    to the same per-subject real-row-count the mask itself encodes, so
-    _gather_reconstructed_action_prob's per-bucket np.stack over it still
-    sees a uniform length once every subject is consolidated into one bucket.
+    Subjects are grouped into buckets by exact argument shape. There is deliberately no
+    inference-side padding/masking counterpart to build_update_layer_precompute's:
+    mask_index/ragged_indices parameters existed here until 2026-09-02 and were removed
+    along with the public analyze_dataset/CLI options, which could never work.
+    post_deployment_analysis.process_inference_func_args builds the inference argument
+    tuples itself -- one entry per DECLARED PARAMETER of inference_func, each filled from
+    the analysis_df column of the same name -- and that is incompatible with
+    self_pad_ragged_args_and_build_mask's convention (mask index == supplied argument
+    count, mask appended past it): no mask index value worked end to end, and nothing in
+    the repo ever set one. Reinstating it means teaching process_inference_func_args to
+    leave the mask position unfilled FIRST; the padding helper itself is generic and is
+    still used by the algorithm side.
     """
     subject_id_to_pos = action_prob_layer.subject_id_to_pos
-
-    if inference_func_args_mask_index >= 0:
-        padded = self_pad_ragged_args_and_build_mask(
-            inference_func_args_by_subject_id,
-            inference_func_args_ragged_indices,
-            inference_func_args_mask_index,
-        )
-        if inference_func_args_action_prob_index >= 0:
-            padded_times_by_subject_id = {}
-            for sid, args in padded.items():
-                mask = args[inference_func_args_mask_index]
-                subj_len = int(np.sum(mask))
-                max_length = len(mask)
-                times = np.asarray(
-                    inference_action_prob_decision_times_by_subject_id[sid]
-                )
-                pad_amount = max_length - subj_len
-                if pad_amount > 0:
-                    pad_block = np.repeat(times[-1:], pad_amount, axis=0)
-                    times = np.concatenate([times, pad_block], axis=0)
-                padded_times_by_subject_id[sid] = times
-            inference_action_prob_decision_times_by_subject_id = (
-                padded_times_by_subject_id
-            )
-        inference_func_args_by_subject_id = padded
 
     buckets: list[UpdateArgBucket] = []
     for shape_group in group_user_args_by_shape(

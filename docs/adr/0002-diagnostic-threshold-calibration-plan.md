@@ -16,8 +16,17 @@ tolerance in `DiagnosticConfig` (`nonlinear_correction_tolerance_se=0.10`,
 `check_influence_concentration` (recently promoted from hardcoded literals to overridable fields,
 same defaults), etc.) is documented as an
 "engineering tolerance, not a theorem-derived critical value, unless a particular deployment has
-calibrated them via `lifejacket.simulator_calibration`." None of them have actually been
-calibrated yet. This plan designs a cluster experiment, using `adjusted-sandwich-user`'s existing
+calibrated them against repeated runs of its own simulator." None of them have actually been
+calibrated yet.
+
+(As written in 2026-08-27 that sentence named `lifejacket.simulator_calibration`, a module
+offering a generic harness for exactly this: the caller supplied a `replay_fn`, it ran held-out
+replays and issued a Clopper-Pearson certificate. It was removed on 2026-09-01 — nothing in the
+package called it, and its certificate silently assumed the caller's holdout seeds were unique
+and disjoint from the training seeds, so a deterministic `replay_fn` could issue a strong-looking
+bound from a single independent replay. Its removal does not affect this plan: what the tolerances
+need is repeated experiments against known ground truth, which is what the cluster grids below
+actually provide, with or without a helper class to wrap them.) This plan designs a cluster experiment, using `adjusted-sandwich-user`'s existing
 SLURM infrastructure, to do that — and separately, to decide which checks are strong enough to
 actually *gate* the classification (vs. only surface a warning) once calibrated.
 
@@ -428,7 +437,28 @@ correlations).
   raw-units version. Field-validated on wave-2 debug_pieces across reward-noise variances
   1/10/100: the raw max residual grew 2e-5 -> 2e-4 -> ~5e-3 (crossing the legacy 5e-4 gate on
   healthy runs), while the standardized statistic stayed flat at 4e-6..8e-5 -- two-plus orders
-  of magnitude inside tolerance at every scale; (b) future work: an
+  of magnitude inside tolerance at every scale. Correction 2026-09-02: the displacement
+  construction was replaced by the residual's own SE, computed directly from the per-subject
+  stacks (a_j = |mean_i psi_ij| / (rms_i psi_ij / sqrt(n)), same 0.01/0.1 gates). Routing
+  through B^-1 and diag(V) made the check inherit the sandwich's degeneracies, all reproduced
+  in unit probes: fully masked under meat-driven SE blow-ups (the U5/B_influence regime -- with
+  SEs inflated 2e5x, a residual displacing estimates by 1000 raw units passed), a silent
+  all-clear ("max displacement 0") when every SE collapsed to exactly zero, a ~1e138 false
+  "does not sum to zero" on a denormal SE, and an abort on a singular bread. The RMS form
+  consults neither matrix, so none of those regimes exist for it; it is bounded
+  (a_j <= sqrt(n) by Cauchy-Schwarz) and components at or below the stack's numerical noise
+  floor (RMS <= ~1.2e-5 of the largest component's; the RL smoke fixture surfaced an update-1
+  component whose only nonzero values were two identical 2-ulp float32 residues reading
+  exactly sqrt(2) SE) are trivially rooted rather than judged -- provably safe, since
+  |r_j| <= s_j bounds any skipped residual by the floor itself. It keeps the same
+  portability, since
+  numerator and denominator share the reward units (toy null ~1e-15 across noise SD 1..10
+  while scale-matched wrong equations read O(0.5); the 0.01/0.1 gates are carried over --
+  re-validate once on the stored wave-2 debug_pieces alongside the next deploy). Known shared
+  limitation, deliberately not patched: one heavy-tailed subject dominating s_j dilutes a bug
+  confined to the typical subjects -- the displacement form had the identical weakness (the
+  same subject dominates the meat), and that regime is owned by the influence and
+  solver-health checks; (b) future work: an
   "update replay" check closing the derivative gap to first order -- perturb update-k's input
   data slightly, re-run the actual algorithm update code, compare the realized eta shift
   against the stacked model's derivative prediction.

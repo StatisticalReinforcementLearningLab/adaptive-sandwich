@@ -67,30 +67,36 @@ statistical finding could look identical in the report.
 `run_input_checks` takes `(name, callable)` pairs (the same `legacy_check_callables` argument
 `run_diagnostic_suite` has always accepted) and invokes each; an exception from any of them is
 caught and turned into its own `failed` `CheckResult` (named after that check, with the exception
-message) rather than propagating. `post_deployment_analysis.analyze_dataset` wires in
-`input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed` here, so the
-diagnostic report gets a non-interactive, structured record of whether the supplied
-action-probability function reproduces the recorded probabilities -- useful in contexts
-(e.g. an unattended cluster job) where the main pipeline's own interactive confirmation prompt has
-no one to answer it. That wiring obeys `suppress_all_data_checks` like every other input check
-`analyze_dataset` makes: with data checks suppressed the callable is not wired in at all (the
-suite must not re-run, and hard-fail on, a check the caller explicitly turned off), and
-`analyze_dataset` instead records an `indeterminate` entry under the same
-`action_probabilities_reconstructed` name with the message
-`"Not run: suppress_all_data_checks=True."`, so a suppressed check and a passing one never look
-alike in the report. Consumers of `input_check_results` should therefore treat `indeterminate`
-as "not run". The sum-to-zero check is deliberately **not** also wired in here, because
+message) rather than propagating. As of 2026-09-02, `post_deployment_analysis.analyze_dataset`
+no longer wires `require_action_probabilities_in_analysis_df_can_be_reconstructed` in here --
+that check evaluates the action-probability function over every active row (the most expensive
+input check) and was being executed twice per analysis. It already runs in the first-wave input
+checks near the start of `analyze_dataset`, it is a hard failure with no interactive continue
+path, and nothing between that run and the suite touches `analysis_df` or
+`action_prob_func_args`, so reaching the suite at all proves it passed. `analyze_dataset`
+therefore records the outcome into the report directly under the same
+`action_probabilities_reconstructed` name: `passed` (with a provenance message) when data checks
+ran, and an `indeterminate` entry with the message `"Not run: suppress_all_data_checks=True."`
+when they were suppressed -- a suppressed check and a passing one never look alike in the
+report. Consumers of `input_check_results` should therefore treat `indeterminate` as "not
+run". The sum-to-zero check is deliberately **not** also wired in here, because
 the main `analyze_dataset` pipeline already runs it (interactively, and under the same
 `suppress_all_data_checks` gate) before the suite starts -- and, as of the ADS-142 follow-ups, in
 SE-standardized form:
-`input_checks.require_estimating_functions_sum_to_zero_se_standardized` judges the residual by
-the displacement it induces on every stacked estimate in units of that estimate's own SE
-(`a_j = |(B_hat^{-1} r)_j| / SE_j`, soft `0.01` / hard `0.1`, with per-update attribution).
-That is `a_root_max`'s construction extended beyond the theta targets to every update block, so
-it is both a portable replacement for the legacy raw-units version (whose absolute tolerances
-were reward-scale-dependent and false-alarmed on healthy high-noise runs -- see `docs/adr/0002`)
-and a genuine value-level test of the stacked model of the algorithm: the recorded `eta_k` must
-actually root the claimed update-`k` equations on the realized data. The legacy
+`input_checks.require_estimating_functions_sum_to_zero_se_standardized` judges each component
+of the residual (the subject-mean estimating function) against its own standard error, taken
+directly from the per-subject values that were averaged
+(`a_j = |mean_i psi_ij| / (rms_i psi_ij / sqrt(n))`, soft `0.01` / hard `0.1`, with per-update
+attribution). It is both a portable replacement for the legacy raw-units version (whose absolute
+tolerances were reward-scale-dependent and false-alarmed on healthy high-noise runs -- see
+`docs/adr/0002`) and a genuine value-level test of the stacked model of the algorithm: the
+recorded `eta_k` must actually root the claimed update-`k` equations on the realized data. An
+earlier incarnation standardized by the displacement `|(B_hat^{-1} r)_j| / SE_j` instead; that
+form inherited the bread/sandwich degeneracies (masked under meat-driven SE blow-ups, silent or
+astronomically wrong on collapsed SEs) and was replaced 2026-09-02 -- the current statistic
+consults neither matrix, is bounded by `sqrt(n)`, and treats a component at or below the
+stack's numerical noise floor as trivially rooted rather than excluded (provably safe:
+`|r_j| <= s_j` bounds any skipped residual by the floor itself). The legacy
 `require_estimating_functions_sum_to_zero` remains only for backward compatibility.
 
 Any `failed` entry in `input_check_results` short-circuits the rest of the suite exactly like a
@@ -769,3 +775,45 @@ operating characteristics the ADS-142 experiments measured for it (see the
 Uncalibrated warnings (radius-scaling exponents, `jacobian_drift`'s `rho`, exploration leading
 indicators) are reported but never move the verdict -- the experiments gave them no operating
 characteristics to gate on.
+
+## The end-of-run summary, and what "flagged" does to the job
+
+When `run_diagnostics=True`, the analysis ends with a printed **diagnostic summary**: one
+status row per input check and per suite check (`diagnostics.format_diagnostic_summary`),
+one pipeline-level row computed outside the suite (below), and the verdict -- printed
+*before* the parameter/variance estimates so a failed run cannot end in a wall of
+plausible-looking numbers.
+
+The pipeline-level row:
+
+- **`joint_bread_condition_number`** -- fails above
+  `post_deployment_analysis.EXTREME_CONDITION_NUMBER_THRESHOLD` (`1e12`). Condition-number
+  thresholds are fraught in general (cond changes under diagonal rescaling, so moderate values
+  can be a units artifact), but the argument runs out at the compute precision's wall: the
+  matrices come from float32 evaluations (~7 significant digits), so beyond ~`1/eps32 ~ 1e7` a
+  solve against the bread retains no trustworthy digits in *any* scaling. `1e12` sits five
+  orders past that wall (and is the threshold the diagnostic solves already use to decide the
+  bread needs a ridge), so this row fires only for the numerically hopeless.
+
+(The standalone "local linearization error ratio" that used to print alongside these was
+removed 2026-09-02: it was exactly the suite's equation-space `r_j` -- same formula, same
+O(1/sqrt(n)) covariance-aligned draws -- computed by a pre-suite code path with strictly worse
+machinery (one radius, no nonfinite censoring, no `q_j`/`a_{j,l}` companions, no role in the
+verdict) at ~25s per run. `local_nonlinearity` is its calibrated replacement; old
+`debug_pieces.pkl` files still carry its `local_linearization_error_ratio_*` keys.)
+
+A run is **flagged** (`diagnostics.diagnostics_flagged`, plus the extreme-condition row) when
+the verdict is `uncertifiable`/`invalid`, when the suite was requested but produced no report
+(a crashed suite must not look like a passing one), or when the condition gate fires. A
+flagged run:
+
+- still completes -- every output file (`analysis.pkl`, `debug_pieces.pkl`,
+  `diagnostic_report.pkl`) is written as usual;
+- interactively asks for consent before *printing* the estimates (suppressed along with the
+  other interactive checks by `--suppress_interactive_data_checks`; declining only skips the
+  printout);
+- makes the CLI exit with **status 3** -- distinct from generic errors (1) and usage errors
+  (2) -- unless `--fail_on_flagged_diagnostics=False` (for calibration sweeps that
+  intentionally probe pathological regimes and read `diagnostic_report.pkl` instead). Library
+  callers of `analyze_dataset` get `diagnostics_flagged` / `diagnostic_verdict` /
+  `diagnostic_classification` on the returned dict and decide for themselves.

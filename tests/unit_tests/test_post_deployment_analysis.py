@@ -4073,3 +4073,31 @@ def test_resolve_jacobian_row_chunk_size_explicit_overrides():
     # Negative is rejected.
     with pytest.raises(ValueError, match="jacobian_row_chunk_size"):
         resolve(-1, 100)
+
+
+def test_pipeline_diagnostic_summary_rows_flag_extreme_condition_number():
+    # Value from the real seed-0 local oralytics run that motivated the gate.
+    rows, extreme_condition = (
+        post_deployment_analysis.build_pipeline_diagnostic_summary_rows(1.473e13)
+    )
+    assert extreme_condition
+    (condition_row,) = rows
+    assert condition_row[0] == "joint_bread_condition_number"
+    assert condition_row[1] == "failed"
+    assert "1.473e+13" in condition_row[2]
+
+    # A nonfinite condition number (a fully singular bread) is also extreme.
+    _, extreme_condition = (
+        post_deployment_analysis.build_pipeline_diagnostic_summary_rows(float("inf"))
+    )
+    assert extreme_condition
+
+
+def test_pipeline_diagnostic_summary_rows_healthy_run_passes():
+    rows, extreme_condition = (
+        post_deployment_analysis.build_pipeline_diagnostic_summary_rows(1.0e5)
+    )
+    assert not extreme_condition
+    (condition_row,) = rows
+    assert condition_row[1] == "passed"
+    assert "1.000e+05" in condition_row[2]

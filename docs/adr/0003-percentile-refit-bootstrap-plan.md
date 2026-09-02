@@ -115,7 +115,7 @@ function mean-zero as beta varies over adaptively collected data; they are
 the same mechanism that puts the score term
 `psi_theta · p'(A−p)/(p(1−p))` into the joint bread's cross entry (verified:
 naive cross-derivative + score term reproduces the stored
-`raw_joint_bread_matrix[1,0]` to 1e-6 on every replication checked).
+`joint_bread_matrix[1,0]` to 1e-6 on every replication checked).
 **A refit that re-solves the naive unweighted equations is wrong on adaptive
 data and will look right in every weights=1 test.** Include a regression test
 that solves at multiplicities forcing `beta* ≠ beta_hat` and checks against

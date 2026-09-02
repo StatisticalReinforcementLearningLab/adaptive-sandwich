@@ -425,3 +425,12 @@ def test_clopper_pearson_warns_on_a_sub_50_percent_confidence_level(caplog):
     with caplog.at_level(logging.WARNING, logger="lifejacket.helper_functions"):
         clopper_pearson_upper_bound(0, 10, 0.95)
     assert caplog.text == ""
+
+
+def test_prompt_yes_no_returns_bool_and_reprompts(monkeypatch):
+    # Unlike confirm_input_check_result, 'n' is an ordinary answer (False), not an abort --
+    # and anything else re-prompts rather than being coerced.
+    answers = iter(["maybe", "N", "Y"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    assert helper_functions.prompt_yes_no("continue? ") is False
+    assert helper_functions.prompt_yes_no("continue? ") is True

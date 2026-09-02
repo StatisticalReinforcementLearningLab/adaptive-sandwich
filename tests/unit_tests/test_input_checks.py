@@ -280,49 +280,64 @@ def test_require_threaded_inference_estimating_function_args_equivalent_mismatch
 
 
 # ---------------------------------------------------------------------------
-# require_estimating_functions_sum_to_zero_se_standardized: the residual is judged by how far
-# it displaces each stacked estimate in units of that estimate's own SE (portable across reward
-# scales), not by a raw-units absolute tolerance. Fixtures: num_updates updates (beta_dim=2)
-# plus theta_dim=2, so the stack has 2*num_updates + 2 components; B and V are diagonal so the
-# expected statistic is hand-derivable and each block's displacement is isolated.
+# require_estimating_functions_sum_to_zero_se_standardized: each component of the residual (the
+# subject-mean estimating function) is judged against its own standard error, taken directly
+# from the per-subject values that were averaged (a_j = |mean psi_j| / (rms psi_j / sqrt(n))),
+# so the check is portable across reward scales and consults neither the bread nor the sandwich
+# (its earlier displacement form inherited both matrices' degeneracies -- see the regression
+# tests at the end of this block). Fixtures: _stacks_with_residuals builds per-subject stacks
+# whose component-j statistic is EXACTLY the requested value -- half the subjects at +d, half
+# at -d (rms pinned to `scale` exactly) plus the mean offset that produces the statistic -- so
+# every expected number is hand-derivable and each block's residual is isolated.
 # ---------------------------------------------------------------------------
 
 
-def _sum_to_zero_fixture(se=0.1, bread_scale=100.0, num_updates=1):
-    beta_dim, theta_dim = 2, 2
-    dim = num_updates * beta_dim + theta_dim
-    B = np.eye(dim) * bread_scale
-    V = np.eye(dim) * se**2
-    return B, V, beta_dim, theta_dim
+def _stacks_with_residuals(
+    residuals_in_se, beta_dim=2, theta_dim=2, scale=1.0, num_subjects=100
+):
+    residuals_in_se = np.asarray(residuals_in_se, dtype=np.float64)
+    dim = residuals_in_se.size
+    assert (dim - theta_dim) % beta_dim == 0
+    m = residuals_in_se * scale / np.sqrt(num_subjects)  # per-component mean
+    d = np.sqrt(
+        scale**2 - m**2
+    )  # alternating spread pinning the rms to exactly `scale`
+    signs = np.tile([1.0, -1.0], num_subjects // 2)[:, None]
+    stacks = m + signs * d
+    return jnp.asarray(stacks), beta_dim, theta_dim
 
 
-def _per_block_displacements(message):
+def _per_block_residuals(message):
     """
-    The max SE-standardized displacement the failure text reports for each block, keyed by
-    block label ("update 1", ..., "inference").
+    The max SE-standardized residual the failure text reports for each block, keyed by block
+    label ("update 1", ..., "inference").
     """
     return {
         label: float(value)
         for label, value in re.findall(
-            r"^(update \d+|inference): max displacement (\S+) SE", message, re.MULTILINE
+            r"^(update \d+|inference): max residual (\S+) SE", message, re.MULTILINE
         )
     }
 
 
 def test_se_standardized_sum_to_zero_passes_where_raw_units_would_hard_fail():
-    # Steep equations (bread scale 100): a raw residual of 0.02 -- past the legacy hard gate of
-    # 1e-2 -- displaces each estimate by only 0.02/100 = 2e-4, i.e. 2e-3 of its SE. The legacy
-    # check raises on exactly this input; the SE-standardized one must pass it.
-    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
-    r = np.full(4, 0.02)
+    # High reward scale (per-subject terms of size 1000): a residual of 0.002 SE corresponds to
+    # a raw mean of 0.002 * 1000 / sqrt(100) = 0.2 -- past the legacy hard gate of 1e-2. The
+    # legacy check raises on exactly this input; the SE-standardized one must pass it.
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(
+        np.full(4, 0.002), scale=1000.0
+    )
 
     with pytest.raises(AssertionError):
         input_checks.require_estimating_functions_sum_to_zero(
-            jnp.asarray(r), beta_dim, theta_dim, suppress_interactive_data_checks=True
+            jnp.mean(stacks, axis=0),
+            beta_dim,
+            theta_dim,
+            suppress_interactive_data_checks=True,
         )
 
     input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-        jnp.asarray(r), B, V, beta_dim, theta_dim, suppress_interactive_data_checks=True
+        stacks, beta_dim, theta_dim, suppress_interactive_data_checks=True
     )
 
 
@@ -337,36 +352,30 @@ def test_se_standardized_sum_to_zero_passes_where_raw_units_would_hard_fail():
 def test_se_standardized_sum_to_zero_hard_failure_attributes_to_the_offending_block(
     offending_component, offending_block
 ):
-    # Residual engineered to displace ONE block's estimate by 0.2 of its SE (past the 0.1 hard
-    # tolerance) while leaving every other block exactly at zero; the error must say which
-    # block. Asserting only that "update 1" appears somewhere would test nothing: the failure
-    # text ends in a breakdown that prints one line per block on ANY hard failure, so an
-    # off-by-one that pointed users at the wrong estimating equations would still raise, still
-    # match, and still pass. What is pinned here is the attribution itself -- the named
-    # offender, the "<-- largest" marker, and the numbers on the other blocks' lines.
-    B, V, beta_dim, theta_dim = _sum_to_zero_fixture(num_updates=2)
-    displacement = np.zeros(6)
-    displacement[offending_component] = 0.2 * 0.1
-    r = B @ displacement
+    # Residual engineered to 0.2 of ONE component's SE (past the 0.1 hard tolerance) while
+    # leaving every other component exactly at zero; the error must say which block. Asserting
+    # only that "update 1" appears somewhere would test nothing: the failure text ends in a
+    # breakdown that prints one line per block on ANY hard failure, so an off-by-one that
+    # pointed users at the wrong estimating equations would still raise, still match, and still
+    # pass. What is pinned here is the attribution itself -- the named offender, the
+    # "<-- largest" marker, and the numbers on the other blocks' lines.
+    residuals = np.zeros(6)
+    residuals[offending_component] = 0.2
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(residuals)
 
     with pytest.raises(AssertionError) as excinfo:
         input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-            jnp.asarray(r),
-            B,
-            V,
-            beta_dim,
-            theta_dim,
-            suppress_interactive_data_checks=True,
+            stacks, beta_dim, theta_dim, suppress_interactive_data_checks=True
         )
 
     message = str(excinfo.value)
-    assert re.search(rf"displaces {offending_block} component \d+ by 0\.2 ", message), (
-        message
-    )
+    assert re.search(
+        rf"residual for {offending_block} component \d+ is 0\.2 ", message
+    ), message
     for other_block in {"update 1", "update 2", "inference"} - {offending_block}:
-        assert f"displaces {other_block} " not in message
+        assert f"residual for {other_block} " not in message
 
-    per_block = _per_block_displacements(message)
+    per_block = _per_block_residuals(message)
     assert set(per_block) == {"update 1", "update 2", "inference"}
     assert per_block[offending_block] == pytest.approx(0.2, rel=1e-3)
     for other_block, value in per_block.items():
@@ -390,29 +399,22 @@ def test_se_standardized_sum_to_zero_hard_failure_attributes_to_the_offending_bl
 def test_se_standardized_sum_to_zero_attribution_holds_across_the_inference_boundary(
     offending_component, offending_block
 ):
-    beta_dim, theta_dim, num_updates = 2, 5, 1
-    dim = num_updates * beta_dim + theta_dim
-    B = np.eye(dim) * 100.0
-    V = np.eye(dim) * 0.1**2
-    displacement = np.zeros(dim)
-    displacement[offending_component] = 0.2 * 0.1
-    r = B @ displacement
+    residuals = np.zeros(7)
+    residuals[offending_component] = 0.2
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(
+        residuals, beta_dim=2, theta_dim=5
+    )
 
     with pytest.raises(AssertionError) as excinfo:
         input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-            jnp.asarray(r),
-            B,
-            V,
-            beta_dim,
-            theta_dim,
-            suppress_interactive_data_checks=True,
+            stacks, beta_dim, theta_dim, suppress_interactive_data_checks=True
         )
 
     message = str(excinfo.value)
-    assert re.search(rf"displaces {offending_block} component \d+ by 0\.2 ", message), (
-        message
-    )
-    per_block = _per_block_displacements(message)
+    assert re.search(
+        rf"residual for {offending_block} component \d+ is 0\.2 ", message
+    ), message
+    per_block = _per_block_residuals(message)
     assert set(per_block) == {"update 1", "inference"}
     assert per_block[offending_block] == pytest.approx(0.2, rel=1e-3)
     assert message.count("<-- largest") == 1
@@ -425,10 +427,9 @@ def test_se_standardized_sum_to_zero_soft_band_prompt_contains_the_breakdown(
     # The interactive prompt has to be self-contained: this package installs no logging
     # handler, so a prompt that says "see the per-block breakdown above" shows the user nothing
     # unless they configured logging themselves.
-    B, V, beta_dim, theta_dim = _sum_to_zero_fixture(num_updates=2)
-    displacement = np.zeros(6)
-    displacement[2] = 0.05 * 0.1  # between the 0.01 soft and 0.1 hard tolerances
-    r = B @ displacement
+    residuals = np.zeros(6)
+    residuals[2] = 0.05  # between the 0.01 soft and 0.1 hard tolerances
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(residuals)
 
     prompts = []
 
@@ -439,71 +440,113 @@ def test_se_standardized_sum_to_zero_soft_band_prompt_contains_the_breakdown(
     monkeypatch.setattr("builtins.input", _capture_prompt)
 
     input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-        jnp.asarray(r),
-        B,
-        V,
-        beta_dim,
-        theta_dim,
-        suppress_interactive_data_checks=False,
+        stacks, beta_dim, theta_dim, suppress_interactive_data_checks=False
     )
 
     assert len(prompts) == 1
-    assert "displaces update 2 component 0" in prompts[0]
-    assert _per_block_displacements(prompts[0]) == {
+    assert "residual for update 2 component 0" in prompts[0]
+    assert _per_block_residuals(prompts[0]) == {
         "update 1": pytest.approx(0.0, abs=1e-9),
         "update 2": pytest.approx(0.05, rel=1e-3),
         "inference": pytest.approx(0.0, abs=1e-9),
     }
 
 
-def test_se_standardized_sum_to_zero_raises_assertion_error_on_exactly_singular_bread():
-    # An exactly singular joint bread makes np.linalg.solve RAISE rather than return inf/nan,
-    # so the nonfinite-displacement guard never sees it: without an explicit catch the check
-    # escapes as a bare numpy.linalg.LinAlgError, past every caller that handles the designed
-    # AssertionError, and with none of the guidance the designed message carries.
-    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
-    B = B.copy()
-    B[1, 1] = 0.0
+def test_se_standardized_sum_to_zero_soft_band_confirms_instead_of_raising():
+    # Residual of 0.05 SE sits between soft (0.01) and hard (0.1): with interaction suppressed
+    # this must log-and-continue, never raise.
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(np.full(4, 0.05))
 
-    with pytest.raises(AssertionError) as excinfo:
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        stacks, beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )
+
+
+def test_se_standardized_sum_to_zero_treats_identically_zero_components_as_rooted():
+    # A component identically zero across all subjects has s_j == 0 AND r_j == 0: a trivially
+    # rooted equation, not a 0/0 or a masked failure. The displacement form "excluded" such
+    # components -- and silently PASSED a stack whose every SE had collapsed to zero. Here the
+    # zero-denominator case is provably benign (s_j == 0 forces r_j == 0), so the check must
+    # pass without warning or division error, and other components must still be judged.
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(np.zeros(4))
+    stacks = np.array(stacks)  # jnp arrays view as read-only; copy to mutate
+    stacks[:, 0] = 0.0
+
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        jnp.asarray(stacks), beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )
+
+    # An all-zero stack -- every component trivially rooted -- must also pass, not blow up.
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        jnp.zeros((100, 4)), beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )
+
+
+def test_se_standardized_sum_to_zero_skips_components_below_the_noise_floor():
+    # Reproduces the RL smoke fixture failure that motivated the floor: a component whose only
+    # nonzero per-subject values are two identical 2-ulp float32 rounding residues (2.4e-7,
+    # non-cancelling) among otherwise O(1) components. Its dispersion IS the float noise, so
+    # the unfloored statistic reads exactly sqrt(2) SE by construction -- not a rooting
+    # failure. Below the floor (relative_noise_floor * max_k s_k) the component must be
+    # trivially rooted; the skip is provably safe because |r_j| <= s_j bounds the skipped
+    # residual by the floor itself.
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(np.zeros(4))
+    stacks = np.array(stacks)  # jnp arrays view as read-only; copy to mutate
+    stacks[:, 1] = 0.0
+    stacks[3, 1] = 2.4e-7
+    stacks[6, 1] = 2.4e-7
+
+    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+        jnp.asarray(stacks), beta_dim, theta_dim, suppress_interactive_data_checks=True
+    )
+
+    # The same two-subject non-cancelling shape ABOVE the floor is a genuine violation and
+    # must still hard-fail (at 0.5 against unit-scale neighbors, a = sqrt(2) > 0.1): the floor
+    # must excuse only float noise, not real non-cancellation.
+    stacks[3, 1] = 0.5
+    stacks[6, 1] = 0.5
+    with pytest.raises(AssertionError, match="update 1 component 1"):
         input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-            jnp.asarray(np.ones(4)),
-            B,
-            V,
+            jnp.asarray(stacks),
             beta_dim,
             theta_dim,
             suppress_interactive_data_checks=True,
         )
 
-    assert "bread_stability" in str(excinfo.value)
-    assert isinstance(excinfo.value.__cause__, np.linalg.LinAlgError)
+
+@pytest.mark.parametrize("scale", [1.0, 1e6])
+def test_se_standardized_sum_to_zero_detection_is_reward_scale_free(scale):
+    # REGRESSION AGAINST THE DISPLACEMENT FORM: detection must not depend on the size of the
+    # per-subject terms. The displacement form divided by the sandwich SE, so a meat-driven
+    # blow-up (U5/B_influence: SE spread ~2e5x) masked genuinely unrooted equations -- a
+    # residual displacing estimates by 1000 raw units passed. Here numerator and denominator
+    # share the reward units, so the same 0.2 SE violation raises identically at term scale 1
+    # and term scale 1e6.
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(np.full(4, 0.2), scale=scale)
+
+    with pytest.raises(AssertionError) as excinfo:
+        input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+            stacks, beta_dim, theta_dim, suppress_interactive_data_checks=True
+        )
+
+    assert "is 0.2 of its own standard error" in str(excinfo.value)
 
 
-def test_se_standardized_sum_to_zero_soft_band_confirms_instead_of_raising():
-    # Displacement of 0.05 SE sits between soft (0.01) and hard (0.1): with interaction
-    # suppressed this must log-and-continue, never raise.
-    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
-    displacement = np.full(4, 0.05 * 0.1)
-    r = B @ displacement
+def test_se_standardized_sum_to_zero_raises_on_nonfinite_stacks():
+    # A nonfinite subject poisons r and s into nan, and nan > 0 is False -- without an explicit
+    # guard the where-mask would leave a == 0 everywhere and the check would silently PASS on
+    # garbage input.
+    stacks, beta_dim, theta_dim = _stacks_with_residuals(np.zeros(4))
+    stacks = np.array(stacks)  # jnp arrays view as read-only; copy to mutate
+    stacks[0, 0] = np.nan
 
-    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-        jnp.asarray(r), B, V, beta_dim, theta_dim, suppress_interactive_data_checks=True
-    )
-
-
-def test_se_standardized_sum_to_zero_excludes_zero_variance_components():
-    # A component with (numerically) zero variance is a rank/identification finding for
-    # bread_stability, not a sum-to-zero failure: a huge displacement confined to that
-    # component must not raise here.
-    B, V, beta_dim, theta_dim = _sum_to_zero_fixture()
-    V = V.copy()
-    V[0, 0] = 0.0
-    displacement = np.array([5.0, 0.0, 0.0, 0.0])
-    r = B @ displacement
-
-    input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-        jnp.asarray(r), B, V, beta_dim, theta_dim, suppress_interactive_data_checks=True
-    )
+    with pytest.raises(AssertionError, match="nonfinite"):
+        input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+            jnp.asarray(stacks),
+            beta_dim,
+            theta_dim,
+            suppress_interactive_data_checks=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +569,9 @@ def test_componentwise_absolute_tolerance_confines_each_component_to_its_own_sca
 
     atol = input_checks.componentwise_absolute_tolerance(reference)
 
+    floor = input_checks.ORIGINAL_VS_THREADED_RELATIVE_FLOOR
     assert atol.shape == (1, 2)
-    np.testing.assert_allclose(atol, [[1e-2, 5e-7]])
+    np.testing.assert_allclose(atol, [[1e4 * floor, 0.5 * floor]])
 
 
 def test_original_and_threaded_agreement_catches_a_small_component_mismatch():
@@ -585,23 +629,25 @@ def test_original_and_threaded_agreement_tolerates_noise_against_an_all_zero_ref
 
 
 def test_componentwise_absolute_tolerance_degenerate_references():
+    floor = input_checks.ORIGINAL_VS_THREADED_RELATIVE_FLOOR
     # A component identically zero across subjects has no scale of its own, so it borrows the
     # SMALLEST nonzero component scale -- not the array's overall scale, which would reopen the
     # cross-component leak this function exists to close. With a 1e4-vs-0.5 spread the array
-    # scale would hand the zero component atol=1e-2, so a mismatch anywhere in 1e-7..1e-2 there
-    # would pass: looser than the fixed 1e-7 this replaced, i.e. a regression against main.
+    # scale would hand the zero component the large component's slack, 2e4x the smallest
+    # scale's own floor, so a mismatch anywhere in that band would pass: looser than the fixed
+    # 1e-7 this replaced, i.e. a regression against main.
     np.testing.assert_allclose(
         input_checks.componentwise_absolute_tolerance(
             np.array([[1e4, 0.5, 0.0], [1e4, 0.5, 0.0]])
         ),
-        [[1e-2, 5e-7, 5e-7]],
+        [[1e4 * floor, 0.5 * floor, 0.5 * floor]],
     )
     # The same rule with only one nonzero component: it is both the max and the min.
     np.testing.assert_allclose(
         input_checks.componentwise_absolute_tolerance(
             np.array([[1.0, 0.0], [2.0, 0.0]])
         ),
-        [[2e-6, 2e-6]],
+        [[2.0 * floor, 2.0 * floor]],
     )
     # And the consequence that matters: an error injected into the all-zero component beside a
     # 1e4 component is caught across the whole band the array-scale fallback used to swallow.
@@ -616,7 +662,7 @@ def test_componentwise_absolute_tolerance_degenerate_references():
     # Nothing observable anywhere: fall back to a unit scale, i.e. relative_floor itself.
     np.testing.assert_allclose(
         input_checks.componentwise_absolute_tolerance(np.zeros((3, 2))),
-        [[1e-6, 1e-6]],
+        [[floor, floor]],
     )
     # Empty: nothing to compare in the first place.
     assert input_checks.componentwise_absolute_tolerance(np.array([])).size == 0
@@ -684,3 +730,52 @@ def test_original_and_threaded_agreement_handles_degenerate_shapes():
         input_checks.require_original_and_threaded_results_agree(
             np.zeros((2, 3)), np.zeros((2, 4)), rtol=1e-3, context="ctx"
         )
+
+
+def test_original_and_threaded_agreement_tolerates_float32_cancellation_noise():
+    # The seed-0 local oralytics run that calibrated ORIGINAL_VS_THREADED_RELATIVE_FLOOR
+    # (2026-09-02): a near-fully-cancelling component whose two float32 evaluations differ by
+    # ~14 ulps of the component's own scale (values ~4e-4 of that scale), while every
+    # same-scale value matches to machine precision. Under the previous 1e-6 floor (~8 ulps)
+    # this healthy run hard-failed the always-on equivalence check by a factor of 1.22.
+    # Component scale 1.6561e-3 is the run's own: atol was reported as 1.6561057e-09.
+    original = np.array([[1.6561057e-03, 0.5], [6.3050538e-07, 0.5]])
+    threaded = original.copy()
+    threaded[1, 0] = (
+        6.3329935e-07  # |difference| 2.79e-9, ~1.7e-6 of the component scale
+    )
+
+    input_checks.require_original_and_threaded_results_agree(
+        original, threaded, rtol=1e-3, context="ctx"
+    )
+
+    # The loosened floor is still a floor, not a hole: the same component at ~10x that noise
+    # (well past 100 ulps of its scale) fails.
+    threaded[1, 0] = original[1, 0] + 3e-8
+    with pytest.raises(AssertionError):
+        input_checks.require_original_and_threaded_results_agree(
+            original, threaded, rtol=1e-3, context="ctx"
+        )
+
+
+def test_original_and_threaded_agreement_failure_message_is_bounded():
+    # The failure message names the worst offenders and SUMMARIZES the arrays instead of
+    # dumping them: the module-level np.set_printoptions(threshold=np.inf) otherwise prints
+    # every value of both arrays -- observed at ~4,400 terminal lines for a 65x135 bucket,
+    # burying the handful of lines that localize the failure.
+    original = np.full((80, 40), 0.5)
+    threaded = original.copy()
+    threaded[3, 7] = 0.6
+    threaded[5, 1] = 0.7
+
+    with pytest.raises(AssertionError) as excinfo:
+        input_checks.require_original_and_threaded_results_agree(
+            original, threaded, rtol=1e-3, context="ctx"
+        )
+    message = str(excinfo.value)
+    # Both offenders are named, worst (largest multiple of its own tolerance) first.
+    assert message.index("index (5, 1)") < message.index("index (3, 7)")
+    assert "2 of 3200 values" in message
+    # The 3,200-value arrays appear only in summarized form.
+    assert "..." in message
+    assert len(message.splitlines()) < 40

@@ -9,7 +9,6 @@ import pathlib
 import pickle
 import resource
 import sys
-import time
 import typing
 from collections.abc import Callable
 from typing import Any
@@ -58,6 +57,7 @@ from .helper_functions import (
     get_active_df_column,
     load_function_from_same_named_file,
     log_phase_duration,
+    prompt_yes_no,
     resolve_jacobian_row_chunk_size,
     unflatten_params,
 )
@@ -129,14 +129,30 @@ def cli():
     )
 
 
+def _parse_comma_separated_indices(ctx, param, value):
+    """
+    click callback: parse one comma-separated string of integers (e.g. "2,3,4", spaces around
+    commas allowed) into the tuple of ints the rest of the package expects. Replaces
+    multiple=True (one flag repetition per index) for the *_ragged_indices options: an
+    accumulating flag cannot be OVERRIDDEN by wrapper scripts, only appended to, so any script
+    wanting a non-empty default had no way to let its caller replace the set.
+    """
+    if not value:
+        return ()
+    try:
+        return tuple(int(part.strip()) for part in value.split(","))
+    except ValueError as exc:
+        raise click.BadParameter(
+            f"expected a comma-separated list of integers, got {value!r}"
+        ) from exc
+
+
 # TODO: Check all help strings for accuracy.
 # TODO: Deal with NA, -1, etc policy numbers
-# TODO: Make sure in deployment is never on for more than one stretch EDIT: unclear if
+# TODO: Make sure active is never on for more than one stretch EDIT: unclear if
 # this will remain an invariant as we deal with more complicated data missingness
 # TODO: I think I'm agnostic to indexing of calendar times but should check because
 # otherwise need to add a check here to verify required format.
-# TODO: Currently assuming function args can be placed in a numpy array. Must be scalar, 1d or 2d array.
-# Higher dimensional objects not supported.  Not entirely sure what kind of "scalars" apply.
 @cli.command(name="analyze")
 @click.option(
     "--analysis_df_pickle",
@@ -212,9 +228,10 @@ def cli():
 )
 @click.option(
     "--alg_update_func_args_ragged_indices",
-    type=int,
-    multiple=True,
-    help="Which alg_update_func_args positions to self-pad when alg_update_func_args_mask_index is given (repeat this option once per position) -- must be non-empty in that case. Ignored otherwise.",
+    type=str,
+    default="",
+    callback=_parse_comma_separated_indices,
+    help='Which alg_update_func_args positions to self-pad when alg_update_func_args_mask_index is given, as one comma-separated list of integers (e.g. "2,3,4") -- must be non-empty in that case. Ignored otherwise.',
 )
 @click.option(
     "--inference_func_filename",
@@ -233,18 +250,6 @@ def cli():
     type=int,
     required=True,
     help="Index of the algorithm parameter vector beta in the tuple of inference loss/estimating func args.",
-)
-@click.option(
-    "--inference_func_args_mask_index",
-    type=int,
-    default=-1000,
-    help="Same as alg_update_func_args_mask_index, for inference_func.",
-)
-@click.option(
-    "--inference_func_args_ragged_indices",
-    type=int,
-    multiple=True,
-    help="Same as alg_update_func_args_ragged_indices, for inference_func.",
 )
 @click.option(
     "--theta_calculation_func_filename",
@@ -334,6 +339,18 @@ def cli():
     "settings (root/implementation, local nonlinearity, bread stability, influence concentration, "
     "exploration/weights) -- the expensive exact-nonlinear-perturbation/Jacobian-drift checks stay "
     "opt-in (see --diagnostic_config_pickle) even when this is True.",
+)
+@click.option(
+    "--fail_on_flagged_diagnostics",
+    type=bool,
+    default=True,
+    help="If True (the default), the CLI exits with status 3 when the diagnostics flag the run "
+    "-- the suite's verdict is uncertifiable/invalid, the suite was requested but produced no "
+    "report, or the joint bread condition number exceeds the extreme gate -- so automated "
+    "pipelines cannot mistake a flagged analysis for a clean one. The analysis itself still "
+    "runs to completion and every output file is written; only the exit status differs. Set "
+    "False for calibration/experiment sweeps that intentionally probe pathological regimes "
+    "and read the diagnostic report from disk instead. No effect when --run_diagnostics=False.",
 )
 @click.option(
     "--diagnostic_config_pickle",
@@ -430,7 +447,16 @@ def analyze_dataset_wrapper(**kwargs):
         else None
     )
 
-    analyze_dataset(**kwargs)
+    # CLI-only concern, so popped here rather than threaded into analyze_dataset: library
+    # callers get the flagged status back on the returned dict and decide for themselves.
+    fail_on_flagged_diagnostics = kwargs.pop("fail_on_flagged_diagnostics")
+
+    analysis_dict = analyze_dataset(**kwargs)
+
+    if fail_on_flagged_diagnostics and analysis_dict.get("diagnostics_flagged"):
+        # 3 to stay distinct from generic errors (1) and click usage errors (2), so wrapper
+        # scripts can tell "analysis crashed" from "analysis completed but is flagged".
+        raise SystemExit(3)
 
 
 # The closed set of _newton_refit exit reasons. Deliberately a Literal of plain strings rather
@@ -663,6 +689,47 @@ def refit_percentile_bootstrap(
     }
 
 
+# "Outrageously high" gate on the joint bread condition number for the final diagnostic
+# summary. Condition-number thresholds are fraught in general -- cond changes under diagonal
+# rescaling, so a moderate value can be an artifact of units -- but that argument runs out at
+# the compute precision's own wall: these matrices are produced by float32 evaluations
+# (~7 significant digits), so once cond exceeds ~1/eps32 ~ 1e7 a linear solve against the bread
+# retains no trustworthy digits in ANY scaling. 1e12 sits five orders past that wall (and is
+# the same threshold the diagnostic solves already use to decide the bread needs a ridge), so
+# a flag here is not a units judgment call -- it fires only for the numerically hopeless.
+EXTREME_CONDITION_NUMBER_THRESHOLD = 1e12
+
+
+def build_pipeline_diagnostic_summary_rows(
+    joint_bread_cond: float,
+) -> tuple[list[tuple[str, str, str]], bool]:
+    """
+    The final diagnostic summary's row(s) for headline numeric diagnostics computed OUTSIDE
+    the suite (the suite's own checks carry their own statuses), as (name, status, detail)
+    triples for diagnostics.format_diagnostic_summary, plus whether the condition number
+    alone should flag the run (see EXTREME_CONDITION_NUMBER_THRESHOLD).
+    """
+    extreme_condition = (not math.isfinite(joint_bread_cond)) or (
+        joint_bread_cond > EXTREME_CONDITION_NUMBER_THRESHOLD
+    )
+    rows = [
+        (
+            "joint_bread_condition_number",
+            CheckStatuses.FAILED if extreme_condition else CheckStatuses.PASSED,
+            (
+                f"cond = {joint_bread_cond:.3e}"
+                + (
+                    f" > {EXTREME_CONDITION_NUMBER_THRESHOLD:.0e}: solves against the "
+                    f"bread carry no significant digits at float32 precision"
+                    if extreme_condition
+                    else f" (gate: {EXTREME_CONDITION_NUMBER_THRESHOLD:.0e})"
+                )
+            ),
+        )
+    ]
+    return rows, extreme_condition
+
+
 def analyze_dataset(
     output_dir: pathlib.Path | str,
     analysis_df: pd.DataFrame,
@@ -692,8 +759,6 @@ def analyze_dataset(
     form_adjusted_meat_adjustments_explicitly: bool,
     alg_update_func_args_mask_index: int = -1,
     alg_update_func_args_ragged_indices: tuple[int, ...] = (),
-    inference_func_args_mask_index: int = -1,
-    inference_func_args_ragged_indices: tuple[int, ...] = (),
     jacobian_row_chunk_size: int | None = None,
     combine_updates_into_one_vmap: bool | None = None,
     run_diagnostics: bool = True,
@@ -784,10 +849,6 @@ def analyze_dataset(
         alg_update_func_args_mask_index >= 0 -- e.g. every position shaped
         (num_decision_times_so_far, ...) that varies per subject under staggered
         recruitment. Must be non-empty in that case; ignored otherwise.
-    inference_func_args_mask_index (int):
-        Same as alg_update_func_args_mask_index, for inference_func.
-    inference_func_args_ragged_indices (tuple[int, ...]):
-        Same as alg_update_func_args_ragged_indices, for inference_func.
     jacobian_row_chunk_size (int | None):
         Passed straight through to construct_classical_and_adjusted_sandwiches's
         jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values) call,
@@ -813,10 +874,7 @@ def analyze_dataset(
         silently left off otherwise, and falls back to the default loop with
         a WARNING log if a structural invariant only checkable mid-precompute
         is violated -- results are numerically identical either way. True =
-        force on, with loud errors when ineligible. False = force off. NOT
-        passed to the separate local-linearization diagnostic below
-        (compute_local_linearization_error_ratio), which continues to use the
-        original per-update/per-bucket loop regardless.
+        force on, with loud errors when ineligible. False = force off.
     run_diagnostics (bool):
         If True (the default), runs the extended diagnostic suite (lifejacket.diagnostics.
         run_diagnostic_suite) after the adjusted sandwich has been computed and writes its
@@ -855,8 +913,28 @@ def analyze_dataset(
 
     Returns:
     dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
-    classical sandwich variance estimate.
+    classical sandwich variance estimate (plus the percentile-bootstrap keys when that was
+    requested). When run_diagnostics is True it additionally carries diagnostics_flagged
+    (bool: the suite's verdict was uncertifiable/invalid, the suite produced no report, or
+    the joint bread condition number exceeded EXTREME_CONDITION_NUMBER_THRESHOLD),
+    diagnostic_verdict and diagnostic_classification -- in the returned dict only, not in
+    analysis.pkl (diagnostic_report.pkl is the on-disk source of truth). The CLI wrapper
+    exits with status 3 on diagnostics_flagged unless --fail_on_flagged_diagnostics=False.
     """
+
+    # Unconditional, and FIRST: not gated behind suppress_all_data_checks, because every
+    # result is written to output_dir only at the very end of the run and nothing creates it,
+    # so a bad path otherwise discards the entire analysis at the finish line. See
+    # input_checks.require_output_dir_ready for what this does and does not protect against.
+    input_checks.require_output_dir_ready(output_dir)
+    # Also unconditional, and for the sharper reason: percentile_bootstrap_alpha is used
+    # directly as a quantile level, so an out-of-range value does not fail -- it silently
+    # reports a meaningless interval as percentile_bootstrap_ci.
+    input_checks.require_valid_percentile_bootstrap_settings(
+        percentile_bootstrap_draws,
+        percentile_bootstrap_alpha,
+        percentile_bootstrap_seed,
+    )
 
     with log_phase_duration("theta_calculation_func"):
         theta_est = jnp.array(theta_calculation_func(analysis_df))
@@ -886,6 +964,13 @@ def analyze_dataset(
                 theta_est,
                 beta_dim,
                 suppress_interactive_data_checks,
+                alg_update_func=alg_update_func,
+                alg_update_func_type=alg_update_func_type,
+                inference_func=inference_func,
+                inference_func_type=inference_func_type,
+                inference_func_args_theta_index=inference_func_args_theta_index,
+                alg_update_func_args_mask_index=alg_update_func_args_mask_index,
+                alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
             )
 
     ### Begin collecting data structures that will be used to compute the joint bread matrix.
@@ -937,16 +1022,23 @@ def analyze_dataset(
         )
 
     # Use a per-subject weighted estimating function stacking function to derive classical and joint
-    # meat and bread matrices.  This is facilitated because the *value* of the
+    # meat and bread matrices.  This is facilitated because the *values* of the
     # weighted and unweighted stacks are the same, as the weights evaluate to 1 pre-differentiation.
     logger.info(
         "Constructing joint bread matrix, joint meat matrix, the classical analogs, and the avg estimating function stack across subjects."
     )
 
-    subject_ids = jnp.array(analysis_df[subject_id_col_name].unique())
+    # np.asarray, NOT jnp.array. Subject ids are opaque keys -- they index per-subject
+    # dictionaries and are zipped with results, never used in arithmetic -- and every consumer
+    # immediately does np.asarray(subject_ids.tolist()) anyway. Going through jnp.array forced
+    # them to be numeric (blocking string ids outright) and, under JAX's default 32-bit mode,
+    # silently TRUNCATED any integer id at or above 2**31: an epoch-millisecond id of
+    # 1700000000123 came back as -807049093, which then matched no key in any per-subject
+    # argument dictionary.
+    subject_ids = np.asarray(analysis_df[subject_id_col_name].unique())
     with log_phase_duration("construct_classical_and_adjusted_sandwiches"):
         (
-            raw_joint_bread_matrix,
+            joint_bread_matrix,
             joint_adjusted_meat_matrix,
             joint_sandwich_matrix,
             classical_bread_matrix,
@@ -954,8 +1046,6 @@ def analyze_dataset(
             classical_sandwich_var_estimate,
             avg_estimating_function_stack,
             per_subject_estimating_function_stacks,
-            per_subject_adjusted_corrections,
-            per_subject_classical_corrections,
             per_subject_adjusted_meat_contributions,
         ) = construct_classical_and_adjusted_sandwiches(
             theta_est,
@@ -993,22 +1083,20 @@ def analyze_dataset(
             action_prob_col_name,
             alg_update_func_args_mask_index=alg_update_func_args_mask_index,
             alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
-            inference_func_args_mask_index=inference_func_args_mask_index,
-            inference_func_args_ragged_indices=inference_func_args_ragged_indices,
             jacobian_row_chunk_size=jacobian_row_chunk_size,
             combine_updates_into_one_vmap=combine_updates_into_one_vmap,
         )
 
     theta_dim = len(theta_est)
     if not suppress_all_data_checks:
-        # SE-standardized form: the residual is measured by how far it displaces each stacked
-        # estimate in units of that estimate's own SE, which is portable across reward scales --
-        # the legacy raw-units version false-alarmed on healthy high-noise runs (docs/adr/0002,
-        # correction 2026-08-31).
+        # SE-standardized form: each component of the residual is measured against its own
+        # standard error (per-subject RMS / sqrt(n)), which is portable across reward scales --
+        # the legacy raw-units version false-alarmed on healthy high-noise runs, and the
+        # earlier bread/sandwich displacement form inherited the sandwich's degeneracies, going
+        # blind exactly in the blow-up regimes (docs/adr/0002, corrections 2026-08-31 and
+        # 2026-09-02).
         input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-            avg_estimating_function_stack,
-            raw_joint_bread_matrix,
-            joint_sandwich_matrix,
+            per_subject_estimating_function_stacks,
             beta_dim,
             theta_dim,
             suppress_interactive_data_checks,
@@ -1085,8 +1173,6 @@ def analyze_dataset(
                 inference_func_args_action_prob_index,
                 inference_action_prob_decision_times_by_subject_id,
                 action_prob_layer,
-                inference_func_args_mask_index,
-                inference_func_args_ragged_indices,
             )
             _stack_reevaluation_precompute.append(
                 (
@@ -1114,14 +1200,13 @@ def analyze_dataset(
     ) -> jnp.ndarray:
         """
         The joint estimating-function stack, re-evaluated on the shared precompute above, in the
-        shape both consumers below jit. This mirrors compute_local_linearization_error_ratio's
-        proven construction exactly -- including taking jit_arrays as a genuine traced argument
-        rather than closing over it, which is what keeps the (N, T, ...)-shaped precompute data
-        from being embedded in the compiled program as XLA literal constants (see that
-        function's comments and _extract_diagnostic_jit_arrays' docstring for why), and
-        including its LANDMINE: suppress_all_data_checks must stay hardcoded True, since the
-        data checks call np.asarray on values that are non-concrete tracers under jax.jit's
-        abstract tracing.
+        shape both consumers below jit. jit_arrays is taken as a genuine traced argument
+        rather than closed over, which is what keeps the (N, T, ...)-shaped precompute data
+        from being embedded in the compiled program as XLA literal constants (see
+        _extract_diagnostic_jit_arrays' docstring for why; the construction was proven out by
+        the since-removed compute_local_linearization_error_ratio). LANDMINE:
+        suppress_all_data_checks must stay hardcoded True, since the data checks call
+        np.asarray on values that are non-concrete tracers under jax.jit's abstract tracing.
         """
         (
             base_action_prob_layer,
@@ -1346,66 +1431,26 @@ def analyze_dataset(
             eigvals_theta_only_adjusted_sandwich,
             max_to_median_ratio_theta_only_adjusted_sandwich,
         ) = compute_eigenvalue_and_condition_diagnostics(
-            raw_joint_bread_matrix,
+            joint_bread_matrix,
             joint_sandwich_matrix,
             adjusted_sandwich_var_estimate,
         )
 
-    # Local linearization validity diagnostic (single-run) -- see
-    # compute_local_linearization_error_ratio's docstring for the full explanation.
-    with log_phase_duration("local_linearization_diagnostic"):
-        try:
-            local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max = (
-                compute_local_linearization_error_ratio(
-                    raw_joint_bread_matrix,
-                    avg_estimating_function_stack,
-                    per_subject_estimating_function_stacks,
-                    all_post_update_betas,
-                    theta_est,
-                    beta_dim,
-                    theta_dim,
-                    subject_ids,
-                    action_prob_func,
-                    action_prob_func_args_beta_index,
-                    alg_update_func,
-                    alg_update_func_type,
-                    alg_update_func_args_beta_index,
-                    alg_update_func_args_action_prob_index,
-                    alg_update_func_args_action_prob_times_index,
-                    alg_update_func_args_previous_betas_index,
-                    inference_func,
-                    inference_func_type,
-                    inference_func_args_theta_index,
-                    inference_func_args_action_prob_index,
-                    action_prob_func_args,
-                    policy_num_by_decision_time_by_subject_id,
-                    initial_policy_num,
-                    beta_index_by_policy_num,
-                    inference_func_args_by_subject_id,
-                    inference_action_prob_decision_times_by_subject_id,
-                    alg_update_func_args,
-                    action_by_decision_time_by_subject_id,
-                    alg_update_func_args_mask_index=alg_update_func_args_mask_index,
-                    alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
-                    inference_func_args_mask_index=inference_func_args_mask_index,
-                    inference_func_args_ragged_indices=inference_func_args_ragged_indices,
-                )
-            )
-        except Exception as e:
-            # This diagnostic is best-effort; failure should not break analysis.
-            logger.warning(
-                "Failed to compute local linearization error ratio diagnostic: %s",
-                str(e),
-            )
-            local_error_ratio_median = math.nan
-            local_error_ratio_p90 = math.nan
-            local_error_ratio_max = math.nan
+    # NOTE (2026-09-02): the standalone "local linearization error ratio" diagnostic that ran
+    # here (compute_local_linearization_error_ratio, added 2026-01-24) was removed: it computed
+    # exactly the diagnostic suite's equation-space r_j -- same formula, same O(1/sqrt(n))
+    # covariance-aligned draws -- but with strictly worse machinery (one radius, no nonfinite
+    # censoring so a pathological run printed bare nans, no standardized q_j/a_{j,l}
+    # companions, no role in classification/verdict) at a measured ~25s per run. The suite's
+    # local_nonlinearity check is its calibrated replacement. The
+    # local_linearization_error_ratio_* keys left debug_pieces.pkl with it;
+    # collect_existing_analyses.py guards every read of them, so old pickles still aggregate.
 
     debug_pieces_dict = {
         "theta_est": theta_est,
         "adjusted_sandwich_var_estimate": adjusted_sandwich_var_estimate,
         "classical_sandwich_var_estimate": classical_sandwich_var_estimate,
-        "raw_joint_bread_matrix": raw_joint_bread_matrix,
+        "joint_bread_matrix": joint_bread_matrix,
         "joint_meat_matrix": joint_adjusted_meat_matrix,
         "classical_bread_matrix": classical_bread_matrix,
         "classical_meat_matrix": classical_meat_matrix,
@@ -1417,12 +1462,7 @@ def analyze_dataset(
         "max_eigenvalue_theta_only_adjusted_sandwich": max_eig_theta,
         "all_eigenvalues_theta_only_adjusted_sandwich": eigvals_theta_only_adjusted_sandwich,
         "max_to_median_ratio_theta_only_adjusted_sandwich": max_to_median_ratio_theta_only_adjusted_sandwich,
-        "local_linearization_error_ratio_median": local_error_ratio_median,
-        "local_linearization_error_ratio_p90": local_error_ratio_p90,
-        "local_linearization_error_ratio_max": local_error_ratio_max,
         "all_post_update_betas": all_post_update_betas,
-        "per_subject_adjusted_corrections": per_subject_adjusted_corrections,
-        "per_subject_classical_corrections": per_subject_classical_corrections,
         "per_subject_adjusted_meat_adjustments": per_subject_adjusted_meat_contributions,
     }
     if percentile_bootstrap_results is not None:
@@ -1437,6 +1477,8 @@ def analyze_dataset(
             f,
         )
 
+    diagnostic_report = None
+    diagnostic_suite_error = ""
     if run_diagnostics:
         logger.info("Running extended diagnostic suite (lifejacket.diagnostics).")
         try:
@@ -1475,8 +1517,7 @@ def analyze_dataset(
             # directions of local-nonlinearity probing at g_tilde_chunk_size=1). Each of those
             # rebuilt the entire structural precompute and re-dispatched the whole stack
             # eagerly before the shared precompute above and this jit existed -- the same
-            # anti-pattern, and the same fix, as the bootstrap wiring and
-            # compute_local_linearization_error_ratio. Probed once here so that a
+            # anti-pattern, and the same fix, as the bootstrap wiring. Probed once here so that a
             # trace/compile failure downgrades to the eager path (which still keeps the shared
             # precompute) instead of taking the whole suite down through the guard below.
             try:
@@ -1491,41 +1532,10 @@ def analyze_dataset(
                 )
                 _diagnostics_g_tilde = _diagnostics_g_tilde_eager
 
-            # Gated on the same suppress_all_data_checks the main pipeline gates its own
-            # input-check calls on: with checks suppressed the suite must not re-run (and
-            # hard-fail on) a check the caller explicitly turned off -- any input-check failure
-            # forces classification = FAILED and skips every statistical check in the suite.
-            # Only the reconstruction check is wired in at all: it has no numeric equivalent
-            # inside the suite. The sum-to-zero check (run by the main pipeline above,
-            # interactively, when data checks are enabled -- now in its SE-standardized
-            # displacement form, require_estimating_functions_sum_to_zero_se_standardized) is
-            # deliberately NOT also wired in here: the pipeline already runs it before the suite
-            # starts, so re-running it would be redundant, not an independent signal.
-            _legacy_check_callables = (
-                []
-                if suppress_all_data_checks
-                else [
-                    (
-                        "action_probabilities_reconstructed",
-                        lambda: (
-                            input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
-                                analysis_df,
-                                action_prob_col_name,
-                                calendar_t_col_name,
-                                subject_id_col_name,
-                                active_col_name,
-                                action_prob_func_args,
-                                action_prob_func,
-                            )
-                        ),
-                    ),
-                ]
-            )
-
             diagnostic_report = diagnostics.run_diagnostic_suite(
                 _diagnostics_g_tilde,
                 _diagnostics_eta_hat,
-                raw_joint_bread_matrix,
+                joint_bread_matrix,
                 joint_adjusted_meat_matrix,
                 joint_sandwich_matrix,
                 per_subject_estimating_function_stacks,
@@ -1533,7 +1543,6 @@ def analyze_dataset(
                 theta_dim,
                 len(subject_ids),
                 diagnostic_config or diagnostics.DiagnosticConfig(),
-                legacy_check_callables=_legacy_check_callables,
                 analysis_df=analysis_df,
                 active_col_name=active_col_name,
                 calendar_t_col_name=calendar_t_col_name,
@@ -1547,17 +1556,37 @@ def analyze_dataset(
                 beta_index_by_policy_num=beta_index_by_policy_num,
                 subject_ids=subject_ids,
             )
-            if suppress_all_data_checks:
-                # Recorded, not silently omitted: a suppressed input check and a passing one
-                # must not look the same in the report. INDETERMINATE, so it stays out of the
-                # FAILED set run_diagnostic_suite's hard-fail gate is built on.
-                diagnostic_report.input_check_results[
-                    "action_probabilities_reconstructed"
-                ] = diagnostics.CheckResult(
+            # The reconstruction check's outcome is RECORDED here rather than re-executed
+            # (it evaluates action_prob_func over every active row -- the most expensive input
+            # check -- and used to run twice per analysis). perform_first_wave_input_checks
+            # already ran it near the start of analyze_dataset, it is a hard failure with no
+            # interactive continue path, and nothing between the first wave and this point
+            # touches analysis_df or action_prob_func_args -- so reaching the suite at all
+            # proves it passed. The suppressed case is likewise recorded, not silently
+            # omitted: a suppressed input check and a passing one must not look the same in
+            # the report. INDETERMINATE, so it stays out of the FAILED set
+            # run_diagnostic_suite's hard-fail gate is built on. The sum-to-zero check is
+            # deliberately not recorded here at all: unlike reconstruction it has numeric
+            # relatives inside the suite (root_and_implementation), so its report-level story
+            # belongs to those checks.
+            diagnostic_report.input_check_results[
+                "action_probabilities_reconstructed"
+            ] = (
+                diagnostics.CheckResult(
                     name="action_probabilities_reconstructed",
                     status=CheckStatuses.INDETERMINATE,
                     message="Not run: suppress_all_data_checks=True.",
                 )
+                if suppress_all_data_checks
+                else diagnostics.CheckResult(
+                    name="action_probabilities_reconstructed",
+                    status=CheckStatuses.PASSED,
+                    message=(
+                        "Verified by the first-wave input checks before the suite ran "
+                        "(a hard failure there aborts the analysis); not re-executed here."
+                    ),
+                )
+            )
             logger.info(
                 "Diagnostic suite classification: %s", diagnostic_report.classification
             )
@@ -1566,15 +1595,69 @@ def analyze_dataset(
             with open(output_folder_abs_path / "diagnostic_report.pkl", "wb") as f:
                 pickle.dump(diagnostic_report, f)
         except Exception as e:  # noqa: BLE001
-            # As with the local linearization diagnostic above, the diagnostic suite is
-            # best-effort and failure to run it should not break the underlying analysis.
+            # As with the local linearization diagnostic above, a crashed diagnostic suite
+            # does not break the underlying analysis -- but it is no longer silent either:
+            # the summary below renders it as DID NOT RUN with an UNAVAILABLE verdict, and
+            # diagnostics_flagged treats a missing report as flagged, so an unvalidated run
+            # cannot look like a passing one to automation.
             logger.warning("Failed to run the extended diagnostic suite: %s", str(e))
+            diagnostic_suite_error = f"{type(e).__name__}: {e}"
 
-    print(f"\nParameter estimate:\n {theta_est}")
-    print(f"\nAdjusted sandwich variance estimate:\n {adjusted_sandwich_var_estimate}")
-    print(
-        f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
-    )
+    run_is_flagged = False
+    if run_diagnostics:
+        pipeline_rows, extreme_condition = build_pipeline_diagnostic_summary_rows(
+            joint_bread_cond
+        )
+        run_is_flagged = (
+            diagnostics.diagnostics_flagged(diagnostic_report) or extreme_condition
+        )
+        print(
+            "\n"
+            + diagnostics.format_diagnostic_summary(
+                diagnostic_report,
+                pipeline_rows,
+                suite_error=diagnostic_suite_error,
+            )
+        )
+        # In-memory only (analysis.pkl was already written above); the on-disk source of
+        # truth for these is diagnostic_report.pkl. The CLI wrapper reads
+        # diagnostics_flagged off the returned dict to set its exit status.
+        analysis_dict["diagnostics_flagged"] = run_is_flagged
+        analysis_dict["diagnostic_verdict"] = (
+            diagnostic_report.verdict if diagnostic_report is not None else ""
+        )
+        analysis_dict["diagnostic_classification"] = (
+            diagnostic_report.classification if diagnostic_report is not None else ""
+        )
+
+    show_estimates = True
+    if run_is_flagged and not suppress_interactive_data_checks:
+        # Consent gate, not an abort gate: the estimates are computed and saved either way,
+        # and declining only skips printing them -- the flagged status (and the CLI's
+        # nonzero exit) is unaffected by the answer.
+        show_estimates = prompt_yes_no(
+            "\nDiagnostics flagged this run (see the summary above). Print the parameter "
+            "and variance estimates anyway? They are saved to analysis.pkl regardless, and "
+            "printing them does not change the job's exit status. (y/n)\n"
+        )
+    if show_estimates:
+        print(f"\nParameter estimate:\n {theta_est}")
+        print(
+            f"\nAdjusted sandwich variance estimate:\n {adjusted_sandwich_var_estimate}"
+        )
+        print(
+            f"\nClassical sandwich variance estimate:\n {classical_sandwich_var_estimate}\n"
+        )
+    else:
+        print(
+            "\nEstimates not printed, as requested (still saved to analysis.pkl and "
+            "debug_pieces.pkl).\n"
+        )
+    if run_is_flagged:
+        print(
+            "DIAGNOSTICS FLAGGED THIS RUN -- see the summary above. The lifejacket CLI "
+            "exits with status 3 unless --fail_on_flagged_diagnostics=False.\n"
+        )
 
     return analysis_dict
 
@@ -1911,7 +1994,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     flattened_betas_and_theta: jnp.ndarray,
     beta_dim: int,
     theta_dim: int,
-    subject_ids: jnp.ndarray,
+    subject_ids: np.ndarray,
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     alg_update_func: callable,
@@ -1952,8 +2035,6 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
     | None = None,
     alg_update_func_args_mask_index: int = -1,
     alg_update_func_args_ragged_indices: tuple[int, ...] = (),
-    inference_func_args_mask_index: int = -1,
-    inference_func_args_ragged_indices: tuple[int, ...] = (),
     combine_updates_into_one_vmap: bool | None = None,
 ) -> tuple[
     jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]
@@ -1971,8 +2052,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             The dimension of each of the beta parameters.
         theta_dim (int):
             The dimension of the theta parameter.
-        subject_ids (jnp.ndarray):
-            A 1D JAX NumPy array of subject IDs.
+        subject_ids (np.ndarray):
+            A 1D numpy array of subject IDs. These are OPAQUE, hashable keys -- they index the
+            per-subject argument dictionaries and are zipped with per-subject results, and are
+            never used numerically -- so they need not be numbers at all (strings are fine).
         action_prob_func (callable):
             The action probability function.
         action_prob_func_args_beta_index (int):
@@ -2039,11 +2122,10 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             update_func_args_by_by_subject_id_by_policy_num/
             inference_func_args_by_subject_id arguments (the three
             build_*_precompute calls are skipped entirely). This exists so a
-            caller that has already built these once (e.g. the
-            local-linearization diagnostic in
-            compute_local_linearization_error_ratio, which calls this
-            function 15 times with identical structural data and only the
-            differentiated betas/theta values changing across calls) can
+            caller that has already built these once (e.g. analyze_dataset's
+            shared bootstrap/diagnostic-suite closure, which re-evaluates the
+            stack many times with identical structural data and only the
+            betas/theta values changing across calls) can
             reuse them, and -- when the caller is a jax.jit trace -- pass a
             reconstruction of them built from genuine traced arguments
             instead of Python-closed-over concrete arrays, which is what
@@ -2072,10 +2154,6 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             Which alg_update_func_args positions to self-pad when
             alg_update_func_args_mask_index >= 0 -- must be non-empty in that
             case. Ignored otherwise.
-        inference_func_args_mask_index (int):
-            Same as alg_update_func_args_mask_index, for inference_func.
-        inference_func_args_ragged_indices (tuple[int, ...]):
-            Same as alg_update_func_args_ragged_indices, for inference_func.
         combine_updates_into_one_vmap (bool | None):
             When enabled, replaces compute_batched_algorithm_component's
             per-update, per-shape-bucket jax.vmap loop with exactly one
@@ -2205,8 +2283,6 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
             inference_func_args_action_prob_index,
             inference_action_prob_decision_times_by_subject_id,
             action_prob_layer,
-            inference_func_args_mask_index,
-            inference_func_args_ragged_indices,
         )
     # Cheap visibility into shape-bucket fan-out: each distinct shape bucket
     # at a given update becomes its own jax.vmap dispatch in
@@ -2380,7 +2456,7 @@ def get_avg_weighted_estimating_function_stacks_and_aux_values(
 def construct_classical_and_adjusted_sandwiches(
     theta_est: jnp.ndarray,
     all_post_update_betas: jnp.ndarray,
-    subject_ids: jnp.ndarray,
+    subject_ids: np.ndarray,
     action_prob_func: callable,
     action_prob_func_args_beta_index: int,
     alg_update_func: callable,
@@ -2423,8 +2499,6 @@ def construct_classical_and_adjusted_sandwiches(
     action_prob_col_name: str | None,
     alg_update_func_args_mask_index: int = -1,
     alg_update_func_args_ragged_indices: tuple[int, ...] = (),
-    inference_func_args_mask_index: int = -1,
-    inference_func_args_ragged_indices: tuple[int, ...] = (),
     jacobian_row_chunk_size: int | None = None,
     combine_updates_into_one_vmap: bool | None = None,
 ) -> tuple[
@@ -2453,7 +2527,7 @@ def construct_classical_and_adjusted_sandwiches(
             A 1-D JAX NumPy array representing the parameter estimate for inference.
         all_post_update_betas (jnp.ndarray):
             A 2-D JAX NumPy array representing all parameter estimates for the algorithm updates.
-        subject_ids (jnp.ndarray):
+        subject_ids (np.ndarray):
             A 1-D JAX NumPy array holding all subject IDs in the deployment.
         action_prob_func (callable):
             The action probability function.
@@ -2534,11 +2608,9 @@ def construct_classical_and_adjusted_sandwiches(
             The name of the column in analysis_df indicating the action probability of the action taken,
             needed if forming the adjusted meat adjustments explicitly.
         alg_update_func_args_mask_index, alg_update_func_args_ragged_indices,
-        inference_func_args_mask_index, inference_func_args_ragged_indices:
+        alg_update_func_args_mask_index, alg_update_func_args_ragged_indices:
             Passed straight through to the jax.jacrev(get_avg_weighted_estimating_function_stacks_and_aux_values)
             call this function makes; see that function's own docstring for what they do.
-            (compute_local_linearization_error_ratio is called separately, by analyze_dataset
-            directly, not from here -- it receives its own copies of these same four arguments.)
         jacobian_row_chunk_size (int | None):
             None (the default) = AUTO: resolved by
             resolve_jacobian_row_chunk_size once out_dim is known -- a
@@ -2588,12 +2660,7 @@ def construct_classical_and_adjusted_sandwiches(
             see both docstrings for the semantics (None = enable when
             eligible, with a warn-logged fallback to the default loop on
             mid-precompute structural violations; True = force on with loud
-            errors when ineligible; False = force off). NOT threaded into
-            the separate local-linearization diagnostic
-            (compute_local_linearization_error_ratio, called directly by
-            analyze_dataset, not from here) -- that diagnostic continues to
-            use the original per-update/per-bucket loop regardless of this
-            argument.
+            errors when ineligible; False = force off).
     Returns:
         tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
             A tuple containing:
@@ -2685,8 +2752,6 @@ def construct_classical_and_adjusted_sandwiches(
                 suppress_interactive_data_checks,
                 alg_update_func_args_mask_index=alg_update_func_args_mask_index,
                 alg_update_func_args_ragged_indices=alg_update_func_args_ragged_indices,
-                inference_func_args_mask_index=inference_func_args_mask_index,
-                inference_func_args_ragged_indices=inference_func_args_ragged_indices,
                 combine_updates_into_one_vmap=combine_updates_into_one_vmap,
             )
 
@@ -2775,7 +2840,7 @@ def construct_classical_and_adjusted_sandwiches(
                 # plain eager call) and did not show a peak-memory win
                 # either, for a single, un-chunked call that has no
                 # repeated-call compile-cost amortization to earn it back.
-                raw_joint_bread_matrix = jax.vmap(pullback)(cotangent_basis)[0]
+                joint_bread_matrix = jax.vmap(pullback)(cotangent_basis)[0]
             else:
                 effective_chunk_size = min(resolved_jacobian_row_chunk_size, out_dim)
 
@@ -2796,8 +2861,8 @@ def construct_classical_and_adjusted_sandwiches(
                 # (via compiled-HLO constant counts, on a toy problem) to
                 # make peak memory WORSE than the plain eager loop, with no
                 # speed benefit. That is the same closure-embedding
-                # pathology already diagnosed and fixed for
-                # _eval_avg_stack_jit elsewhere in this file (see
+                # pathology already diagnosed and fixed for the jitted
+                # stack re-evaluations elsewhere in this file (see
                 # _extract_diagnostic_jit_arrays/
                 # _rebuild_precomputes_from_jit_arrays).
                 #
@@ -2821,7 +2886,7 @@ def construct_classical_and_adjusted_sandwiches(
                 # as literals. jax.jit compiles once per distinct chunk
                 # shape it is called with (the same "compile once per
                 # shape" pattern already relied on elsewhere in this file
-                # for _eval_avg_stack_jit) -- at most twice here, since
+                # for the jitted stack re-evaluations) -- at most twice here, since
                 # every chunk has effective_chunk_size rows except possibly
                 # a shorter final remainder chunk.
                 #
@@ -2874,7 +2939,7 @@ def construct_classical_and_adjusted_sandwiches(
                 residual_leaves, pullback_treedef = jax.tree_util.tree_flatten(pullback)
 
                 if not residual_leaves:
-                    raw_joint_bread_matrix = jnp.concatenate(
+                    joint_bread_matrix = jnp.concatenate(
                         [
                             jax.vmap(pullback)(
                                 cotangent_basis[start : start + effective_chunk_size]
@@ -2926,9 +2991,9 @@ def construct_classical_and_adjusted_sandwiches(
                                 chunk_parts.append(
                                     jitted_backward_chunk(chunk, *residual_leaves)
                                 )
-                        raw_joint_bread_matrix = jnp.concatenate(chunk_parts, axis=0)
+                        joint_bread_matrix = jnp.concatenate(chunk_parts, axis=0)
 
-            jax.block_until_ready(raw_joint_bread_matrix)
+            jax.block_until_ready(joint_bread_matrix)
             logger.info(
                 "Peak RSS after backward_vmap_chunks: %.1f MB",
                 _peak_rss_mb(),
@@ -2943,16 +3008,10 @@ def construct_classical_and_adjusted_sandwiches(
         # inference_component -- see
         # get_avg_weighted_estimating_function_stacks_and_aux_values), so
         # the meat matrices are just their per-subject average.
-        # per_subject_adjusted_corrections/per_subject_classical_corrections
-        # are kept as trivial all-ones arrays purely to preserve this
-        # function's output shape (there is no longer any small-sample
-        # correction to report here).
         joint_adjusted_meat_matrix = (
             per_subject_joint_adjusted_meat_contributions / num_subjects
         )
         classical_meat_matrix = per_subject_classical_meat_contributions / num_subjects
-        per_subject_adjusted_corrections = jnp.ones(num_subjects)
-        per_subject_classical_corrections = jnp.ones(num_subjects)
         # This is the phase this session's real oralytics-scale run was
         # observed to crash inside, back when this step materialized a
         # per-subject (N, out_dim, out_dim) tensor (see
@@ -2969,7 +3028,7 @@ def construct_classical_and_adjusted_sandwiches(
     # Now stably (no explicit inversion) form our sandwiches.
     with log_phase_duration("form_sandwich_from_bread_and_meat (joint)"):
         joint_sandwich = form_sandwich_from_bread_and_meat(
-            raw_joint_bread_matrix,
+            joint_bread_matrix,
             joint_adjusted_meat_matrix,
             num_subjects,
             method=SandwichFormationMethods.BREAD_T_QR,
@@ -2999,7 +3058,7 @@ def construct_classical_and_adjusted_sandwiches(
                 form_adjusted_meat_adjustments_directly(
                     theta_dim,
                     all_post_update_betas.shape[1],
-                    raw_joint_bread_matrix,
+                    joint_bread_matrix,
                     per_subject_estimating_function_stacks,
                     analysis_df,
                     active_col_name,
@@ -3050,7 +3109,7 @@ def construct_classical_and_adjusted_sandwiches(
     # Stack the joint bread pieces together horizontally and return the auxiliary
     # values too. The joint bread should always be block lower triangular.
     return (
-        raw_joint_bread_matrix,
+        joint_bread_matrix,
         joint_adjusted_meat_matrix,
         joint_sandwich,
         classical_bread_matrix,
@@ -3058,8 +3117,6 @@ def construct_classical_and_adjusted_sandwiches(
         classical_sandwich,
         avg_estimating_function_stack,
         per_subject_estimating_function_stacks,
-        per_subject_adjusted_corrections,
-        per_subject_classical_corrections,
         per_subject_adjusted_meat_contributions,
     )
 
@@ -3138,7 +3195,7 @@ def form_sandwich_from_bread_and_meat(
 
 
 def compute_eigenvalue_and_condition_diagnostics(
-    raw_joint_bread_matrix: jnp.ndarray,
+    joint_bread_matrix: jnp.ndarray,
     joint_sandwich_matrix: jnp.ndarray,
     adjusted_sandwich_var_estimate: jnp.ndarray,
 ) -> tuple[float, float, np.ndarray, float, float, np.ndarray, float]:
@@ -3147,7 +3204,7 @@ def compute_eigenvalue_and_condition_diagnostics(
     bread matrix and both the joint and theta-only adjusted sandwich matrices.
 
     Args:
-        raw_joint_bread_matrix (jnp.ndarray):
+        joint_bread_matrix (jnp.ndarray):
             The (unstabilized) joint bread matrix.
         joint_sandwich_matrix (jnp.ndarray):
             The joint (betas and theta) sandwich variance matrix.
@@ -3170,7 +3227,7 @@ def compute_eigenvalue_and_condition_diagnostics(
               eigenvalue ratio for the theta-only adjusted sandwich matrix, over
               eigenvalues >= 1e-8 * max.
     """
-    joint_bread_cond = jnp.linalg.cond(raw_joint_bread_matrix)
+    joint_bread_cond = jnp.linalg.cond(joint_bread_matrix)
     logger.info(
         "Joint bread condition number: %f",
         joint_bread_cond,
@@ -3255,8 +3312,8 @@ class _BucketJitArrays(typing.NamedTuple):
     _build_algorithm_bucket_overrides/_build_inference_bucket_overrides and
     not all-None -- see _bucket_stackable_positions). A plain
     typing.NamedTuple is a first-class JAX pytree with no registration
-    needed (see Investigation A/B discussion above this module's
-    compute_local_linearization_error_ratio).
+    needed (see _rebuild_precomputes_from_jit_arrays' Investigation A/B
+    discussion below).
 
     Deliberately does NOT carry the position indices themselves (which
     positions were stacked, in what order) -- those are static Python ints,
@@ -3307,11 +3364,11 @@ class _InferenceLayerJitArrays(typing.NamedTuple):
 class _DiagnosticJitArrays(typing.NamedTuple):
     """
     The flat pytree that becomes the second, genuinely traced argument of
-    every jitted stack evaluation in this module (_eval_avg_stack_jit, and
-    analyze_dataset's shared bootstrap/diagnostic-suite closure) -- see
-    _eval_avg_stack_jit's own comment for why this (as opposed to closing
-    over the precompute objects directly) is the actual fix for the
-    compile-time-scales-with-N pathology.
+    every jitted stack evaluation in this module (analyze_dataset's shared
+    bootstrap/diagnostic-suite closure) -- see
+    _evaluate_avg_stack_on_shared_precompute's docstring for why this (as
+    opposed to closing over the precompute objects directly) is the actual
+    fix for the compile-time-scales-with-N pathology.
     """
 
     action_prob: _ActionProbLayerJitArrays
@@ -3431,8 +3488,8 @@ def _extract_diagnostic_jit_arrays(
     metadata) out of the three (concrete, numpy-valued) structural
     precompute objects, as a flat pytree of jnp arrays. Called once,
     eagerly (outside any jit trace), per consumer that re-evaluates the
-    stack: compute_local_linearization_error_ratio, and analyze_dataset's
-    shared precompute for the refit bootstrap and the diagnostic suite.
+    stack (analyze_dataset's shared precompute for the refit bootstrap and
+    the diagnostic suite).
 
     This flat pytree is what becomes those jitted closures' second,
     genuinely traced argument: every leaf here is data that scales with the
@@ -3503,7 +3560,7 @@ def _rebuild_precomputes_from_jit_arrays(
 ) -> tuple[ActionProbLayerPrecompute, UpdateLayerPrecompute, InferenceLayerPrecompute]:
     """
     Inverse of _extract_diagnostic_jit_arrays -- called INSIDE the jax.jit
-    trace (from _eval_avg_stack_jit's body, and from analyze_dataset's
+    trace (from analyze_dataset's
     shared stack-evaluation closure): reconstructs three precompute
     objects equivalent to the base ones, but with every extracted field's
     value coming from jit_arrays' traced leaves instead of the base
@@ -3574,342 +3631,6 @@ def _rebuild_precomputes_from_jit_arrays(
         ],
     )
     return action_prob_layer, update_layer, inference_layer
-
-
-def compute_local_linearization_error_ratio(
-    joint_bread_matrix: jnp.ndarray,
-    avg_estimating_function_stack: jnp.ndarray,
-    per_subject_estimating_function_stacks: jnp.ndarray,
-    all_post_update_betas: jnp.ndarray,
-    theta_est: jnp.ndarray,
-    beta_dim: int,
-    theta_dim: int,
-    subject_ids: jnp.ndarray,
-    action_prob_func: Callable,
-    action_prob_func_args_beta_index: int,
-    alg_update_func: Callable,
-    alg_update_func_type: str,
-    alg_update_func_args_beta_index: int,
-    alg_update_func_args_action_prob_index: int,
-    alg_update_func_args_action_prob_times_index: int,
-    alg_update_func_args_previous_betas_index: int,
-    inference_func: Callable,
-    inference_func_type: str,
-    inference_func_args_theta_index: int,
-    inference_func_args_action_prob_index: int,
-    action_prob_func_args_by_subject_id_by_decision_time: dict[
-        collections.abc.Hashable, dict[int, tuple[Any, ...]]
-    ],
-    policy_num_by_decision_time_by_subject_id: dict[
-        collections.abc.Hashable, dict[int, int | float]
-    ],
-    initial_policy_num: int | float,
-    beta_index_by_policy_num: dict[int | float, int],
-    inference_func_args_by_subject_id: dict[collections.abc.Hashable, tuple[Any, ...]],
-    inference_action_prob_decision_times_by_subject_id: dict[
-        collections.abc.Hashable, list[int]
-    ],
-    update_func_args_by_by_subject_id_by_policy_num: dict[
-        collections.abc.Hashable, dict[int | float, tuple[Any, ...]]
-    ],
-    action_by_decision_time_by_subject_id: dict[
-        collections.abc.Hashable, dict[int, int]
-    ],
-    alg_update_func_args_mask_index: int = -1,
-    alg_update_func_args_ragged_indices: tuple[int, ...] = (),
-    inference_func_args_mask_index: int = -1,
-    inference_func_args_ragged_indices: tuple[int, ...] = (),
-) -> tuple[float, float, float]:
-    """
-    Compares the nonlinear Taylor remainder of the joint estimating-function map to
-    the retained linear term, at perturbations on the O(1/sqrt(n)) scale, as a
-    necessary/sanity diagnostic that the first-order linearization the sandwich
-    variance relies on is locally accurate at the estimation scale.
-
-    Define r(delta) = || g(eta+delta) - g(eta) - B delta ||_2 / || B delta ||_2,
-    where g(eta) is the avg per-subject weighted estimating-function stack and B is
-    the joint bread (Jacobian of g w.r.t. flattened betas+theta). This ratio is
-    dimensionless.
-
-    Args:
-        joint_bread_matrix (jnp.ndarray):
-            The joint bread matrix, B above.
-        avg_estimating_function_stack (jnp.ndarray):
-            g(eta) above, evaluated at the final estimate.
-        per_subject_estimating_function_stacks (jnp.ndarray):
-            Per-subject estimating function stacks, used to align perturbation draws
-            with the empirical joint estimating-function stack covariance.
-        all_post_update_betas (jnp.ndarray):
-            All parameter estimates for the algorithm updates.
-        theta_est (jnp.ndarray):
-            The parameter estimate for inference.
-        beta_dim, theta_dim, subject_ids, action_prob_func,
-        action_prob_func_args_beta_index, alg_update_func, alg_update_func_type,
-        alg_update_func_args_beta_index, alg_update_func_args_action_prob_index,
-        alg_update_func_args_action_prob_times_index,
-        alg_update_func_args_previous_betas_index, inference_func,
-        inference_func_type, inference_func_args_theta_index,
-        inference_func_args_action_prob_index,
-        action_prob_func_args_by_subject_id_by_decision_time,
-        policy_num_by_decision_time_by_subject_id, initial_policy_num,
-        beta_index_by_policy_num, inference_func_args_by_subject_id,
-        inference_action_prob_decision_times_by_subject_id,
-        update_func_args_by_by_subject_id_by_policy_num,
-        action_by_decision_time_by_subject_id,
-        alg_update_func_args_mask_index, alg_update_func_args_ragged_indices,
-        inference_func_args_mask_index, inference_func_args_ragged_indices:
-            Passed straight through to get_avg_weighted_estimating_function_stacks_and_aux_values
-            (via this function's own build_update_layer_precompute/build_inference_layer_precompute
-            calls, since this diagnostic builds its structural precompute directly rather than
-            through that function); see that function's own docstring for what the four
-            mask/ragged-indices arguments do.
-
-    Returns:
-        tuple[float, float, float]:
-            The median, 90th percentile, and max local linearization error ratio
-            over the sampled perturbations.
-    """
-    joint_bread = joint_bread_matrix
-    g_hat = avg_estimating_function_stack
-    stacks = per_subject_estimating_function_stacks
-
-    # Add a small ridge to improve numerical stability for ill-conditioned bread.
-    ridge_scale = 1e-8
-
-    # Only add a ridge when the (possibly-already-stabilized) bread is still numerically problematic.
-    cond_threshold = 1e12
-    bread_cond = float(jnp.linalg.cond(joint_bread))
-
-    if (not math.isfinite(bread_cond)) or (bread_cond > cond_threshold):
-        diag_scale = jnp.max(jnp.abs(jnp.diag(joint_bread)))
-        ridge = ridge_scale * jnp.where(diag_scale > 0, diag_scale, 1.0)
-        joint_bread = joint_bread + ridge * jnp.eye(joint_bread.shape[0])
-        logger.info(
-            "Added ridge %.3e to joint bread for diagnostic solve (cond=%.3e, threshold=%.3e).",
-            float(ridge),
-            bread_cond,
-            cond_threshold,
-        )
-
-    num_subjects = stacks.shape[0]
-
-    # One-time structural precompute, built exactly the way
-    # get_avg_weighted_estimating_function_stacks_and_aux_values would build
-    # it itself (same build_*_precompute calls, same raw arguments) -- but
-    # built HERE, once, in plain eager numpy, so it can be extracted into a
-    # traced jit argument below instead of being closed over by
-    # _eval_avg_stack_jit. See _extract_diagnostic_jit_arrays's own
-    # docstring for why closing over these objects directly (the previous
-    # version of this fix) is exactly what caused compile time to balloon
-    # with the number of subjects.
-    subject_ids_np = np.asarray(subject_ids.tolist())
-    base_action_prob_layer = build_action_prob_layer_precompute(
-        subject_ids_np,
-        action_prob_func_args_by_subject_id_by_decision_time,
-        action_by_decision_time_by_subject_id,
-        policy_num_by_decision_time_by_subject_id,
-        beta_index_by_policy_num,
-        initial_policy_num,
-        action_prob_func_args_beta_index,
-    )
-    base_update_layer = build_update_layer_precompute(
-        subject_ids_np,
-        update_func_args_by_by_subject_id_by_policy_num,
-        beta_index_by_policy_num,
-        alg_update_func_args_action_prob_times_index,
-        base_action_prob_layer,
-        alg_update_func_args_mask_index,
-        alg_update_func_args_ragged_indices,
-    )
-    base_inference_layer = build_inference_layer_precompute(
-        inference_func_args_by_subject_id,
-        inference_func_args_action_prob_index,
-        inference_action_prob_decision_times_by_subject_id,
-        base_action_prob_layer,
-        inference_func_args_mask_index,
-        inference_func_args_ragged_indices,
-    )
-    jit_arrays = _extract_diagnostic_jit_arrays(
-        base_action_prob_layer,
-        base_update_layer,
-        base_inference_layer,
-        alg_update_func_args_beta_index,
-        alg_update_func_args_previous_betas_index,
-        alg_update_func_args_action_prob_index,
-        inference_func_args_theta_index,
-        inference_func_args_action_prob_index,
-    )
-
-    # This closure is jit-friendly by construction: suppress_all_data_checks and
-    # include_auxiliary_outputs are hardcoded below (never traced), so the
-    # np.testing.assert_allclose/.tolist()/int() concretization hazards that
-    # broke the earlier, ADR-documented jax.jit attempt on the differentiated
-    # call never enter this trace. Since ADS-139 Step 4 replaced the ragged
-    # per-subject/per-update Python loops with jax.vmap batching, this now
-    # traces to a small, compile-once graph -- worth jitting since this
-    # closure is called J=15 times below (this diagnostic previously
-    # dominated wall-clock, per this ADR's Step 0 benchmark).
-    #
-    # LANDMINE: do not change suppress_all_data_checks to a real,
-    # non-hardcoded value here. check_batched_algorithm_estimating_function_args_equivalent
-    # / check_batched_inference_estimating_function_args_equivalent (called
-    # when suppress_all_data_checks is False) call np.asarray() on their
-    # results -- fine under jax.jacrev's concrete-valued autodiff tracing
-    # (which is all they run under elsewhere), but under jax.jit's abstract
-    # tracing every value in the trace becomes a non-concrete tracer
-    # (confirmed empirically: even a jax.lax.stop_gradient'd value raises
-    # TracerArrayConversionError here, unlike under jacrev alone), so those
-    # checks would hard-crash the moment this closure ever traced with
-    # checks enabled.
-    #
-    # This closure must stay nested here (rather than hoisted to module level like
-    # the outer function around it) because it closes over the static config above
-    # and below: jax.jit needs those values fixed at trace time, and several of
-    # them (the dict-typed args) are unhashable, so they can't be passed as jit
-    # static_argnums/static_argnames to a module-level function instead.
-    #
-    # jit_arrays is this closure's SECOND argument (not closed over) --
-    # deliberately, so its leaves are real jit trace parameters rather than
-    # Python constants XLA would otherwise have to embed as literals (see
-    # docs/adr/0001-adaptive-sandwich-performance-plan.md's "Real-scale
-    # (n=10000) findings" section, and _extract_diagnostic_jit_arrays'
-    # docstring). base_action_prob_layer/base_update_layer/base_inference_layer
-    # ARE still closed over, but only to supply the small, never-traced
-    # metadata dataclasses.replace(...) needs to fill in every field this
-    # closure's jit_arrays argument does not carry (time_to_col,
-    # subject_id_to_pos, subject_ids_in_order, action_prob_times_by_subject,
-    # etc.) -- see _rebuild_precomputes_from_jit_arrays.
-    @jax.jit
-    def _eval_avg_stack_jit(
-        flattened_betas_and_theta: jnp.ndarray,
-        jit_arrays: _DiagnosticJitArrays,
-    ) -> jnp.ndarray:
-        action_prob_layer, update_layer, inference_layer = (
-            _rebuild_precomputes_from_jit_arrays(
-                base_action_prob_layer,
-                base_update_layer,
-                base_inference_layer,
-                jit_arrays,
-                alg_update_func_args_beta_index,
-                alg_update_func_args_previous_betas_index,
-                alg_update_func_args_action_prob_index,
-                inference_func_args_theta_index,
-                inference_func_args_action_prob_index,
-            )
-        )
-        return get_avg_weighted_estimating_function_stacks_and_aux_values(
-            flattened_betas_and_theta,
-            beta_dim,
-            theta_dim,
-            subject_ids,
-            action_prob_func,
-            action_prob_func_args_beta_index,
-            alg_update_func,
-            alg_update_func_type,
-            alg_update_func_args_beta_index,
-            alg_update_func_args_action_prob_index,
-            alg_update_func_args_action_prob_times_index,
-            alg_update_func_args_previous_betas_index,
-            inference_func,
-            inference_func_type,
-            inference_func_args_theta_index,
-            inference_func_args_action_prob_index,
-            action_prob_func_args_by_subject_id_by_decision_time,
-            policy_num_by_decision_time_by_subject_id,
-            initial_policy_num,
-            beta_index_by_policy_num,
-            inference_func_args_by_subject_id,
-            inference_action_prob_decision_times_by_subject_id,
-            update_func_args_by_by_subject_id_by_policy_num,
-            action_by_decision_time_by_subject_id,
-            True,  # suppress_all_data_checks
-            True,  # suppress_interactive_data_checks
-            False,  # include_auxiliary_outputs
-            precomputed_layers=(action_prob_layer, update_layer, inference_layer),
-        )
-
-    # Evaluate at the final estimate.
-    eta_hat = flatten_params(all_post_update_betas, theta_est)
-
-    # Draw perturbations delta_j on the O(1/sqrt(n)) scale, aligned with the empirical
-    # joint estimating function stack covariance, without forming a d_joint x d_joint matrix
-    # square-root. If G is the (n x d) matrix of per-subject stacks, then (1/n) G^T G is the
-    # empirical covariance in joint estimating function stack space. Sampling u = (G^T w)/sqrt(n) with w~N(0, I_n) gives
-    # u ~ N(0, empirical joint estimating function stack covariance G^T G/n ) in joint estimating function stack space.
-    key = jax.random.PRNGKey(0)
-
-    # The number of perturbations we will probe
-    J = 15
-    # Chunk size to reduce peak memory
-    chunk_size = 1
-
-    ratios_list = []
-    chunk_wall_times = []
-    num_chunks = (J + chunk_size - 1) // chunk_size
-
-    for chunk_idx in range(num_chunks):
-        start = chunk_idx * chunk_size
-        end = min(start + chunk_size, J)
-        cur_size = end - start
-        if cur_size <= 0:
-            continue
-
-        chunk_start = time.perf_counter()
-
-        subkey = jax.random.fold_in(key, chunk_idx)
-        W = jax.random.normal(subkey, shape=(cur_size, num_subjects))
-
-        U = (W @ stacks) / jnp.sqrt(num_subjects)
-
-        c = 1.0
-        # TODO: Consider QR decomposition
-        delta = (c / jnp.sqrt(num_subjects)) * jnp.linalg.solve(joint_bread, U.T).T
-
-        B_delta = (joint_bread @ delta.T).T
-        g_plus = jax.vmap(lambda d: _eval_avg_stack_jit(eta_hat + d, jit_arrays))(delta)
-        remainder = g_plus - g_hat - B_delta
-
-        denom = jnp.linalg.norm(B_delta, axis=1)
-        numer = jnp.linalg.norm(remainder, axis=1)
-        ratios = jnp.where(denom > 0, numer / denom, jnp.inf)
-
-        # block_until_ready so each chunk's wall time reflects its own actual
-        # device work (JAX dispatch is async otherwise) -- separates one-time
-        # jit compile cost (chunk 0) from steady-state per-chunk cost.
-        jax.block_until_ready(ratios)
-        chunk_wall_times.append(time.perf_counter() - chunk_start)
-
-        ratios_list.append(ratios)
-
-    logger.info(
-        "Local linearization diagnostic per-chunk wall times (seconds): %s",
-        [round(t, 3) for t in chunk_wall_times],
-    )
-
-    ratios = jnp.concatenate(ratios_list, axis=0)
-
-    local_error_ratio_median = float(jnp.median(ratios))
-    local_error_ratio_p90 = float(jnp.quantile(ratios, 0.9))
-    local_error_ratio_max = float(jnp.max(ratios))
-
-    logger.info(
-        "Local linearization error ratio (median over %d draws): %.6f",
-        J,
-        local_error_ratio_median,
-    )
-    logger.info(
-        "Local linearization error ratio (90th pct over %d draws): %.6f",
-        J,
-        local_error_ratio_p90,
-    )
-
-    logger.info(
-        "Local linearization error ratio (max over %d draws): %.6f",
-        J,
-        local_error_ratio_max,
-    )
-
-    return local_error_ratio_median, local_error_ratio_p90, local_error_ratio_max
 
 
 if __name__ == "__main__":

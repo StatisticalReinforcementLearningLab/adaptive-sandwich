@@ -177,7 +177,7 @@ def _run_package_pipeline_with_meat_adjustments(beta_hat, theta_hat):
     )
 
     (
-        _raw_joint_bread_matrix,
+        _joint_bread_matrix,
         _joint_adjusted_meat_matrix,
         joint_sandwich_matrix,
         classical_bread_matrix,
@@ -185,8 +185,6 @@ def _run_package_pipeline_with_meat_adjustments(beta_hat, theta_hat):
         _classical_sandwich,
         _avg_estimating_function_stack,
         _per_subject_estimating_function_stacks,
-        _per_subject_adjusted_corrections,
-        _per_subject_classical_corrections,
         per_subject_adjusted_meat_contributions,
     ) = post_deployment_analysis.construct_classical_and_adjusted_sandwiches(
         theta_hat_jnp,

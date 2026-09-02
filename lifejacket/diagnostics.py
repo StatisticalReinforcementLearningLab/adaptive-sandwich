@@ -389,6 +389,117 @@ class DiagnosticReport:
     verdict_basis: str = ""
 
 
+# One short action phrase per verdict, printed beside it in the final summary so the reader
+# does not need DiagnosticVerdicts' docstring open to know what the word means for them.
+_VERDICT_ACTION_PHRASES = {
+    DiagnosticVerdicts.CERTIFIED: "report this CI",
+    DiagnosticVerdicts.CONSERVATIVE: "report this CI; its width is likely inflated",
+    DiagnosticVerdicts.UNCERTIFIABLE: "do NOT report this CI as validated",
+    DiagnosticVerdicts.INVALID: "do NOT report this CI",
+}
+
+_SUMMARY_NAME_WIDTH = 34
+_SUMMARY_STATUS_WIDTH = 15
+_SUMMARY_DETAIL_WIDTH = 78
+
+
+def _summary_row(name: str, status: str, detail: str) -> str:
+    if len(detail) > _SUMMARY_DETAIL_WIDTH:
+        detail = detail[: _SUMMARY_DETAIL_WIDTH - 3] + "..."
+    # The +2s guarantee a gutter even when a name or status fills its column exactly.
+    return (
+        f"{name[:_SUMMARY_NAME_WIDTH]:<{_SUMMARY_NAME_WIDTH + 2}}"
+        f"{status.upper():<{_SUMMARY_STATUS_WIDTH}}"
+        f"{detail}"
+    ).rstrip()
+
+
+def _check_result_detail(result: CheckResult) -> str:
+    detail = result.message or (result.warnings[0] if result.warnings else "")
+    extra_flags = len(result.warnings) - (0 if result.message else 1)
+    suffix = ""
+    if result.warnings and extra_flags > 0:
+        suffix = f" (+{extra_flags} more flag{'s' if extra_flags > 1 else ''})"
+    # Truncate the base text, never the flag-count suffix: "how much more is there" must
+    # survive however long the first warning happens to be.
+    max_base_length = _SUMMARY_DETAIL_WIDTH - len(suffix)
+    if len(detail) > max_base_length:
+        detail = detail[: max_base_length - 3] + "..."
+    return detail + suffix
+
+
+def diagnostics_flagged(report: DiagnosticReport | None) -> bool:
+    """
+    Single definition of "did the diagnostics flag this run" for job-level consequences (the
+    final summary's tone, gating the estimate printout behind consent, and the CLI's nonzero
+    exit): True exactly when the verdict says the CI should not be reported (UNCERTIFIABLE or
+    INVALID -- see DiagnosticVerdicts), falling back to classification == failed for reports
+    pickled before the verdict field existed, and True when there is no report at all (the
+    suite was requested but did not produce one): an unevaluated run must not look like a
+    passing one to automation.
+    """
+    if report is None:
+        return True
+    if report.verdict:
+        return report.verdict in (
+            DiagnosticVerdicts.UNCERTIFIABLE,
+            DiagnosticVerdicts.INVALID,
+        )
+    return report.classification == DiagnosticClassifications.FAILED
+
+
+def format_diagnostic_summary(
+    report: DiagnosticReport | None,
+    pipeline_rows: Sequence[tuple[str, str, str]] = (),
+    suite_error: str = "",
+) -> str:
+    """
+    Renders the end-of-run diagnostic summary: one status row per input check and per suite
+    check, then the caller's pipeline-level rows (quantities computed outside the suite, e.g.
+    the bread condition number and the local linearization ratio, as (name, status, detail)
+    triples), then the decision-level verdict. This is the one block a reader who scrolled
+    straight to the bottom must be able to act on -- the estimates print AFTER it, so a failed
+    run cannot end with a wall of plausible-looking numbers.
+
+    `report` None means the suite was requested but produced no report (crashed, in
+    `suite_error`); that renders as an explicit DID NOT RUN row and an UNAVAILABLE verdict,
+    which diagnostics_flagged treats as flagged.
+    """
+    lines = [
+        "=" * 72,
+        "DIAGNOSTIC SUMMARY",
+        "-" * 72,
+    ]
+    if report is None:
+        detail = f"error: {suite_error}" if suite_error else ""
+        lines.append(_summary_row("diagnostic suite", "did not run", detail))
+        verdict_line = (
+            "VERDICT: UNAVAILABLE -- the diagnostic suite produced no report; "
+            "treat this run as unvalidated"
+        )
+    else:
+        for name, result in report.input_check_results.items():
+            lines.append(
+                _summary_row(name, result.status, _check_result_detail(result))
+            )
+        for name, result in report.check_results.items():
+            lines.append(
+                _summary_row(name, result.status, _check_result_detail(result))
+            )
+        verdict = report.verdict or report.classification
+        action = _VERDICT_ACTION_PHRASES.get(verdict, "")
+        basis = f" (basis: {report.verdict_basis})" if report.verdict_basis else ""
+        verdict_line = f"VERDICT: {verdict.upper()}{basis}"
+        if action:
+            verdict_line += f" -- {action}"
+    for name, status, detail in pipeline_rows:
+        lines.append(_summary_row(name, status, detail))
+    lines.append("-" * 72)
+    lines.append(verdict_line)
+    lines.append("=" * 72)
+    return "\n".join(lines)
+
+
 ###############################################################################
 # Small numerical primitives shared by every check. B_hat is factored exactly once and never
 # explicitly inverted; every downstream solve reuses that factorization.
@@ -478,11 +589,16 @@ def run_input_checks(
 ) -> dict[str, CheckResult]:
     """
     Re-runs any supplied legacy lifejacket.input_checks functions, converting each one's hard
-    raise into its own failed CheckResult rather than propagating. This exists purely for
-    automatability: the main analyze_dataset pipeline's own call to these same functions can pop
-    an interactive confirmation prompt and raise, which has no sensible meaning in an unattended
-    context (e.g. a cluster job with nobody to answer "(y/n)") -- this gives the same underlying
-    fact a non-interactive, structured, always-present outcome instead.
+    raise into its own failed CheckResult rather than propagating -- a non-interactive,
+    structured, always-present outcome for callers wiring their own checks into
+    run_diagnostic_suite (e.g. an unattended cluster job with nobody to answer an interactive
+    "(y/n)" prompt and raise). analyze_dataset itself no longer passes any callables here
+    (2026-09-02): its one wired-in check, action-probability reconstruction, is the most
+    expensive input check (it evaluates action_prob_func over every active row) and was being
+    executed twice per analysis. It already runs in the first-wave input checks, is a hard
+    failure with no interactive continue path, and nothing between that run and the suite
+    touches its inputs -- so analyze_dataset records the first-wave outcome into
+    DiagnosticReport.input_check_results directly instead of re-executing it.
     """
     results: dict[str, CheckResult] = {}
     for check_name, check_callable in legacy_check_callables:

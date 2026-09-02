@@ -155,12 +155,16 @@ practical "why would I care" for each one, in the order they run.
 functions the main `analyze_dataset` pipeline already runs -- and converts each one's hard raise
 into its own `failed` `CheckResult` rather than propagating, giving an otherwise-interactive check
 (one that can pop a `(y/n)` confirmation prompt) a non-interactive, structured outcome instead.
-`analyze_dataset` wires in
-`input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed` here -- but only
-when `suppress_all_data_checks=False`, the same gate its own direct input-check calls obey. With
-checks suppressed the callable is not wired in at all (the suite must not re-run, let alone
-hard-fail on, a check you explicitly turned off), and `analyze_dataset` writes an `indeterminate`
-entry under the same name with the message `"Not run: suppress_all_data_checks=True."` instead.
+`analyze_dataset` no longer re-executes any check here (as of 2026-09-02): the one check it
+used to wire in, `require_action_probabilities_in_analysis_df_can_be_reconstructed`, is the most
+expensive input check (it evaluates the action-probability function over every active row), and
+it already runs -- as a hard failure, with no interactive continue path -- in the first-wave
+input checks near the start of the pipeline, on inputs nothing later touches. Reaching the suite
+proves it passed, so `analyze_dataset` records that outcome directly: a `passed` entry (with a
+provenance message) under `action_probabilities_reconstructed` when data checks ran, and an
+`indeterminate` entry with the message `"Not run: suppress_all_data_checks=True."` when
+`suppress_all_data_checks=True` (the suite must not re-run, let alone hard-fail on, a check you
+explicitly turned off).
 **So `input_check_results` is not a passed/failed dict**: read an `indeterminate` entry there as
 "not run," not as a finding.
 
@@ -176,16 +180,18 @@ example.
 **The sum-to-zero check isn't wired in here, on purpose -- and it's now SE-standardized.** The
 main `analyze_dataset` pipeline runs
 `require_estimating_functions_sum_to_zero_se_standardized` (interactively, and like every other
-input check only when `suppress_all_data_checks=False`): the
-residual is judged by the displacement it induces on every stacked estimate in units of that
-estimate's own SE (`a_j = |(B_hat^{-1} r)_j| / SE_j`, soft 0.01 / hard 0.1), replacing the
+input check only when `suppress_all_data_checks=False`): each component of the residual (the
+subject-mean estimating function) is judged against its own standard error, taken directly from
+the per-subject values that were averaged
+(`a_j = |mean_i psi_ij| / (rms_i psi_ij / sqrt(n))`, soft 0.01 / hard 0.1), replacing the
 legacy raw-units version whose absolute tolerances were reward-scale-dependent and documented to
-false-alarm on healthy high-noise runs (docs/adr/0002). This is `a_root_max`'s construction
-extended beyond the theta targets to every update block, with per-update attribution -- so it is
-a genuine value-level test of the stacked model of the algorithm (do the recorded parameters
-actually root the claimed update equations on the real data?), not just a rerun of the root
-check. It isn't duplicated into this dict because the pipeline already runs it before the
-suite ever starts.
+false-alarm on healthy high-noise runs (docs/adr/0002; an intermediate bread/sandwich
+displacement form was itself replaced 2026-09-02 because it inherited the sandwich's
+degeneracies and went blind exactly in the blow-up regimes). It carries per-update attribution,
+so it is a genuine value-level test of the stacked model of the algorithm (do the recorded
+parameters actually root the claimed update equations on the real data?), not just a rerun of
+the root check. It isn't duplicated into this dict because the pipeline already runs it before
+the suite ever starts.
 
 ### 4.2 `check_root_and_implementation` -- is the thing I built actually correct?
 

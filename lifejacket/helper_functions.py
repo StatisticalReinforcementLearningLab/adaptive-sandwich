@@ -584,6 +584,21 @@ def confirm_input_check_result(message, suppress_interaction, error=None):
             print("\nPlease enter 'y' or 'n'.\n")
 
 
+def prompt_yes_no(message) -> bool:
+    """
+    Interactive y/n question whose answer is a plain bool -- unlike
+    confirm_input_check_result above, 'n' is an ordinary answer here, not an abort. Used where
+    the caller owns the consequence (e.g. whether to print flagged estimates), while the
+    confirm variant remains the one for checks where 'n' means 'stop the run'.
+    """
+    answer = None
+    while answer not in ("y", "n"):
+        answer = input(message).lower()
+        if answer not in ("y", "n"):
+            print("\nPlease enter 'y' or 'n'.\n")
+    return answer == "y"
+
+
 def get_active_df_column(analysis_df, col_name, active_col_name):
     return jnp.array(
         analysis_df.loc[analysis_df[active_col_name] == 1, col_name]

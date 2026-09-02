@@ -2322,3 +2322,109 @@ def test_batched_bootstrap_resolves_auto_is_refused():
     assert d._resolve_bootstrap_batch_width(always, num_planned_trials=1000) > 0
     off = d.DiagnosticConfig(batched_bootstrap_resolves="off")
     assert d._resolve_bootstrap_batch_width(off, num_planned_trials=1000) == 0
+
+
+# ---------------------------------------------------------------------------
+# 10. format_diagnostic_summary / diagnostics_flagged -- the end-of-run surface: the one block
+#     a reader who scrolled straight to the bottom must be able to act on, and the single
+#     definition of "flagged" the CLI's exit status and the consent gate both consume.
+# ---------------------------------------------------------------------------
+
+
+def _summary_report(**overrides):
+    fields = dict(
+        classification=DiagnosticClassifications.FAILED,
+        check_results={
+            "bread_stability": d.CheckResult(
+                name="bread_stability",
+                status=CheckStatuses.FAILED,
+                warnings=[
+                    "Target SEs changed by 99.99% under a numerically negligible "
+                    "(1.0e-06 relative) perturbation of B_hat -- this indicates numerical "
+                    "fragility distinct from statistical identification.",
+                    "Second flag.",
+                    "Third flag.",
+                ],
+            ),
+            "influence_concentration": d.CheckResult(
+                name="influence_concentration", status=CheckStatuses.PASSED
+            ),
+        },
+        input_check_results={
+            "action_probabilities_reconstructed": d.CheckResult(
+                name="action_probabilities_reconstructed",
+                status=CheckStatuses.PASSED,
+            ),
+        },
+        metrics={},
+        tolerances_used={},
+        warnings=[],
+        monte_carlo_counts={},
+        target_labels=[],
+        rank_diagnostics={},
+        verdict=DiagnosticVerdicts.INVALID,
+        verdict_basis="",
+    )
+    fields.update(overrides)
+    return d.DiagnosticReport(**fields)
+
+
+def test_format_diagnostic_summary_lists_every_check_and_the_verdict():
+    summary = d.format_diagnostic_summary(
+        _summary_report(),
+        pipeline_rows=[
+            (
+                "joint_bread_condition_number",
+                CheckStatuses.FAILED,
+                "cond = 1.473e+13 > 1e+12",
+            )
+        ],
+    )
+    for expected in (
+        "action_probabilities_reconstructed",
+        "bread_stability",
+        "influence_concentration",
+        "joint_bread_condition_number",
+        "FAILED",
+        "PASSED",
+        "(+2 more flags)",
+        "VERDICT: INVALID -- do NOT report this CI",
+    ):
+        assert expected in summary
+    # Long warning texts are truncated into the detail column, not wrapped or dumped whole:
+    # every line stays terminal-width readable.
+    assert all(len(line) <= 130 for line in summary.splitlines())
+    # The verdict is the last substantive line, so it cannot scroll away above a wall of rows.
+    assert "VERDICT:" in summary.splitlines()[-2]
+
+
+def test_format_diagnostic_summary_with_no_report_renders_did_not_run():
+    summary = d.format_diagnostic_summary(None, suite_error="ValueError: boom")
+    assert "DID NOT RUN" in summary
+    assert "ValueError: boom" in summary
+    assert "VERDICT: UNAVAILABLE" in summary
+
+
+def test_diagnostics_flagged_definition():
+    # Verdict-first: only the two do-not-report verdicts flag.
+    assert d.diagnostics_flagged(_summary_report(verdict=DiagnosticVerdicts.INVALID))
+    assert d.diagnostics_flagged(
+        _summary_report(verdict=DiagnosticVerdicts.UNCERTIFIABLE)
+    )
+    assert not d.diagnostics_flagged(
+        _summary_report(verdict=DiagnosticVerdicts.CERTIFIED)
+    )
+    assert not d.diagnostics_flagged(
+        _summary_report(verdict=DiagnosticVerdicts.CONSERVATIVE)
+    )
+    # Pre-verdict reports (empty string) fall back to classification.
+    assert d.diagnostics_flagged(
+        _summary_report(verdict="", classification=DiagnosticClassifications.FAILED)
+    )
+    assert not d.diagnostics_flagged(
+        _summary_report(
+            verdict="", classification=DiagnosticClassifications.LOCALLY_SUPPORTED
+        )
+    )
+    # No report at all (the suite crashed): an unevaluated run must read as flagged.
+    assert d.diagnostics_flagged(None)

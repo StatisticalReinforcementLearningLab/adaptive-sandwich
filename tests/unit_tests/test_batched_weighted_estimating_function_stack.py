@@ -625,13 +625,19 @@ def test_compute_batched_algorithm_component_with_mask_matches_unpadded_per_subj
         np.testing.assert_allclose(by_subject_pos[pos], sum(state))
 
 
-def test_build_inference_layer_precompute_mask_index_consolidates_and_matches_unpadded_sums():
+def test_compute_batched_inference_outputs_matches_per_subject_sums_across_buckets():
     """
-    Inference-side counterpart to
-    test_compute_batched_algorithm_component_with_mask_matches_unpadded_per_subject_sums.
-    Three subjects with staggered per-subject history lengths collapse from
-    3 buckets to 1 when opted in, and a mask-aware inference_estimating_func
-    reproduces each subject's own unpadded sum exactly.
+    compute_batched_inference_outputs scatters each shape-bucket's vmapped result into the
+    right per-subject rows -- check that with three subjects of DIFFERENT history lengths,
+    i.e. three separate exact-shape buckets, every subject gets its own sum back.
+
+    This replaces test_build_inference_layer_precompute_mask_index_consolidates_and_matches_unpadded_sums,
+    removed on 2026-09-02 with build_inference_layer_precompute's mask_index/ragged_indices
+    parameters. That test was the only direct unit test of compute_batched_inference_outputs,
+    so the half of it that did not concern masking is kept here. Multi-bucket scatter is
+    arguably the better exercise of this function anyway: the deleted version consolidated
+    everything into ONE bucket, so it could not have caught a scatter that mixed up rows
+    across buckets.
     """
     subject_ids = np.array([1, 2, 3])
     action_prob_layer = build_action_prob_layer_precompute(
@@ -656,42 +662,32 @@ def test_build_inference_layer_precompute_mask_index_consolidates_and_matches_un
         for sid, rewards in per_subject_reward.items()
     }
 
-    unpadded_layer = build_inference_layer_precompute(
+    layer = build_inference_layer_precompute(
         inference_func_args_by_subject_id,
         -1,  # inference_func_args_action_prob_index
         {},
         action_prob_layer,
     )
-    assert len(unpadded_layer.buckets) == 3
+    # Three distinct history lengths -> three exact-shape buckets.
+    assert len(layer.buckets) == 3
 
-    padded_layer = build_inference_layer_precompute(
-        inference_func_args_by_subject_id,
-        -1,  # inference_func_args_action_prob_index
-        {},
-        action_prob_layer,
-        inference_func_args_mask_index=2,
-        inference_func_args_ragged_indices=(1,),
-    )
-    assert len(padded_layer.buckets) == 1
+    def sum_estimating_func(theta, rewards):
+        return jnp.sum(rewards).reshape(1)
 
-    def mask_aware_sum_estimating_func(theta, rewards, mask):
-        return jnp.sum(mask * rewards).reshape(1)
-
-    theta = jnp.array([0.0])
     weighted_component, _, bucket_outputs = compute_batched_inference_outputs(
-        theta,
+        jnp.array([0.0]),
         1,  # theta_dim
-        mask_aware_sum_estimating_func,
+        sum_estimating_func,
         0,  # inference_func_args_theta_index
         -1,  # inference_func_args_action_prob_index
         action_prob_layer,
-        padded_layer,
+        layer,
         None,  # pi_beta_grid
         jnp.ones(3),  # inference_weight_products
         need_hessians=False,
     )
 
-    assert len(bucket_outputs) == 1
+    assert len(bucket_outputs) == 3
     for sid, rewards in per_subject_reward.items():
         pos = action_prob_layer.subject_id_to_pos[sid]
         np.testing.assert_allclose(float(weighted_component[pos, 0]), sum(rewards))

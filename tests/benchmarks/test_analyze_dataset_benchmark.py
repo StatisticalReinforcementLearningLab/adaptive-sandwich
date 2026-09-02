@@ -35,7 +35,6 @@ directory.
 from __future__ import annotations
 
 import logging
-import pathlib
 import pickle
 import re
 import time
@@ -131,49 +130,7 @@ def _run_analyze_dataset(tmp_path, scale, suppress_all_data_checks, caplog):
         if match
     ]
 
-    # debug_pieces.pkl (unlike analysis.pkl, loaded into `result` above)
-    # carries the local-linearization diagnostic's own numeric output
-    # (local_linearization_error_ratio_median/p90/max, computed by
-    # compute_local_linearization_error_ratio) -- see this test module's own
-    # LOCAL_LINEARIZATION_GOLDEN for why this is checked here.
-    with open(pathlib.Path(tmp_path) / "debug_pieces.pkl", "rb") as f:
-        debug_pieces = pickle.load(f)
-
-    return result, debug_pieces, total_seconds, phase_timings
-
-
-# compute_local_linearization_error_ratio's own numeric output
-# (local_linearization_error_ratio_median/p90/max, in debug_pieces.pkl) had
-# never been checked against an expected value anywhere in this repo before
-# (its keys were only checked for PRESENCE in tests/utils.py's
-# assert_real_run_output_as_expected, used by tests/integration_tests) --
-# confirmed finding 2(a) of the ADS-139 hot-path rewrite (see
-# docs/adr/0001-adaptive-sandwich-performance-plan.md). These are first-run
-# values, pinned here rather than hand-derived from first principles: the
-# diagnostic already draws its J=15 perturbations from a fixed
-# jax.random.PRNGKey(0) (see compute_local_linearization_error_ratio), so
-# given the already-golden theta_est/betas this test's other assertions
-# pin, its three summary statistics are fully deterministic -- there is
-# nothing further to "pin down" by re-deriving them from scratch that this
-# fixed-seed determinism doesn't already give. Not compared against
-# suppress_all_data_checks=False's own analyze_dataset run, since the
-# diagnostic itself always hardcodes suppress_all_data_checks=True/
-# suppress_interactive_data_checks=True internally (see
-# compute_local_linearization_error_ratio's own LANDMINE comment) and is
-# otherwise identical either way -- confirmed empirically, both variants
-# produce bit-identical values at both scales.
-LOCAL_LINEARIZATION_GOLDEN = {
-    "small": {
-        "median": 0.11875026673078537,
-        "p90": 0.20014047622680664,
-        "max": 0.20171566307544708,
-    },
-    "medium": {
-        "median": 0.0222441665828228,
-        "p90": 0.04883337765932083,
-        "max": 0.06498895585536957,
-    },
-}
+    return result, total_seconds, phase_timings
 
 
 def _print_timing_report(label, total_seconds, phase_timings):
@@ -208,7 +165,7 @@ def test_analyze_dataset_benchmark(tmp_path, caplog, scale, suppress_all_data_ch
     signal for whether a change made this hot path faster or slower, and
     whether it changed the answer.
     """
-    result, debug_pieces, total_seconds, phase_timings = _run_analyze_dataset(
+    result, total_seconds, phase_timings = _run_analyze_dataset(
         tmp_path, scale, suppress_all_data_checks, caplog
     )
     _print_timing_report(
@@ -263,27 +220,4 @@ def test_analyze_dataset_benchmark(tmp_path, caplog, scale, suppress_all_data_ch
         np.asarray(golden["classical_sandwich_var_estimate"]),
         rtol=1e-5,
         err_msg="classical_sandwich_var_estimate diverged from the golden fixture.",
-    )
-
-    # See LOCAL_LINEARIZATION_GOLDEN's own comment: this hot path has been
-    # substantially rewritten twice (ADS-139) with no numeric check on its
-    # own output anywhere in the repo until now.
-    local_linearization_golden = LOCAL_LINEARIZATION_GOLDEN[scale]
-    np.testing.assert_allclose(
-        float(debug_pieces["local_linearization_error_ratio_median"]),
-        local_linearization_golden["median"],
-        rtol=1e-5,
-        err_msg="local_linearization_error_ratio_median diverged from its pinned value.",
-    )
-    np.testing.assert_allclose(
-        float(debug_pieces["local_linearization_error_ratio_p90"]),
-        local_linearization_golden["p90"],
-        rtol=1e-5,
-        err_msg="local_linearization_error_ratio_p90 diverged from its pinned value.",
-    )
-    np.testing.assert_allclose(
-        float(debug_pieces["local_linearization_error_ratio_max"]),
-        local_linearization_golden["max"],
-        rtol=1e-5,
-        err_msg="local_linearization_error_ratio_max diverged from its pinned value.",
     )

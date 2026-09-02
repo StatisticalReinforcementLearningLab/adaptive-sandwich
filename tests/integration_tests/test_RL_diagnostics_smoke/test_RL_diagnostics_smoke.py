@@ -20,7 +20,10 @@ def test_RL_diagnostics_smoke(run_local_pipeline):  # pylint: disable=redefined-
     # A small/fast configuration -- this test is about exercising the new run_diagnostics=True
     # path end-to-end against the real simulator and estimator, not about a specific numeric
     # result (see tests/unit_tests/test_diagnostics.py for the closed-form correctness checks).
-    run_local_pipeline(
+    # fail_on_flagged_diagnostics=0 because this config's verdict is allowed to be flagged
+    # (the classification assertion below accepts failed) and the CLI would then exit 3 --
+    # this test is the documented read-the-report-from-disk consumer of that flag.
+    result = run_local_pipeline(
         T="6",
         n="20",
         recruit_n="10",
@@ -28,7 +31,13 @@ def test_RL_diagnostics_smoke(run_local_pipeline):  # pylint: disable=redefined-
         alg_seed_override="1726463458",
         suppress_interactive_data_checks="1",
         run_diagnostics="1",
+        fail_on_flagged_diagnostics="0",
     )
+
+    # The end-of-run diagnostic summary and verdict must be printed whenever the suite runs.
+    stdout_text = str(result)
+    assert "DIAGNOSTIC SUMMARY" in stdout_text
+    assert "VERDICT:" in stdout_text
 
     output_dir = get_abs_path(
         __file__,
@@ -288,17 +297,22 @@ def test_diagnostic_suite_runs_on_a_mask_aware_study(
 def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):
     """
     The bootstrap runs after the adjusted sandwich is computed but BEFORE anything is written,
-    so an unguarded failure there threw away a completed analysis over an added interval. A
-    negative seed is the cheapest way to make the bootstrap block itself (not an individual
-    draw) fail: np.random.default_rng rejects it immediately.
-
-    Note the CLI now rejects a negative --percentile_bootstrap_seed at the boundary via
-    click.IntRange(min=0); this exercises the library entry point, where the guard has to be
-    the try/except rather than argument parsing.
+    so an unguarded failure there threw away a completed analysis over an added interval. The
+    guard's contract is that ANY exception escaping the bootstrap block is recorded and the
+    surrounding analysis still lands on disk, so the failure is injected at the block's entry
+    point directly: patch refit_percentile_bootstrap to raise (on post_deployment_analysis,
+    per the NOTE above). This test used to reach the same guard by passing
+    percentile_bootstrap_seed=-1 through the library entry point, but
+    require_valid_percentile_bootstrap_settings now rejects that upfront, before the sandwich
+    is ever computed -- and any replacement sneak-a-bad-value route would be one validation
+    tightening away from breaking the same way.
     """
-    result = _run_masked_analyze_dataset(
-        tmp_path, percentile_bootstrap_draws=4, percentile_bootstrap_seed=-1
-    )
+    with mock.patch.object(
+        post_deployment_analysis,
+        "refit_percentile_bootstrap",
+        side_effect=ValueError("injected bootstrap failure"),
+    ):
+        result = _run_masked_analyze_dataset(tmp_path, percentile_bootstrap_draws=4)
 
     assert "theta_est" in result
     analysis = _load_pickle(tmp_path, "analysis.pkl")

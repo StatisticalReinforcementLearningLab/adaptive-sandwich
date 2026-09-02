@@ -1,3 +1,11 @@
+# Stop at the FIRST failing hook instead of running them all. Without this, a ruff or
+# ruff-format failure -- which is usually just "the hook rewrote your files" -- still lets the
+# pytest-unit hook run its full ~70s suite, only for the commit to abort anyway; you then fix
+# nothing, re-commit, and pay for that suite a second time. Ordering matters here: the fast
+# formatting hooks run first, so short-circuiting means the slow one runs only once, on a tree
+# that is already clean.
+fail_fast: true
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.8

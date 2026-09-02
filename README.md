@@ -11,6 +11,10 @@
 
 Save your standard errors from "pooling" in online decision-making algorithms.
 
+TODO: Link to Arxiv paper for background.
+
+
+
 ## Setup
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 - Install uv (see the [install docs](https://docs.astral.sh/uv/getting-started/installation/))
@@ -20,12 +24,12 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 ### Adding a package
 - Runtime dependency: `uv add <package>`
 - Dev/test-only dependency: `uv add --optional dev <package>`
-- Either updates `pyproject.toml` and `uv.lock` together
+- Both commands update `pyproject.toml` and `uv.lock` together
 
 ## Running the code
 
 ### From the command line
-The primary interface is the `lifejacket analyze` CLI command (installed by `uv sync`). It takes pickled inputs (an analysis dataframe plus the per-subject/per-decision-time argument dictionaries for your action-probability, algorithm-update, and inference functions) and paths to the Python files defining those functions:
+The primary interface is the `lifejacket analyze` CLI command (installed by `uv sync`). It takes pickled inputs (an analysis dataframe plus the per-subject/per-decision-time argument dictionaries for your action-probability function, algorithm-update loss or estimating function, and inference loss or estimating function) and paths to the Python files defining those functions:
 
 ```bash
 uv run lifejacket analyze \
@@ -155,11 +159,15 @@ It does not change the adjusted sandwich estimator itself,
 and a diagnostic failure does not mean the classical sandwich is valid instead. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish, or
 [`docs/diagnostics_tutorial.md`](docs/diagnostics_tutorial.md) for a practical guide to reading a
-`DiagnosticReport` and deciding what to do about it. Separately -- and not one of the checks
-above, since it requires a multi-run simulator experiment rather than a single `analyze_dataset`
-call -- `lifejacket.simulator_calibration.calibrate_and_classify` can validate a diagnostic
-threshold against a known ground truth; see `docs/diagnostics_tutorial.md`'s closing section for
-how to run one yourself.
+`DiagnosticReport` and deciding what to do about it.
+
+No single-run check can establish what repeated sampling establishes, so validating a diagnostic
+threshold against known ground truth means running many simulated deployments and comparing the
+threshold's verdicts to what actually happened -- a multi-run experiment, not something one
+`analyze_dataset` call can produce. `docs/adr/0002-diagnostic-threshold-calibration-plan.md`
+designs exactly that experiment and records what its ~27,000 runs measured, including the
+operating characteristics (precision/recall) now quoted for individual checks in
+`docs/diagnostics.md`.
 
 ## Linting/Formatting
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting, run automatically via [pre-commit](https://pre-commit.com/) before every commit.
@@ -195,7 +203,8 @@ uv run python -m pytest tests/integration_tests    # slower, real simulator runs
 Both suites also run on every pull request (`.github/workflows/run_unit_tests_on_prs.yml`
 and `run_integration_tests_on_prs.yml`).
 
-The unit tests, but not the integration tests, will run on every commit once pre-commit is installed as described above.
+The unit tests, but not the integration tests, will run on every commit once pre-commit
+is installed as described above.
 
 ### Performance benchmarks
 `tests/benchmarks` is a phase-timing + numerical-regression benchmark for

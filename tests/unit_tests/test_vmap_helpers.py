@@ -152,6 +152,29 @@ def test_stack_batched_arg_lists_into_tensors_rejects_nested_sequence_naming_pos
         stack_batched_arg_lists_into_tensors(batched_arg_lists)
 
 
+def test_stack_batched_arg_lists_into_tensors_2d_dtype_failure_is_typeerror_not_shape_advice():
+    # SAME-shape 2-D arrays that jnp cannot convert (object dtype here) must raise a
+    # TypeError blaming the dtype -- not the shape-mismatch ValueError, whose "supply
+    # the same array shape" advice would send the caller the wrong way.
+    same_shape_object_arrays = [
+        np.array([["a", "b"], ["c", "d"]], dtype=object),
+        np.array([["e", "f"], ["g", "h"]], dtype=object),
+    ]
+
+    with pytest.raises(TypeError, match=r"position 0.*numeric or boolean dtype"):
+        stack_batched_arg_lists_into_tensors([same_shape_object_arrays])
+
+
+def test_stack_batched_arg_lists_into_tensors_1d_dtype_failure_is_typeerror_not_shape_advice():
+    same_length_object_arrays = [
+        np.array([0.1, "b"], dtype=object),
+        np.array([0.2, "c"], dtype=object),
+    ]
+
+    with pytest.raises(TypeError, match=r"position 0.*numeric or boolean dtype"):
+        stack_batched_arg_lists_into_tensors([same_length_object_arrays])
+
+
 def test_stack_batched_arg_lists_into_tensors_rejects_strings_naming_position():
     # Strings dodge the vector branch (deliberately) and land in the scalar branch,
     # where jnp.array raises a jax-internal TypeError; it must be wrapped with the

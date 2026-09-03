@@ -100,11 +100,21 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
             try:
                 stacked = jnp.stack(batched_arg_list, 0)
             except Exception as e:
-                raise ValueError(
-                    f"Argument position {position}: could not stack the "
-                    f"per-subject 2-D arrays into one batch tensor ({e}). Every "
-                    "subject in a batch must supply the same array shape at "
-                    "each argument position."
+                # Blame the actual cause: a ValueError with shape advice only when
+                # the shapes really do differ, a TypeError otherwise (e.g. an
+                # object- or datetime-dtype array jnp cannot convert) -- shape
+                # advice for a dtype problem would send the caller the wrong way.
+                if len({getattr(x, "shape", None) for x in batched_arg_list}) > 1:
+                    raise ValueError(
+                        f"Argument position {position}: could not stack the "
+                        f"per-subject 2-D arrays into one batch tensor ({e}). "
+                        "Every subject in a batch must supply the same array "
+                        "shape at each argument position."
+                    ) from e
+                raise TypeError(
+                    f"Argument position {position}: the per-subject 2-D arrays "
+                    f"cannot be converted to a JAX numpy batch tensor ({e}). "
+                    "Arrays must have a numeric or boolean dtype."
                 ) from e
             batched_arg_tensors.append(stacked)
             batch_axes.append(0)
@@ -131,11 +141,18 @@ def stack_batched_arg_lists_into_tensors(batched_arg_lists):
             try:
                 stacked = jnp.vstack(batched_arg_list)
             except Exception as e:
-                raise ValueError(
-                    f"Argument position {position}: could not stack the "
-                    f"per-subject 1-D vectors into one batch tensor ({e}). Every "
-                    "subject in a batch must supply the same vector length at "
-                    "each argument position."
+                # Same cause-splitting as the 2-D branch above.
+                if len({getattr(x, "shape", None) for x in batched_arg_list}) > 1:
+                    raise ValueError(
+                        f"Argument position {position}: could not stack the "
+                        f"per-subject 1-D vectors into one batch tensor ({e}). "
+                        "Every subject in a batch must supply the same vector "
+                        "length at each argument position."
+                    ) from e
+                raise TypeError(
+                    f"Argument position {position}: the per-subject 1-D vectors "
+                    f"cannot be converted to a JAX numpy batch tensor ({e}). "
+                    "Arrays must have a numeric or boolean dtype."
                 ) from e
             batched_arg_tensors.append(stacked)
             batch_axes.append(0)

@@ -1693,7 +1693,12 @@ def require_analysis_df_values_finite(
 
 def _is_supported_numeric_scalar(value):
     if isinstance(value, numbers.Number):
-        return True
+        # numbers.Number alone is too broad: fractions.Fraction and decimal.Decimal
+        # register with it, but numpy represents them with OBJECT dtype, which the
+        # stacker's jnp casts reject. Require the dtype numpy actually assigns to be
+        # numeric or boolean, so this check never approves a value the stacker fails on.
+        dtype = np.asarray(value).dtype
+        return np.issubdtype(dtype, np.number) or np.issubdtype(dtype, np.bool_)
     if isinstance(value, (np.generic, np.ndarray, jnp.ndarray)):
         # A numpy scalar like np.bool_(True) is not registered with numbers.Number, and a
         # 0-D array is what a Python scalar becomes across a jax.jit boundary; both batch

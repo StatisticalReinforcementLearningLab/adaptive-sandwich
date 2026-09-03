@@ -19,6 +19,8 @@ non-numeric argument entries, and the first update policy's empty previous-betas
 """
 
 import ast
+import decimal
+import fractions
 import re
 
 import numpy as np
@@ -1151,6 +1153,32 @@ def test_require_supplied_arg_types_supported_rejects_none_entry():
         input_checks.require_supplied_arg_types_supported(
             args_by_subject_id_by_key, "action_prob_func", "decision_time"
         )
+
+
+def test_require_supplied_arg_types_supported_rejects_number_registered_object_dtype_scalars():
+    # fractions.Fraction and decimal.Decimal register with numbers.Number, but numpy
+    # represents both with OBJECT dtype, so the stacker's jnp casts reject them. The
+    # check must not approve a value the stacker fails on -- standalone or inside a
+    # sequence.
+    args_by_subject_id_by_key = {
+        0: {
+            "s1": (fractions.Fraction(1, 2),),
+            "s2": (decimal.Decimal("0.5"),),
+            "s3": ([0.1, fractions.Fraction(1, 2)],),
+        }
+    }
+
+    with pytest.raises(AssertionError) as excinfo:
+        input_checks.require_supplied_arg_types_supported(
+            args_by_subject_id_by_key, "alg_update_func", "policy_num"
+        )
+    message = str(excinfo.value)
+    assert "(0, 's1', 0): 'of unsupported type Fraction'" in message
+    assert "(0, 's2', 0): 'of unsupported type Decimal'" in message
+    assert (
+        "(0, 's3', 0): 'a sequence with a non-scalar or non-numeric entry of type "
+        "Fraction'" in message
+    )
 
 
 def test_require_supplied_arg_types_supported_rejects_3d_array_and_object_dtype_and_nested():

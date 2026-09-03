@@ -108,3 +108,80 @@ def test_stack_batched_arg_lists_into_tensors_rejects_bare_0d_array():
         stack_batched_arg_lists_into_tensors([jnp.array(3.0)])
     with pytest.raises(TypeError, match="0-D"):
         stack_batched_arg_lists_into_tensors([np.array(3.0)])
+
+
+# Every error below must name the offending argument POSITION: the underlying
+# jnp.stack/vstack/array errors do not, and by the time this function runs the
+# caller has pivoted the per-subject tuples into per-position lists, so the
+# position is the one coordinate the user can act on.
+
+
+def test_stack_batched_arg_lists_into_tensors_rejects_3d_arrays_naming_position():
+    batched_arg_lists = [
+        [jnp.array(1.0), jnp.array(2.0)],
+        [jnp.ones((2, 2, 2)), jnp.ones((2, 2, 2))],
+    ]
+
+    with pytest.raises(TypeError, match=r"position 1.*more than 2"):
+        stack_batched_arg_lists_into_tensors(batched_arg_lists)
+
+
+def test_stack_batched_arg_lists_into_tensors_mismatched_2d_shapes_error_names_position():
+    # Shape-bucketing normally guarantees identical shapes within a batch, but direct
+    # callers exist; a mismatch must not surface as jax's bare "All input arrays must
+    # have the same shape."
+    batched_arg_lists = [[jnp.ones((2, 2)), jnp.ones((3, 2))]]
+
+    with pytest.raises(ValueError, match=r"position 0.*same array shape"):
+        stack_batched_arg_lists_into_tensors(batched_arg_lists)
+
+
+def test_stack_batched_arg_lists_into_tensors_mismatched_1d_lengths_error_names_position():
+    batched_arg_lists = [[jnp.array([1.0, 2.0]), jnp.array([1.0, 2.0, 3.0])]]
+
+    with pytest.raises(ValueError, match=r"position 0.*same vector length"):
+        stack_batched_arg_lists_into_tensors(batched_arg_lists)
+
+
+def test_stack_batched_arg_lists_into_tensors_rejects_nested_sequence_naming_position():
+    # A plain-sequence position must be FLAT: a nested list casts to a 2-D array, which
+    # previously died on a bare `assert ... ndim == 1` with no message at all.
+    batched_arg_lists = [[[[1.0, 2.0], [3.0, 4.0]]]]
+
+    with pytest.raises(TypeError, match=r"position 0.*FLAT"):
+        stack_batched_arg_lists_into_tensors(batched_arg_lists)
+
+
+def test_stack_batched_arg_lists_into_tensors_2d_dtype_failure_is_typeerror_not_shape_advice():
+    # SAME-shape 2-D arrays that jnp cannot convert (object dtype here) must raise a
+    # TypeError blaming the dtype -- not the shape-mismatch ValueError, whose "supply
+    # the same array shape" advice would send the caller the wrong way.
+    same_shape_object_arrays = [
+        np.array([["a", "b"], ["c", "d"]], dtype=object),
+        np.array([["e", "f"], ["g", "h"]], dtype=object),
+    ]
+
+    with pytest.raises(TypeError, match=r"position 0.*numeric or boolean dtype"):
+        stack_batched_arg_lists_into_tensors([same_shape_object_arrays])
+
+
+def test_stack_batched_arg_lists_into_tensors_1d_dtype_failure_is_typeerror_not_shape_advice():
+    same_length_object_arrays = [
+        np.array([0.1, "b"], dtype=object),
+        np.array([0.2, "c"], dtype=object),
+    ]
+
+    with pytest.raises(TypeError, match=r"position 0.*numeric or boolean dtype"):
+        stack_batched_arg_lists_into_tensors([same_length_object_arrays])
+
+
+def test_stack_batched_arg_lists_into_tensors_rejects_strings_naming_position():
+    # Strings dodge the vector branch (deliberately) and land in the scalar branch,
+    # where jnp.array raises a jax-internal TypeError; it must be wrapped with the
+    # position and the list of supported kinds. (For user-supplied argument tuples,
+    # input_checks.require_supplied_arg_types_supported already rejects this earlier
+    # with the key and subject id attached.)
+    batched_arg_lists = [["logistic", "logistic"]]
+
+    with pytest.raises(TypeError, match=r"position 0.*'str'"):
+        stack_batched_arg_lists_into_tensors(batched_arg_lists)

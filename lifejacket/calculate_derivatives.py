@@ -1,14 +1,14 @@
 """
 This module contains functions for calculating derivatives and handling
-batched arguments for users in a study. It includes utilities for grouping
-user arguments by shape, padding loss gradients, and managing involved
-user IDs.
+batched arguments for users in a study. It includes utilities for padding
+loss gradients and managing involved user IDs.
 
-It is largely legacy code, but still used in some debugging code that calculates
-the adjusted sandwich by alternative means (directly forming the per-user meat adjustments.)
+It is legacy code: nothing on the main analysis path imports from it anymore.
+It is still used by debugging code that calculates the adjusted sandwich by
+alternative means (directly forming the per-user meat adjustments) -- see
+form_adjusted_meat_adjustments_directly.py.
 """
 
-import collections
 import inspect
 import logging
 from functools import partial
@@ -22,7 +22,10 @@ from .helper_functions import (
     conditional_x_or_one_minus_x,
     load_function_from_same_named_file,
 )
-from .vmap_helpers import stack_batched_arg_lists_into_tensors
+from .vmap_helpers import (
+    group_user_args_by_shape,
+    stack_batched_arg_lists_into_tensors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +47,7 @@ def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_u
 
     # Just a quick way to get the arg count instead of iterating through args
     # for the first Truthy tuple
-    # TODO: If there are arguments with defaults and not supplied, this will break.
+    # NOTE: If there are arguments with defaults and not supplied, this will break.
     # Should probably in fact iterate through to first Truthy tuple.
     # NOTE: inspect.signature (not func.__code__.co_argcount) so this also works
     # for a jax.jit-wrapped func -- its __code__ belongs to the PjitFunction/
@@ -66,30 +69,6 @@ def get_batched_arg_lists_and_involved_user_ids(func, sorted_user_ids, args_by_u
     return batched_arg_lists, involved_user_ids
 
 
-def get_shape(obj):
-    if hasattr(obj, "shape"):
-        return obj.shape
-    if isinstance(obj, str):
-        return None
-    try:
-        return len(obj)
-    except Exception:
-        return None
-
-
-def group_user_args_by_shape(user_arg_dict, empty_allowed=True):
-    user_arg_dicts_by_shape = collections.defaultdict(dict)
-    for user_id, args in user_arg_dict.items():
-        if not args:
-            if not empty_allowed:
-                raise ValueError("There shouldn't be a user with no data at this time")
-            continue
-        shape_id = tuple(get_shape(arg) for arg in args)
-        user_arg_dicts_by_shape[shape_id][user_id] = args
-    return user_arg_dicts_by_shape.values()
-
-
-# TODO: Add clarity on why we need gradients at all times.
 def pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
     loss_gradient_pi_derivative,
     action_prob_times,
@@ -102,6 +81,13 @@ def pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites(
     not currently in the study. This is about filling in zero gradients for
     times 1,2,3,4,9,10,11,12 if action probabilities are given for times 5,6,7,
     8.
+
+    NOTE: unlike the main analysis path, which is agnostic to the calendar-time
+    base (see require_consecutive_integer_calendar_times), the range(1, ...)
+    below assumes calendar times start at exactly 1. This function is reachable
+    only through the opt-in form_adjusted_meat_adjustments_directly diagnostics,
+    where the arrays it feeds are logged/inspected rather than used in any
+    published estimate, so the assumption is tolerated rather than fixed.
     """
     zero_gradient = np.zeros((loss_gradient_pi_derivative.shape[0], 1, 1))
     gradients_to_stack = []
@@ -260,7 +246,6 @@ def calculate_pi_and_weight_gradients_specific_t(
             batched_arg_tensors,
         )
 
-        # TODO: betas should be verified to be the same across users now or earlier
         logger.debug("Forming weight gradients with respect to beta.")
         in_study_batched_actions_tensor = collect_batched_in_study_actions(
             study_df,
@@ -309,7 +294,7 @@ def calculate_pi_and_weight_gradients_specific_t(
         for user_id in sorted_user_ids
         if user_id in all_involved_user_ids
     ]
-    # TODO: These padding methods assume someone was in the study at this time.
+    # NOTE: These padding methods assume someone was in the study at this time.
     pi_gradients = pad_in_study_derivatives_with_zeros(
         in_study_pi_gradients, sorted_user_ids, all_involved_user_ids
     )
@@ -320,10 +305,6 @@ def calculate_pi_and_weight_gradients_specific_t(
     return pi_gradients, weight_gradients
 
 
-# TODO: is it ok to get the action from the study df? No issues with actions taken
-# but not known about?
-# TODO: Test this at least with an incremental recruitment collect pi gradients
-# case, possibly directly.
 def collect_batched_in_study_actions(
     study_df,
     calendar_t,
@@ -334,7 +315,7 @@ def collect_batched_in_study_actions(
     subject_id_col_name,
 ):
 
-    # TODO: This for loop can be removed, just grabbing the actions col after
+    # NOTE: This for loop can be removed, just grabbing the actions col after
     # filtering and sorting, and converting to jnp array.  It's just an artifact
     # from when the loop used to be more complicated.
     batched_actions_list = []
@@ -350,7 +331,6 @@ def collect_batched_in_study_actions(
     return jnp.array(batched_actions_list)
 
 
-# TODO: Docstring
 def get_radon_nikodym_weight(
     beta_target,
     action_prob_func,
@@ -371,10 +351,9 @@ def get_radon_nikodym_weight(
     )
 
 
-# TODO: Docstring
 # JIT'd (batch_axes must be a hashable tuple, not a list, for this to work --
 # see calculate_pi_and_weight_gradients_specific_t's call site): resolves the
-# "JIT whole function? or just gradient and hessian batch functions" TODO
+# "JIT whole function? or just gradient and hessian batch functions" TO DO
 # above calculate_rl_update_derivatives for this pair of batched functions.
 # calculate_pi_and_weight_gradients calls this once per calendar_t, so an
 # eager (unjitted) vmap(grad(...)) re-traces and redispatches through XLA on
@@ -398,7 +377,6 @@ def get_pi_gradients_batched(
     )(*batched_arg_tensors)
 
 
-# TODO: Docstring
 # JIT'd -- see get_pi_gradients_batched's comment just above.
 @partial(jax.jit, static_argnums=(1, 2, 4))
 def get_weight_gradients_batched(
@@ -425,9 +403,6 @@ def get_weight_gradients_batched(
     )
 
 
-# TODO: Docstring
-# TODO: JIT whole function? or just gradient and hessian batch functions
-# TODO: This is a hotspot for moving away from update times
 def calculate_rl_update_derivatives(
     study_df,
     rl_update_func_filename,
@@ -484,8 +459,7 @@ def calculate_rl_update_derivatives(
             # happen above, but the vmap call spits out a 4D array so in that
             # sense that's the most natural return value. Note that we don't
             # simply squeeze because that would remove the beta dimension
-            # if it were one.
-            # TODO: This probably has to do with the dimension of the action
+            # if it were one. This probably has to do with the dimension of the action
             # probabilities... we may need to specify that they are scalars in the
             # loss function args, rather than 1-element vectors. Or one will
             # have to say so.  Test both of these cases.  Can probably check
@@ -622,7 +596,7 @@ def calculate_rl_update_derivatives_specific_update(
             for user_id in sorted_user_ids
             if user_id in all_involved_user_ids
         ]
-    # TODO: These padding methods assume *someone* had study data at this time.
+    # NOTE: These padding methods assume *someone* had study data at this time.
     loss_gradients = pad_in_study_derivatives_with_zeros(
         in_study_loss_gradients, sorted_user_ids, all_involved_user_ids
     )
@@ -728,7 +702,7 @@ def get_loss_gradient_derivatives_wrt_pi_batched(
     raise ValueError("Unknown update function type.")
 
 
-# TODO: Is there a better way to calculate this? This seems like it should
+# NOTE: Is there a better way to calculate this? This seems like it should
 # be reliable, not messing up when a policy was actually available. If study
 # df says policy was used, that should be correct.  May not play nicely with
 # pure exploration phase though.

@@ -13,16 +13,12 @@ import pandas as pd
 import plotext as plt
 from jax import numpy as jnp
 
-from .calculate_derivatives import (
-    get_batched_arg_lists_and_involved_user_ids,
-    group_user_args_by_shape,
-)
 from .constants import FunctionTypes
 from .helper_functions import (
     confirm_input_check_result,
     construct_beta_index_by_policy_num_map,
 )
-from .vmap_helpers import batch_args_by_subject, stack_batched_arg_lists_into_tensors
+from .vmap_helpers import batch_args_by_subject, group_user_args_by_shape
 
 # When we print out objects for debugging, show the whole thing.
 np.set_printoptions(threshold=np.inf)
@@ -129,7 +125,6 @@ def perform_conditional_zeroth_wave_dataframe_checks(
     require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_name)
 
 
-# TODO: any checks needed here about alg update function type?
 def perform_first_wave_input_checks(
     analysis_df,
     active_col_name,
@@ -331,6 +326,16 @@ def perform_first_wave_input_checks(
     )
 
     ### Validate algorithm loss/estimating function and args
+    #
+    # Types before values: an unsupported entry type otherwise surfaces as an opaque
+    # TypeError from inside the JAX precompute (or, for a None, as a silent NaN), and the
+    # finiteness check just below deliberately skips anything non-numeric.
+    require_supplied_arg_types_supported(
+        action_prob_func_args, "action_prob_func", "decision_time"
+    )
+    require_supplied_arg_types_supported(
+        alg_update_func_args, "alg_update_func", "policy_num"
+    )
     require_supplied_args_finite(
         action_prob_func_args, "action_prob_func", "decision_time"
     )
@@ -530,7 +535,6 @@ def perform_first_wave_input_checks(
     return {"action_prob_reconstruction": action_prob_reconstruction}
 
 
-# TODO: Give a hard-to-use option to loosen this check somehow
 def require_action_probabilities_in_analysis_df_can_be_reconstructed(
     analysis_df,
     action_prob_col_name,
@@ -604,11 +608,8 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
             continue
         for shape_group in group_user_args_by_shape(nontrivial_args_by_subject_id):
             group_subject_ids = sorted(shape_group.keys())
-            batched_arg_lists, _ = get_batched_arg_lists_and_involved_user_ids(
-                action_prob_func, group_subject_ids, shape_group
-            )
-            batched_arg_tensors, batch_axes = stack_batched_arg_lists_into_tensors(
-                batched_arg_lists
+            batched_arg_tensors, batch_axes = batch_args_by_subject(
+                group_subject_ids, shape_group
             )
             reconstructed_chunks.append(
                 jax.vmap(action_prob_func, in_axes=batch_axes)(*batched_arg_tensors)
@@ -1055,7 +1056,6 @@ def _unique_sorted_integer_values(values, value_description):
 def require_consecutive_integer_policy_numbers(
     analysis_df, active_col_name, policy_num_col_name
 ):
-    # TODO: This is a somewhat rough check of this, could also check nondecreasing temporally
 
     logger.info(
         "Checking that in-study, non-fallback policy numbers are consecutive integers."
@@ -1085,6 +1085,14 @@ def require_consecutive_integer_calendar_times(analysis_df, calendar_t_col_name)
     # gaps in the integers covered.  But we have other checks that all subjects
     # have same times, etc.
     # Note these times should be well-formed even when the subject is not in the study.
+    # The STARTING value is deliberately unconstrained: consecutive integers at any
+    # base (0, 1, 2024001, ...) are accepted, and the analysis pipeline stays
+    # agnostic to it by keying dicts on the actual time values and mapping them to
+    # positions on a sorted grid (see get_global_time_axis / time_to_col in
+    # batched_weighted_estimating_function_stack.py) rather than using the values
+    # as indices. The one exception is legacy diagnostic-only code in
+    # calculate_derivatives.py that assumes times start at 1 -- see the note on
+    # pad_loss_gradient_pi_derivative_outside_supplied_action_probabilites.
     logger.info("Checking that calendar times are consecutive integers.")
     if analysis_df.empty:
         return
@@ -1520,8 +1528,8 @@ def require_nondecreasing_policy_numbers_over_time(
     that policy's update produced, so a subject acting under an EARLIER policy after a later
     one contradicts the temporal structure the whole adjustment is built on -- the recorded
     action probabilities and the betas being differentiated would come from different points in
-    the algorithm's history. This is the check the TODO on
-    require_consecutive_integer_policy_numbers has always asked for ("could also check
+    the algorithm's history. This is the check the TO DO on
+    require_consecutive_integer_policy_numbers had always asked for ("could also check
     nondecreasing temporally"); that check only verifies the SET of policy numbers has no gaps.
 
     Fallback (negative) policy numbers are excluded rather than ordered: they mark "the
@@ -1680,6 +1688,95 @@ def require_analysis_df_values_finite(
         f"These analysis DataFrame columns contain non-finite values (NaN or inf) on ACTIVE "
         f"rows -- column -> count: {nonfinite_counts}. Non-finite inputs propagate silently "
         "into the estimates and the reported variance. Please see the contract for details."
+    )
+
+
+def _is_supported_numeric_scalar(value):
+    if isinstance(value, numbers.Number):
+        # numbers.Number alone is too broad: fractions.Fraction and decimal.Decimal
+        # register with it, but numpy represents them with OBJECT dtype, which the
+        # stacker's jnp casts reject. Require the dtype numpy actually assigns to be
+        # numeric or boolean, so this check never approves a value the stacker fails on.
+        dtype = np.asarray(value).dtype
+        return np.issubdtype(dtype, np.number) or np.issubdtype(dtype, np.bool_)
+    if isinstance(value, (np.generic, np.ndarray, jnp.ndarray)):
+        # A numpy scalar like np.bool_(True) is not registered with numbers.Number, and a
+        # 0-D array is what a Python scalar becomes across a jax.jit boundary; both batch
+        # exactly like a plain scalar.
+        return value.ndim == 0 and (
+            np.issubdtype(value.dtype, np.number)
+            or np.issubdtype(value.dtype, np.bool_)
+        )
+    return False
+
+
+def _supplied_arg_type_problem(arg):
+    """
+    None if vmap_helpers.stack_batched_arg_lists_into_tensors can batch this argument,
+    else a short description of why it cannot.
+    """
+    if _is_supported_numeric_scalar(arg):
+        return None
+    if isinstance(arg, (jnp.ndarray, np.ndarray)):
+        if not (
+            np.issubdtype(arg.dtype, np.number) or np.issubdtype(arg.dtype, np.bool_)
+        ):
+            return f"an array of non-numeric dtype {arg.dtype}"
+        if arg.ndim > 2:
+            return f"a {arg.ndim}-D array"
+        return None
+    if isinstance(arg, str):
+        return "a string"
+    if isinstance(arg, collections.abc.Sequence):
+        for entry in arg:
+            if not _is_supported_numeric_scalar(entry):
+                return (
+                    "a sequence with a non-scalar or non-numeric entry of type "
+                    f"{type(entry).__name__}"
+                )
+        return None
+    return f"of unsupported type {type(arg).__name__}"
+
+
+def require_supplied_arg_types_supported(
+    args_by_subject_id_by_key, func_description, key_description
+):
+    """
+    Every entry in the supplied argument tuples must be a kind the argument batching
+    (vmap_helpers.stack_batched_arg_lists_into_tensors) can stack: a numeric or boolean
+    scalar, a flat sequence of such scalars, or a numeric/boolean array with at most 2
+    dimensions.
+
+    Without this, an unsupported entry -- a string, a dict, an object- or datetime-dtype
+    array, a 3-D array, a nested sequence -- surfaces only from inside the JAX precompute,
+    as a bare TypeError naming neither the key, the subject, nor the argument position,
+    after every other input check and all of the data-structure preparation have already
+    run. A None entry is worse than opaque: jnp.array currently converts None SILENTLY to
+    NaN (with a FutureWarning), so it would poison the estimate rather than fail -- and
+    require_supplied_args_finite cannot flag it, because that check by design skips
+    anything non-numeric as having no finiteness to test.
+    """
+    logger.info(
+        "Checking that supplied %s argument types are supported.", func_description
+    )
+    offenders = {}
+    for key, args_by_subject_id in args_by_subject_id_by_key.items():
+        for subject_id, args in args_by_subject_id.items():
+            if not args:
+                continue
+            for position, arg in enumerate(args):
+                problem = _supplied_arg_type_problem(arg)
+                if problem is not None:
+                    offenders[(key, subject_id, position)] = problem
+    example_offenders = dict(
+        sorted(offenders.items(), key=lambda item: str(item[0]))[:5]
+    )
+    assert not offenders, (
+        f"{len(offenders)} supplied {func_description} argument position(s) hold values "
+        "the argument batching cannot stack. Each argument must be a numeric scalar, a "
+        "flat sequence of numbers, or a numeric array with at most 2 dimensions. "
+        f"Offending ({key_description}, subject_id, arg position) -> problem, up to 5 "
+        f"shown: {example_offenders}. Please see the contract for details."
     )
 
 

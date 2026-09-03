@@ -19,6 +19,8 @@ non-numeric argument entries, and the first update policy's empty previous-betas
 """
 
 import ast
+import decimal
+import fractions
 import re
 
 import numpy as np
@@ -297,8 +299,9 @@ def _build_supplied_args_integrity(
     if nan_in_jnp_array:
         _replace(0, "s2", 0, jnp.array([0.1, jnp.nan]))
     if string_entry:
-        # Argument tuples legitimately carry non-numeric entries; a string has no
-        # finiteness to test and must be skipped rather than rejected.
+        # A string has no finiteness to test, so the FINITENESS check must skip it rather
+        # than reject it -- rejecting unsupported entry types is
+        # require_supplied_arg_types_supported's job (the batching cannot stack a string).
         for subject_id in ("s1", "s2", "s3"):
             if args_by_subject_id_by_key[0][subject_id]:
                 _replace(0, subject_id, 1, "logistic")
@@ -1072,6 +1075,135 @@ def test_require_analysis_df_values_finite_counts_every_offending_active_row():
             _ACTION_PROB_COL_INTEGRITY,
             _REWARD_COL_INTEGRITY,
         )
+
+
+# ---------------------------------------------------------------------------
+# require_supplied_arg_types_supported
+# ---------------------------------------------------------------------------
+
+
+def test_require_supplied_arg_types_supported_passes_on_valid_args():
+    args_by_subject_id_by_key = _build_supplied_args_integrity()
+
+    input_checks.require_supplied_arg_types_supported(
+        args_by_subject_id_by_key, "action_prob_func", "decision_time"
+    )
+
+
+def test_require_supplied_arg_types_supported_skips_blank_arg_tuples():
+    # FALSE-ALARM GUARD: a blank () tuple is how "this subject is out of study at this
+    # key" is expressed, and it has nothing to test.
+    args_by_subject_id_by_key = _build_supplied_args_integrity(all_blank=True)
+
+    input_checks.require_supplied_arg_types_supported(
+        args_by_subject_id_by_key, "action_prob_func", "decision_time"
+    )
+
+
+def test_require_supplied_arg_types_supported_accepts_supported_scalar_and_array_kinds():
+    # FALSE-ALARM GUARD: everything the batching can actually stack must pass -- plain
+    # and numpy scalars (np.bool_ is not registered with numbers.Number), 0-D arrays
+    # (what a scalar becomes across a jax.jit boundary), flat sequences, bool arrays,
+    # and 1-D/2-D arrays.
+    args_by_subject_id_by_key = {
+        0: {
+            "s1": (
+                np.array([0.1, 0.2]),
+                jnp.array([[0.1, 0.2], [0.3, 0.4]]),
+                0.35,
+                4,
+                True,
+                np.bool_(True),
+                np.float64(1.5),
+                jnp.array(2.0),
+                [1.0, 2, np.float32(3.0)],
+                (0.5, 0.6),
+                np.array([True, False]),
+            )
+        }
+    }
+
+    input_checks.require_supplied_arg_types_supported(
+        args_by_subject_id_by_key, "alg_update_func", "policy_num"
+    )
+
+
+def test_require_supplied_arg_types_supported_rejects_string_entry():
+    args_by_subject_id_by_key = _build_supplied_args_integrity(string_entry=True)
+
+    with pytest.raises(
+        AssertionError,
+        match=re.escape("(0, 's1', 1): 'a string'"),
+    ):
+        input_checks.require_supplied_arg_types_supported(
+            args_by_subject_id_by_key, "action_prob_func", "decision_time"
+        )
+
+
+def test_require_supplied_arg_types_supported_rejects_none_entry():
+    # A None entry is the nastiest case: jnp.array converts it SILENTLY to NaN, so it
+    # poisons the estimate rather than failing, and the finiteness check skips it as
+    # non-numeric.
+    args_by_subject_id_by_key = _build_supplied_args_integrity(none_entry=True)
+
+    with pytest.raises(
+        AssertionError,
+        match=re.escape("(0, 's1', 2): 'of unsupported type NoneType'"),
+    ):
+        input_checks.require_supplied_arg_types_supported(
+            args_by_subject_id_by_key, "action_prob_func", "decision_time"
+        )
+
+
+def test_require_supplied_arg_types_supported_rejects_number_registered_object_dtype_scalars():
+    # fractions.Fraction and decimal.Decimal register with numbers.Number, but numpy
+    # represents both with OBJECT dtype, so the stacker's jnp casts reject them. The
+    # check must not approve a value the stacker fails on -- standalone or inside a
+    # sequence.
+    args_by_subject_id_by_key = {
+        0: {
+            "s1": (fractions.Fraction(1, 2),),
+            "s2": (decimal.Decimal("0.5"),),
+            "s3": ([0.1, fractions.Fraction(1, 2)],),
+        }
+    }
+
+    with pytest.raises(AssertionError) as excinfo:
+        input_checks.require_supplied_arg_types_supported(
+            args_by_subject_id_by_key, "alg_update_func", "policy_num"
+        )
+    message = str(excinfo.value)
+    assert "(0, 's1', 0): 'of unsupported type Fraction'" in message
+    assert "(0, 's2', 0): 'of unsupported type Decimal'" in message
+    assert (
+        "(0, 's3', 0): 'a sequence with a non-scalar or non-numeric entry of type "
+        "Fraction'" in message
+    )
+
+
+def test_require_supplied_arg_types_supported_rejects_3d_array_and_object_dtype_and_nested():
+    args_by_subject_id_by_key = {
+        0: {
+            "s1": (np.zeros((2, 2, 2)),),
+            "s2": (np.array([0.1, "b"], dtype=object),),
+            "s3": ([[1.0, 2.0], [3.0, 4.0]],),
+            "s4": ({"a": 1},),
+        }
+    }
+
+    with pytest.raises(AssertionError) as excinfo:
+        input_checks.require_supplied_arg_types_supported(
+            args_by_subject_id_by_key, "alg_update_func", "policy_num"
+        )
+    message = str(excinfo.value)
+    assert "4 supplied alg_update_func argument position(s)" in message
+    assert "(0, 's1', 0): 'a 3-D array'" in message
+    assert "(0, 's2', 0): 'an array of non-numeric dtype object'" in message
+    assert (
+        "(0, 's3', 0): 'a sequence with a non-scalar or non-numeric entry of type list'"
+        in message
+    )
+    assert "(0, 's4', 0): 'of unsupported type dict'" in message
 
 
 # ---------------------------------------------------------------------------

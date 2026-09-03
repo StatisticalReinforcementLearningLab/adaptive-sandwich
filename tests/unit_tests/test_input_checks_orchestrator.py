@@ -1,10 +1,14 @@
 """
-Integration coverage for the first-wave input-check ORCHESTRATOR,
-input_checks.perform_first_wave_input_checks.
+Integration coverage for the input-check ORCHESTRATORS,
+input_checks.perform_first_wave_input_checks and, for the handful of dataframe-only checks that
+moved ahead of the caller's theta_calculation_func,
+input_checks.perform_conditional_zeroth_wave_dataframe_checks.
 
-Every test here goes through the orchestrator rather than a single check function, because the
+Every test here goes through an orchestrator rather than a single check function, because the
 question these tests answer is not "is this check correct?" (the sibling modules cover that) but
-"is this check actually REACHED, with the arguments the orchestrator threads into it?". The
+"is this check actually REACHED, with the arguments the orchestrator threads into it?". A check
+belongs to exactly ONE wave -- the zeroth wave's three are not repeated in the first -- so the
+test for each goes through the wave that owns it. The
 golden-path test is the anchor: one small study that satisfies every first-wave check at once,
 with a NON-ZERO initial policy number (active policies 1, 2, 3 and alg_update_func_args keyed
 2, 3, mirroring tests/benchmarks/fixtures/small where policy_num is float64 1.0..7.0). Each
@@ -121,6 +125,31 @@ def _assert_first_wave_passes_orch(study):
     assert set(reconstruction) == {"max_abs_difference", "num_cells", "atol"}
     assert reconstruction["num_cells"] > 0
     assert 0.0 <= reconstruction["max_abs_difference"] <= reconstruction["atol"]
+
+
+def _zeroth_wave_kwargs_orch(study):
+    """
+    The subset of a study's keyword arguments that
+    input_checks.perform_conditional_zeroth_wave_dataframe_checks takes.
+
+    That wave runs BEFORE the caller's theta_calculation_func, so it sees only the frame and
+    the column names -- none of the functions, argument tuples or indices the first wave
+    needs. Its checks are no longer repeated inside the first wave, so the tests that pin them
+    go through this instead of through _build_study_orch's full kwargs.
+    """
+    return {
+        key: study[key]
+        for key in (
+            "analysis_df",
+            "active_col_name",
+            "action_col_name",
+            "policy_num_col_name",
+            "calendar_t_col_name",
+            "subject_id_col_name",
+            "action_prob_col_name",
+            "reward_col_name",
+        )
+    }
 
 
 def _build_study_orch(
@@ -474,24 +503,41 @@ def test_perform_first_wave_input_checks_passes_with_integer_policy_num_column_o
     _assert_first_wave_passes_orch(study)
 
 
-def test_perform_first_wave_input_checks_on_empty_study_reports_it_clearly_orch():
+def test_perform_conditional_zeroth_wave_dataframe_checks_pass_on_valid_study_orch():
     """
-    An empty analysis_df with empty argument dictionaries.
+    The golden study satisfies the zeroth wave too.
 
-    RETARGETED TWICE. It first asserted a ZeroDivisionError, from
+    The anchor for the three tests below, which each break one thing the zeroth wave -- and,
+    since the duplication was removed, ONLY the zeroth wave -- is responsible for. Nothing to
+    assert but that it returns: this wave reports no measurements.
+    """
+    study = _build_study_orch()
+
+    input_checks.perform_conditional_zeroth_wave_dataframe_checks(
+        **_zeroth_wave_kwargs_orch(study)
+    )
+
+
+def test_perform_conditional_zeroth_wave_dataframe_checks_on_empty_study_report_it_clearly_orch():
+    """
+    An empty analysis_df.
+
+    RETARGETED THREE TIMES. It first asserted a ZeroDivisionError, from
     verify_analysis_df_summary_satisfactory dividing the active row count by a subject count of
     zero; then a bare IndexError, once the orchestrator began deriving beta_index_by_policy_num
     ahead of the summary. Both were unnamed downstream failures. require_analysis_df_nonempty
-    now runs first and says what is actually wrong, which is the whole point of the check --
-    so this asserts the MESSAGE, not merely that something raised.
+    then ran at the top of the first wave and said what was actually wrong, which is the whole
+    point of the check -- so this asserts the MESSAGE, not merely that something raised. It now
+    lives in the zeroth wave, ahead of theta_calculation_func, and is not repeated in the
+    first wave, so the call under test moved with it.
     """
     study = _build_study_orch()
     study["analysis_df"] = study["analysis_df"].iloc[0:0]
-    study["action_prob_func_args"] = {}
-    study["alg_update_func_args"] = {}
 
     with pytest.raises(AssertionError, match="analysis DataFrame is empty"):
-        input_checks.perform_first_wave_input_checks(**study)
+        input_checks.perform_conditional_zeroth_wave_dataframe_checks(
+            **_zeroth_wave_kwargs_orch(study)
+        )
 
 
 def test_perform_first_wave_input_checks_interactive_confirmation_accepted_orch(
@@ -1441,18 +1487,15 @@ def test_perform_first_wave_input_checks_rejects_action_prob_times_index_without
 ### the checks' own edge cases belong with the functions.
 
 
-def test_perform_first_wave_input_checks_rejects_missing_reward_column_orch():
+def test_perform_conditional_zeroth_wave_dataframe_checks_reject_missing_reward_column_orch():
     """
     The reward column is not in the analysis DataFrame.
 
-    reward_col_name is a new parameter of require_all_named_columns_present_in_analysis_df, and
-    the column checks now run at the very TOP of the orchestrator. Before that, a wrong reward
+    reward_col_name is a parameter of require_all_named_columns_present_in_analysis_df, and the
+    presence check runs in the ZEROTH wave, ahead of everything. Before that, a wrong reward
     column name reached verify_analysis_df_summary_satisfactory, which reads that column to
     build its average-reward plot, and surfaced as a bare KeyError from inside a plotting
-    routine. It is also the column
-    require_inference_func_parameter_names_are_analysis_df_columns would object to here (it is
-    _inference_func_orch's third parameter), so this doubles as a check on the ORDER: the
-    purpose-built column message wins.
+    routine.
     """
     study = _build_study_orch()
     study["analysis_df"] = study["analysis_df"].drop(columns=["reward"])
@@ -1465,10 +1508,12 @@ def test_perform_first_wave_input_checks_rejects_missing_reward_column_orch():
             "'state', 'user_id']."
         ),
     ):
-        input_checks.perform_first_wave_input_checks(**study)
+        input_checks.perform_conditional_zeroth_wave_dataframe_checks(
+            **_zeroth_wave_kwargs_orch(study)
+        )
 
 
-def test_perform_first_wave_input_checks_reports_every_missing_column_at_once_orch():
+def test_perform_conditional_zeroth_wave_dataframe_checks_report_every_missing_column_at_once_orch():
     """
     Two column names are wrong, and BOTH are named in one message.
 
@@ -1487,7 +1532,9 @@ def test_perform_first_wave_input_checks_reports_every_missing_column_at_once_or
             "['action_prob', 'rewrd']."
         ),
     ):
-        input_checks.perform_first_wave_input_checks(**study)
+        input_checks.perform_conditional_zeroth_wave_dataframe_checks(
+            **_zeroth_wave_kwargs_orch(study)
+        )
 
 
 def test_perform_first_wave_input_checks_rejects_object_dtype_reward_column_orch():

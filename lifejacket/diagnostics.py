@@ -448,6 +448,36 @@ _VERDICT_ACTION_PHRASES = {
 }
 
 
+# How each verdict ARISES, for the summary's verdict key -- the precedence ladder of
+# _derive_verdict, in one line each. The key deliberately explains causes rather than repeating
+# the action phrases above: the action for the verdict this run actually got is already printed
+# on the VERDICT: line, while the CAUSE is the part a reader cannot reconstruct from the rows
+# without knowing the ladder (in particular, that a WARNING never blocks certification and that
+# NOT CERTIFIED is usually a re-run away from an answer).
+_VERDICT_KEY_CAUSES = {
+    DiagnosticVerdicts.CERTIFIED: (
+        "nothing failed or was left unresolved, and the bootstrap either reproduced the "
+        "reported standard errors or the run was quiet enough that it was never needed"
+    ),
+    DiagnosticVerdicts.CONSERVATIVE: (
+        "as CERTIFIED, plus a calibrated signal that the variance is wider than it needs to "
+        "be -- bootstrap standard errors below the sandwich's, or only a handful of subjects "
+        "driving the estimate"
+    ),
+    DiagnosticVerdicts.NOT_CERTIFIED: (
+        "nothing measured a problem, but something could not be concluded: a check came back "
+        "INDETERMINATE, an input check was skipped, or the screen called for the multiplier "
+        "bootstrap and it did not run. This is NOT YET VALIDATED rather than wrong, and is "
+        "usually a re-run away -- enable the data checks, or set "
+        'multiplier_bootstrap="auto"; see the NEXT STEP line below when one applies'
+    ),
+    DiagnosticVerdicts.INVALID: (
+        "a check measured a real problem -- one of the [fail] criteria above, or an "
+        "unidentified estimate component"
+    ),
+}
+
+
 _ANSI_RESET = "\x1b[0m"
 # 256-color codes for orange and purple (the 16-color palette has neither); plain 32/33/31 for
 # green/yellow/red. Verdicts: green CERTIFIED, yellow CONSERVATIVE, orange NOT CERTIFIED, red
@@ -461,6 +491,7 @@ _ANSI_COLORS = {
     "purple": "\x1b[38;5;141m",
     "red": "\x1b[31m",
     "cyan": "\x1b[36m",
+    "gray": "\x1b[90m",
 }
 
 # Zero-width sentinels bracketing each criterion's measured VALUE in the laid-out text.
@@ -481,7 +512,8 @@ _COLOR_BY_TOKEN = {
     "[indeterminate]": "purple",
     "DO NOT REPORT": "red",
     "NOT CERTIFIED": "orange",
-    "[FAIL]": "red",
+    "[no gate]": "gray",
+    "[fail]": "red",
     "[warn]": "orange",
     "[ok]": "green",
     "INDETERMINATE": "purple",
@@ -659,10 +691,12 @@ def _criterion_lines(criterion: CriterionResult) -> list[str]:
         padding = _SUMMARY_DETAIL_WIDTH - last_plain_length - len(marker)
         lines[-1] = lines[-1] + _marker_leader(padding) + marker
     else:
-        # No room on the last line: the marker gets its own line, still flush right (the
-        # leader runs from the bullet's hanging indent).
+        # No room on the last line: the marker gets its own line, still flush right, with the
+        # leader running from the bullet's hanging indent. NOT lstripped -- _marker_leader
+        # returns exactly `padding` characters, so stripping one left this marker a column
+        # short of every other one (caught by the alignment test, visible as a ragged edge).
         padding = _SUMMARY_DETAIL_WIDTH - 2 - len(marker)
-        lines.append("  " + _marker_leader(padding).lstrip() + marker)
+        lines.append("  " + _marker_leader(padding) + marker)
     return lines
 
 
@@ -717,6 +751,11 @@ def _summary_row(
 
 
 def _criterion_marker(criterion: CriterionResult) -> str:
+    # severity="info" is checked FIRST because such a row carries no ok at all: the quantity
+    # WAS measured, there is simply no calibrated threshold to judge it against, which is a
+    # different statement from "could not be evaluated" and must not borrow its marker.
+    if criterion.severity == "info":
+        return "[no gate]"
     if criterion.ok is None:
         return "[not evaluated]"
     if criterion.ok:
@@ -724,7 +763,7 @@ def _criterion_marker(criterion: CriterionResult) -> str:
     return {
         "warn": "[warn]",
         "indeterminate": "[indeterminate]",
-    }.get(criterion.severity, "[FAIL]")
+    }.get(criterion.severity, "[fail]")
 
 
 def _check_result_detail(result: CheckResult) -> list[str | CriterionResult]:
@@ -852,15 +891,23 @@ def _legend_lines(row_names: Sequence[str] = (), verdict_basis: str = "") -> lis
 
     lines.append("")
     lines.append(
-        f"{'':<{heading_width}}A suite row lists every criterion that can set its status, "
-        "each with its measured value"
+        f"{'':<{heading_width}}A suite row itemizes every condition the check judged, each "
+        "with its measured value"
     )
     lines.append(
-        f"{'':<{heading_width}}and its own outcome: [ok], [FAIL], [warn] (fires as a "
-        "WARNING), [indeterminate], or"
+        f"{'':<{heading_width}}and its own outcome: [ok], [fail], [warn], "
+        "[indeterminate],"
     )
     lines.append(
-        f'{"":<{heading_width}}[not evaluated]. The "messages from the check:" bullets are '
+        f"{'':<{heading_width}}[not evaluated] (this run's data could not support it), or "
+        "[no gate] (measured and"
+    )
+    lines.append(
+        f"{'':<{heading_width}}reported, but no calibrated threshold exists, so it never "
+        "sets the status)."
+    )
+    lines.append(
+        f'{"":<{heading_width}}The "messages from the check:" bullets are '
         "the check's own findings --"
     )
     lines.append(f"{'':<{heading_width}}the specifics of whichever criterion fired.")
@@ -873,11 +920,16 @@ def _legend_lines(row_names: Sequence[str] = (), verdict_basis: str = "") -> lis
         _key_block(
             _VERDICT_HEADING,
             [
-                (_verdict_label(verdict), action)
-                for verdict, action in _VERDICT_ACTION_PHRASES.items()
+                # What to do, then how the verdict arose. Action first because it is the
+                # punchline; the cause is what a reader cannot reconstruct from the rows.
+                (
+                    _verdict_label(verdict),
+                    f"{_VERDICT_ACTION_PHRASES[verdict]}. Arises when: {cause}.",
+                )
+                for verdict, cause in _VERDICT_KEY_CAUSES.items()
             ],
             heading_width,
-            max(len(_verdict_label(v)) for v in _VERDICT_ACTION_PHRASES) + 2,
+            max(len(_verdict_label(v)) for v in _VERDICT_KEY_CAUSES) + 2,
         )
     )
 
@@ -1686,8 +1738,9 @@ def check_local_nonlinearity(
         # The figure itself is in `message` (printed on every row, pass or not), so this says
         # only what exceeding the gate MEANS -- otherwise a WARNING row prints it twice.
         warnings_list.append(
-            "The warn criterion above is a rule of thumb, not a calibrated number; "
-            "certification is decided by the separate bootstrap screen."
+            "The warn criterion above is a rule of thumb, not a calibrated number: "
+            "certification is decided by the multiplier bootstrap, which this row screens "
+            "for."
         )
     if warnings_list and status == CheckStatuses.PASSED:
         status = CheckStatuses.WARNING
@@ -2957,7 +3010,7 @@ def check_exact_nonlinear_perturbations(
     # Per-criterion outcomes. Guards mirror the status logic: an empty evaluable_se_ratios or a
     # NaN mean-shift gate reads [not evaluated], never a NaN posing as a measurement; a
     # below-band SE ratio while the solver is unhealthy does not fail (the excluded directions
-    # bias the spread down), so that criterion is excused rather than marked [FAIL].
+    # bias the spread down), so that criterion is excused rather than marked [fail].
     quantile_shift_values = [
         abs(shifts[key])
         for shifts in quantile_shifts.values()
@@ -4310,20 +4363,30 @@ def check_exploration_and_weights(
             else None,
         )
     )
-    # The ESS figure is informational, not a criterion: no threshold for it has been
-    # calibrated, so it is reported without a gate and can never set the status.
+    # Reported as a criterion row so it sits in the same column as everything else, but with
+    # severity="info": ADR 0002 measured the weight leading indicators as having no operating
+    # characteristics to gate on, so putting a threshold here would be exactly the kind of
+    # guess that ADR removed. The 100% reference point is what makes an ungated number
+    # readable at all -- without it there is no way to tell a healthy 86% from a dire 12%.
     finite_ess = [value for value in ess_by_direction if math.isfinite(value)]
+    if finite_ess:
+        criteria.append(
+            CriterionResult(
+                description=(
+                    "how much of the sample the importance weights effectively retain "
+                    "when the policy parameters are nudged a typical sampling fluctuation "
+                    "(100% = perfectly even weights)"
+                ),
+                value=f"{min(finite_ess):.0%} in the worst direction",
+                ok=None,
+                severity="info",
+            )
+        )
     return CheckResult(
         name="exploration_and_weights",
         status=status,
         metrics=metrics,
         warnings=warnings_list,
-        message=(
-            f"worst-direction importance weights keep {min(finite_ess):.0%} of the "
-            "effective sample (reported without a gate)"
-            if finite_ess
-            else ""
-        ),
         criteria=criteria,
     )
 
@@ -4568,6 +4631,35 @@ def run_diagnostic_suite(
                 V_hat,
                 config,
             )
+
+        # local_nonlinearity and multiplier_bootstrap are two stages of ONE decision -- a
+        # cheap screen and the verdict-grade second opinion it calls for -- and the report has
+        # to say so. A WARNING on the screen beside a PASSED bootstrap and a CERTIFIED verdict
+        # otherwise reads as a contradiction the reader can only resolve by knowing the
+        # division of labor from the docs. So the screening row states the outcome in place.
+        # Written into `message` (which check_local_nonlinearity leaves empty, having moved
+        # its content into criteria) rather than into `warnings`, because this is the
+        # summary's own cross-reference, not a finding from inside the check.
+        local_result = check_results.get("local_nonlinearity")
+        bootstrap_result = check_results.get("multiplier_bootstrap")
+        if (
+            local_result is not None
+            and local_result.status != CheckStatuses.PASSED
+            and bootstrap_result is not None
+        ):
+            if bootstrap_result.status == CheckStatuses.PASSED:
+                local_result.message = (
+                    "SETTLED BELOW: the multiplier_bootstrap row ran because of this one, "
+                    "and passed. The reported standard errors were confirmed by a second "
+                    "opinion that does not rely on the approximation this row measures, so "
+                    "what this row found does not block certification."
+                )
+            else:
+                local_result.message = (
+                    "This row is what triggered the multiplier_bootstrap row below, and that "
+                    f"row ({bootstrap_result.status.upper()}) is what decides certification "
+                    "here -- read it rather than judging this row on its own."
+                )
 
         if config.compute_exact_nonlinear_roots:
             check_results["exact_nonlinear_perturbation"] = (

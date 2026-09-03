@@ -348,10 +348,11 @@ def _action_prob_reconstruction_row_content(first_wave_measurements):
     type=bool,
     default=False,
     help="Flag to suppress all data checks. Not usually recommended, as suppressing only "
-    "interactive checks suffices to keep tests/simulations running and is safer. When "
-    "diagnostics run, a suppressed first wave also caps the verdict at NOT_CERTIFIED: "
-    "unvalidated inputs cannot certify, so with the default "
-    "--fail_on_flagged_diagnostics=True the CLI will exit 3.",
+    "interactive checks suffices to keep tests/simulations running and is safer. This also "
+    "turns OFF the diagnostic suite (--run_diagnostics is ignored, no diagnostic_report.pkl "
+    "is written, the run is not flagged and the CLI exits 0): the suite is data checking, "
+    "and with the input checks off its verdict could never be better than NOT_CERTIFIED. "
+    "Use --suppress_interactive_data_checks to keep every check and drop only the prompts.",
 )
 @click.option(
     "--form_adjusted_meat_adjustments_explicitly",
@@ -874,7 +875,11 @@ def analyze_dataset(
     suppress_interactive_data_checks (bool):
         Whether to suppress interactive data checks. This should be used in simulations, for example.
     suppress_all_data_checks (bool):
-        Whether to suppress all data checks. Not recommended.
+        Whether to suppress all data checks. Not recommended. Also turns off the diagnostic
+        suite (run_diagnostics is ignored, and the run is not flagged), since the suite is
+        itself data checking and its verdict would be capped at NOT_CERTIFIED with the input
+        checks off. Prefer suppress_interactive_data_checks, which keeps every check and
+        drops only the prompts.
     form_adjusted_meat_adjustments_explicitly (bool):
         If True, explicitly forms the per-subject meat adjustments that differentiate the
         sandwich from the classical sandwich. This is for diagnostic purposes, as the
@@ -971,41 +976,50 @@ def analyze_dataset(
     exits with status 3 on diagnostics_flagged unless --fail_on_flagged_diagnostics=False.
     """
 
-    # Unconditional, and FIRST: not gated behind suppress_all_data_checks, because every
-    # result is written to output_dir only at the very end of the run and nothing creates it,
-    # so a bad path otherwise discards the entire analysis at the finish line. See
-    # input_checks.require_output_dir_ready for what this does and does not protect against.
-    input_checks.require_output_dir_ready(output_dir)
-    # Also unconditional, and for the sharper reason: percentile_bootstrap_alpha is used
-    # directly as a quantile level, so an out-of-range value does not fail -- it silently
-    # reports a meaningless interval as percentile_bootstrap_ci.
-    input_checks.require_valid_percentile_bootstrap_settings(
-        percentile_bootstrap_draws,
-        percentile_bootstrap_alpha,
-        percentile_bootstrap_seed,
-    )
+    # FIRST, and not gated behind suppress_all_data_checks -- see the function for why each of
+    # its checks is exempt.
+    with log_phase_duration("input_checks.unconditional_zeroth_wave"):
+        input_checks.perform_unconditional_zeroth_wave_input_checks(
+            output_dir,
+            percentile_bootstrap_draws,
+            percentile_bootstrap_alpha,
+            percentile_bootstrap_seed,
+        )
 
-    # The user-supplied theta_calculation_func consumes analysis_df BEFORE the first wave can
-    # run (the wave needs the theta it returns), so a malformed frame used to fail inside user
-    # code with whatever error that code happened to raise. The dataframe-only prerequisites
-    # run first: they need nothing but the frame, and they are exactly the checks whose
-    # actionable messages a broken callback input would otherwise preempt. Each runs again
-    # inside the full wave, which is fine -- all three are trivial next to the analysis.
+    # suppress_all_data_checks turns the diagnostic suite off too, because the suite IS data
+    # checking -- the flag's name promises to stop checking the data, and running the most
+    # expensive checks in the package after being told not to check is the opposite of that.
+    # It is also pointless: with the first wave suppressed, the suite's input rows would all
+    # read "not run", which caps the verdict at NOT_CERTIFIED by construction (see
+    # _derive_verdict), so the run would pay full price for a guaranteed-uncertifiable answer.
+    # Note the consequence: like run_diagnostics=False, such a run is NOT flagged, so the CLI
+    # exits 0. Suppressing every check is a statement that this run is not being validated;
+    # use suppress_interactive_data_checks=True to keep the checks and drop only the prompts.
+    if run_diagnostics and suppress_all_data_checks:
+        logger.warning(
+            "suppress_all_data_checks=True, so the diagnostic suite is skipped as well and "
+            "run_diagnostics=True is ignored: with the input checks off, the suite's verdict "
+            "could never be better than NOT_CERTIFIED. No diagnostic_report.pkl is written "
+            "and the run is not flagged. Pass suppress_interactive_data_checks=True instead "
+            "to keep the diagnostics without the interactive prompts."
+        )
+        run_diagnostics = False
+
+    # The dataframe-only prerequisites, which have to run before the user-supplied
+    # theta_calculation_func consumes analysis_df -- see the function for why. The first wave
+    # below assumes they have passed and does not repeat them.
     if not suppress_all_data_checks:
-        input_checks.require_analysis_df_nonempty(analysis_df)
-        input_checks.require_all_named_columns_present_in_analysis_df(
-            analysis_df,
-            active_col_name,
-            action_col_name,
-            policy_num_col_name,
-            calendar_t_col_name,
-            subject_id_col_name,
-            action_prob_col_name,
-            reward_col_name,
-        )
-        input_checks.require_hashable_subject_ids(
-            analysis_df, active_col_name, subject_id_col_name
-        )
+        with log_phase_duration("input_checks.conditional_zeroth_wave"):
+            input_checks.perform_conditional_zeroth_wave_dataframe_checks(
+                analysis_df,
+                active_col_name,
+                action_col_name,
+                policy_num_col_name,
+                calendar_t_col_name,
+                subject_id_col_name,
+                action_prob_col_name,
+                reward_col_name,
+            )
 
     with log_phase_duration("theta_calculation_func"):
         theta_est = jnp.array(theta_calculation_func(analysis_df))
@@ -1013,14 +1027,17 @@ def analyze_dataset(
     beta_dim = calculate_beta_dim(
         action_prob_func_args, action_prob_func_args_beta_index
     )
-    # None means the first wave did not run (suppress_all_data_checks); the summary then
-    # falls back to prose instead of quoting a measurement that was never made. Initialized
+    # None means the first wave did not run (suppress_all_data_checks), which also turns the
+    # diagnostic suite off, so no summary reads these. Initialized
     # HERE, above the gated call -- an earlier version initialized it further down alongside
     # sum_to_zero_result, i.e. AFTER this assignment, silently overwriting the measurements on
     # every checked run.
     first_wave_measurements = None
     if not suppress_all_data_checks:
-        with log_phase_duration("input_checks"):
+        # Named for the wave, not just "input_checks": the two zeroth waves above are timed
+        # under their own names, and a single shared label would have made the breakdown
+        # ambiguous about which of the three the seconds belonged to.
+        with log_phase_duration("input_checks.first_wave"):
             first_wave_measurements = input_checks.perform_first_wave_input_checks(
                 analysis_df,
                 active_col_name,
@@ -1164,9 +1181,8 @@ def analyze_dataset(
         )
 
     theta_dim = len(theta_est)
-    # None means the check did not run (suppress_all_data_checks); the summary records that as
-    # INDETERMINATE rather than omitting the row, so a suppressed check and a passing one never
-    # look the same.
+    # None means the check did not run (suppress_all_data_checks) -- which also turns the
+    # diagnostic suite off, so nothing downstream ever reads a None result.
     sum_to_zero_result = None
     if not suppress_all_data_checks:
         # SE-standardized form: each component of the residual is measured against its own
@@ -1615,11 +1631,12 @@ def analyze_dataset(
                 _diagnostics_g_tilde = _diagnostics_g_tilde_eager
 
             # These three rows are built BEFORE run_diagnostic_suite and passed into it, so
-            # that hard_failed and the verdict are derived WITH them: previously they were
-            # grafted onto the report afterwards, and suppress_all_data_checks could leave a
-            # quiet run CERTIFIED (exit 0) while its own report said the input prerequisites
-            # were never run. An INDETERMINATE input row now caps the verdict at
-            # NOT_CERTIFIED (see _derive_verdict).
+            # hard_failed and the verdict are derived WITH them rather than having them
+            # grafted onto a report whose verdict was already decided. (The suppression hole
+            # that first motivated this -- a quiet run reading CERTIFIED while its own report
+            # said the inputs were never checked -- is now closed twice over: suppression
+            # skips the suite outright, and _derive_verdict still caps the verdict at
+            # NOT_CERTIFIED for any INDETERMINATE input row a direct caller passes in.)
             pipeline_input_check_rows: dict[str, diagnostics.CheckResult] = {}
             # Recorded FIRST so it reads as the foundation the two specific rows below sit
             # on. Every other first-wave check -- ~40 of them, covering column names and
@@ -1631,14 +1648,10 @@ def analyze_dataset(
             # and each is a hard failure, so the only informative thing to say is whether they
             # ran. No count is quoted -- a hard-coded number would go stale the next time a
             # check is added, which is exactly the kind of quiet drift this summary is for.
+            # Unconditional: reaching this block at all means suppress_all_data_checks was
+            # False (it forces run_diagnostics off, up top), so the first wave really ran.
             pipeline_input_check_rows["first_wave_input_checks"] = (
                 diagnostics.CheckResult(
-                    name="first_wave_input_checks",
-                    status=CheckStatuses.INDETERMINATE,
-                    message="Not run: suppress_all_data_checks=True.",
-                )
-                if suppress_all_data_checks
-                else diagnostics.CheckResult(
                     name="first_wave_input_checks",
                     status=CheckStatuses.PASSED,
                     message=(
@@ -1648,10 +1661,11 @@ def analyze_dataset(
                     criteria=[
                         diagnostics.CriterionResult(
                             description=(
-                                "every first-wave input check passed -- column names and "
-                                "dtypes, policy numbering, participation windows, argument "
-                                "indices, beta dimensions, value finiteness, and more (each "
-                                "is a hard failure that aborts the analysis)"
+                                "every zeroth- and first-wave input check passed -- column "
+                                "presence, names and dtypes, policy numbering, participation "
+                                "windows, argument indices, beta dimensions, value "
+                                "finiteness, and more (each is a hard failure that aborts the "
+                                "analysis)"
                             ),
                             value="all passed",
                             ok=True,
@@ -1665,21 +1679,12 @@ def analyze_dataset(
             # already ran it near the start of analyze_dataset, it is a hard failure with no
             # interactive continue path, and nothing between the first wave and this point
             # touches analysis_df or action_prob_func_args -- so the analysis having gotten
-            # this far proves it passed. The suppressed case is likewise recorded, not silently
-            # omitted: a suppressed input check and a passing one must not look the same in
-            # the report. INDETERMINATE, so it stays out of the FAILED set
-            # run_diagnostic_suite's hard-fail gate is built on.
+            # this far proves it passed.
             _reconstruction_message, _reconstruction_criteria = (
                 _action_prob_reconstruction_row_content(first_wave_measurements)
             )
             pipeline_input_check_rows["action_probabilities_reconstructed"] = (
                 diagnostics.CheckResult(
-                    name="action_probabilities_reconstructed",
-                    status=CheckStatuses.INDETERMINATE,
-                    message="Not run: suppress_all_data_checks=True.",
-                )
-                if suppress_all_data_checks
-                else diagnostics.CheckResult(
                     name="action_probabilities_reconstructed",
                     status=CheckStatuses.PASSED,
                     # The measured agreement as a criterion, not prose: the
@@ -1696,14 +1701,10 @@ def analyze_dataset(
             # only, while this check is that same a_root construction extended to EVERY
             # stacked component -- so the per-update beta residuals, which is where a
             # mis-specified update function shows up, appear in no other row.
+            # sum_to_zero_result is None only when suppress_all_data_checks was set, which
+            # cannot reach this block, so it is always a real measurement here.
             pipeline_input_check_rows["estimating_functions_sum_to_zero"] = (
                 diagnostics.CheckResult(
-                    name="estimating_functions_sum_to_zero",
-                    status=CheckStatuses.INDETERMINATE,
-                    message="Not run: suppress_all_data_checks=True.",
-                )
-                if sum_to_zero_result is None
-                else diagnostics.CheckResult(
                     name="estimating_functions_sum_to_zero",
                     status=(
                         CheckStatuses.PASSED

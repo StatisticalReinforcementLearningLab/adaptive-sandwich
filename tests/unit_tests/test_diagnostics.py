@@ -1117,7 +1117,7 @@ def test_exact_check_failed_verdict_stands_when_the_solver_is_unhealthy():
     assert 0 < result.metrics["num_converged_trials"] < result.metrics["num_trials"]
     assert max(result.metrics["se_ratios"]) > result.metrics["se_ratio_null_band"][1]
     assert any("optimistically selected" in w for w in result.warnings)
-    # Merely unhealthy: the rate criterion stays [indeterminate]-severity, not [FAIL].
+    # Merely unhealthy: the rate criterion stays [indeterminate]-severity, not [fail].
     (rate_criterion,) = [c for c in result.criteria if "failure rate" in c.description]
     assert rate_criterion.ok is False
     assert rate_criterion.severity == "indeterminate"
@@ -2457,6 +2457,12 @@ def _summary_report(**overrides):
                         ok=None,
                     ),
                     d.CriterionResult(
+                        description="a measured quantity with no calibrated threshold",
+                        value="85% in the worst direction",
+                        ok=None,
+                        severity="info",
+                    ),
+                    d.CriterionResult(
                         description="a criterion whose measured value is itself long",
                         value=(
                             "a measured value long enough that wrapping must split it "
@@ -2608,10 +2614,11 @@ def test_format_diagnostic_summary_colors_are_opt_in_and_atomic():
     # Per-criterion outcome markers are individually colored, keyed to their own ok/severity
     # (the fixture's influence row carries one of each), not to the row's overall status.
     assert "\x1b[32m[ok]\x1b[0m" in colored
-    assert "\x1b[31m[FAIL]\x1b[0m" in colored
+    assert "\x1b[31m[fail]\x1b[0m" in colored
     assert "\x1b[38;5;208m[warn]\x1b[0m" in colored
     assert "\x1b[38;5;141m[indeterminate]\x1b[0m" in colored
     assert "\x1b[38;5;141m[not evaluated]\x1b[0m" in colored
+    assert "\x1b[90m[no gate]\x1b[0m" in colored
     # Each criterion's measured VALUE is cyan -- on every line it touches when it wraps, so a
     # value split across two lines carries its own start/reset on each (an unterminated color
     # would bleed into the padding and the next line's text).
@@ -2637,7 +2644,7 @@ def test_format_diagnostic_summary_right_aligns_criterion_markers():
     """
     Each criterion renders as "- description: value" with its outcome marker flush against the
     summary's right edge -- ON THE CRITERION'S LAST LINE even when the text wraps, so the
-    markers form one scannable column. Severity maps ok=False to [FAIL]/[warn]/[indeterminate]
+    markers form one scannable column. Severity maps ok=False to [fail]/[warn]/[indeterminate]
     and ok=None to [not evaluated], independent of the row's overall status.
     """
     summary = d.format_diagnostic_summary(_summary_report())
@@ -2656,8 +2663,9 @@ def test_format_diagnostic_summary_right_aligns_criterion_markers():
         ("[ok]", "worst 5.0 of 20"),
         ("[warn]", ""),
         ("[not evaluated]", "not evaluable"),
-        ("[FAIL]", "0.5"),
+        ("[fail]", "0.5"),
         ("[indeterminate]", "3 of 4"),
+        ("[no gate]", ""),
     ]:
         line = line_with(marker, fragment)
         assert len(line) == d._SUMMARY_TOTAL_WIDTH
@@ -2677,6 +2685,19 @@ def test_format_diagnostic_summary_right_aligns_criterion_markers():
     )
     assert marker_index > start_index
     assert "largest 39.8%" in lines[marker_index]
+
+    # The other wrapping fallback: when the value fills its line, the marker cannot fit after
+    # it and takes a leader line of its own -- still flush right at the same column.
+    own_line = line_with("[no gate]")
+    assert own_line.strip().startswith(".")
+    assert len(own_line) == d._SUMMARY_TOTAL_WIDTH
+    value_line_index = next(
+        index
+        for index, line in enumerate(lines)
+        if "a measured quantity with no calibrated threshold" in line
+    )
+    assert "85% in the worst direction" in lines[value_line_index]
+    assert lines[value_line_index + 1] == own_line
 
 
 def test_format_diagnostic_summary_with_no_report_renders_did_not_run():

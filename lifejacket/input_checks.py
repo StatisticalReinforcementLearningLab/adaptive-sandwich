@@ -30,6 +30,105 @@ np.set_printoptions(threshold=np.inf)
 logger = logging.getLogger(__name__)
 
 
+def perform_unconditional_zeroth_wave_input_checks(
+    output_dir,
+    percentile_bootstrap_draws,
+    percentile_bootstrap_alpha,
+    percentile_bootstrap_seed,
+):
+    """
+    The checks that run FIRST and are never suppressed, not even by suppress_all_data_checks.
+
+    Both earn their exemption by guarding something that would otherwise be discarded or
+    silently wrong rather than merely unchecked:
+
+    - The output directory: every result is written to output_dir only at the very end of the
+      run and nothing creates it, so a bad path would otherwise throw away the entire analysis
+      at the finish line. See require_output_dir_ready for what this does and does not
+      protect against.
+    - The percentile-bootstrap settings, for the sharper reason: percentile_bootstrap_alpha is
+      used directly as a quantile level, so an out-of-range value does not fail -- it silently
+      reports a meaningless interval as percentile_bootstrap_ci.
+
+    Neither one looks at the data, which is why suppress_all_data_checks has no bearing on
+    them.
+
+    Args:
+        output_dir (str | os.PathLike): The directory every result will be written to.
+        percentile_bootstrap_draws (int | None): The number of multiplier-bootstrap draws, or
+            None when the percentile bootstrap was not requested.
+        percentile_bootstrap_alpha (float): The percentile-interval level.
+        percentile_bootstrap_seed (int | None): The seed for the multiplicity draws.
+    """
+    require_output_dir_ready(output_dir)
+    require_valid_percentile_bootstrap_settings(
+        percentile_bootstrap_draws,
+        percentile_bootstrap_alpha,
+        percentile_bootstrap_seed,
+    )
+
+
+def perform_conditional_zeroth_wave_dataframe_checks(
+    analysis_df,
+    active_col_name,
+    action_col_name,
+    policy_num_col_name,
+    calendar_t_col_name,
+    subject_id_col_name,
+    action_prob_col_name,
+    reward_col_name,
+):
+    """
+    The dataframe-only prerequisites, run before the caller's theta_calculation_func.
+
+    The user-supplied theta_calculation_func consumes analysis_df BEFORE the first wave can run
+    (the wave needs the theta it returns), so a malformed frame used to fail inside user code
+    with whatever error that code happened to raise. These are exactly the checks that need
+    nothing but the frame, and whose actionable messages a broken callback input would
+    otherwise preempt -- so they run here, ahead of it, and NOT again in the first wave.
+
+    Conditional: skipped, along with the first wave and the diagnostic suite, under
+    suppress_all_data_checks. Everything downstream of them -- including
+    require_all_named_columns_not_object_type_in_analysis_df and every check that hashes a
+    subject id -- assumes they have already passed, so a caller invoking the first wave
+    directly must call this first.
+
+    Args:
+        analysis_df (pd.DataFrame): The analysis DataFrame.
+        active_col_name (str): The name of the active column.
+        action_col_name (str): The name of the action column.
+        policy_num_col_name (str): The name of the policy number column.
+        calendar_t_col_name (str): The name of the calendar time column.
+        subject_id_col_name (str): The name of the subject ID column.
+        action_prob_col_name (str): The name of the action probability column.
+        reward_col_name (str): The name of the reward column.
+    """
+    require_analysis_df_nonempty(analysis_df)
+    # Before everything else that touches analysis_df, because almost every other check
+    # indexes it by one of these names. Until 2026-09-02 the presence check ran in the first
+    # wave's analysis_df section, AFTER verify_analysis_df_summary_satisfactory had already
+    # read six of the columns to build its summary plots -- so a single typo'd column name
+    # surfaced as a bare KeyError from inside a plotting routine instead of the purpose-built
+    # message here.
+    require_all_named_columns_present_in_analysis_df(
+        analysis_df,
+        active_col_name,
+        action_col_name,
+        policy_num_col_name,
+        calendar_t_col_name,
+        subject_id_col_name,
+        action_prob_col_name,
+        reward_col_name,
+    )
+    # Immediately after the column checks, and BEFORE anything that hashes a subject id.
+    # Previously this ran at the end of the first wave's analysis_df block, where it could
+    # never fire: an unhashable id makes pandas raise a bare "TypeError: unhashable type:
+    # 'list'" from the .unique()/groupby()/duplicated() calls in the checks that run before it
+    # (verified). Its own docstring claims it is what stands between such an id and an
+    # unhelpful failure, so it has to run here to deliver that.
+    require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_name)
+
+
 # TODO: any checks needed here about alg update function type?
 def perform_first_wave_input_checks(
     analysis_df,
@@ -64,6 +163,10 @@ def perform_first_wave_input_checks(
     Perform the first wave of input checks on the analysis DataFrame and algorithm update function arguments.
     These are generally to make sure that the inputs are wired correctly and to verify the
     options selected are correct.
+
+    Assumes perform_conditional_zeroth_wave_dataframe_checks has already passed on this frame -- the
+    zeroth wave runs before theta_calculation_func produces the theta_est this wave needs, so
+    its checks are not repeated here. Call it first if you are invoking this wave directly.
 
     Args:
         analysis_df (pd.DataFrame): The analysis DataFrame.
@@ -105,7 +208,12 @@ def perform_first_wave_input_checks(
         reconstruction's agreement), for the diagnostic summary to report.
     """
     ### Validate the analysis DataFrame's columns FIRST.
-    require_analysis_df_nonempty(analysis_df)
+    #
+    # The frame being non-empty, every named column being PRESENT, and the subject ids being
+    # hashable are perform_conditional_zeroth_wave_dataframe_checks' job, not repeated here: that wave
+    # runs ahead of the caller's theta_calculation_func, which this wave's theta_est comes
+    # from, so by the time we are called they have already passed. The dtype check below does
+    # index analysis_df by these names and so depends on the presence check having run.
     require_named_columns_distinct(
         {
             "active_col_name": active_col_name,
@@ -117,22 +225,6 @@ def perform_first_wave_input_checks(
             "reward_col_name": reward_col_name,
         }
     )
-    #
-    # These run before everything else because almost every other check in this function
-    # indexes analysis_df by one of these names. Until 2026-09-02 they ran in the analysis_df
-    # section far below, AFTER verify_analysis_df_summary_satisfactory had already read six of
-    # the columns to build its summary plots -- so a single typo'd column name surfaced as a
-    # bare KeyError from inside a plotting routine instead of the purpose-built message here.
-    require_all_named_columns_present_in_analysis_df(
-        analysis_df,
-        active_col_name,
-        action_col_name,
-        policy_num_col_name,
-        calendar_t_col_name,
-        subject_id_col_name,
-        action_prob_col_name,
-        reward_col_name,
-    )
     require_all_named_columns_not_object_type_in_analysis_df(
         analysis_df,
         active_col_name,
@@ -143,13 +235,6 @@ def perform_first_wave_input_checks(
         action_prob_col_name,
         reward_col_name,
     )
-    # Immediately after the column checks, and BEFORE anything that hashes a subject id.
-    # Previously this ran at the end of the analysis_df block, where it could never fire: an
-    # unhashable id makes pandas raise a bare "TypeError: unhashable type: 'list'" from the
-    # .unique()/groupby()/duplicated() calls in the checks that run before it (verified). Its
-    # own docstring claims it is what stands between such an id and an unhelpful failure, so it
-    # has to run here to deliver that.
-    require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_name)
 
     ### Validate the supplied functions and the argument indices that address their args.
     #

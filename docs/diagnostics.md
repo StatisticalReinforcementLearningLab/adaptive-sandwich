@@ -75,11 +75,15 @@ checks near the start of `analyze_dataset`, it is a hard failure with no interac
 path, and nothing between that run and the suite touches `analysis_df` or
 `action_prob_func_args`, so reaching the suite at all proves it passed. `analyze_dataset`
 therefore records the outcome into the report directly under the same
-`action_probabilities_reconstructed` name: `passed` (with a provenance message) when data checks
-ran, and an `indeterminate` entry with the message `"Not run: suppress_all_data_checks=True."`
-when they were suppressed -- a suppressed check and a passing one never look alike in the
-report. Consumers of `input_check_results` should therefore treat `indeterminate` as "not
-run". The sum-to-zero check is deliberately **not** also wired in here, because
+`action_probabilities_reconstructed` name, as a `passed` entry carrying the measured agreement.
+There is no suppressed counterpart to distinguish it from, because
+`suppress_all_data_checks=True` now turns the diagnostic suite off entirely (the suite is
+itself data checking, and with the input rows unrun its verdict would be capped at
+`not_certified` regardless): a suppressed run writes no `diagnostic_report.pkl` at all. An
+`indeterminate` entry in `input_check_results` still means "not run" rather than "found
+something" -- it is reachable by a direct `run_diagnostic_suite` caller passing its own
+`extra_input_check_results`, and `_derive_verdict` caps the verdict at `not_certified` for one.
+The sum-to-zero check is deliberately **not** also wired in here, because
 the main `analyze_dataset` pipeline already runs it (interactively, and under the same
 `suppress_all_data_checks` gate) before the suite starts -- and, as of the ADS-142 follow-ups, in
 SE-standardized form:

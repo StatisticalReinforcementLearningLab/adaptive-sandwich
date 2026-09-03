@@ -10,11 +10,7 @@ from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
 from tests.utils import get_abs_path
 
 from lifejacket import post_deployment_analysis
-from lifejacket.constants import (
-    CheckStatuses,
-    DiagnosticClassifications,
-    DiagnosticVerdicts,
-)
+from lifejacket.constants import CheckStatuses, DiagnosticClassifications
 from lifejacket.diagnostics import DiagnosticReport
 from lifejacket.helper_functions import load_function_from_same_named_file
 from lifejacket.post_deployment_analysis import analyze_dataset
@@ -286,16 +282,25 @@ def test_diagnostic_suite_runs_on_a_mask_aware_study(
     debug_pieces.pkl -- only diagnostic_report.pkl was missing, which is exactly what made the
     defect survive.
 
-    Parametrized over suppress_all_data_checks because the second finding fixed here lives on
-    the same path: with checks suppressed the suite must not re-run (and hard-fail on) the
-    reconstruction input check the caller explicitly turned off, and a suppressed check must
-    not be indistinguishable from a passing one in the report.
+    Parametrized over suppress_all_data_checks because the second finding fixed here lived on
+    the same path: with the checks suppressed the suite must not re-run (and hard-fail on) the
+    reconstruction input check the caller explicitly turned off. That is now settled more
+    bluntly -- suppress_all_data_checks skips the suite entirely, since the suite IS data
+    checking and its verdict would be capped at NOT_CERTIFIED anyway -- so the True arm
+    asserts exactly that: no report, and no diagnostics_flagged for the CLI to exit 3 on.
     """
-    _run_masked_analyze_dataset(
+    result = _run_masked_analyze_dataset(
         tmp_path,
         run_diagnostics=True,
         suppress_all_data_checks=suppress_all_data_checks,
     )
+
+    if suppress_all_data_checks:
+        assert not os.path.exists(f"{tmp_path}/diagnostic_report.pkl")
+        assert "diagnostics_flagged" not in result
+        # The analysis itself still completes and lands on disk.
+        assert "theta_est" in _load_pickle(tmp_path, "analysis.pkl")
+        return
 
     report = _load_pickle(tmp_path, "diagnostic_report.pkl")
     assert isinstance(report, DiagnosticReport)
@@ -311,23 +316,13 @@ def test_diagnostic_suite_runs_on_a_mask_aware_study(
     reconstruction_check = report.input_check_results[
         "action_probabilities_reconstructed"
     ]
-    if suppress_all_data_checks:
-        # Recorded as not-run, not omitted and not silently "passed".
-        assert reconstruction_check.status == CheckStatuses.INDETERMINATE
-        assert "suppress_all_data_checks" in reconstruction_check.message
-        # And it caps the verdict: the input rows are passed INTO the suite before the
-        # verdict is derived, so unvalidated inputs can never read CERTIFIED (a Copilot
-        # review finding -- they used to be grafted onto the finished report, leaving a
-        # quiet suppressed run certified with exit status 0).
-        assert report.verdict == DiagnosticVerdicts.NOT_CERTIFIED
-    else:
-        assert reconstruction_check.status == CheckStatuses.PASSED
-        # An unsuppressed run may still be honestly uncertified for statistical reasons;
-        # what it must never carry is a not-run input row.
-        assert all(
-            row.status != CheckStatuses.INDETERMINATE
-            for row in report.input_check_results.values()
-        )
+    assert reconstruction_check.status == CheckStatuses.PASSED
+    # A run that reached the suite had its inputs checked, so no input row may read
+    # "not run" -- such a row would cap the verdict at NOT_CERTIFIED (see _derive_verdict).
+    assert all(
+        row.status != CheckStatuses.INDETERMINATE
+        for row in report.input_check_results.values()
+    )
 
 
 def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):

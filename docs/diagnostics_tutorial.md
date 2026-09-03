@@ -168,13 +168,15 @@ used to wire in, `require_action_probabilities_in_analysis_df_can_be_reconstruct
 expensive input check (it evaluates the action-probability function over every active row), and
 it already runs -- as a hard failure, with no interactive continue path -- in the first-wave
 input checks near the start of the pipeline, on inputs nothing later touches. Reaching the suite
-proves it passed, so `analyze_dataset` records that outcome directly: a `passed` entry (with a
-provenance message) under `action_probabilities_reconstructed` when data checks ran, and an
-`indeterminate` entry with the message `"Not run: suppress_all_data_checks=True."` when
-`suppress_all_data_checks=True` (the suite must not re-run, let alone hard-fail on, a check you
-explicitly turned off).
-**So `input_check_results` is not a passed/failed dict**: read an `indeterminate` entry there as
-"not run," not as a finding.
+proves it passed, so `analyze_dataset` records that outcome directly, as a `passed` entry
+carrying the measured agreement under `action_probabilities_reconstructed`. Setting
+`suppress_all_data_checks=True` does not produce a suppressed variant of this row: it turns the
+whole diagnostic suite off (the suite is data checking too, and its verdict could not exceed
+`not_certified` with the input checks unrun), so such a run writes no `diagnostic_report.pkl`
+and is not flagged.
+**Still, `input_check_results` is not a passed/failed dict**: read an `indeterminate` entry
+there as "not run," not as a finding -- and note that such an entry caps the verdict at
+`not_certified`, because unvalidated inputs cannot certify.
 
 **Why it's separate from every numbered check below.** These are questions about whether the
 *supplied data and functions* are wired together correctly -- not numeric measurements of how

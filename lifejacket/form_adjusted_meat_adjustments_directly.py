@@ -231,7 +231,10 @@ def form_adjusted_meat_adjustments_directly(
         action_prob_func_args_beta_index,
     )
 
-    _, _, loss_gradient_pi_derivatives = calculate_inference_loss_derivatives(
+    # Return values intentionally unused, exactly as with the call just above: nothing below
+    # consumes any of the three, but the call is kept for its logger.debug side effects during
+    # interactive use of this diagnostic function (see the breakpoint() further down).
+    _inference_loss_derivatives = calculate_inference_loss_derivatives(
         study_df,
         theta_est,
         inference_func,

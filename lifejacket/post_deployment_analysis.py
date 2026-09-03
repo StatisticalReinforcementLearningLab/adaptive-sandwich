@@ -1121,7 +1121,6 @@ def analyze_dataset(
             classical_bread_matrix,
             classical_meat_matrix,
             classical_sandwich_var_estimate,
-            avg_estimating_function_stack,
             per_subject_estimating_function_stacks,
             per_subject_adjusted_meat_contributions,
         ) = construct_classical_and_adjusted_sandwiches(
@@ -2705,7 +2704,6 @@ def construct_classical_and_adjusted_sandwiches(
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
 ]:
     """
     Constructs the classical and adjusted sandwich matrices, as well as various
@@ -2855,19 +2853,20 @@ def construct_classical_and_adjusted_sandwiches(
             mid-precompute structural violations; True = force on with loud
             errors when ineligible; False = force off).
     Returns:
-        A nine-element tuple containing:
+        An eight-element tuple containing:
             - The raw joint bread matrix.
             - The joint (adjusted) meat matrix.
             - The joint sandwich matrix.
             - The classical bread matrix.
             - The classical meat matrix.
             - The classical sandwich matrix.
-            - The average weighted estimating function stack.
             - All per-subject weighted estimating function stacks.
             - The per-subject adjusted meat contributions, if form_adjusted_meat_adjustments_explicitly
               is True, otherwise an array of NaNs.
-        (The two all-ones small-sample-correction placeholders that used to pad this tuple to
-        eleven are gone with the feature that produced them.)
+        Two of this tuple's former elements are gone: the all-ones small-sample-correction
+        placeholders (with the feature that produced them), and the average estimating-function
+        stack, which no caller ever used and which is exactly
+        per_subject_estimating_function_stacks.mean(axis=0) if it is ever wanted.
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."
@@ -3302,7 +3301,6 @@ def construct_classical_and_adjusted_sandwiches(
         classical_bread_matrix,
         classical_meat_matrix,
         classical_sandwich,
-        avg_estimating_function_stack,
         per_subject_estimating_function_stacks,
         per_subject_adjusted_meat_contributions,
     )

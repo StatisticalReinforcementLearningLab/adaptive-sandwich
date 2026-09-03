@@ -1512,7 +1512,9 @@ def check_local_nonlinearity(
     symmetry as warnings (never as a pass/fail cutoff, per the task write-up).
     """
     se_l = standard_errors_for_contrasts(V_hat, L)
-    base_delta, base_s = sample_perturbation_directions(
+    # The score draws are unused here -- this check probes eta_hat + s*delta directly and never
+    # needs the s that produced each delta (the exact check, which re-solves, does).
+    base_delta, _ = sample_perturbation_directions(
         per_subject_stacks,
         bread_factored,
         num_subjects,
@@ -4029,8 +4031,8 @@ def leave_one_out_theta_sensitivity(
     subject does not replay the policy that would have been run without them). Holds all beta_k
     fixed at their observed values and reports, for each requested subject, the one-step Newton
     shift in theta implied by excluding that subject's contribution to the theta-block
-    estimating equation, using the closed-form leave-one-out average available because
-    avg_estimating_function_stack is exactly mean(per_subject_stacks, axis=0).
+    estimating equation, using the closed-form leave-one-out average available because the
+    average estimating-function stack is exactly mean(per_subject_stacks, axis=0).
 
     This is intentionally a single Newton step, not an iterated re-solve to convergence: doing
     better would require re-evaluating every OTHER subject's estimating-function row at a new

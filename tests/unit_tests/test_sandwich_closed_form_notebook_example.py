@@ -296,7 +296,6 @@ def _run_package_pipeline(beta_hat, theta_hat, jacobian_row_chunk_size=None):
         _classical_bread_matrix,
         _classical_meat_matrix,
         _classical_sandwich,
-        _avg_estimating_function_stack,
         _per_subject_estimating_function_stacks,
         _per_subject_adjusted_meat_adjustments,
     ) = post_deployment_analysis.construct_classical_and_adjusted_sandwiches(

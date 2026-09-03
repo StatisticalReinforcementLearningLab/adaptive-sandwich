@@ -657,11 +657,25 @@ def _criterion_lines(criterion: CriterionResult) -> list[str]:
     last_plain_length = len(lines[-1]) - (2 if span_start_by_line else 0)
     if last_plain_length + 2 + len(marker) <= _SUMMARY_DETAIL_WIDTH:
         padding = _SUMMARY_DETAIL_WIDTH - last_plain_length - len(marker)
-        lines[-1] = lines[-1] + " " * padding + marker
+        lines[-1] = lines[-1] + _marker_leader(padding) + marker
     else:
-        # No room on the last line: the marker gets its own line, still flush right.
-        lines.append(" " * (_SUMMARY_DETAIL_WIDTH - len(marker)) + marker)
+        # No room on the last line: the marker gets its own line, still flush right (the
+        # leader runs from the bullet's hanging indent).
+        padding = _SUMMARY_DETAIL_WIDTH - 2 - len(marker)
+        lines.append("  " + _marker_leader(padding).lstrip() + marker)
     return lines
+
+
+def _marker_leader(padding: int) -> str:
+    """
+    The gap between a criterion's value and its right-aligned outcome marker, exactly `padding`
+    characters wide: dot leaders (" .... ") so the eye can track from the value to the marker
+    across the row. Degenerates to plain spaces when the gap is too narrow for at least two
+    dots -- a single dot reads as a stray period, not a leader.
+    """
+    if padding - 2 >= 2:
+        return " " + "." * (padding - 2) + " "
+    return " " * padding
 
 
 def _summary_row(
@@ -4215,6 +4229,11 @@ def check_exploration_and_weights(
     # actually supplied that bound.
     have_rows = bool(all_probs.size)
     probs_finite = bool(np.all(np.isfinite(all_probs)))
+    # NOT redundant with the interval criterion below it: a NaN passes `<= 0` and `>= 1`
+    # vacuously (NaN comparisons are always false), so only this criterion catches it -- and
+    # the displayed [min, max] range cannot reveal one either, because pandas' min()/max()
+    # skip NaN. Hence this criterion reports a finiteness COUNT, not the range.
+    num_nonfinite_probs = int(np.sum(~np.isfinite(all_probs)))
     prob_range_value = (
         f"[{metrics['action_prob_global_min']:.4g}, "
         f"{metrics['action_prob_global_max']:.4g}] over {all_probs.size} active rows"
@@ -4223,8 +4242,17 @@ def check_exploration_and_weights(
     )
     criteria = [
         CriterionResult(
-            description="every recorded action probability finite",
-            value=prob_range_value,
+            description=(
+                "every recorded action probability finite (a NaN would pass the interval "
+                "test below silently)"
+            ),
+            value=(
+                f"all {all_probs.size} finite"
+                if probs_finite
+                else f"{num_nonfinite_probs} of {all_probs.size} nonfinite"
+            )
+            if have_rows
+            else "no active rows",
             ok=probs_finite if have_rows else None,
         ),
         CriterionResult(

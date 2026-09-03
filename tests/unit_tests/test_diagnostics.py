@@ -1281,6 +1281,17 @@ def test_exploration_check_hard_fails_on_nonfinite_probability():
     result = _run_exploration_check(_exploration_df([0.3, float("nan"), 0.5, 0.4]))
     assert result.status == CheckStatuses.FAILED
     assert any("Nonfinite" in w for w in result.warnings)
+    # The finiteness criterion is NOT redundant with the interval criterion: a NaN passes
+    # `<= 0` / `>= 1` vacuously (NaN comparisons are always false), so the interval criterion
+    # reads [ok] here and ONLY the finiteness criterion catches the NaN -- with a count, since
+    # the displayed [min, max] range (pandas skipna) also cannot reveal one.
+    (finite_criterion,) = [c for c in result.criteria if "finite (" in c.description]
+    assert finite_criterion.ok is False
+    assert finite_criterion.value == "1 of 4 nonfinite"
+    (interval_criterion,) = [
+        c for c in result.criteria if "strictly inside" in c.description
+    ]
+    assert interval_criterion.ok is True
 
 
 def test_exploration_check_ignores_inactive_rows():
@@ -2606,7 +2617,10 @@ def test_format_diagnostic_summary_right_aligns_criterion_markers():
         (line,) = [line for line in lines if line.endswith(marker) and fragment in line]
         return line
 
-    # Marker-terminated lines all end at the same right edge.
+    # Marker-terminated lines all end at the same right edge, with a dot leader running from
+    # the value to the marker so the eye can track across the gap.
+    import re as _re
+
     for marker, fragment in [
         ("[ok]", "worst 5.0 of 20"),
         ("[warn]", ""),
@@ -2614,7 +2628,9 @@ def test_format_diagnostic_summary_right_aligns_criterion_markers():
         ("[FAIL]", "0.5"),
         ("[indeterminate]", "3 of 4"),
     ]:
-        assert len(line_with(marker, fragment)) == d._SUMMARY_TOTAL_WIDTH
+        line = line_with(marker, fragment)
+        assert len(line) == d._SUMMARY_TOTAL_WIDTH
+        assert _re.search(r" \.{2,} \[", line), line
     # The deliberately over-long criterion wrapped: its description starts on one line and its
     # marker lands on a LATER line (the value's), still flush right.
     start_index = next(

@@ -38,7 +38,8 @@ from simulators_and_runners.functions_to_pass_to_analysis.synthetic_get_least_sq
     synthetic_get_least_squares_loss_rl,
 )
 
-# TODO: Add checking of all aux values.
+# All aux values except result[1][3] are checked against hand-built expectations in the
+# stacker tests below; see the comment in the first one for why [3] is the exception.
 
 
 @pytest.fixture
@@ -386,6 +387,22 @@ def test_construct_single_user_weighted_estimating_function_stacker_simplest(
         ),
         rtol=1e-6,
     )
+    # The remaining aux values, against the same hand-built stacks. Per-subject stacks
+    # (result[1][4]) are the stacks themselves, in subject order; the classical meat
+    # (result[1][2]) is the outer-product sum over the (weighted) INFERENCE components
+    # only -- the last theta_dim entries of each stack -- so a mis-slice that let a beta
+    # block leak in would be caught here. (result[1][3], the per-subject inverse classical
+    # bread contributions, is deliberately not hand-checked: an expectation would just
+    # re-run jax.jacfwd over the same threaded args as the implementation, and the
+    # classical sandwich built from it is pinned by the golden-file integration tests.)
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-6)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
+        rtol=1e-6,
+    )
 
 
 @pytest.fixture
@@ -705,6 +722,15 @@ def test_construct_single_user_weighted_estimating_function_stacker_estimating_f
             ),
             axis=0,
         ),
+        rtol=1e-6,
+    )
+    # Per-subject stacks and classical meat -- see the first test's comment on these.
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-6)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
         rtol=1e-6,
     )
 
@@ -1295,6 +1321,15 @@ def test_construct_single_user_weighted_estimating_function_stacker_different_be
         ),
         rtol=1e-6,
     )
+    # Per-subject stacks and classical meat -- see the first test's comment on these.
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-6)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
+        rtol=1e-6,
+    )
 
 
 @pytest.fixture
@@ -1825,6 +1860,15 @@ def test_construct_single_user_weighted_estimating_function_stacker_incremental_
             ),
             axis=0,
         ),
+        rtol=1e-6,
+    )
+    # Per-subject stacks and classical meat -- see the first test's comment on these.
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-6)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
         rtol=1e-6,
     )
 
@@ -2400,6 +2444,15 @@ def test_construct_single_user_weighted_estimating_function_stacker_multiple_dec
             ),
             axis=0,
         ),
+        rtol=1e-6,
+    )
+    # Per-subject stacks and classical meat -- see the first test's comment on these.
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-6)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
         rtol=1e-6,
     )
 
@@ -3117,6 +3170,15 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             ),
             axis=0,
         ),
+        rtol=1e-5,
+    )
+    # Per-subject stacks and classical meat -- see the first test's comment on these.
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-5)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
         rtol=1e-5,
     )
 
@@ -3954,6 +4016,15 @@ def test_construct_single_user_weighted_estimating_function_stacker_use_action_p
             ),
             axis=0,
         ),
+        rtol=1e-5,
+    )
+    # Per-subject stacks and classical meat -- see the first test's comment on these.
+    expected_stacks = jnp.array([expected_weighted_stack_1, expected_weighted_stack_2])
+    np.testing.assert_allclose(result[1][4], expected_stacks, rtol=1e-5)
+    expected_inference_components = expected_stacks[:, -theta.shape[0] :]
+    np.testing.assert_allclose(
+        result[1][2],
+        expected_inference_components.T @ expected_inference_components,
         rtol=1e-5,
     )
 

@@ -39,7 +39,7 @@ def RL_least_squares_loss_regularized_previous_betas_as_args_hard_clipping(
     beta_0_est = beta_est[: base_states.shape[1]].reshape(-1, 1)
     beta_1_est = beta_est[base_states.shape[1] :].reshape(-1, 1)
 
-    # TODO: Use vmap to speed this up if necessary.
+    # NOTE: Use vmap to speed this up if necessary.
     action1probs = jnp.concatenate(
         [
             pre_update_action1probs,

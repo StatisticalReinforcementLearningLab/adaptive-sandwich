@@ -36,6 +36,10 @@ def get_pis_batched_sigmoid(
     smooth_clip,
     batched_treat_states_tensor,
 ):
+    """
+    Compute action-1 probabilities for a batch of treatment states under the
+    clipped sigmoid policy (smoothly clipped if `smooth_clip`, else hard-clipped).
+    """
     return jax.vmap(
         fun=(
             synthetic_get_action_1_prob_generalized_logistic
@@ -61,6 +65,10 @@ def get_pis_batched_thompson_sampling(
     upper_clip,
     steepness,
 ):
+    """
+    Compute action-1 probabilities for a batch of treatment states under the
+    smooth posterior (Thompson) sampling policy.
+    """
     return jax.vmap(
         fun=smooth_thompson_sampling_act_prob_function_no_action_centering,
         in_axes=(None, 0, None, None, None, None),
@@ -147,26 +155,35 @@ class SigmoidLS:
         self.alg_update_func_args_action_prob_index = 5
         self.alg_update_func_args_action_prob_times_index = 6
 
-    # TODO: All of these functions arguably should not modify the dataframe...
+    # NOTE: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
     # to be formatted as such (though I don't like the latter). Going with this
     # for now. This modification also raises a warning about setting a slice on
     # a copy, but it seems to work perfectly.
 
-    # TODO: Docstring
     def get_base_states(self, in_study_df):
+        """
+        Extract the baseline state features as a JAX array with one row per
+        decision time.
+        """
         base_states = in_study_df[self.state_feats].to_numpy()
         return jnp.array(base_states)
 
     def get_treat_states(self, in_study_df):
+        """
+        Extract the treatment state features as a JAX array with one row per
+        decision time.
+        """
         treat_states = in_study_df[self.treat_feats].to_numpy()
         return jnp.array(treat_states)
 
     def get_rewards(self, in_study_df, reward_col="reward"):
+        """Extract rewards as a column-vector JAX array."""
         rewards = in_study_df[reward_col].to_numpy().reshape(-1, 1)
         return jnp.array(rewards)
 
     def get_actions(self, in_study_df, action_col="action"):
+        """Extract actions as a column-vector JAX array."""
         actions = in_study_df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
@@ -175,6 +192,7 @@ class SigmoidLS:
         in_study_df,
         actionprob_col="action1prob",
     ):
+        """Extract action-1 selection probabilities as a float32 column-vector JAX array."""
         action1probs = (
             in_study_df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
         )
@@ -185,12 +203,20 @@ class SigmoidLS:
         in_study_df,
         calendar_t_col="calendar_t",
     ):
+        """
+        Extract the calendar times corresponding to each action-1 probability
+        as a float32 column-vector JAX array.
+        """
         action1probstimes = (
             in_study_df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
         )
         return jnp.array(action1probstimes)
 
     def get_initial_policy_num(self, full_df, policy_num_col="policy_num"):
+        """
+        Return the smallest nonnegative policy number in the data, or 0 if
+        there is none.
+        """
         policy_nums = full_df[policy_num_col]
         nonnegative_policy_nums = policy_nums[policy_nums >= 0]
         return nonnegative_policy_nums.min() if len(nonnegative_policy_nums) > 0 else 0
@@ -233,8 +259,11 @@ class SigmoidLS:
         )
         return jnp.array(action1probs)
 
-    # TODO: Docstring
     def get_states(self, df):
+        """
+        Extract the baseline and treatment state feature matrices as a
+        (base_states, treat_states) tuple of numpy arrays.
+        """
         base_states = df[self.state_feats].to_numpy()
         treat_states = df[self.treat_feats].to_numpy()
         return (base_states, treat_states)
@@ -280,10 +309,9 @@ class SigmoidLS:
 
         # NOTE: this gives NANs and breaks action selection when all
         # users take same action, at least with no regularization
-        inv_XX = jnp.linalg.inv(new_XX + self.lambda_ * np.eye(design.shape[1]))
-
-        # TODO: Do this multiplication with a solve instead, or use QR decomposition even.
-        beta_est = jnp.matmul(inv_XX, new_RX.reshape(-1)).squeeze()
+        beta_est = jnp.linalg.solve(
+            new_XX + self.lambda_ * np.eye(design.shape[1]), new_RX.reshape(-1)
+        ).squeeze()
 
         seen_user_id = self.all_policies[-1]["seen_user_id"].copy()
         seen_user_id.update(new_data["user_id"].to_numpy())
@@ -312,13 +340,18 @@ class SigmoidLS:
         self.all_policies.append(update_dict)
 
     def get_all_users(self, study_df, user_id_column="user_id"):
+        """Return the unique user ids appearing in the study data."""
         return study_df[user_id_column].unique()
 
     def get_current_beta_estimate(self):
+        """Return the beta estimate from the most recent policy."""
         return self.all_policies[-1]["beta_est"]
 
     def get_previous_post_update_betas(self):
-        # Exclude initial policy and current policy
+        """
+        Return the beta estimates from all previous updates, excluding the
+        initial policy and the current one, as a 2D array with beta_dim columns.
+        """
         # The reshape is so that the empty output is 2D, with shape representing
         # 0 rows of size beta_dim
         return jnp.array(
@@ -407,6 +440,11 @@ class SigmoidLS:
         self.rl_update_args[next_policy_num] = result
 
     def collect_pi_args(self, all_prev_data, calendar_t):
+        """
+        Store, keyed by calendar time then user id, the arguments needed to
+        re-evaluate the action-probability (pi) function for each user at this
+        decision time. Users not in study get an empty tuple.
+        """
         logger.info(
             "Collecting args to pi function at time %d for each user in dictionary format",
             calendar_t,
@@ -466,7 +504,8 @@ class SigmoidLS:
 
 class SmoothPosteriorSampling:
     """
-    Sigmoid Least Squares algorithm
+    Smooth posterior (Thompson) sampling algorithm with a Bayesian linear
+    regression reward model.
     """
 
     def __init__(
@@ -511,26 +550,35 @@ class SmoothPosteriorSampling:
         self.action_centering = action_centering
         self.incremental_updates = False
 
-    # TODO: All of these functions arguably should not modify the dataframe...
+    # NOTE: All of these functions arguably should not modify the dataframe...
     # Should be making a new dataframe and modifying that, or expecting the data
     # to be formatted as such (though I don't like the latter). Going with this
     # for now. This modification also raises a warning about setting a slice on
     # a copy, but it seems to work perfectly.
 
-    # TODO: Docstring
     def get_base_states(self, df):
+        """
+        Extract the baseline state features as a JAX array with one row per
+        decision time.
+        """
         base_states = df[self.state_feats].to_numpy()
         return jnp.array(base_states)
 
     def get_treat_states(self, df):
+        """
+        Extract the treatment state features as a JAX array with one row per
+        decision time.
+        """
         treat_states = df[self.treat_feats].to_numpy()
         return jnp.array(treat_states)
 
     def get_rewards(self, df, reward_col="reward"):
+        """Extract rewards as a column-vector JAX array."""
         rewards = df[reward_col].to_numpy().reshape(-1, 1)
         return jnp.array(rewards)
 
     def get_actions(self, df, action_col="action"):
+        """Extract actions as a column-vector JAX array."""
         actions = df[action_col].to_numpy().reshape(-1, 1)
         return jnp.array(actions)
 
@@ -539,6 +587,7 @@ class SmoothPosteriorSampling:
         df,
         actionprob_col="action1prob",
     ):
+        """Extract action-1 selection probabilities as a float32 column-vector JAX array."""
         action1probs = df[actionprob_col].to_numpy(dtype="float32").reshape(-1, 1)
         return jnp.array(action1probs)
 
@@ -547,33 +596,41 @@ class SmoothPosteriorSampling:
         df,
         calendar_t_col="calendar_t",
     ):
+        """
+        Extract the calendar times corresponding to each action-1 probability
+        as a float32 column-vector JAX array.
+        """
         action1probstimes = df[calendar_t_col].to_numpy(dtype="float32").reshape(-1, 1)
         return jnp.array(action1probstimes)
 
-    # TODO: Docstring
     def get_states(self, df):
+        """
+        Extract the baseline and treatment state feature matrices as a
+        (base_states, treat_states) tuple of numpy arrays.
+        """
         base_states = df[self.state_feats].to_numpy()
         treat_states = df[self.treat_feats].to_numpy()
         return (base_states, treat_states)
 
     def compute_posterior_var(self, design):
+        """Compute the posterior variance of beta given the design matrix."""
         return np.linalg.inv(
             1 / self.noise_var * design.T @ design + np.linalg.inv(self.prior_sigma)
         )
 
     def compute_posterior_mean(self, design, rewards):
-
+        """Compute the posterior mean of beta given the design matrix and rewards."""
         return self.compute_posterior_var(design) @ (
             1 / self.noise_var * design.T @ rewards
             + np.linalg.inv(self.prior_sigma) @ self.prior_mu
         )
 
-    # update posterior distribution
     def compute_posterior(
         self,
         design,
         rewards,
     ):
+        """Compute the posterior mean and variance of beta given the design and rewards."""
         mean = self.compute_posterior_mean(design, rewards)
         var = self.compute_posterior_var(design)
 
@@ -668,12 +725,15 @@ class SmoothPosteriorSampling:
         self.all_policies.append(update_dict)
 
     def get_all_users(self, study_df, user_id_column="user_id"):
+        """Return the unique user ids appearing in the study data."""
         return study_df[user_id_column].unique()
 
     def get_current_beta_estimate(self):
+        """Return the beta estimate from the most recent policy."""
         return self.all_policies[-1]["beta_est"]
 
     def get_num_users_entered_before_last_update(self):
+        """Return the number of users who had entered the study before the last update."""
         return self.all_policies[-1]["num_users_entered_before_last_update"]
 
     def collect_rl_update_args(self, all_prev_data, calendar_t):
@@ -724,6 +784,11 @@ class SmoothPosteriorSampling:
         self.rl_update_args[next_policy_num] = result
 
     def collect_pi_args(self, all_prev_data, calendar_t):
+        """
+        Store, keyed by calendar time then user id, the arguments needed to
+        re-evaluate the action-probability (pi) function for each user at this
+        decision time. Users not in study get an empty tuple.
+        """
         logger.info(
             "Collecting args to pi function at time %d for each user in dictionary format",
             calendar_t,

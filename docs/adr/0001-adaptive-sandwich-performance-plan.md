@@ -884,7 +884,7 @@ this work since they were found here:
    `(4, 4)`, corrupting `self.latest_phi_dot_bar` (and therefore every
    conditioning check downstream) from the second incremental call onward.
    This is why the file's two regression tests were
-   `@pytest.mark.skip(reason="TODO fix if monitoring becomes more important")`.
+   `@pytest.mark.skip(reason="TO DO fix if monitoring becomes more important")`.
    Fixed in `deployment_conditioning_monitor.py`; one of the two tests is now
    un-skipped, fixed (its fixture data had independent, pre-existing
    structural bugs -- wrong dict nesting, an off-by-one in which policy's

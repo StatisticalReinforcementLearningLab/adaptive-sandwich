@@ -103,7 +103,10 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
         study_RLalg.collect_pi_args(all_prev_data, t)
 
         # Check if need to update algorithm #######################################
-        # TODO: recruit_t not respected here.  Either remove it or use here.
+        # recruit_t (updates between recruitment waves) does not appear here
+        # because it is already honored by construction: get_entry_last_times
+        # in synthetic_env.py spaces entry times by
+        # decisions_between_updates * recruit_t decision times.
         if (
             t < study_env.calendar_T
             and t % args.decisions_between_updates == args.update_cadence_offset
@@ -576,6 +579,7 @@ def main():
     logger.info("Args provided to rl_study_simulation.py:\n%s", args)
 
     assert args.T >= args.decisions_between_updates
+    assert args.recruit_t >= 1
 
     load_data_and_simulate_studies(args, gen_feats, alg_state_feats, alg_treat_feats)
 

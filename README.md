@@ -11,9 +11,6 @@
 
 Save your standard errors from "pooling" in online decision-making algorithms.
 
-TODO: Link to Arxiv paper for background.
-
-
 
 ## Setup
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.

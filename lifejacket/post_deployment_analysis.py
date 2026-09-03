@@ -147,12 +147,6 @@ def _parse_comma_separated_indices(ctx, param, value):
         ) from exc
 
 
-# TODO: Check all help strings for accuracy.
-# TODO: Deal with NA, -1, etc policy numbers
-# TODO: Make sure active is never on for more than one stretch EDIT: unclear if
-# this will remain an invariant as we deal with more complicated data missingness
-# TODO: I think I'm agnostic to indexing of calendar times but should check because
-# otherwise need to add a check here to verify required format.
 def _action_prob_reconstruction_row_content(first_wave_measurements):
     """
     (message, criteria) for the reconstruction check's summary row, from the first wave's

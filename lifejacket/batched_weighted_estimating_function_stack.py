@@ -120,7 +120,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .calculate_derivatives import group_user_args_by_shape
 from .helper_functions import (
     get_min_time_by_policy_num,
     get_radon_nikodym_weight,
@@ -128,6 +127,7 @@ from .helper_functions import (
 from .input_checks import require_original_and_threaded_results_agree
 from .vmap_helpers import (
     build_batched_arg_lists_by_subject,
+    group_user_args_by_shape,
     stack_batched_arg_lists_into_tensors,
 )
 
@@ -707,7 +707,7 @@ def build_update_layer_precompute(
     update_func_args_by_by_subject_id_by_policy_num's own dict order.
 
     Bucketing only groups the valid (non-()) subjects at each update by exact
-    arg-tuple shape (reusing calculate_derivatives.group_user_args_by_shape --
+    arg-tuple shape (reusing vmap_helpers.group_user_args_by_shape --
     the same machinery input_checks.py's
     require_threaded_algorithm_estimating_function_args_equivalent already
     uses for this identical shape-heterogeneity problem).
@@ -1427,7 +1427,7 @@ def _build_algorithm_bucket_overrides(
         # len(), not .shape[0]: the original thread_update_func_args used
         # len(...) on this argument (arg_threading_helpers.py), which
         # accepts a plain Python list/tuple as well as an ndarray --
-        # calculate_derivatives.get_shape's own len()-fallback anticipates
+        # vmap_helpers.get_shape's own len()-fallback anticipates
         # exactly this for shape-bucketing, so this stays consistent.
         num_previous = len(prev_raw_list[0])
         if num_previous > betas.shape[0]:

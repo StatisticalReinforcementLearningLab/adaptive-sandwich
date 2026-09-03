@@ -1,3 +1,11 @@
+# Stop at the FIRST failing hook instead of running them all. Without this, a ruff or
+# ruff-format failure -- which is usually just "the hook rewrote your files" -- still lets the
+# pytest-unit hook run its full ~70s suite, only for the commit to abort anyway; you then fix
+# nothing, re-commit, and pay for that suite a second time. Ordering matters here: the fast
+# formatting hooks run first, so short-circuiting means the slow one runs only once, on a tree
+# that is already clean.
+fail_fast: true
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.8
@@ -10,7 +18,11 @@ repos:
     hooks:
       - id: pytest-unit
         name: pytest unit tests
-        entry: uv run python -m pytest tests/unit_tests -m "not slow"
+        # Resolve uv before calling it. `language: system` runs this with whatever PATH the git
+        # client happens to export, and GUI clients (VS Code, JetBrains, Tower) do not source a
+        # login shell -- so uv's default install location, ~/.local/bin, is missing and the hook
+        # dies with "Executable `uv` not found" even though it works from a terminal.
+        entry: bash -c 'command -v uv >/dev/null 2>&1 || export PATH="$HOME/.local/bin:$PATH"; exec uv run python -m pytest tests/unit_tests -m "not slow"'
         language: system
         types: [python]
         pass_filenames: false

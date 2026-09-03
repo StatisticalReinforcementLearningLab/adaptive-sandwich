@@ -290,17 +290,13 @@ def _run_package_pipeline(beta_hat, theta_hat, jacobian_row_chunk_size=None):
     }
 
     (
-        raw_joint_bread_matrix,
-        _stabilized_joint_bread_matrix,
+        joint_bread_matrix,
         joint_adjusted_meat_matrix,
         joint_sandwich_matrix,
         _classical_bread_matrix,
         _classical_meat_matrix,
         _classical_sandwich,
-        _avg_estimating_function_stack,
         _per_subject_estimating_function_stacks,
-        _per_subject_adjusted_corrections,
-        _per_subject_classical_corrections,
         _per_subject_adjusted_meat_adjustments,
     ) = post_deployment_analysis.construct_classical_and_adjusted_sandwiches(
         theta_hat_jnp,
@@ -329,7 +325,6 @@ def _run_package_pipeline(beta_hat, theta_hat, jacobian_row_chunk_size=None):
         True,  # suppress_all_data_checks
         True,  # suppress_interactive_data_checks
         False,  # form_adjusted_meat_adjustments_explicitly
-        False,  # stabilize_joint_bread: compare against the raw/unstabilized bread
         None,  # analysis_df (only needed if forming meat adjustments explicitly)
         None,  # active_col_name
         None,  # action_col_name
@@ -342,7 +337,7 @@ def _run_package_pipeline(beta_hat, theta_hat, jacobian_row_chunk_size=None):
 
     theta_only_adjusted_sandwich = joint_sandwich_matrix[-2:, -2:]
     return (
-        raw_joint_bread_matrix,
+        joint_bread_matrix,
         joint_adjusted_meat_matrix,
         theta_only_adjusted_sandwich,
     )

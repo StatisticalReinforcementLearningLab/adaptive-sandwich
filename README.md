@@ -11,6 +11,10 @@
 
 Save your standard errors from "pooling" in online decision-making algorithms.
 
+TODO: Link to Arxiv paper for background.
+
+
+
 ## Setup
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 - Install uv (see the [install docs](https://docs.astral.sh/uv/getting-started/installation/))
@@ -20,12 +24,12 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 ### Adding a package
 - Runtime dependency: `uv add <package>`
 - Dev/test-only dependency: `uv add --optional dev <package>`
-- Either updates `pyproject.toml` and `uv.lock` together
+- Both commands update `pyproject.toml` and `uv.lock` together
 
 ## Running the code
 
 ### From the command line
-The primary interface is the `lifejacket analyze` CLI command (installed by `uv sync`). It takes pickled inputs (an analysis dataframe plus the per-subject/per-decision-time argument dictionaries for your action-probability, algorithm-update, and inference functions) and paths to the Python files defining those functions:
+The primary interface is the `lifejacket analyze` CLI command (installed by `uv sync`). It takes pickled inputs (an analysis dataframe plus the per-subject/per-decision-time argument dictionaries for your action-probability function, algorithm-update loss or estimating function, and inference loss or estimating function) and paths to the Python files defining those functions:
 
 ```bash
 uv run lifejacket analyze \
@@ -62,10 +66,10 @@ above, wired up with generated pickles:
 
 This simulates a study and then calls `lifejacket analyze` on it, outputting
 to `tests/simulators_and_runners/simulated_data/` by default (gitignored).
-With default settings it will interactively ask you to confirm that skipping
-small-sample corrections is intentional; answer `y`, or pass
-`--suppress_interactive_data_checks=1` to skip all such prompts. See the
-script itself for all the flags it accepts.
+With default settings it will interactively ask you to confirm a handful of
+input checks (e.g. that the supplied study shape and function arguments look
+right); answer `y` at each, or pass `--suppress_interactive_data_checks=1` to
+skip all such prompts. See the script itself for all the flags it accepts.
 
 ### From Python
 `lifejacket analyze` is a thin wrapper around
@@ -122,9 +126,7 @@ analyze_dataset(
     reward_col_name="reward",
     suppress_interactive_data_checks=True,
     suppress_all_data_checks=False,
-    collect_data_for_blowup_supervised_learning=False,
     form_adjusted_meat_adjustments_explicitly=False,
-    stabilize_joint_bread=False,
 )
 ```
 
@@ -141,6 +143,33 @@ If your analysis is slow or runs out of memory under staggered recruitment
 (many distinct per-subject history lengths), see
 [docs/masking_tutorial.md](docs/masking_tutorial.md) for the opt-in
 padding/masking feature that fixes exactly that.
+
+## Diagnostics
+
+`analyze`/`analyze_dataset` accept a `--run_diagnostics`/`run_diagnostics` flag, **on by
+default**, that runs a layered diagnostic suite over the adjusted sandwich and writes
+`diagnostic_report.pkl`. By default this runs only the cheap checks (input-check results,
+root/implementation, local nonlinearity, bread stability, influence concentration,
+exploration/importance-weight checks) -- the expensive exact-nonlinear-perturbation and
+Jacobian-drift checks stay opt-in (pass `--diagnostic_config_pickle`/`diagnostic_config` with
+`compute_exact_nonlinear_roots=True`), The frozen-score multiplier bootstrap has its own switch on the same config and now defaults to
+`multiplier_bootstrap="auto"`: it runs automatically -- extra re-solves included -- whenever the
+calibrated screen trips or local nonlinearity does not pass outright, and stays off on quiet runs
+(`"always"`/`"off"` force it either way). It is the check that turns a screen-tripped run into a
+per-dataset verdict on the reported standard errors.
+It does not change the adjusted sandwich estimator itself,
+and a diagnostic failure does not mean the classical sandwich is valid instead. See
+[`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish, or
+[`docs/diagnostics_tutorial.md`](docs/diagnostics_tutorial.md) for a practical guide to reading a
+`DiagnosticReport` and deciding what to do about it.
+
+No single-run check can establish what repeated sampling establishes, so validating a diagnostic
+threshold against known ground truth means running many simulated deployments and comparing the
+threshold's verdicts to what actually happened -- a multi-run experiment, not something one
+`analyze_dataset` call can produce. `docs/adr/0002-diagnostic-threshold-calibration-plan.md`
+designs exactly that experiment and records what its ~27,000 runs measured, including the
+operating characteristics (precision/recall) now quoted for individual checks in
+`docs/diagnostics.md`.
 
 ## Linting/Formatting
 This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting, run automatically via [pre-commit](https://pre-commit.com/) before every commit.
@@ -166,9 +195,18 @@ Hooks configured in `.pre-commit-config.yaml`:
 | `pytest-unit` | Run `tests/unit_tests` (excluding `slow`-marked tests) before every commit |
 
 ## Testing
-uv run python -m pytest
-uv run python -m pytest tests/unit_tests
-uv run python -m pytest tests/integration_tests
+
+```bash
+uv run python -m pytest                            # everything
+uv run python -m pytest tests/unit_tests           # fast, run before every commit
+uv run python -m pytest tests/integration_tests    # slower, real simulator runs
+```
+
+Both suites also run on every pull request (`.github/workflows/run_unit_tests_on_prs.yml`
+and `run_integration_tests_on_prs.yml`).
+
+The unit tests, but not the integration tests, will run on every commit once pre-commit
+is installed as described above.
 
 ### Performance benchmarks
 `tests/benchmarks` is a phase-timing + numerical-regression benchmark for
@@ -176,8 +214,18 @@ uv run python -m pytest tests/integration_tests
 always fast; "medium", matching `tests/integration_tests`' scale, marked
 `slow`). Run with `-s` to see the per-phase wall-clock breakdown:
 
-    python -m pytest tests/benchmarks -v -s              # both scales
-    python -m pytest tests/benchmarks -v -s -m "not slow" # small only, fast
+```bash
+uv run python -m pytest tests/benchmarks -v -s                # both scales
+uv run python -m pytest tests/benchmarks -v -s -m "not slow"  # small only, fast
+```
+
+**These report timings; they do not fail on them.** Nothing in `tests/benchmarks`
+compares a duration against a threshold or a stored baseline, so a run that got
+10x slower still passes — the numbers only mean something to a human reading the
+`-s` output, which is why they are not in CI. Wall-clock on a shared runner varies
+by more than the regressions worth catching, so the useful CI signal here would be
+deterministic work counters (how many times the structural precompute is built, how
+many `g_tilde` evaluations a fixed fixture takes) rather than seconds.
 
 See `docs/adr/0001-adaptive-sandwich-performance-plan.md` for why this exists
 (including a JIT compile-time regression it caught) and

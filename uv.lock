@@ -177,7 +177,6 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
     { name = "scikit-learn" },
-    { name = "sh" },
 ]
 
 [package.metadata]
@@ -194,7 +193,6 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.8" },
     { name = "scikit-learn", marker = "extra == 'dev'", specifier = "==1.3.0" },
     { name = "scipy", specifier = ">=1.7.0,<2" },
-    { name = "sh", marker = "extra == 'dev'", specifier = "==2.0.7" },
 ]
 provides-extras = ["dev"]
 
@@ -700,15 +698,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/52/52/e57eceff0e342a1f50e274264ed47497b59e6a4e3118808ee58ddda7b74a/scipy-1.17.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:a77cbd07b940d326d39a1d1b37817e2ee4d79cb30e7338f3d0cddffae70fcaa2", size = 37682317, upload-time = "2026-02-23T00:22:18.513Z" },
     { url = "https://files.pythonhosted.org/packages/11/2f/b29eafe4a3fbc3d6de9662b36e028d5f039e72d345e05c250e121a230dd4/scipy-1.17.1-cp314-cp314t-win_amd64.whl", hash = "sha256:eb092099205ef62cd1782b006658db09e2fed75bffcae7cc0d44052d8aa0f484", size = 37345327, upload-time = "2026-02-23T00:22:24.442Z" },
     { url = "https://files.pythonhosted.org/packages/07/39/338d9219c4e87f3e708f18857ecd24d22a0c3094752393319553096b98af/scipy-1.17.1-cp314-cp314t-win_arm64.whl", hash = "sha256:200e1050faffacc162be6a486a984a0497866ec54149a01270adc8a59b7c7d21", size = 25489165, upload-time = "2026-02-23T00:22:29.563Z" },
-]
-
-[[package]]
-name = "sh"
-version = "2.0.7"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/14/7a/5148402146d360a6d15922814a3b065b52be3a5fe878a8834d3ce4e7d33f/sh-2.0.7.tar.gz", hash = "sha256:029d45198902bfb967391eccfd13a88d92f7cebd200411e93f99ebacc6afbb35", size = 345477, upload-time = "2024-06-01T16:36:57.145Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/c2/79f9dea6fc544c0eb79ed5018a38860c52d597c4be66c2cf2029bea5b3fd/sh-2.0.7-py3-none-any.whl", hash = "sha256:2f2f79a65abd00696cf2e9ad26508cf8abb6dba5745f40255f1c0ded2876926d", size = 38103, upload-time = "2024-06-01T16:36:54.323Z" },
 ]
 
 [[package]]

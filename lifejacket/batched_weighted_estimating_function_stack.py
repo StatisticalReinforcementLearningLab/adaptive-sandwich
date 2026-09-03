@@ -73,10 +73,11 @@ deliberately out of scope here -- see the ADR's Step 4 "Scope" note):
     shape-bucket), instead of one dispatch per (subject, update) pair.
   - helper_functions.compute_subject_radon_nikodym_weights: the shared,
     still-per-subject weight/bookkeeping helper that
-    deployment_conditioning_monitor.py and
-    get_datum_for_blowup_supervised_learning.py still call directly (a
-    deliberate scope decision, not an oversight -- porting them is the
-    natural next step if their performance ever becomes a concern).
+    post_deployment_analysis.py's
+    _reference_single_subject_weighted_estimating_function_stacker still
+    calls directly (a deliberate scope decision, not an oversight -- it is
+    a correctness oracle kept for tests, not the hot path, so porting it is
+    the natural next step only if its performance ever becomes a concern).
     compute_action_prob_layer_outputs + compute_windowed_weight_products
     together are this module's batched, all-subjects-at-once counterpart,
     used only by post_deployment_analysis.py's hot path.
@@ -120,7 +121,11 @@ import jax.numpy as jnp
 import numpy as np
 
 from .calculate_derivatives import group_user_args_by_shape
-from .helper_functions import get_min_time_by_policy_num, get_radon_nikodym_weight
+from .helper_functions import (
+    get_min_time_by_policy_num,
+    get_radon_nikodym_weight,
+)
+from .input_checks import require_original_and_threaded_results_agree
 from .vmap_helpers import (
     build_batched_arg_lists_by_subject,
     stack_batched_arg_lists_into_tensors,
@@ -347,9 +352,15 @@ def assert_no_intra_window_gaps(precompute: ActionProbLayerPrecompute) -> None:
         window = precompute.active_mask[n, lo : hi + 1]
         if not window.all():
             gap_cols = np.nonzero(~window)[0] + lo
+            # A bare str from an object-dtype subject-id column has no .item(); numpy scalars
+            # do. Guarded so this error path reports the id instead of raising AttributeError
+            # over it. (diagnostics.py uses the same hasattr idiom for the same reason.)
+            reported_subject_id = precompute.subject_ids[n]
             violations.append(
                 (
-                    precompute.subject_ids[n].item(),
+                    reported_subject_id.item()
+                    if hasattr(reported_subject_id, "item")
+                    else reported_subject_id,
                     [precompute.time_values[c].item() for c in gap_cols],
                 )
             )
@@ -1106,53 +1117,26 @@ def build_inference_layer_precompute(
     inference_func_args_action_prob_index: int,
     inference_action_prob_decision_times_by_subject_id: dict[Any, Any],
     action_prob_layer: ActionProbLayerPrecompute,
-    inference_func_args_mask_index: int = -1,
-    inference_func_args_ragged_indices: tuple[int, ...] = (),
 ) -> InferenceLayerPrecompute:
     """
     One-time, plain-numpy precompute. Every subject has a real (never-())
     inference-args tuple, so this layer needs shape-bucketing but no
     valid_* mask.
 
-    If inference_func_args_mask_index >= 0 (opt-in; default -1 preserves
-    today's exact-shape bucketing with zero change), self-pads every
-    inference_func_args_ragged_indices position the same way
-    build_update_layer_precompute does for the algorithm side -- see
-    self_pad_ragged_args_and_build_mask's own docstring for the padding
-    rationale and constraints. inference_action_prob_decision_times_by_subject_id
-    is NOT one of inference_func_args_by_subject_id's own positions (a
-    structural difference from the algorithm side, where action-prob-times
-    IS one of the args tuple's positions) -- it must be self-padded in sync,
-    to the same per-subject real-row-count the mask itself encodes, so
-    _gather_reconstructed_action_prob's per-bucket np.stack over it still
-    sees a uniform length once every subject is consolidated into one bucket.
+    Subjects are grouped into buckets by exact argument shape. There is deliberately no
+    inference-side padding/masking counterpart to build_update_layer_precompute's:
+    mask_index/ragged_indices parameters existed here until 2026-09-02 and were removed
+    along with the public analyze_dataset/CLI options, which could never work.
+    post_deployment_analysis.process_inference_func_args builds the inference argument
+    tuples itself -- one entry per DECLARED PARAMETER of inference_func, each filled from
+    the analysis_df column of the same name -- and that is incompatible with
+    self_pad_ragged_args_and_build_mask's convention (mask index == supplied argument
+    count, mask appended past it): no mask index value worked end to end, and nothing in
+    the repo ever set one. Reinstating it means teaching process_inference_func_args to
+    leave the mask position unfilled FIRST; the padding helper itself is generic and is
+    still used by the algorithm side.
     """
     subject_id_to_pos = action_prob_layer.subject_id_to_pos
-
-    if inference_func_args_mask_index >= 0:
-        padded = self_pad_ragged_args_and_build_mask(
-            inference_func_args_by_subject_id,
-            inference_func_args_ragged_indices,
-            inference_func_args_mask_index,
-        )
-        if inference_func_args_action_prob_index >= 0:
-            padded_times_by_subject_id = {}
-            for sid, args in padded.items():
-                mask = args[inference_func_args_mask_index]
-                subj_len = int(np.sum(mask))
-                max_length = len(mask)
-                times = np.asarray(
-                    inference_action_prob_decision_times_by_subject_id[sid]
-                )
-                pad_amount = max_length - subj_len
-                if pad_amount > 0:
-                    pad_block = np.repeat(times[-1:], pad_amount, axis=0)
-                    times = np.concatenate([times, pad_block], axis=0)
-                padded_times_by_subject_id[sid] = times
-            inference_action_prob_decision_times_by_subject_id = (
-                padded_times_by_subject_id
-            )
-        inference_func_args_by_subject_id = padded
 
     buckets: list[UpdateArgBucket] = []
     for shape_group in group_user_args_by_shape(
@@ -1871,8 +1855,8 @@ def _assert_original_and_threaded_bucket_results_agree(
     estimating_func: collections.abc.Callable,
     bucket: UpdateArgBucket,
     threaded_result: jnp.ndarray,
-    atol: float,
     rtol: float,
+    context: str,
 ) -> None:
     """
     Shared comparison step for both check_batched_*_equivalent functions:
@@ -1885,6 +1869,15 @@ def _assert_original_and_threaded_bucket_results_agree(
     instead of matching its own original,
     input_checks.require_threaded_inference_estimating_function_args_equivalent's
     looser rtol=1e-2, no-atol tolerance).
+
+    The comparison itself -- including the per-component absolute-tolerance
+    floor computed from the original values -- is
+    input_checks.require_original_and_threaded_results_agree, the same one
+    the unbatched checks in that module use, so this module's tolerances
+    cannot drift from theirs either. See its docstring for why a fixed atol
+    (the previous 1e-7) false-alarms on healthy high-reward data and why a
+    zero one (the previous inference-side 0.0) fails an exactly-zero
+    component on any nonzero noise.
     """
     original_call_args, original_in_axes = _assemble_call_args_and_in_axes(
         bucket.raw_arg_lists, {}
@@ -1895,11 +1888,11 @@ def _assert_original_and_threaded_bucket_results_agree(
     # Need to stop gradient here: threaded_result traces back to betas/theta,
     # which are being differentiated in the real jax.jacrev call this check
     # runs alongside, and np.asarray can't convert a traced value.
-    np.testing.assert_allclose(
+    require_original_and_threaded_results_agree(
         np.asarray(original_result),
         np.asarray(jax.lax.stop_gradient(threaded_result)),
-        atol=atol,
         rtol=rtol,
+        context=context,
     )
 
 
@@ -1969,13 +1962,18 @@ def check_batched_algorithm_estimating_function_args_equivalent(
             result_idx += 1
             # Tolerance matches
             # input_checks.require_threaded_algorithm_estimating_function_args_equivalent
-            # exactly -- see _assert_original_and_threaded_bucket_results_agree.
+            # exactly -- see _assert_original_and_threaded_bucket_results_agree (the atol
+            # floor is computed from the compared values there).
             _assert_original_and_threaded_bucket_results_agree(
                 algorithm_estimating_func,
                 bucket,
                 threaded_result,
-                atol=1e-7,
                 rtol=1e-3,
+                context=(
+                    "Algorithm estimating function args are not equivalent after threading "
+                    f"for update {u + 1} (policy number {policy_num}), subjects "
+                    f"{bucket.subject_ids_in_order}."
+                ),
             )
 
 
@@ -2021,9 +2019,17 @@ def check_batched_inference_estimating_function_args_equivalent(
         result_idx += 1
         # Tolerance matches
         # input_checks.require_threaded_inference_estimating_function_args_equivalent
-        # exactly (a looser rtol, no atol, than the algorithm-side check
-        # above -- NOT the same value, and previously copy-pasted wrong; see
+        # exactly (a looser rtol than the algorithm-side check above -- NOT
+        # the same value, and previously copy-pasted wrong; the atol floor is
+        # computed from the compared values; see
         # _assert_original_and_threaded_bucket_results_agree).
         _assert_original_and_threaded_bucket_results_agree(
-            inference_estimating_func, bucket, threaded_result, atol=0.0, rtol=1e-2
+            inference_estimating_func,
+            bucket,
+            threaded_result,
+            rtol=1e-2,
+            context=(
+                "Inference estimating function args are not equivalent after threading for "
+                f"subjects {bucket.subject_ids_in_order}."
+            ),
         )

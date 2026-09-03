@@ -27,7 +27,6 @@ lambda_=0.0
 dynamic_seeds=0
 env_seed_override=-1
 alg_seed_override=-1
-monitor_bread_conditioning_and_intervene=0
 
 # Arguments that only affect inference side.
 active_col_name="in_study"
@@ -51,17 +50,23 @@ inference_func_type="loss"
 theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
 suppress_interactive_data_checks=0
 suppress_all_data_checks=0
-collect_data_for_blowup_supervised_learning=0
 form_adjusted_meat_adjustments_explicitly=0
-stabilize_joint_bread=0
+run_diagnostics=1
+diagnostic_config_pickle=""
+percentile_bootstrap_draws=0
+percentile_bootstrap_alpha=0.05
+percentile_bootstrap_seed=""
+# Empty = flag omitted = lifejacket's own default (True: exit status 3 when
+# diagnostics flag the run). Pass False for runs that intentionally probe
+# flagged regimes and read diagnostic_report.pkl instead.
+fail_on_flagged_diagnostics=""
 # Opt-in mask/padding bucket consolidation (see lifejacket's
 # alg_update_func_args_mask_index docs and docs/masking_tutorial.md). -1000
-# is lifejacket's CLI "unused" sentinel; the ragged-indices string is
-# space-separated and expanded into repeated flags below.
+# is lifejacket's CLI "unused" sentinel; the ragged-indices values are one
+# comma-separated list of integers each (e.g. "2,3,4"), passed through to
+# lifejacket's same-named options verbatim.
 alg_update_func_args_mask_index=-1000
 alg_update_func_args_ragged_indices=""
-inference_func_args_mask_index=-1000
-inference_func_args_ragged_indices=""
 # Empty = flag omitted = lifejacket's AUTO defaults. combine: True/False to
 # force; chunk size: 0 forces unchunked, positive int is explicit.
 combine_updates_into_one_vmap=""
@@ -69,7 +74,7 @@ jacobian_row_chunk_size=""
 
 # Parse single-char options as directly supported by getopts, but allow long-form
 # under - option.  The :'s signify that arguments are required for these options.
-while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:k:K:m:N:w:W-: OPT; do
+while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:F:L:M:Q:q:K:w:W:R:O:-: OPT; do
   # support long options: https://stackoverflow.com/a/28466267/519360
   if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
     OPT="${OPTARG%%=*}"       # extract long option name
@@ -116,18 +121,19 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:J:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:
     M  | alg_seed_override )                                needs_arg; alg_seed_override="$OPTARG" ;;
     Q  | suppress_interactive_data_checks )                 needs_arg; suppress_interactive_data_checks="$OPTARG" ;;
     q  | suppress_all_data_checks )                         needs_arg; suppress_all_data_checks="$OPTARG" ;;
-    k  | collect_data_for_blowup_supervised_learning )      needs_arg; collect_data_for_blowup_supervised_learning="$OPTARG" ;;
     K  | form_adjusted_meat_adjustments_explicitly )        needs_arg; form_adjusted_meat_adjustments_explicitly="$OPTARG" ;;
-    m  | stabilize_joint_bread )           needs_arg; stabilize_joint_bread="$OPTARG" ;;
-    N  | monitor_bread_conditioning_and_intervene ) needs_arg; monitor_bread_conditioning_and_intervene="$OPTARG" ;;
     w  | collect_args_to_reconstruct_action_probs )         needs_arg; collect_args_to_reconstruct_action_probs="$OPTARG" ;;
     W  | alg_update_func_args_previous_betas_index )        needs_arg; alg_update_func_args_previous_betas_index="$OPTARG" ;;
+    R  | run_diagnostics )                                  needs_arg; run_diagnostics="$OPTARG" ;;
+    O  | diagnostic_config_pickle )                         needs_arg; diagnostic_config_pickle="$OPTARG" ;;
+    percentile_bootstrap_draws )                            needs_arg; percentile_bootstrap_draws="$OPTARG" ;;
+    percentile_bootstrap_alpha )                            needs_arg; percentile_bootstrap_alpha="$OPTARG" ;;
+    percentile_bootstrap_seed )                             needs_arg; percentile_bootstrap_seed="$OPTARG" ;;
+    fail_on_flagged_diagnostics )                           needs_arg; fail_on_flagged_diagnostics="$OPTARG" ;;
     alg_update_func_args_mask_index )                       needs_arg; alg_update_func_args_mask_index="$OPTARG" ;;
-    # Repeatable (matching the underlying click multiple=True option) --
-    # ACCUMULATE, don't overwrite.
-    alg_update_func_args_ragged_indices )                   needs_arg; alg_update_func_args_ragged_indices="$alg_update_func_args_ragged_indices $OPTARG" ;;
-    inference_func_args_mask_index )                        needs_arg; inference_func_args_mask_index="$OPTARG" ;;
-    inference_func_args_ragged_indices )                    needs_arg; inference_func_args_ragged_indices="$inference_func_args_ragged_indices $OPTARG" ;;
+    # One comma-separated list of integers, e.g. "2,3,4", passed through to
+    # lifejacket's same-named option verbatim.
+    alg_update_func_args_ragged_indices )                   needs_arg; alg_update_func_args_ragged_indices="$OPTARG" ;;
     combine_updates_into_one_vmap )                         needs_arg; combine_updates_into_one_vmap="$OPTARG" ;;
     jacobian_row_chunk_size )                               needs_arg; jacobian_row_chunk_size="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
@@ -171,8 +177,7 @@ python rl_study_simulation.py \
   --upper_clip=$uclip \
   --lower_clip=$lclip \
   --lambda_=$lambda_ \
-  --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs \
-  --monitor_bread_conditioning_and_intervene=$monitor_bread_conditioning_and_intervene
+  --collect_args_to_reconstruct_action_probs=$collect_args_to_reconstruct_action_probs
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Finished RL study simulation."
 
 # Create a convenience variable that holds the output folder for the last script.
@@ -181,24 +186,17 @@ output_folder="simulated_data/synthetic_mode=${synthetic_mode}_alg=${RL_alg}_T=$
 
 # Do after-study analysis on the single algorithm run from above
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Beginning after-study analysis."
-# Expand the space-separated ragged-indices strings into repeated flags
-# (matching lifejacket's click multiple=True options), and only emit the
-# mask/auto flags when actually set -- omitted flags keep lifejacket's own
-# defaults AND keep this script runnable against older lifejacket versions
-# that don't know these flags.
+# Only emit the mask/ragged/auto flags when actually set -- omitted flags
+# keep lifejacket's own defaults AND keep this script runnable against older
+# lifejacket versions that don't know these flags. The ragged-indices values
+# are comma-separated lists passed through verbatim.
 mask_args=""
 if [ "$alg_update_func_args_mask_index" != "-1000" ]; then
   mask_args="--alg_update_func_args_mask_index=$alg_update_func_args_mask_index"
 fi
-for idx in $alg_update_func_args_ragged_indices; do
-  mask_args="$mask_args --alg_update_func_args_ragged_indices=$idx"
-done
-if [ "$inference_func_args_mask_index" != "-1000" ]; then
-  mask_args="$mask_args --inference_func_args_mask_index=$inference_func_args_mask_index"
+if [ -n "$alg_update_func_args_ragged_indices" ]; then
+  mask_args="$mask_args --alg_update_func_args_ragged_indices=$alg_update_func_args_ragged_indices"
 fi
-for idx in $inference_func_args_ragged_indices; do
-  mask_args="$mask_args --inference_func_args_ragged_indices=$idx"
-done
 if [ -n "$combine_updates_into_one_vmap" ]; then
   mask_args="$mask_args --combine_updates_into_one_vmap=$combine_updates_into_one_vmap"
 fi
@@ -232,9 +230,13 @@ lifejacket analyze \
   --reward_col_name=$reward_col_name \
   --suppress_interactive_data_checks=$suppress_interactive_data_checks \
   --suppress_all_data_checks=$suppress_all_data_checks \
-  --collect_data_for_blowup_supervised_learning=$collect_data_for_blowup_supervised_learning \
   --form_adjusted_meat_adjustments_explicitly=$form_adjusted_meat_adjustments_explicitly \
-  --stabilize_joint_bread=$stabilize_joint_bread
+  --run_diagnostics=$run_diagnostics \
+  ${diagnostic_config_pickle:+--diagnostic_config_pickle="$diagnostic_config_pickle"} \
+  ${fail_on_flagged_diagnostics:+--fail_on_flagged_diagnostics="$fail_on_flagged_diagnostics"} \
+  --percentile_bootstrap_draws=$percentile_bootstrap_draws \
+  --percentile_bootstrap_alpha=$percentile_bootstrap_alpha \
+  ${percentile_bootstrap_seed:+--percentile_bootstrap_seed="$percentile_bootstrap_seed"}
 
 echo "$(date +"%Y-%m-%d %T") run_local_synthetic.sh: Ending after-study analysis."
 

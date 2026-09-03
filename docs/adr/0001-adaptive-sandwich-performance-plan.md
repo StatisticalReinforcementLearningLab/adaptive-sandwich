@@ -273,7 +273,7 @@ and all four `tests/integration_tests/*/expected_*.pkl` were then
 regenerated from fresh, deterministic (fixed-seed) runs of the new code.
 Regenerating the integration fixtures also surfaced two pre-existing,
 unrelated legacy key-naming mismatches in `tests/utils.py`'s comparison
-(`joint_bread_inverse_matrix` vs. the current `raw_joint_bread_matrix`;
+(`joint_bread_inverse_matrix` vs. the current `joint_bread_matrix`;
 `adaptive_sandwich_var_estimate` vs. the current `adjusted_sandwich_var_estimate`)
 -- worked around by preserving the old key names inside the regenerated
 fixtures (not by changing the shared `tests/utils.py` comparison code),
@@ -906,7 +906,7 @@ this work since they were found here:
    referencing the already-correct implementation 400 lines away in another
    file, repeated exactly the kind of triplicated-logic pattern this ADR
    otherwise argues against.
-2. **`analyze_dataset` swapped `raw_joint_bread_matrix` and
+2. **`analyze_dataset` swapped `joint_bread_matrix` and
    `stabilized_joint_bread_matrix`** when unpacking
    `construct_classical_and_adjusted_sandwiches`'s return tuple. Didn't
    affect the returned `adjusted_sandwich_var_estimate` (that comes from a

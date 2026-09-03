@@ -14,15 +14,16 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import scipy.stats
 
+from .constants import (
+    JACOBIAN_AUTO_MAX_CHUNK,
+    JACOBIAN_AUTO_ROW_BUDGET,
+    JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM,
+)
 from .vmap_helpers import stack_batched_arg_lists_into_tensors
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format="%(asctime)s,%(msecs)03d %(levelname)-2s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-    level=logging.INFO,
-)
 
 
 @contextlib.contextmanager
@@ -42,6 +43,124 @@ def log_phase_duration(phase_name: str):
     finally:
         elapsed = time.perf_counter() - start
         logger.info("Phase '%s' took %.3f seconds.", phase_name, elapsed)
+
+
+def clopper_pearson_upper_bound(
+    num_failures: int, num_trials: int, confidence_level: float = 0.95
+) -> float:
+    """
+    One-sided Clopper-Pearson upper confidence bound on a failure probability given
+    `num_failures` observed out of `num_trials` independent trials.
+
+    For num_failures == 0, this reduces exactly to `1 - alpha**(1/num_trials)` with
+    `alpha = 1 - confidence_level` (e.g. 0 failures in 59 directions bounds the failure
+    probability below ~5% at 95% confidence; 0 failures in 299 directions bounds it below ~1%).
+
+    The domain checks below are not defensive boilerplate: each bad input has a silent failure
+    mode that reads as GOOD NEWS -- a tighter or more legitimate-looking bound -- rather than an
+    obviously broken one, so none is allowed to pass quietly.
+      - An out-of-range confidence_level raises. A confidence_level below 0.5 cannot raise (0.05
+        is a legal level, and nothing here can distinguish "I meant 0.95" from "I want a 5%
+        bound"), so it WARNS instead: it is the shape of the alpha/confidence mix-up, which is
+        dangerous precisely because it returns a far TIGHTER bound -- (0 failures, 10 trials)
+        gives 0.0051 at 0.05 against the correct 0.2589 at 0.95, a 50x overstatement of how
+        well-bounded the failure rate is. This argument reaches here from a user-settable
+        DiagnosticConfig field, so it is reachable by configuration, not just a caller's slip.
+      - num_failures > num_trials raises; it previously returned 1.0, a legitimate-looking bound
+        for an impossible observation, hiding whatever miscounted upstream.
+      - A negative num_trials raises; it previously returned nan, which the callers propagate
+        into a reported metric rather than treat as an error.
+    The two LEGITIMATE boundary cases are handled after validation, not before it: zero trials
+    (nothing observed, so the bound is genuinely undefined -> nan) and all trials failing
+    (the bound really is 1.0).
+    """
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError(
+            "confidence_level must be strictly between 0 and 1 (it is a confidence level, "
+            f"not an alpha -- pass 0.95, not 0.05), got {confidence_level!r}."
+        )
+    if confidence_level < 0.5:
+        # Cannot be an error: 0.05 is a perfectly legal confidence level, so the range check
+        # above has no way to tell "I meant 0.95" from "I want a 5% bound". But a ONE-SIDED
+        # UPPER bound below 50% confidence is close to never what anyone wants, and it is the
+        # exact shape of the alpha/confidence mix-up -- which is dangerous precisely because it
+        # returns a TIGHTER, better-looking bound rather than an obviously broken one.
+        logger.warning(
+            "clopper_pearson_upper_bound called with confidence_level=%r, i.e. below 50%%. "
+            "This yields a much TIGHTER upper bound than a conventional level would (0 failures "
+            "in 10 trials gives %.4f here vs 0.2589 at 0.95), so it reads as far stronger "
+            "evidence than it is. If you meant to pass alpha, pass 1 - alpha instead.",
+            confidence_level,
+            float(scipy.stats.beta.ppf(confidence_level, 1, 10)),
+        )
+    if num_trials < 0:
+        raise ValueError(f"num_trials must be non-negative, got {num_trials!r}.")
+    if not 0 <= num_failures <= num_trials:
+        raise ValueError(
+            "num_failures must be between 0 and num_trials inclusive, got "
+            f"num_failures={num_failures!r} of num_trials={num_trials!r}."
+        )
+    if num_trials == 0:
+        return math.nan
+    if num_failures == num_trials:
+        return 1.0
+    return float(
+        scipy.stats.beta.ppf(
+            confidence_level, num_failures + 1, num_trials - num_failures
+        )
+    )
+
+
+def clopper_pearson_lower_bound(
+    num_failures: int, num_trials: int, confidence_level: float = 0.95
+) -> float:
+    """
+    One-sided Clopper-Pearson LOWER confidence bound on a failure probability given
+    `num_failures` observed out of `num_trials` independent trials -- the exact mirror of
+    clopper_pearson_upper_bound (beta.ppf(1 - confidence_level, x, n - x + 1)).
+
+    Its role in the diagnostics is the opposite of the upper bound's: the upper bound says
+    "the failure rate is AT MOST this much, so the run may pass"; this one says "the failure
+    rate is AT LEAST this much" -- when it exceeds bad_direction_probability_target, solver
+    fragility is statistically CONFIRMED on the executed trials, which is a measured failure
+    rather than an unevaluable ensemble (198/198 failures at 0.95 confidence bounds the rate
+    above ~0.985). For num_failures == 0 the bound is exactly 0.0: no failures observed can
+    never confirm fragility.
+
+    Validation mirrors the upper bound's, for the mirrored reason: a confidence_level below
+    0.5 here yields a HIGHER lower bound, i.e. it overstates the evidence of failure -- wrong
+    in the loud direction rather than the quiet one, but still the shape of the
+    alpha/confidence mix-up, so it warns identically.
+    """
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError(
+            "confidence_level must be strictly between 0 and 1 (it is a confidence level, "
+            f"not an alpha -- pass 0.95, not 0.05), got {confidence_level!r}."
+        )
+    if confidence_level < 0.5:
+        logger.warning(
+            "clopper_pearson_lower_bound called with confidence_level=%r, i.e. below 50%%. "
+            "This yields a much HIGHER lower bound than a conventional level would, so it "
+            "overstates the evidence that failures are systematic. If you meant to pass "
+            "alpha, pass 1 - alpha instead.",
+            confidence_level,
+        )
+    if num_trials < 0:
+        raise ValueError(f"num_trials must be non-negative, got {num_trials!r}.")
+    if not 0 <= num_failures <= num_trials:
+        raise ValueError(
+            "num_failures must be between 0 and num_trials inclusive, got "
+            f"num_failures={num_failures!r} of num_trials={num_trials!r}."
+        )
+    if num_trials == 0:
+        return math.nan
+    if num_failures == 0:
+        return 0.0
+    return float(
+        scipy.stats.beta.ppf(
+            1.0 - confidence_level, num_failures, num_trials - num_failures + 1
+        )
+    )
 
 
 def conditional_x_or_one_minus_x(x, condition):
@@ -267,6 +386,211 @@ def matrix_inv_sqrt(mat: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     return eigvec @ np.diag(eigval**-0.5) @ eigvec.T
 
 
+def resolve_jacobian_row_chunk_size(
+    requested: int | None,
+    out_dim: int,
+) -> int | None:
+    """
+    Resolves the jacobian_row_chunk_size request into a concrete decision for
+    construct_classical_and_adjusted_sandwiches's backward pass: returns None
+    for a single unchunked eager jax.vmap(pullback) over the whole cotangent
+    basis, or a positive chunk size for the chunked, jitted backward path.
+
+    This lives here, rather than next to that backward pass, because it is the
+    ONE memory-bounding policy shared by every reverse-mode Jacobian in the
+    package -- diagnostics.py cannot import post_deployment_analysis (that
+    module imports diagnostics, so the reverse direction is circular), and the
+    policy must not fork per call site. Call sites that do not implement their
+    own chunked backward pass pass this function's result straight to
+    compute_row_chunked_jacobian below, whose None/0 case is the plain
+    unchunked jax.jacrev rather than the eager vmap(pullback) described here
+    (same numbers, same memory profile, different plumbing).
+
+    - requested > 0: honored verbatim (the pre-auto explicit behavior).
+    - requested == 0: force the unchunked single eager vmap -- the pre-auto
+      DEFAULT behavior -- even when the auto heuristic would chunk. Fastest
+      when it fits in memory.
+    - requested < 0: ValueError.
+    - requested is None (the default, "auto"): unchunked when
+      out_dim <= JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM (small problems, where
+      chunking's one-time jit compile was measured ~2.4x SLOWER than the
+      plain eager call); otherwise
+      max(1, min(JACOBIAN_AUTO_MAX_CHUNK, JACOBIAN_AUTO_ROW_BUDGET // out_dim)),
+      which keeps chunk_size * out_dim (the empirically-usable memory proxy)
+      at or below every budget verified safe at real oralytics scale and at
+      roughly one-third of the one observed crash-while-chunked budget --
+      see the constants' own comment in lifejacket/constants.py for the full
+      empirical calibration table.
+
+    HONESTY NOTE on the heuristic: out_dim (= num_updates * beta_dim +
+    theta_dim) is a single-variable PROXY for the true per-cotangent
+    backward-graph footprint, which also grows with num_subjects x
+    num_updates x per-subject history length; the thresholds were calibrated
+    on ONE study shape (oralytics, beta_dim=135) on ONE 24GB machine. The
+    explicit parameter is the escape hatch in both directions: to use LESS
+    memory (smaller machine, bigger study, or a crash under auto), pass a
+    smaller explicit chunk size (e.g. 8 or 4); to go FASTER when memory is
+    known-plentiful, pass a larger explicit chunk size, or 0 to force the
+    single unchunked vmap.
+    """
+    if requested is not None:
+        if requested < 0:
+            raise ValueError(
+                "jacobian_row_chunk_size must be a non-negative int or None "
+                "(None = auto, 0 = force a single unchunked backward vmap, "
+                f"positive = explicit chunk size), got {requested!r}."
+            )
+        if requested == 0:
+            logger.info(
+                "jacobian_row_chunk_size=0: forcing the single unchunked "
+                "eager jax.vmap(pullback) backward pass (out_dim=%d).",
+                out_dim,
+            )
+            return None
+        logger.info(
+            "jacobian_row_chunk_size=%d was passed explicitly; using it as-is "
+            "(out_dim=%d).",
+            requested,
+            out_dim,
+        )
+        return requested
+    if out_dim <= JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM:
+        logger.info(
+            "jacobian_row_chunk_size=None (auto) resolved to unchunked: "
+            "out_dim=%d <= %d. Pass an explicit positive chunk size to chunk "
+            "anyway (e.g. if this crashes from memory pressure).",
+            out_dim,
+            JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM,
+        )
+        return None
+    chunk_size = max(
+        1, min(JACOBIAN_AUTO_MAX_CHUNK, JACOBIAN_AUTO_ROW_BUDGET // out_dim)
+    )
+    logger.info(
+        "jacobian_row_chunk_size=None (auto) resolved to chunk size %d: "
+        "out_dim=%d > %d, targeting chunk_size * out_dim <= %d (a memory "
+        "proxy calibrated on one 24GB-machine study -- pass a smaller "
+        "explicit chunk size if memory is tighter, a larger one or 0 for the "
+        "unchunked vmap if memory is plentiful).",
+        chunk_size,
+        out_dim,
+        JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM,
+        JACOBIAN_AUTO_ROW_BUDGET,
+    )
+    return chunk_size
+
+
+def compute_row_chunked_jacobian(
+    fn: collections.abc.Callable[[jnp.ndarray], jnp.ndarray],
+    x: jnp.ndarray,
+    chunk_size: int | None = None,
+) -> jnp.ndarray:
+    """
+    Memory-bounded reverse-mode Jacobian: the same quantity as
+    jax.jacrev(fn)(x) (same shape, same forward pass, the same independent
+    per-row vjp), but with the output cotangent basis walked in chunks of at
+    most chunk_size rows so that peak memory scales with chunk_size rather
+    than with the full output dimension. Chunking is exact -- no row is
+    accumulated across chunks, so no chunk size is "more approximate" than
+    another; measured agreement with jax.jacrev is ~1 ulp (float64) and
+    ~5e-7 absolute (float32), identical at every chunk size, which is XLA
+    fusing the compiled scan body differently from eager op-by-op dispatch
+    rather than anything the chunking does. This is the general-purpose
+    counterpart to
+    construct_classical_and_adjusted_sandwiches's own hand-rolled chunked
+    backward pass; use this one anywhere that does not need that function's
+    explicit-residual jit machinery.
+
+    Args:
+        fn: a function from one array to one array (differentiated w.r.t. its
+            single argument; close over anything else).
+        x: the point to differentiate at.
+        chunk_size: None or 0 = no chunking, i.e. a plain jax.jacrev(fn)(x)
+            (jacrev's own single vmap over the whole basis -- fastest when it
+            fits in memory). A positive int caps how many output-basis rows
+            are pulled back at once. Negative values raise ValueError. Pass
+            resolve_jacobian_row_chunk_size(requested, out_dim) to get the
+            package-wide auto policy.
+
+    Returns:
+        The Jacobian, of shape fn(x).shape + x.shape -- exactly jax.jacrev's.
+        fn's argument and result must each be a single array (not a pytree),
+        which is what makes that shape, and the flat output basis below,
+        well-defined.
+
+    The chunk loop is jax.lax.map (a scan under the hood), NOT a Python for
+    loop, because this is called from inside jax.jit traces: a Python loop
+    unrolls at trace time into num_chunks copies of the backward graph, whose
+    intermediates XLA is then free to keep live simultaneously -- which
+    reinstates exactly the peak-memory blowup the chunking exists to prevent
+    (real 24GB OOM crashes at oralytics scale; see
+    docs/adr/0001-adaptive-sandwich-performance-plan.md). lax.map keeps one
+    chunk's backward pass live at a time under jit and eagerly alike.
+
+    A final short chunk is handled by PADDING the basis up to a whole number
+    of chunks with all-zero cotangent rows (lax.map needs one uniform chunk
+    shape) and dropping the corresponding all-zero Jacobian rows from the
+    result. The padding costs at most chunk_size - 1 extra pullbacks of the
+    zero cotangent; it never changes the returned rows.
+    """
+    if chunk_size is not None and chunk_size < 0:
+        raise ValueError(
+            "chunk_size must be a non-negative int or None (None or 0 = no "
+            f"chunking, positive = max rows per chunk), got {chunk_size!r}."
+        )
+    if chunk_size is None or chunk_size == 0:
+        return jax.jacrev(fn)(x)
+    if not hasattr(x, "shape"):
+        raise TypeError(
+            "compute_row_chunked_jacobian differentiates w.r.t. a single "
+            f"array, not a pytree; got {type(x).__name__}."
+        )
+
+    outputs, pullback = jax.vjp(fn, x)
+    if not hasattr(outputs, "shape"):
+        raise TypeError(
+            "compute_row_chunked_jacobian needs fn to return a single array "
+            "(the output basis it chunks is that array's flattened identity); "
+            f"got {type(outputs).__name__}."
+        )
+    out_dim = math.prod(outputs.shape)
+    effective_chunk_size = min(chunk_size, out_dim)
+    if effective_chunk_size < 1:
+        # Empty output: no basis to chunk, and the arithmetic below would
+        # divide by zero.
+        return jax.jacrev(fn)(x)
+
+    num_chunks = math.ceil(out_dim / effective_chunk_size)
+    padded_out_dim = num_chunks * effective_chunk_size
+
+    def pull_back_chunk(chunk_index):
+        # Build THIS chunk's rows of the identity from the chunk index, rather than slicing a
+        # materialized (padded_out_dim, out_dim) one. That array is O(out_dim**2) and, as a
+        # lax.map operand, stays live for the whole scan -- an unbounded term inside the helper
+        # whose entire job is bounding memory, and one that grows in exactly the wrong
+        # direction: the auto policy shrinks chunk_size as out_dim rises (65536 // out_dim), so
+        # the ratio of the unbounded term to the bounded one grows like out_dim**3. Constructing
+        # per chunk keeps peak cotangent memory at chunk_size x out_dim, the intended bound.
+        # Rows at or past out_dim compare equal to nothing and come out all-zero, which is
+        # exactly the padding described above.
+        row_ids = chunk_index * effective_chunk_size + jnp.arange(effective_chunk_size)
+        cotangent_chunk = (
+            (row_ids[:, None] == jnp.arange(out_dim)[None, :])
+            .astype(outputs.dtype)
+            .reshape(effective_chunk_size, *outputs.shape)
+        )
+        return jax.vmap(lambda cotangent: pullback(cotangent)[0])(cotangent_chunk)
+
+    jacobian_rows = jax.lax.map(pull_back_chunk, jnp.arange(num_chunks))
+    # Concatenated shape tuple rather than two splats: identical for every non-degenerate case,
+    # but when fn(x) and x are BOTH 0-D the splats expand to nothing and this becomes a bare
+    # .reshape(), which relies on an incidental no-argument behavior instead of asking for the
+    # scalar shape explicitly.
+    return jacobian_rows.reshape(padded_out_dim, *x.shape)[:out_dim].reshape(
+        outputs.shape + x.shape
+    )
+
+
 def load_module_from_source_file(modname, filename):
     loader = importlib.machinery.SourceFileLoader(modname, filename)
     spec = importlib.util.spec_from_file_location(modname, filename, loader=loader)
@@ -310,6 +634,21 @@ def confirm_input_check_result(message, suppress_interaction, error=None):
             raise SystemExit
         else:
             print("\nPlease enter 'y' or 'n'.\n")
+
+
+def prompt_yes_no(message) -> bool:
+    """
+    Interactive y/n question whose answer is a plain bool -- unlike
+    confirm_input_check_result above, 'n' is an ordinary answer here, not an abort. Used where
+    the caller owns the consequence (e.g. whether to print flagged estimates), while the
+    confirm variant remains the one for checks where 'n' means 'stop the run'.
+    """
+    answer = None
+    while answer not in ("y", "n"):
+        answer = input(message).lower()
+        if answer not in ("y", "n"):
+            print("\nPlease enter 'y' or 'n'.\n")
+    return answer == "y"
 
 
 def get_active_df_column(analysis_df, col_name, active_col_name):

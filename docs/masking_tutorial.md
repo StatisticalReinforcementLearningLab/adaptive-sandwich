@@ -247,45 +247,55 @@ means "unused"). Note that `alg_update_func_args` themselves do **not**
 change: you keep supplying each subject's real, unpadded argument tuples, and
 lifejacket does the padding and appends the mask internally.
 
-**CLI** (`lifejacket analyze`): same names as flags; `ragged_indices` is a
-repeated option (once per position):
+**CLI** (`lifejacket analyze`): same names as flags; `ragged_indices` is one
+comma-separated list of integers:
 
 ```bash
 uv run lifejacket analyze \
   ... \
   --alg_update_func_filename=functions_to_pass_to_analysis/oralytics_RL_estimating_function_masked.py \
   --alg_update_func_args_mask_index=10 \
-  --alg_update_func_args_ragged_indices=2 \
-  --alg_update_func_args_ragged_indices=3 \
-  --alg_update_func_args_ragged_indices=4 \
-  --alg_update_func_args_ragged_indices=5 \
-  --alg_update_func_args_ragged_indices=6
+  --alg_update_func_args_ragged_indices=2,3,4,5,6
 ```
 
-In the `adjusted-sandwich-user` repo, `run_local_oralytics.sh` already threads
-these through (it also accepts the space-separated shorthand
-`--alg_update_func_args_ragged_indices="2 3 4 5 6"`); this is the actual
-working full-scale invocation:
+In the `adjusted-sandwich-user` repo, `run_local_oralytics.sh` uses exactly
+these masked settings BY DEFAULT (its ragged-indices flag takes the same
+comma-separated form), so the full-scale invocation is simply:
 
 ```bash
-bash run_local_oralytics.sh -n 70 -q 1 \
-  -l functions_to_pass_to_analysis/oralytics_RL_estimating_function_masked.py \
-  --alg_update_func_args_mask_index=10 \
-  --alg_update_func_args_ragged_indices=2 \
-  --alg_update_func_args_ragged_indices=3 \
-  --alg_update_func_args_ragged_indices=4 \
-  --alg_update_func_args_ragged_indices=5 \
-  --alg_update_func_args_ragged_indices=6
+bash run_local_oralytics.sh -n 70 -q 1
 ```
+
+Passing any one of `--alg_update_func_filename`,
+`--alg_update_func_args_mask_index`, or
+`--alg_update_func_args_ragged_indices` there switches the whole trio to
+manual mode -- e.g. the old exact-shape bucketing is
+`bash run_local_oralytics.sh -l functions_to_pass_to_analysis/oralytics_RL_estimating_function.py`.
 
 (`-n 70` = subjects, `-q 1` = suppress all data checks, `-l` = the
 algorithm-update function file.)
 
-**Inference side.** If your `inference_func` also takes ragged
-per-decision-time arrays, the same mechanism exists as
-`inference_func_args_mask_index` / `inference_func_args_ragged_indices`
-(identical contract; the mask is again appended last). The two sides are
-independent opt-ins.
+**Inference side: not available.** Masking is an algorithm-side feature
+only. Public `inference_func_args_mask_index` /
+`inference_func_args_ragged_indices` options existed until 2026-09-02 and
+were removed, because they could never actually work: `analyze_dataset`
+builds the inference argument tuples itself, in
+`process_inference_func_args`, filling one entry per *declared parameter* of
+`inference_func` from the `analysis_df` column of the same name. The padding
+helper requires the mask index to equal the *supplied* argument count, so a
+mask-aware `inference_func` would have needed a literal `mask` column in the
+DataFrame and would then have been called with one argument too many. No
+value of the flag worked, and nothing in the repo ever set one.
+
+`build_inference_layer_precompute`'s own `mask_index` / `ragged_indices`
+parameters were removed at the same time, so nothing inference-side is
+half-wired. The padding helper itself
+(`self_pad_ragged_args_and_build_mask`) is generic and is still what the
+algorithm side uses, so reinstating this later means teaching
+`process_inference_func_args` to leave the mask position unfilled and then
+re-adding the parameters -- not rewriting the padding. If your
+`inference_func` takes ragged per-decision-time arrays today, it is bucketed
+by exact shape, exactly as before.
 
 ## 6. What you get for free once masking is on
 

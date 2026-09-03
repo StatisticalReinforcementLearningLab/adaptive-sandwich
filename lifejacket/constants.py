@@ -9,7 +9,7 @@ class SandwichFormationMethods:
     NAIVE = "naive"
 
 
-# Auto-mode heuristic for post_deployment_analysis.resolve_jacobian_row_chunk_size
+# Auto-mode heuristic for helper_functions.resolve_jacobian_row_chunk_size
 # (jacobian_row_chunk_size=None). HONESTY NOTE: out_dim (= num_updates *
 # beta_dim + theta_dim) is a single-variable PROXY for the true backward-pass
 # peak-memory driver -- the per-cotangent backward-graph footprint also grows
@@ -42,3 +42,71 @@ class SandwichFormationMethods:
 JACOBIAN_AUTO_UNCHUNKED_MAX_OUT_DIM = 512
 JACOBIAN_AUTO_ROW_BUDGET = 65536
 JACOBIAN_AUTO_MAX_CHUNK = 64
+
+
+class DiagnosticClassifications:
+    # NOTE: "supported" was removed on 2026-09-01 along with lifejacket.simulator_calibration,
+    # which was its only producer. That module required the CALLER to supply a runnable
+    # simulator (a replay_fn), nothing in this package called it, and its Clopper-Pearson
+    # certificate silently assumed the caller's holdout seeds were unique and disjoint from
+    # the training seeds -- a deterministic replay_fn repeating one passing seed could issue a
+    # strong-looking certificate from a single independent replay. The decision-level vocabulary
+    # now lives in DiagnosticVerdicts, which run_diagnostic_suite can actually produce.
+    LOCALLY_SUPPORTED = "locally_supported"
+    FAILED = "failed"
+    INDETERMINATE = "indeterminate"
+
+
+class CheckStatuses:
+    PASSED = "passed"
+    WARNING = "warning"
+    FAILED = "failed"
+    INDETERMINATE = "indeterminate"
+
+
+class DiagnosticVerdicts:
+    """
+    The decision-level summary derived from the suite (DiagnosticReport.verdict) -- the four
+    outcomes the ADS-142 calibration experiments showed a single run can actually support
+    (docs/adr/0002, results sections), phrased as the answer to "can I report the
+    adjusted sandwich variance?" (the estimate and the classical sandwich are computed
+    regardless; the verdict says nothing about the classical sandwich's own accuracy):
+
+    - CERTIFIED: report it. Everything gated passed; see DiagnosticReport.verdict_basis for
+      whether the multiplier bootstrap verified the SEs directly ("bootstrap") or the run was
+      quiet enough that the calibrated a_{j,l} screen never called for it ("screen").
+    - CONSERVATIVE: report it, with the caveat that the variance may be inflated
+      -- the
+      calibrated conservatism signals fired (bootstrap SEs below their null band, and/or
+      influence concentration under its floor). Direction trustworthy, power wasted; the
+      ADR 0003 percentile refit bootstrap is the interval-level remedy.
+    - NOT_CERTIFIED: do not report it as validated. Something is unresolved -- re-solve
+      fragility, a censored ensemble, an unevaluable gate, or the screen called for the
+      bootstrap and it was not run. Empirically, every genuinely miscalibrated design in the
+      calibration grids landed here (or in INVALID) rather than falsely certifying.
+    - INVALID: do not report it. A hard prerequisite failed (input wiring, root/implementation,
+      positivity) or a measured failure occurred (a distortion gate, or a rank-deficient target
+      covariance -- the zero-width-CI collapse mode, 76/76 of which this condition caught).
+    """
+
+    CERTIFIED = "certified"
+    CONSERVATIVE = "conservative"
+    NOT_CERTIFIED = "not_certified"
+    INVALID = "invalid"
+
+    # Renamed from UNCERTIFIABLE on 2026-09-02. "Uncertifiable" asserted IMPOSSIBILITY, but the
+    # verdict means "not established yet" -- and its most common cause (the a_{j,l} screen
+    # calling for the multiplier bootstrap when it did not run) is fixed by re-running, which
+    # the summary now says outright. A verdict whose own next-step line reads "this is fixable"
+    # should not be named un-certifi-able.
+    #
+    # The old NAME stays as an alias so a downstream comparison against
+    # DiagnosticVerdicts.UNCERTIFIABLE keeps working. Reports pickled before the rename carry
+    # the old wire value "uncertifiable" and are deliberately NOT special-cased: re-reading one
+    # is out of scope, so such a report's verdict simply will not match any current constant.
+    UNCERTIFIABLE = NOT_CERTIFIED
+
+
+class VerdictBases:
+    BOOTSTRAP = "bootstrap"
+    SCREEN = "screen"

@@ -1,8 +1,8 @@
 import os
 import shutil
+import subprocess
 
 import pytest
-import sh
 from tests.utils import get_abs_path
 
 
@@ -29,14 +29,45 @@ def run_local_pipeline():
         except Exception as e:
             raise RuntimeError(f"Failed to empty simulated_data: {e}") from e
 
-        command = sh.Command(script_path)
+        # Default off FOR TESTS ONLY (the CLI's own default is on): these integration tests
+        # assert numeric correctness of the analysis outputs, and whether a toy config's
+        # diagnostics happen to be flagged (exit status 3) is incidental to that -- a
+        # diagnostic-threshold recalibration must not spuriously fail them. A test about the
+        # exit behavior itself can override by passing fail_on_flagged_diagnostics="1".
+        kwargs.setdefault("fail_on_flagged_diagnostics", "0")
         args = [f"--{key}={value}" for key, value in kwargs.items()]
-        try:
-            result = command(*args, _cwd=run_location)
-        except sh.ErrorReturnCode as e:
+
+        # subprocess, NOT the sh library, which this fixture used until 2026-09-02.
+        #
+        # sh runs a bare os.fork() and then executes a substantial amount of PYTHON in the
+        # child before execv -- signal handling, os.setsid(), dup2, fd closes, and on macOS a
+        # BLOCKING os.read on a sync pipe. Forking a multithreaded process and then running
+        # non-async-signal-safe code in the child is the classic deadlock pattern: the child
+        # inherits mutexes held by threads that do not exist in it. By the time these tests
+        # run, JAX's thread pool is live (every unit test in the same pytest process warms it
+        # up), and JAX installs an os.register_at_fork hook that warned about exactly this on
+        # every one of these tests: "os.fork() was called. os.fork() is incompatible with
+        # multithreaded code, and JAX is multithreaded, so this will likely lead to a
+        # deadlock."
+        #
+        # subprocess never runs Python in the child: CPython either uses posix_spawn (no fork
+        # at all -- _USE_POSIX_SPAWN is True on this platform) or _posixsubprocess.fork_exec,
+        # which forks and execs entirely in async-signal-safe C. Verified: the fork warning is
+        # gone.
+        completed = subprocess.run(
+            [script_path, *args],
+            cwd=run_location,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
             raise RuntimeError(
-                f"Bash script failed with error: {e.stderr.decode()}"
-            ) from e
-        return result
+                f"Bash script failed with exit status {completed.returncode}: "
+                f"{completed.stderr}"
+            )
+        # The script's STDOUT, so that str(result) still yields it -- sh's RunningCommand
+        # stringified to stdout, and test_RL_diagnostics_smoke asserts on that text.
+        return completed.stdout
 
     return _run_local_pipeline

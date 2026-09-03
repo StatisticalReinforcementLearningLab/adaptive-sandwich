@@ -158,9 +158,11 @@ def _run(tmp_path, scale, variant, caplog):
             reward_col_name="reward",
             suppress_interactive_data_checks=True,
             suppress_all_data_checks=True,
-            collect_data_for_blowup_supervised_learning=False,
             form_adjusted_meat_adjustments_explicitly=False,
-            stabilize_joint_bread=True,
+            # This benchmark measures the core estimation pipeline; run_diagnostics
+            # now defaults to True, which would add an unrelated phase to the timing
+            # this test is specifically measuring.
+            run_diagnostics=False,
             **mask_kwargs,
         )
         total_seconds = time.perf_counter() - start

@@ -2128,6 +2128,37 @@ def test_derive_verdict_precedence_ladder():
     )
     assert verdict == DiagnosticVerdicts.UNCERTIFIABLE
 
+    # An INDETERMINATE INPUT row (an input prerequisite that never ran, e.g. under
+    # suppress_all_data_checks) -> uncertifiable even when every statistical check passed:
+    # unvalidated inputs cannot certify. Before the rows were passed into the suite this
+    # combination read CERTIFIED, exit 0.
+    verdict, _ = d._derive_verdict(
+        {"local_nonlinearity": passed_local},
+        {
+            "first_wave_input_checks": _cr(
+                "first_wave_input_checks", CheckStatuses.INDETERMINATE
+            )
+        },
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.UNCERTIFIABLE
+
+    # A PASSED input row changes nothing.
+    verdict, _ = d._derive_verdict(
+        {"local_nonlinearity": passed_local},
+        {
+            "first_wave_input_checks": _cr(
+                "first_wave_input_checks", CheckStatuses.PASSED
+            )
+        },
+        False,
+        2,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CERTIFIED
+
     # The screen called for the bootstrap (local not PASSED) and it never ran -> uncertifiable:
     # no verdict layer means no verdict, not a pass.
     verdict, _ = d._derive_verdict(

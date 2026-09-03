@@ -347,7 +347,11 @@ def _action_prob_reconstruction_row_content(first_wave_measurements):
     "--suppress_all_data_checks",
     type=bool,
     default=False,
-    help="Flag to suppress all data checks. Not usually recommended, as suppressing only interactive checks suffices to keep tests/simulations running and is safer.",
+    help="Flag to suppress all data checks. Not usually recommended, as suppressing only "
+    "interactive checks suffices to keep tests/simulations running and is safer. When "
+    "diagnostics run, a suppressed first wave also caps the verdict at NOT_CERTIFIED: "
+    "unvalidated inputs cannot certify, so with the default "
+    "--fail_on_flagged_diagnostics=True the CLI will exit 3.",
 )
 @click.option(
     "--form_adjusted_meat_adjustments_explicitly",
@@ -403,11 +407,13 @@ def _action_prob_reconstruction_row_content(first_wave_measurements):
     "--percentile_bootstrap_draws",
     type=int,
     default=0,
-    help="If > 0, runs the refit percentile bootstrap (docs/adr/0003) with this many "
+    help="If >= 10, runs the refit percentile bootstrap (docs/adr/0003) with this many "
     "Poisson(1)-multiplicity draws, re-solving the full RN-weighted joint estimating system "
     "per draw, and adds percentile_bootstrap_ci / bootstrap_num_draws / "
     "bootstrap_num_failed_draws to analysis.pkl (raw theta* draws go to debug_pieces.pkl). "
-    "0 (the default) = off; no behavior change. The reported interval is asymmetric around "
+    "0 (the default) = off; no behavior change. 1-9 are rejected up front: the quantile step "
+    "needs at least max(10, half the draws) survivors, so those counts always produce an "
+    "all-NaN interval. In practice use hundreds (the ADR used 300). The reported interval is asymmetric around "
     "theta_est by design -- downstream code must read percentile_bootstrap_ci rather than "
     "reconstructing theta +/- c*SE. The adjusted sandwich variance is still reported "
     "unchanged; this changes the interval, not the variance.",
@@ -978,6 +984,28 @@ def analyze_dataset(
         percentile_bootstrap_alpha,
         percentile_bootstrap_seed,
     )
+
+    # The user-supplied theta_calculation_func consumes analysis_df BEFORE the first wave can
+    # run (the wave needs the theta it returns), so a malformed frame used to fail inside user
+    # code with whatever error that code happened to raise. The dataframe-only prerequisites
+    # run first: they need nothing but the frame, and they are exactly the checks whose
+    # actionable messages a broken callback input would otherwise preempt. Each runs again
+    # inside the full wave, which is fine -- all three are trivial next to the analysis.
+    if not suppress_all_data_checks:
+        input_checks.require_analysis_df_nonempty(analysis_df)
+        input_checks.require_all_named_columns_present_in_analysis_df(
+            analysis_df,
+            active_col_name,
+            action_col_name,
+            policy_num_col_name,
+            calendar_t_col_name,
+            subject_id_col_name,
+            action_prob_col_name,
+            reward_col_name,
+        )
+        input_checks.require_hashable_subject_ids(
+            analysis_df, active_col_name, subject_id_col_name
+        )
 
     with log_phase_duration("theta_calculation_func"):
         theta_est = jnp.array(theta_calculation_func(analysis_df))
@@ -1587,30 +1615,13 @@ def analyze_dataset(
                 )
                 _diagnostics_g_tilde = _diagnostics_g_tilde_eager
 
-            diagnostic_report = diagnostics.run_diagnostic_suite(
-                _diagnostics_g_tilde,
-                _diagnostics_eta_hat,
-                joint_bread_matrix,
-                joint_adjusted_meat_matrix,
-                joint_sandwich_matrix,
-                per_subject_estimating_function_stacks,
-                beta_dim,
-                theta_dim,
-                len(subject_ids),
-                diagnostic_config or diagnostics.DiagnosticConfig(),
-                analysis_df=analysis_df,
-                active_col_name=active_col_name,
-                calendar_t_col_name=calendar_t_col_name,
-                action_prob_col_name=action_prob_col_name,
-                action_prob_func=action_prob_func,
-                action_prob_func_args=action_prob_func_args,
-                action_prob_func_args_beta_index=action_prob_func_args_beta_index,
-                action_by_decision_time_by_subject_id=action_by_decision_time_by_subject_id,
-                policy_num_by_decision_time_by_subject_id=policy_num_by_decision_time_by_subject_id,
-                initial_policy_num=initial_policy_num,
-                beta_index_by_policy_num=beta_index_by_policy_num,
-                subject_ids=subject_ids,
-            )
+            # These three rows are built BEFORE run_diagnostic_suite and passed into it, so
+            # that hard_failed and the verdict are derived WITH them: previously they were
+            # grafted onto the report afterwards, and suppress_all_data_checks could leave a
+            # quiet run CERTIFIED (exit 0) while its own report said the input prerequisites
+            # were never run. An INDETERMINATE input row now caps the verdict at
+            # NOT_CERTIFIED (see _derive_verdict).
+            pipeline_input_check_rows: dict[str, diagnostics.CheckResult] = {}
             # Recorded FIRST so it reads as the foundation the two specific rows below sit
             # on. Every other first-wave check -- ~40 of them, covering column names and
             # dtypes, policy numbering, participation windows, argument indices, beta
@@ -1621,7 +1632,7 @@ def analyze_dataset(
             # and each is a hard failure, so the only informative thing to say is whether they
             # ran. No count is quoted -- a hard-coded number would go stale the next time a
             # check is added, which is exactly the kind of quiet drift this summary is for.
-            diagnostic_report.input_check_results["first_wave_input_checks"] = (
+            pipeline_input_check_rows["first_wave_input_checks"] = (
                 diagnostics.CheckResult(
                     name="first_wave_input_checks",
                     status=CheckStatuses.INDETERMINATE,
@@ -1654,17 +1665,15 @@ def analyze_dataset(
             # check -- and used to run twice per analysis). perform_first_wave_input_checks
             # already ran it near the start of analyze_dataset, it is a hard failure with no
             # interactive continue path, and nothing between the first wave and this point
-            # touches analysis_df or action_prob_func_args -- so reaching the suite at all
-            # proves it passed. The suppressed case is likewise recorded, not silently
+            # touches analysis_df or action_prob_func_args -- so the analysis having gotten
+            # this far proves it passed. The suppressed case is likewise recorded, not silently
             # omitted: a suppressed input check and a passing one must not look the same in
             # the report. INDETERMINATE, so it stays out of the FAILED set
             # run_diagnostic_suite's hard-fail gate is built on.
             _reconstruction_message, _reconstruction_criteria = (
                 _action_prob_reconstruction_row_content(first_wave_measurements)
             )
-            diagnostic_report.input_check_results[
-                "action_probabilities_reconstructed"
-            ] = (
+            pipeline_input_check_rows["action_probabilities_reconstructed"] = (
                 diagnostics.CheckResult(
                     name="action_probabilities_reconstructed",
                     status=CheckStatuses.INDETERMINATE,
@@ -1688,9 +1697,7 @@ def analyze_dataset(
             # only, while this check is that same a_root construction extended to EVERY
             # stacked component -- so the per-update beta residuals, which is where a
             # mis-specified update function shows up, appear in no other row.
-            diagnostic_report.input_check_results[
-                "estimating_functions_sum_to_zero"
-            ] = (
+            pipeline_input_check_rows["estimating_functions_sum_to_zero"] = (
                 diagnostics.CheckResult(
                     name="estimating_functions_sum_to_zero",
                     status=CheckStatuses.INDETERMINATE,
@@ -1749,6 +1756,31 @@ def analyze_dataset(
                         ),
                     ],
                 )
+            )
+            diagnostic_report = diagnostics.run_diagnostic_suite(
+                _diagnostics_g_tilde,
+                _diagnostics_eta_hat,
+                joint_bread_matrix,
+                joint_adjusted_meat_matrix,
+                joint_sandwich_matrix,
+                per_subject_estimating_function_stacks,
+                beta_dim,
+                theta_dim,
+                len(subject_ids),
+                diagnostic_config or diagnostics.DiagnosticConfig(),
+                analysis_df=analysis_df,
+                active_col_name=active_col_name,
+                calendar_t_col_name=calendar_t_col_name,
+                action_prob_col_name=action_prob_col_name,
+                action_prob_func=action_prob_func,
+                action_prob_func_args=action_prob_func_args,
+                action_prob_func_args_beta_index=action_prob_func_args_beta_index,
+                action_by_decision_time_by_subject_id=action_by_decision_time_by_subject_id,
+                policy_num_by_decision_time_by_subject_id=policy_num_by_decision_time_by_subject_id,
+                initial_policy_num=initial_policy_num,
+                beta_index_by_policy_num=beta_index_by_policy_num,
+                subject_ids=subject_ids,
+                extra_input_check_results=pipeline_input_check_rows,
             )
             logger.info(
                 "Diagnostic suite classification: %s", diagnostic_report.classification
@@ -2674,8 +2706,6 @@ def construct_classical_and_adjusted_sandwiches(
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
     jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
-    jnp.ndarray[jnp.float32],
 ]:
     """
     Constructs the classical and adjusted sandwich matrices, as well as various
@@ -2825,25 +2855,19 @@ def construct_classical_and_adjusted_sandwiches(
             mid-precompute structural violations; True = force on with loud
             errors when ineligible; False = force off).
     Returns:
-        tuple[jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32], jnp.ndarray[jnp.float32]]:
-            A tuple containing:
+        A nine-element tuple containing:
             - The raw joint bread matrix.
-            - The joint meat matrix.
+            - The joint (adjusted) meat matrix.
             - The joint sandwich matrix.
             - The classical bread matrix.
             - The classical meat matrix.
             - The classical sandwich matrix.
             - The average weighted estimating function stack.
             - All per-subject weighted estimating function stacks.
-            - A trivial all-ones array of length num_subjects, kept only for
-              output-shape stability (previously the per-subject adjusted
-              meat small-sample corrections; there is no small-sample
-              correction feature any more).
-            - A trivial all-ones array of length num_subjects, kept only for
-              output-shape stability (previously the per-subject classical
-              meat small-sample corrections).
             - The per-subject adjusted meat contributions, if form_adjusted_meat_adjustments_explicitly
               is True, otherwise an array of NaNs.
+        (The two all-ones small-sample-correction placeholders that used to pad this tuple to
+        eleven are gone with the feature that produced them.)
     """
     logger.info(
         "Differentiating average weighted estimating function stack and collecting auxiliary values."

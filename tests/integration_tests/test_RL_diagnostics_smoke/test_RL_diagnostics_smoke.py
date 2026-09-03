@@ -10,7 +10,11 @@ from tests.integration_tests.fixtures import (  # pylint: disable=unused-import
 from tests.utils import get_abs_path
 
 from lifejacket import post_deployment_analysis
-from lifejacket.constants import CheckStatuses, DiagnosticClassifications
+from lifejacket.constants import (
+    CheckStatuses,
+    DiagnosticClassifications,
+    DiagnosticVerdicts,
+)
 from lifejacket.diagnostics import DiagnosticReport
 from lifejacket.helper_functions import load_function_from_same_named_file
 from lifejacket.post_deployment_analysis import analyze_dataset
@@ -311,8 +315,19 @@ def test_diagnostic_suite_runs_on_a_mask_aware_study(
         # Recorded as not-run, not omitted and not silently "passed".
         assert reconstruction_check.status == CheckStatuses.INDETERMINATE
         assert "suppress_all_data_checks" in reconstruction_check.message
+        # And it caps the verdict: the input rows are passed INTO the suite before the
+        # verdict is derived, so unvalidated inputs can never read CERTIFIED (a Copilot
+        # review finding -- they used to be grafted onto the finished report, leaving a
+        # quiet suppressed run certified with exit status 0).
+        assert report.verdict == DiagnosticVerdicts.NOT_CERTIFIED
     else:
         assert reconstruction_check.status == CheckStatuses.PASSED
+        # An unsuppressed run may still be honestly uncertified for statistical reasons;
+        # what it must never carry is a not-run input row.
+        assert all(
+            row.status != CheckStatuses.INDETERMINATE
+            for row in report.input_check_results.values()
+        )
 
 
 def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):
@@ -333,7 +348,10 @@ def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):
         "refit_percentile_bootstrap",
         side_effect=ValueError("injected bootstrap failure"),
     ):
-        result = _run_masked_analyze_dataset(tmp_path, percentile_bootstrap_draws=4)
+        # 12, not a smaller number: require_valid_percentile_bootstrap_settings rejects 1-9
+        # up front (they cannot meet the quantile step's survivor minimum), and this test needs
+        # to get PAST validation to the mocked refit.
+        result = _run_masked_analyze_dataset(tmp_path, percentile_bootstrap_draws=12)
 
     assert "theta_est" in result
     analysis = _load_pickle(tmp_path, "analysis.pkl")
@@ -347,8 +365,8 @@ def test_percentile_bootstrap_failure_does_not_destroy_the_analysis(tmp_path):
     assert analysis["bootstrap_error"] is not None
     assert "ValueError" in analysis["bootstrap_error"]
     assert np.all(np.isnan(np.asarray(analysis["percentile_bootstrap_ci"])))
-    assert analysis["bootstrap_num_draws"] == 4
-    assert analysis["bootstrap_num_failed_draws"] == 4
+    assert analysis["bootstrap_num_draws"] == 12
+    assert analysis["bootstrap_num_failed_draws"] == 12
 
 
 # ---------------------------------------------------------------------------
@@ -414,9 +432,9 @@ def test_refit_bootstrap_precompute_does_not_scale_with_draw_count(tmp_path):
         str(tmp_path / "none"), run_diagnostics=False, percentile_bootstrap_draws=0
     )
     with_draws = _count_update_layer_builds(
-        str(tmp_path / "six"), run_diagnostics=False, percentile_bootstrap_draws=6
+        str(tmp_path / "twelve"), run_diagnostics=False, percentile_bootstrap_draws=12
     )
     assert with_draws - no_draws <= _MAX_EXTRA_PRECOMPUTE_BUILDS, (
-        f"6 bootstrap draws added {with_draws - no_draws} structural precompute builds "
+        f"12 bootstrap draws added {with_draws - no_draws} structural precompute builds "
         f"({no_draws} -> {with_draws}); the count must not scale with the draw count."
     )

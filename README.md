@@ -152,9 +152,11 @@ default**, that runs a layered diagnostic suite over the adjusted sandwich and w
 root/implementation, local nonlinearity, bread stability, influence concentration,
 exploration/importance-weight checks) -- the expensive exact-nonlinear-perturbation and
 Jacobian-drift checks stay opt-in (pass `--diagnostic_config_pickle`/`diagnostic_config` with
-`compute_exact_nonlinear_roots=True`), as does the frozen-score multiplier bootstrap, which has
-its own switch on the same config (`multiplier_bootstrap="auto"`/`"always"`, default `"off"`) and
-is the check to reach for when you want a per-dataset verdict on the reported standard errors.
+`compute_exact_nonlinear_roots=True`), The frozen-score multiplier bootstrap has its own switch on the same config and now defaults to
+`multiplier_bootstrap="auto"`: it runs automatically -- extra re-solves included -- whenever the
+calibrated screen trips or local nonlinearity does not pass outright, and stays off on quiet runs
+(`"always"`/`"off"` force it either way). It is the check that turns a screen-tripped run into a
+per-dataset verdict on the reported standard errors.
 It does not change the adjusted sandwich estimator itself,
 and a diagnostic failure does not mean the classical sandwich is valid instead. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for what each check does and does not establish, or

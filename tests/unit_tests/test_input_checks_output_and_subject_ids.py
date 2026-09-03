@@ -271,6 +271,16 @@ def test_require_hashable_subject_ids_raises_on_mixed_string_and_numeric_ids():
         _check_subject_ids_sid(analysis_df)
 
 
+def test_require_hashable_subject_ids_raises_on_same_type_but_unorderable_ids():
+    # The type grouping alone cannot catch these: complex ids are hashable and all one type,
+    # so they pass the mixed-type test and would raise a bare "'<' not supported between
+    # instances of 'complex' and 'complex'" from sorted(...) deep in the derivative
+    # precompute. The check now attempts the actual sort and translates that TypeError.
+    analysis_df = _build_study_sid(subject_ids=(1j, 2j))
+    with pytest.raises(AssertionError, match="are not sortable"):
+        _check_subject_ids_sid(analysis_df)
+
+
 def test_require_hashable_subject_ids_treats_int_and_float_ids_as_comparable():
     # int and float are mutually orderable, so a column mixing them sorts fine and must NOT be
     # rejected -- the comparability check groups them as one "number" type on purpose.

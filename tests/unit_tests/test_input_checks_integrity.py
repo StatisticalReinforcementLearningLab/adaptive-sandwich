@@ -1508,6 +1508,20 @@ def test_require_valid_percentile_bootstrap_settings_passes_on_zero_draws():
     input_checks.require_valid_percentile_bootstrap_settings(0, 0.05, None)
 
 
+def test_require_valid_percentile_bootstrap_settings_rejects_draws_below_ten():
+    # 1-9 pass the nonnegativity test but refit_percentile_bootstrap requires at least
+    # max(10, half the requested draws) SURVIVING draws before computing quantiles, so any
+    # such count was guaranteed to report an all-NaN interval even with zero failures.
+    with pytest.raises(AssertionError, match="must be 0 \\(off\\) or at least 10"):
+        input_checks.require_valid_percentile_bootstrap_settings(4, 0.05, 0)
+    with pytest.raises(AssertionError, match="must be 0 \\(off\\) or at least 10"):
+        input_checks.require_valid_percentile_bootstrap_settings(9, 0.05, 0)
+
+
+def test_require_valid_percentile_bootstrap_settings_allows_the_minimum_of_ten():
+    input_checks.require_valid_percentile_bootstrap_settings(10, 0.05, 0)
+
+
 def test_require_valid_percentile_bootstrap_settings_allows_seed_zero():
     # 0 is a perfectly good seed and must not be confused with "no seed supplied".
     input_checks.require_valid_percentile_bootstrap_settings(200, 0.05, 0)

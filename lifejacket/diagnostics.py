@@ -4376,7 +4376,9 @@ def _derive_verdict(
        check versions, whose row says INDETERMINATE.)
     2. UNCERTIFIABLE -- any indeterminate check (an unconfirmed re-solve exceedance, a
        partially censored ensemble, unevaluable gates; CONFIRMED fragility and TOTAL censoring
-       now fail instead), or the a_{j,l} screen called for the multiplier bootstrap and it did
+       now fail instead), any indeterminate INPUT row (an input prerequisite that never ran,
+       e.g. under suppress_all_data_checks -- unvalidated inputs cannot certify), or the
+       a_{j,l} screen called for the multiplier bootstrap and it did
        not run (`multiplier_bootstrap="off"`, or the report predates the check): the calibrated
        division of labor makes the bootstrap the verdict layer once the screen trips, so its
        absence there means no verdict was reached, not a pass.
@@ -4409,7 +4411,14 @@ def _derive_verdict(
     if any_failed or rank_deficient:
         return DiagnosticVerdicts.INVALID, ""
 
-    if any(r.status == CheckStatuses.INDETERMINATE for r in check_results.values()):
+    if any(
+        r.status == CheckStatuses.INDETERMINATE for r in check_results.values()
+    ) or any(
+        r.status == CheckStatuses.INDETERMINATE for r in input_check_results.values()
+    ):
+        # Input rows too: an INDETERMINATE one means an input prerequisite did not run
+        # (suppress_all_data_checks) or could not conclude, and unvalidated inputs cannot
+        # certify -- without this, suppressing the first wave left quiet runs CERTIFIED.
         return DiagnosticVerdicts.NOT_CERTIFIED, ""
 
     bootstrap = check_results.get("multiplier_bootstrap")
@@ -4464,6 +4473,7 @@ def run_diagnostic_suite(
     beta_index_by_policy_num: dict | None = None,
     subject_ids: Sequence[Any] | None = None,
     pi_and_weight_gradients_by_calendar_t: dict | None = None,
+    extra_input_check_results: dict[str, CheckResult] | None = None,
 ) -> DiagnosticReport:
     """
     Runs the full layered diagnostic suite and combines every check into one DiagnosticReport.
@@ -4485,6 +4495,12 @@ def run_diagnostic_suite(
     V_hat = np.asarray(joint_sandwich_matrix, dtype=np.float64)
 
     input_check_results = run_input_checks(legacy_check_callables)
+    # Pipeline-level input rows (the first wave, the reconstruction check, the sum-to-zero
+    # check) are merged BEFORE hard_failed and the verdict are derived, so they shape both.
+    # They used to be grafted onto the finished report instead, which let
+    # suppress_all_data_checks leave a quiet run CERTIFIED while its own report said the
+    # input prerequisites never ran.
+    input_check_results.update(extra_input_check_results or {})
 
     check_results["root_and_implementation"] = check_root_and_implementation(
         g_tilde,

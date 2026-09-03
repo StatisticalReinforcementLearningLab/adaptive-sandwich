@@ -1059,12 +1059,14 @@ def require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_na
         "argument dictionary. Please see the contract for details."
     )
 
-    # Mutual comparability, by type. Several call sites sort subject ids -- sorted(user_ids) in
-    # calculate_derivatives and sorted(shape_group.keys()) here -- and sorting a mixed-type
-    # column raises a bare TypeError from deep inside the derivative precompute that names
-    # neither the column nor the offending values. Checking the TYPES rather than attempting a
-    # trial sort keeps this O(n) and gives a message that names the actual problem; bool/int
-    # are grouped because Python orders them together, as are the numeric types.
+    # Mutual comparability, in two layers. Several call sites sort subject ids --
+    # sorted(user_ids) in calculate_derivatives and sorted(shape_group.keys()) here -- and a
+    # failed sort raises a bare TypeError from deep inside the derivative precompute that
+    # names neither the column nor the offending values. The type grouping below gives the
+    # sharper message for the common mistake (a MIXED column); the trial sort after it is the
+    # actual contract, catching same-type ids that simply do not order (complex numbers, a
+    # hashable class without __lt__). bool/int are grouped because Python orders them
+    # together, as are the numeric types.
     def _id_type_name(subject_id):
         if isinstance(subject_id, (bool, int, float, np.integer, np.floating)):
             return "number"
@@ -1079,6 +1081,20 @@ def require_hashable_subject_ids(analysis_df, active_col_name, subject_id_col_na
         "places, and sorting a mixed column raises an uninformative TypeError from inside the "
         "derivative precompute. Please see the contract for details."
     )
+
+    # The trial sort, on the unique ids (hashability was established above, so dict.fromkeys
+    # is safe and keeps this O(u log u) in the unique count rather than the row count).
+    unique_subject_ids = list(dict.fromkeys(active_subject_ids))
+    try:
+        sorted(unique_subject_ids)
+    except TypeError as exc:
+        raise AssertionError(
+            f"Subject IDs in {subject_id_col_name} are not sortable ({exc}). Subject ids are "
+            "sorted in several places (per-subject argument batching, derivative "
+            "precomputation), so ids of a type without an ordering -- complex numbers, or a "
+            "custom class that defines __hash__ but not __lt__ -- cannot be used. Please see "
+            "the contract for details."
+        ) from exc
 
 
 def require_no_policy_numbers_present_in_alg_update_args_but_not_analysis_df(
@@ -1345,6 +1361,16 @@ def require_valid_percentile_bootstrap_settings(
     ), (
         f"percentile_bootstrap_draws must be a non-negative integer, got "
         f"{percentile_bootstrap_draws!r} (0 disables the bootstrap)."
+    )
+    # 1-9 are rejected, not merely discouraged: refit_percentile_bootstrap refuses to compute
+    # quantiles from fewer than max(10, half the requested draws) surviving draws, so any
+    # accepted count in 1-9 was GUARANTEED to report an all-NaN interval even when every
+    # refit converged -- a configuration error dressed up as a bootstrap result.
+    assert percentile_bootstrap_draws == 0 or percentile_bootstrap_draws >= 10, (
+        f"percentile_bootstrap_draws must be 0 (off) or at least 10, got "
+        f"{percentile_bootstrap_draws!r}: the quantile step requires at least "
+        f"max(10, half the requested draws) surviving draws, so 1-9 draws always produce an "
+        f"all-NaN interval. In practice use hundreds (docs/adr/0003 used 300)."
     )
     assert 0.0 < percentile_bootstrap_alpha < 1.0, (
         f"percentile_bootstrap_alpha must be strictly between 0 and 1 -- it is a PROPORTION, "

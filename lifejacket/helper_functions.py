@@ -111,6 +111,58 @@ def clopper_pearson_upper_bound(
     )
 
 
+def clopper_pearson_lower_bound(
+    num_failures: int, num_trials: int, confidence_level: float = 0.95
+) -> float:
+    """
+    One-sided Clopper-Pearson LOWER confidence bound on a failure probability given
+    `num_failures` observed out of `num_trials` independent trials -- the exact mirror of
+    clopper_pearson_upper_bound (beta.ppf(1 - confidence_level, x, n - x + 1)).
+
+    Its role in the diagnostics is the opposite of the upper bound's: the upper bound says
+    "the failure rate is AT MOST this much, so the run may pass"; this one says "the failure
+    rate is AT LEAST this much" -- when it exceeds bad_direction_probability_target, solver
+    fragility is statistically CONFIRMED on the executed trials, which is a measured failure
+    rather than an unevaluable ensemble (198/198 failures at 0.95 confidence bounds the rate
+    above ~0.985). For num_failures == 0 the bound is exactly 0.0: no failures observed can
+    never confirm fragility.
+
+    Validation mirrors the upper bound's, for the mirrored reason: a confidence_level below
+    0.5 here yields a HIGHER lower bound, i.e. it overstates the evidence of failure -- wrong
+    in the loud direction rather than the quiet one, but still the shape of the
+    alpha/confidence mix-up, so it warns identically.
+    """
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError(
+            "confidence_level must be strictly between 0 and 1 (it is a confidence level, "
+            f"not an alpha -- pass 0.95, not 0.05), got {confidence_level!r}."
+        )
+    if confidence_level < 0.5:
+        logger.warning(
+            "clopper_pearson_lower_bound called with confidence_level=%r, i.e. below 50%%. "
+            "This yields a much HIGHER lower bound than a conventional level would, so it "
+            "overstates the evidence that failures are systematic. If you meant to pass "
+            "alpha, pass 1 - alpha instead.",
+            confidence_level,
+        )
+    if num_trials < 0:
+        raise ValueError(f"num_trials must be non-negative, got {num_trials!r}.")
+    if not 0 <= num_failures <= num_trials:
+        raise ValueError(
+            "num_failures must be between 0 and num_trials inclusive, got "
+            f"num_failures={num_failures!r} of num_trials={num_trials!r}."
+        )
+    if num_trials == 0:
+        return math.nan
+    if num_failures == 0:
+        return 0.0
+    return float(
+        scipy.stats.beta.ppf(
+            1.0 - confidence_level, num_failures, num_trials - num_failures + 1
+        )
+    )
+
+
 def conditional_x_or_one_minus_x(x, condition):
     return (1 - condition) + (2 * condition - 1) * x
 

@@ -4084,7 +4084,12 @@ def test_pipeline_diagnostic_summary_rows_flag_extreme_condition_number():
     (condition_row,) = rows
     assert condition_row[0] == "joint_bread_condition_number"
     assert condition_row[1] == "failed"
-    assert "1.473e+13" in condition_row[2]
+    # The detail is a criteria list: a heading plus one CriterionResult whose own ok mirrors
+    # the row status and whose value carries the measured condition number.
+    heading, criterion = condition_row[2]
+    assert heading == "criteria:"
+    assert criterion.value == "1.473e+13"
+    assert criterion.ok is False
 
     # A nonfinite condition number (a fully singular bread) is also extreme.
     _, extreme_condition = (
@@ -4100,4 +4105,6 @@ def test_pipeline_diagnostic_summary_rows_healthy_run_passes():
     assert not extreme_condition
     (condition_row,) = rows
     assert condition_row[1] == "passed"
-    assert "1.000e+05" in condition_row[2]
+    _, criterion = condition_row[2]
+    assert criterion.value == "1.000e+05"
+    assert criterion.ok is True

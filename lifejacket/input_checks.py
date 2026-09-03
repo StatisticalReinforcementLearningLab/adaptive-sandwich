@@ -101,7 +101,8 @@ def perform_first_wave_input_checks(
             positions to self-pad when mask padding is on.
 
     Returns:
-        None
+        dict: measurements from the checks that produce one (currently the action-probability
+        reconstruction's agreement), for the diagnostic summary to report.
     """
     ### Validate the analysis DataFrame's columns FIRST.
     require_analysis_df_nonempty(analysis_df)
@@ -325,14 +326,16 @@ def perform_first_wave_input_checks(
     require_action_prob_func_args_given_for_all_decision_times(
         analysis_df, calendar_t_col_name, action_prob_func_args
     )
-    require_action_probabilities_in_analysis_df_can_be_reconstructed(
-        analysis_df,
-        action_prob_col_name,
-        calendar_t_col_name,
-        subject_id_col_name,
-        active_col_name,
-        action_prob_func_args,
-        action_prob_func,
+    action_prob_reconstruction = (
+        require_action_probabilities_in_analysis_df_can_be_reconstructed(
+            analysis_df,
+            action_prob_col_name,
+            calendar_t_col_name,
+            subject_id_col_name,
+            active_col_name,
+            action_prob_func_args,
+            action_prob_func,
+        )
     )
 
     require_out_of_study_decision_times_are_exactly_blank_action_prob_args_times(
@@ -436,6 +439,10 @@ def perform_first_wave_input_checks(
     ### Validate theta estimation
     require_theta_is_1D_array(theta_est)
     require_theta_estimate_is_finite_and_nonempty(theta_est)
+
+    # The measurements worth carrying into the diagnostic summary. Everything else in the first
+    # wave is a black-and-white wiring question with nothing to report beyond having run.
+    return {"action_prob_reconstruction": action_prob_reconstruction}
 
 
 # TODO: Give a hard-to-use option to loosen this check somehow
@@ -579,11 +586,21 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
     # values: probabilities are unitless and bounded in (0, 1), so there is no reward-scale
     # exposure, and 1e-6 leaves ~10x headroom over float32 evaluation noise at typical
     # probabilities. Do not "fix" this to a relative/scale-aware tolerance.
-    np.testing.assert_allclose(
-        np.asarray(actual_action_probs, dtype="float64"),
-        np.asarray(reconstructed_action_probs, dtype="float64"),
-        atol=1e-6,
-    )
+    actual_values = np.asarray(actual_action_probs, dtype="float64")
+    reconstructed_values = np.asarray(reconstructed_action_probs, dtype="float64")
+    np.testing.assert_allclose(actual_values, reconstructed_values, atol=1e-6)
+    # Returned so the diagnostic summary can report the measured agreement rather than prose
+    # boilerplate; callers that ignore the return value are unaffected. NaN, not 0.0, for an
+    # empty study: "agreed to within 0" would claim a measurement where none was made.
+    return {
+        "max_abs_difference": (
+            float(np.max(np.abs(actual_values - reconstructed_values)))
+            if actual_values.size
+            else math.nan
+        ),
+        "num_cells": int(actual_values.size),
+        "atol": 1e-6,
+    }
 
 
 def require_all_subjects_have_all_times_in_analysis_df(
@@ -2671,6 +2688,16 @@ def require_estimating_functions_sum_to_zero_se_standardized(
         "residual %.4g).",
         a_max,
     )
+    # Returned, not just logged, so analyze_dataset can record this outcome as a row in the
+    # diagnostic summary. Returning None (as this did until 2026-09-02) left the check's result
+    # visible only in a log line, which this package configures no handler for. Callers that
+    # ignore the return value are unaffected.
+    return {
+        "max_residual_se": a_max,
+        "worst_label": worst_label,
+        "soft_tolerance_se": soft_tolerance_se,
+        "hard_tolerance_se": hard_tolerance_se,
+    }
 
 
 def require_estimating_functions_sum_to_zero(

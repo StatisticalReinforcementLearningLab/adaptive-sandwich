@@ -450,7 +450,7 @@ def test_joint_mahalanobis_correction_handles_rank_deficient_target_covariance()
     np.testing.assert_allclose(result["values"], [3.0, 1.0], atol=1e-8)
 
 
-def test_run_diagnostic_suite_reports_indeterminate_for_rank_deficient_target():
+def test_run_diagnostic_suite_reports_failed_for_rank_deficient_target():
     rng = np.random.default_rng(2)
     d_total = 2
     n = 100
@@ -480,7 +480,10 @@ def test_run_diagnostic_suite_reports_indeterminate_for_rank_deficient_target():
         num_subjects=n,
         config=d.DiagnosticConfig(num_directions=20),
     )
-    assert report.classification == DiagnosticClassifications.INDETERMINATE
+    # Rank deficiency is a measured failure (76/76 of the undercoverage hunt's zero-width
+    # collapses), not a could-not-evaluate.
+    assert report.classification == DiagnosticClassifications.FAILED
+    assert report.check_results["bread_stability"].status == CheckStatuses.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -502,11 +505,12 @@ def test_ill_conditioned_bread_solves_stay_finite_and_are_flagged():
     )
     assert np.isfinite(result.metrics["full_bread_condition_number"])
     assert result.metrics["full_bread_condition_number"] > 1e5
-    # Both indeterminate triggers fire on this fixture and either alone is a correct diagnosis:
-    # V_hat = diag(1, 1e12)/n is rank 1 at rank_tolerance=1e-8, and the 1e-6*||B|| perturbation
-    # doubles the small diagonal entry, so the second SE moves enormously. check_bread_stability
-    # has no WARNING path at all -- PASSED or INDETERMINATE are its only outcomes.
-    assert result.status == CheckStatuses.INDETERMINATE
+    # Both status triggers fire on this fixture: V_hat = diag(1, 1e12)/n is rank 1 at
+    # rank_tolerance=1e-8 (FAILED -- the measured predictor of variance collapse), and the
+    # 1e-6*||B|| perturbation doubles the small diagonal entry so the second SE moves enormously
+    # (INDETERMINATE on its own). Rank deficiency wins: check_bread_stability has no WARNING
+    # path at all -- PASSED, INDETERMINATE (fragile SEs) or FAILED (unidentified components).
+    assert result.status == CheckStatuses.FAILED
     assert result.metrics["target_covariance_rank_estimate"] < 2
     assert (
         result.metrics["numerical_sensitivity_max_relative_se_change"]
@@ -821,10 +825,14 @@ def test_multiplier_bootstrap_warns_when_sandwich_se_is_overstated():
     assert result.metrics["se_ratio_by_target"]["theta_0"] < 0.7
 
 
-def test_multiplier_bootstrap_indeterminate_when_resolves_fail():
+def test_multiplier_bootstrap_fails_when_resolve_fragility_is_confirmed():
     # g(eta) = b*w*tanh(eta/w) has range (-b*w, b*w); multiplier draws routinely exceed it, so
-    # many re-solves cannot converge. That fragility must surface as INDETERMINATE (with the
-    # failure fraction reported), never as a confident PASS/FAIL from the surviving easy draws.
+    # many re-solves cannot converge. With >20% of 100 trials failing, the failure rate's
+    # Clopper-Pearson lower bound clears bad_direction_probability_target by an order of
+    # magnitude: fragility is statistically CONFIRMED on the full trial set (no
+    # optimistic-subset caveat applies to counting failures), so the check FAILS -- it must
+    # never read as a confident PASS from the surviving easy draws, and no longer hides a
+    # measured collapse behind INDETERMINATE either.
     stacks, B, V_hat = _scalar_bootstrap_inputs()
     n = stacks.shape[0]
     sd_s = math.sqrt(float((stacks.T @ stacks)[0, 0]) / n / n)
@@ -845,8 +853,13 @@ def test_multiplier_bootstrap_indeterminate_when_resolves_fail():
         V_hat,
         d.DiagnosticConfig(num_bootstrap_draws=50),
     )
-    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.status == CheckStatuses.FAILED
     assert result.metrics["root_failure_fraction"] > 0.2
+    assert any("confirmed fragility" in w for w in result.warnings)
+    (rate_criterion,) = [c for c in result.criteria if "failure rate" in c.description]
+    assert rate_criterion.ok is False
+    assert rate_criterion.severity == "fail"
+    assert "lower confidence bound" in rate_criterion.value
 
 
 def test_exact_check_passes_on_affine_map_with_few_directions():
@@ -882,13 +895,15 @@ def test_exact_check_passes_on_affine_map_with_few_directions():
     assert exact.metrics["num_converged_trials"] == exact.metrics["num_trials"]
 
 
-def test_exact_check_excludes_nonconverged_solves_and_reports_indeterminate():
+def test_exact_check_excludes_nonconverged_solves_and_confirms_fragility():
     # g(eta) = b*clip(eta, -cap, cap): EXACTLY linear inside its solvable range, saturated
     # outside it. Directions whose targets are unreachable fail to converge; the converged ones
     # are perfectly linear. The check must exclude the failures from a^NL (no solver debris in
-    # the ensemble statistics -- the converged-only a^NL is ~0 here) and report INDETERMINATE
-    # (a PASS from the optimistically-selected subset would be unearned; there is nothing to
-    # FAIL on).
+    # the ensemble statistics -- the converged-only a^NL is ~0 here) and report FAILED: with
+    # roughly half of 30 trials failing, the failure rate's lower confidence bound clears the
+    # 0.01 target, so the equation's fragility at perturbation scale is a confirmed
+    # measurement, not a gap in the evidence (a PASS from the optimistically-selected subset
+    # would still be unearned).
     stacks, B, V_hat = _scalar_bootstrap_inputs(seed=3)
     n = stacks.shape[0]
     sd_s = math.sqrt(float((stacks.T @ stacks)[0, 0]) / n / n)
@@ -910,7 +925,8 @@ def test_exact_check_excludes_nonconverged_solves_and_reports_indeterminate():
         V_hat,
         d.DiagnosticConfig(num_exact_directions=15),
     )
-    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.status == CheckStatuses.FAILED
+    assert any("confirmed fragility" in w for w in result.warnings)
     assert 0 < result.metrics["num_converged_trials"] < result.metrics["num_trials"]
     a_nl_max = result.metrics["a_nl_by_target"]["theta_0"]["max"]
     assert math.isfinite(a_nl_max)
@@ -1087,16 +1103,24 @@ def test_exact_check_failed_verdict_stands_when_the_solver_is_unhealthy():
             num_exact_directions=15,
             nonlinear_solver_max_iterations=200,
             quantile_shift_tolerance_se=1e6,
+            # Between this fixture's confirmed lower bound (2 failures of 30 -> 0.012) and its
+            # observed fraction (0.0667): the solver reads UNHEALTHY but NOT confirmed-fragile,
+            # which is the precedence this test exists to pin -- a distortion FAILED from the
+            # optimistically-selected converged subset outranking the unhealthy INDETERMINATE.
+            # At the default 0.01 target the confirmed-fragility rung would fire first and the
+            # gates would never be consulted.
+            bad_direction_probability_target=0.03,
         ),
     )
     assert result.status == CheckStatuses.FAILED
-    assert (
-        result.metrics["root_failure_fraction"]
-        > d.DiagnosticConfig().bad_direction_probability_target
-    )
+    assert result.metrics["root_failure_fraction"] > 0.03
     assert 0 < result.metrics["num_converged_trials"] < result.metrics["num_trials"]
     assert max(result.metrics["se_ratios"]) > result.metrics["se_ratio_null_band"][1]
     assert any("optimistically selected" in w for w in result.warnings)
+    # Merely unhealthy: the rate criterion stays [indeterminate]-severity, not [FAIL].
+    (rate_criterion,) = [c for c in result.criteria if "failure rate" in c.description]
+    assert rate_criterion.ok is False
+    assert rate_criterion.severity == "indeterminate"
 
 
 def test_multiplier_bootstrap_auto_mode_screens_on_local_nonlinearity():
@@ -1367,27 +1391,35 @@ def test_bread_stability_passes_on_well_conditioned_system():
     )
 
 
-def test_bread_stability_indeterminate_on_rank_deficient_target_covariance():
+def test_bread_stability_fails_on_rank_deficient_target_covariance():
     n = 50
     result = d.check_bread_stability(
         np.eye(2), np.eye(2), 0, 2, n, np.diag([1.0, 0.0]) / n, d.DiagnosticConfig()
     )
-    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.status == CheckStatuses.FAILED
     assert result.metrics["target_covariance_rank_estimate"] < 2
+    (rank_criterion,) = [
+        c for c in result.criteria if "components identified" in c.description
+    ]
+    assert rank_criterion.ok is False
+    assert rank_criterion.severity == "fail"
 
 
 def test_bread_stability_flags_numerically_fragile_standard_errors():
     # B = diag(1, 1e-5): the check's 1e-6 * ||B||-scale perturbation is ~10% of the small
-    # diagonal, so that component's SE moves far past se_distortion_tolerance -- the reported
-    # SEs are numerically fragile (the co-occurring near-degenerate V_hat is inherent to the
-    # construction; either indeterminate trigger is a correct diagnosis, and the sensitivity
-    # metric itself must register).
+    # diagonal, so that component's SE moves past se_distortion_tolerance (~9%). M is scaled
+    # so V = diag(1, 1)/n stays FULL rank: with rank deficiency now a FAILED trigger, the old
+    # M = I fixture (V = diag(1, 1e10)/n, rank 1) would fail on rank and this test would stop
+    # exercising the sensitivity trigger at all. Fragile SEs alone are INDETERMINATE -- the
+    # ADS-142 grid measured the sensitivity gate as non-predictive of real variance failure
+    # (and conservative when it fires), so it never earns FAILED on its own.
     n = 50
     B = np.diag([1.0, 1e-5])
-    M = np.eye(2)
+    M = np.diag([1.0, 1e-10])
     V = np.linalg.solve(B, M) @ np.linalg.inv(B).T / n
     result = d.check_bread_stability(B, M, 0, 2, n, V, d.DiagnosticConfig())
     assert result.status == CheckStatuses.INDETERMINATE
+    assert result.metrics["target_covariance_rank_estimate"] == 2
     assert (
         result.metrics["numerical_sensitivity_max_relative_se_change"]
         > d.DiagnosticConfig().se_distortion_tolerance
@@ -1487,17 +1519,19 @@ def test_multiplier_bootstrap_fails_on_curvature_induced_mean_shift():
     assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
 
 
-def test_multiplier_bootstrap_is_indeterminate_on_an_asymmetrically_censored_ensemble():
-    # BEHAVIOR CHANGE, deliberate: this fixture (g(eta) = eta + 0.8*eta^2) used to assert FAILED
-    # on a mean shift of 0.214 SE. That map has NO root once a draw passes its branch point, so
-    # ~27% of the re-solves fail and the surviving ensemble is asymmetrically censored -- roughly
-    # a third of the converged rows have lost their antithetic partner. The old mean shift was
-    # computed over those lone rows, where the linear part no longer cancels and selection on
-    # where the root landed masquerades as curvature; measured on complete +/- pairs only, the
-    # genuine displacement is ~0.088 SE, BELOW the practical-significance floor. The 27% failure
-    # fraction (and the below-band SE ratio it produces, itself a censoring artifact) is what
-    # this dataset actually demonstrates, and INDETERMINATE is the honest verdict. The real
-    # curvature-induced FAILED lives in the test above, on a globally solvable map.
+def test_multiplier_bootstrap_fails_on_confirmed_fragility_of_a_censored_ensemble():
+    # TWO deliberate behavior changes, in sequence. First (older): this fixture
+    # (g(eta) = eta + 0.8*eta^2) used to assert FAILED on a mean shift of 0.214 SE -- an
+    # artifact: the map has NO root once a draw passes its branch point, so ~27% of the
+    # re-solves fail and roughly a third of the converged rows lose their antithetic partner;
+    # measured on complete +/- pairs only, the genuine displacement is ~0.088 SE, below the
+    # practical-significance floor -- so the assertion moved to INDETERMINATE and the real
+    # curvature-induced FAILED lives in the test above, on a globally solvable map. Second
+    # (current): the 27% failure fraction is itself the finding -- its lower confidence bound
+    # clears bad_direction_probability_target, so "no root past the branch point" is a
+    # CONFIRMED fragility of the estimating equation and the check FAILS on that, not on the
+    # censoring-artifact mean shift (whose pair-only statistic must still stay under its
+    # threshold, pinned below).
     stacks, B, V_hat = _scalar_bootstrap_inputs()
 
     result = _run_scalar_bootstrap(
@@ -1507,7 +1541,8 @@ def test_multiplier_bootstrap_is_indeterminate_on_an_asymmetrically_censored_ens
         V_hat,
         d.DiagnosticConfig(num_bootstrap_draws=100),
     )
-    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.status == CheckStatuses.FAILED
+    assert any("confirmed fragility" in w for w in result.warnings)
     assert (
         result.metrics["root_failure_fraction"]
         > d.DiagnosticConfig().bad_direction_probability_target
@@ -1680,15 +1715,25 @@ def _nan_off_the_root_map(d_total):
     return g_tilde
 
 
-def test_local_nonlinearity_censors_a_fully_undefined_neighborhood_without_raising():
+def test_local_nonlinearity_fails_on_a_fully_undefined_neighborhood_without_raising():
+    # TOTAL censoring is a measured failure, not an unevaluable probe set: every probe point
+    # at sampling scale returned a nonfinite g_tilde, so the linearization the adjusted
+    # sandwich relies on has no domain there. (Partial censoring keeps its WARNING /
+    # INDETERMINATE ladder -- see the test below.)
     stacks, B, _, V_hat = _censoring_inputs()
     result = _run_local_nonlinearity(
         _nan_off_the_root_map(B.shape[0]), stacks, B, V_hat, num_directions=6
     )
-    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.status == CheckStatuses.FAILED
     assert result.metrics["domain_censored_fraction"] == 1.0
     assert result.metrics["num_domain_censored_probes"] == result.metrics["num_probes"]
     assert any("undefined (nonfinite)" in w for w in result.warnings)
+    assert any("nonfinite at ALL" in w for w in result.warnings)
+    (survival_criterion,) = [
+        c for c in result.criteria if "stayed well-defined" in c.description
+    ]
+    assert survival_criterion.ok is False
+    assert survival_criterion.severity == "fail"
 
 
 def test_local_nonlinearity_downgrades_to_warning_under_partial_censoring():
@@ -1730,10 +1775,8 @@ def test_run_diagnostic_suite_survives_an_undefined_neighborhood():
         config=d.DiagnosticConfig(num_directions=6),
     )
     assert isinstance(report, d.DiagnosticReport)
-    assert report.classification == DiagnosticClassifications.INDETERMINATE
-    assert (
-        report.check_results["local_nonlinearity"].status == CheckStatuses.INDETERMINATE
-    )
+    assert report.classification == DiagnosticClassifications.FAILED
+    assert report.check_results["local_nonlinearity"].status == CheckStatuses.FAILED
     assert (
         report.check_results["local_nonlinearity"].metrics["domain_censored_fraction"]
         == 1.0
@@ -1820,7 +1863,7 @@ def test_bread_stability_rank_gate_fires_on_a_singular_theta_block_with_healthy_
 
     result = d.check_bread_stability(B, M, beta_dim, theta_dim, n, V, config, L=L)
 
-    assert result.status == CheckStatuses.INDETERMINATE
+    assert result.status == CheckStatuses.FAILED
     assert result.metrics["target_covariance_dim"] == theta_dim
     assert result.metrics["target_covariance_rank_estimate"] < theta_dim
     assert len(result.metrics["target_covariance_eigenvalues"]) == theta_dim
@@ -1852,7 +1895,7 @@ def test_bread_stability_rank_gate_is_judged_on_the_supplied_contrast():
     unidentified = single_contrast(-1)
     assert unidentified.metrics["target_covariance_dim"] == 1
     assert unidentified.metrics["target_covariance_rank_estimate"] == 0
-    assert unidentified.status == CheckStatuses.INDETERMINATE
+    assert unidentified.status == CheckStatuses.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -2347,7 +2390,50 @@ def _summary_report(**overrides):
                 ],
             ),
             "influence_concentration": d.CheckResult(
-                name="influence_concentration", status=CheckStatuses.PASSED
+                name="influence_concentration",
+                status=CheckStatuses.PASSED,
+                criteria=[
+                    d.CriterionResult(
+                        description="effective sample at least 2.0 subjects",
+                        value="worst 5.0 of 20",
+                        ok=True,
+                        severity="warn",
+                    ),
+                    d.CriterionResult(
+                        description=(
+                            "a deliberately very long criterion description that cannot "
+                            "possibly fit on a single detail line together with its value, "
+                            "so its marker must be re-aligned after wrapping"
+                        ),
+                        value="largest 39.8%",
+                        ok=False,
+                        severity="warn",
+                    ),
+                    d.CriterionResult(
+                        description="a criterion its data could not evaluate",
+                        value="not evaluable",
+                        ok=None,
+                    ),
+                    d.CriterionResult(
+                        description="a criterion whose measured value is itself long",
+                        value=(
+                            "a measured value long enough that wrapping must split it "
+                            "across two detail lines"
+                        ),
+                        ok=True,
+                    ),
+                    d.CriterionResult(
+                        description="a hard criterion",
+                        value="0.5",
+                        ok=False,
+                    ),
+                    d.CriterionResult(
+                        description="a soft identifiability criterion",
+                        value="3 of 4",
+                        ok=False,
+                        severity="indeterminate",
+                    ),
+                ],
             ),
         },
         input_check_results={
@@ -2387,15 +2473,163 @@ def test_format_diagnostic_summary_lists_every_check_and_the_verdict():
         "joint_bread_condition_number",
         "FAILED",
         "PASSED",
-        "(+2 more flags)",
-        "VERDICT: INVALID -- do NOT report this CI",
+        "messages from the check:",
+        # RETARGETED 2026-09-02: previously pinned "(+2 more flags)". Every message is now
+        # listed in full -- on a failing run the elided ones were exactly the explanation for a
+        # status the gate line could not account for.
+        "- Second flag.",
+        "- Third flag.",
+        "VERDICT: INVALID -- DO NOT REPORT the adjusted sandwich variance",
     ):
         assert expected in summary
-    # Long warning texts are truncated into the detail column, not wrapped or dumped whole:
-    # every line stays terminal-width readable.
+    # INVERTED on 2026-09-02: long detail texts are now WRAPPED into the detail column rather
+    # than truncated there. These messages end in the specific numbers and target names that
+    # say what actually went wrong, so cutting at a fixed width reliably discarded the
+    # actionable half and left the boilerplate. Every line still stays terminal-width readable.
     assert all(len(line) <= 130 for line in summary.splitlines())
+    # The tail of the fixture's long warning -- the first thing truncation used to eat.
+    # Checked against whitespace-normalized text, since wrapping may put a line break anywhere
+    # inside the phrase.
+    flattened_summary = " ".join(summary.split())
+    assert "distinct from statistical identification." in flattened_summary
+    # Wrapped remainder is indented to the detail column, so the name/status columns stay
+    # scannable instead of continuation text starting at column 0.
+    continuation_lines = [
+        line
+        for line in summary.splitlines()
+        if line.strip() and line.startswith(" " * d._SUMMARY_DETAIL_INDENT)
+    ]
+    assert continuation_lines
+    # The rules span the full row rather than a narrower fixed width, so no row hangs past the
+    # end of its own box.
+    rule_lengths = {
+        len(line) for line in summary.splitlines() if set(line) in ({"="}, {"-"})
+    }
+    assert rule_lengths == {d._SUMMARY_TOTAL_WIDTH}
+    assert max(len(line) for line in summary.splitlines()) <= d._SUMMARY_TOTAL_WIDTH
     # The verdict is the last substantive line, so it cannot scroll away above a wall of rows.
     assert "VERDICT:" in summary.splitlines()[-2]
+
+
+def test_format_diagnostic_summary_includes_a_status_and_verdict_key():
+    # The summary is read by people who did not run the suite and will not go looking for
+    # CheckStatuses or DiagnosticVerdicts, so every status and verdict it can print is spelled
+    # out in the block itself.
+    summary = d.format_diagnostic_summary(_summary_report())
+
+    assert "CHECK STATUS KEY" in summary
+    assert "VERDICT KEY" in summary
+    for status, meaning in d._STATUS_LEGEND.items():
+        assert status.upper() in summary
+        assert meaning in summary
+    # Sourced from _VERDICT_ACTION_PHRASES rather than restated, so the key cannot drift from
+    # the action phrase the verdict line itself prints.
+    for verdict, action in d._VERDICT_ACTION_PHRASES.items():
+        # The DISPLAYED label, not the stored value: NOT_CERTIFIED renders as "NOT CERTIFIED"
+        # while the wire value keeps its underscore for pickled reports and downstream
+        # comparisons.
+        assert d._verdict_label(verdict) in summary
+        assert action in summary
+
+    # ORDER, retargeted 2026-09-02: the CHECKS KEY now leads the legend (what the rows are must
+    # come before what their columns mean), so the first bread_stability occurrence is its
+    # checks-key description, ABOVE the status key. The whole legend still sits above the rows,
+    # and the verdict stays the last substantive line.
+    assert summary.index("CHECKS KEY") < summary.index("CHECK STATUS KEY")
+    assert summary.index("CHECK STATUS KEY") < summary.index("VERDICT KEY")
+    # The units note and the docs pointer travel with the checks key.
+    assert "fractions of the reported standard error" in summary
+    assert "docs/diagnostics.md" in summary
+    assert "VERDICT:" in summary.splitlines()[-2]
+
+
+def test_format_diagnostic_summary_colors_are_opt_in_and_atomic():
+    """
+    color=True wraps each status/verdict token in its mapped ANSI color; color=False (and the
+    non-tty auto default under pytest) emits none. "NOT CERTIFIED" is pinned as ONE orange
+    token: a shorter-token-first bug would render an uncolored NOT beside a green CERTIFIED,
+    inverting the meaning at a glance.
+    """
+    report = _summary_report(verdict=DiagnosticVerdicts.NOT_CERTIFIED)
+    plain = d.format_diagnostic_summary(report, color=False)
+    assert "\x1b[" not in plain
+    # The auto default under pytest (captured stdout, not a tty) is also plain.
+    assert "\x1b[" not in d.format_diagnostic_summary(report)
+
+    colored = d.format_diagnostic_summary(report, color=True)
+    assert "\x1b[32mPASSED\x1b[0m" in colored  # status green
+    assert "\x1b[31mFAILED\x1b[0m" in colored  # status red
+    assert "\x1b[38;5;141mINDETERMINATE\x1b[0m" in colored  # status purple
+    assert "\x1b[38;5;208mNOT CERTIFIED\x1b[0m" in colored  # verdict orange, one unit
+    assert "\x1b[31mDO NOT REPORT\x1b[0m" in colored  # the instruction itself, red
+    assert "NOT \x1b" not in colored  # never a bare NOT beside a colored CERTIFIED
+    # Per-criterion outcome markers are individually colored, keyed to their own ok/severity
+    # (the fixture's influence row carries one of each), not to the row's overall status.
+    assert "\x1b[32m[ok]\x1b[0m" in colored
+    assert "\x1b[31m[FAIL]\x1b[0m" in colored
+    assert "\x1b[38;5;208m[warn]\x1b[0m" in colored
+    assert "\x1b[38;5;141m[indeterminate]\x1b[0m" in colored
+    assert "\x1b[38;5;141m[not evaluated]\x1b[0m" in colored
+    # Each criterion's measured VALUE is cyan -- on every line it touches when it wraps, so a
+    # value split across two lines carries its own start/reset on each (an unterminated color
+    # would bleed into the padding and the next line's text).
+    assert "\x1b[36mworst 5.0 of 20\x1b[0m" in colored
+    colored_lines = colored.splitlines()
+    first_half_index = next(
+        index
+        for index, line in enumerate(colored_lines)
+        if "whose measured value is itself long" in line
+    )
+    assert colored_lines[first_half_index].count("\x1b[36m") == 1
+    assert colored_lines[first_half_index].rstrip().endswith("\x1b[0m")
+    second_half = colored_lines[first_half_index + 1]
+    assert second_half.lstrip().startswith("\x1b[36m")
+    assert "detail lines\x1b[0m" in second_half
+    # Stripping the codes recovers the plain block exactly -- color is presentation only.
+    import re as _re
+
+    assert _re.sub("\x1b\\[[0-9;]*m", "", colored) == plain
+
+
+def test_format_diagnostic_summary_right_aligns_criterion_markers():
+    """
+    Each criterion renders as "- description: value" with its outcome marker flush against the
+    summary's right edge -- ON THE CRITERION'S LAST LINE even when the text wraps, so the
+    markers form one scannable column. Severity maps ok=False to [FAIL]/[warn]/[indeterminate]
+    and ok=None to [not evaluated], independent of the row's overall status.
+    """
+    summary = d.format_diagnostic_summary(_summary_report())
+    lines = summary.splitlines()
+    assert "criteria:" in summary
+
+    def line_with(marker, fragment=""):
+        (line,) = [line for line in lines if line.endswith(marker) and fragment in line]
+        return line
+
+    # Marker-terminated lines all end at the same right edge.
+    for marker, fragment in [
+        ("[ok]", "worst 5.0 of 20"),
+        ("[warn]", ""),
+        ("[not evaluated]", "not evaluable"),
+        ("[FAIL]", "0.5"),
+        ("[indeterminate]", "3 of 4"),
+    ]:
+        assert len(line_with(marker, fragment)) == d._SUMMARY_TOTAL_WIDTH
+    # The deliberately over-long criterion wrapped: its description starts on one line and its
+    # marker lands on a LATER line (the value's), still flush right.
+    start_index = next(
+        index
+        for index, line in enumerate(lines)
+        if "deliberately very long criterion" in line
+    )
+    assert not lines[start_index].endswith("[warn]")
+    marker_index = next(
+        index
+        for index, line in enumerate(lines[start_index:], start=start_index)
+        if line.endswith("[warn]")
+    )
+    assert marker_index > start_index
+    assert "largest 39.8%" in lines[marker_index]
 
 
 def test_format_diagnostic_summary_with_no_report_renders_did_not_run():

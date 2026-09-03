@@ -3,6 +3,10 @@ from __future__ import annotations
 import dataclasses
 import logging
 import math
+import os
+import re
+import sys
+import textwrap
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -18,6 +22,7 @@ from .constants import (
     VerdictBases,
 )
 from .helper_functions import (
+    clopper_pearson_lower_bound,
     clopper_pearson_upper_bound,
     compute_row_chunked_jacobian,
     get_radon_nikodym_weight,
@@ -210,7 +215,7 @@ class DiagnosticConfig:
     # KNOWN UNSOUND -- do not enable without reading this. Adversarial review (2026-09-01)
     # produced a reproducible counterexample in which flipping ONLY this knob moves
     # check_multiplier_bootstrap from `indeterminate` to `failed`, the classification likewise,
-    # and the verdict from `uncertifiable` to `invalid`, on identical data and seed. The cause is
+    # and the verdict from `not_certified` to `invalid`, on identical data and seed. The cause is
     # NOT the driver -- that was verified to replay the serial chord-Newton arithmetic exactly
     # over 25 adversarial shapes -- but the float32 error budget: the equivalence argument was
     # measured against |g| (~1e-7 relative), while the accept/reject test compares
@@ -276,7 +281,20 @@ class DiagnosticConfig:
     # ADS-142 calibration experiment (docs/adr/0002): against the exact check's a^NL > 0.10
     # answer key on the borderline cells, screening at 0.05 missed ~11% of exceedances while
     # flagging ~54% of replicates; the default tolerance 0.10 missed ~67%.
-    multiplier_bootstrap: str = "off"
+    # Defaults to "auto" as of 2026-09-02, previously "off". Two things changed the calculus.
+    # (a) Cost: the bootstrap's hours-scale reputation predates the fix that builds and jits
+    # g_tilde's closure once instead of rebuilding the O(n*T) precompute per call -- 100 paired
+    # draws measured 12.7-21.7 s at n=100/T=50, against ~1.8 h projected under the old closure.
+    # (b) Consequence: without it, ANY run whose headline a_{j,l} exceeds the 0.05 screen is
+    # UNCERTIFIABLE by construction, because _derive_verdict makes the bootstrap the verdict
+    # layer once the screen trips. "off" therefore meant such runs could never be certified, no
+    # matter how healthy, and nothing in the output said so.
+    # "auto" still costs nothing on a quiet run: the screen has to trip first.
+    # CAVEAT worth keeping in view (docs/adr/0002, "Pending, and not to be quoted as measured"):
+    # the batched path's verdict-equivalence is measured on CLEAN fixtures only. A fragile
+    # ensemble with solves near the convergence boundary, where a ~5e-7 perturbation could flip
+    # a convergence flag, is unmeasured. Pass "off" to opt out.
+    multiplier_bootstrap: str = "auto"
     num_bootstrap_draws: int = 100
     bootstrap_screen_a_jl_threshold: float = 0.05
     # "rademacher" (default) | "mammen" | "gaussian". Mammen's two-point distribution also
@@ -355,6 +373,24 @@ class DiagnosticConfig:
     g_tilde_chunk_size: int = 30
 
 
+@dataclasses.dataclass(frozen=True)
+class CriterionResult:
+    """
+    One criterion of one check, with its measured value and its OWN outcome -- so the summary
+    can show, per criterion, what was required, what was measured, and whether THAT criterion
+    passed, instead of a prose paragraph the reader has to reconcile with the row's status.
+
+    ok: True passed, False fired, None could not be evaluated on this run's data.
+    severity: what an ok=False means for the row -- "fail", "warn", or "indeterminate" --
+    mirroring the check's own status logic.
+    """
+
+    description: str
+    value: str
+    ok: bool | None
+    severity: str = "fail"
+
+
 @dataclasses.dataclass
 class CheckResult:
     name: str
@@ -362,6 +398,10 @@ class CheckResult:
     metrics: dict[str, Any] = dataclasses.field(default_factory=dict)
     warnings: list[str] = dataclasses.field(default_factory=list)
     message: str = ""
+    # Per-criterion outcomes for the summary. Optional and last: reports pickled before this
+    # field existed unpickle without it, so every reader goes through getattr(..., "criteria",
+    # []) rather than attribute access.
+    criteria: list[CriterionResult] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -379,7 +419,7 @@ class DiagnosticReport:
     target_labels: list[str]
     rank_diagnostics: dict[str, Any]
     # Decision-level summary derived from the check results (see _derive_verdict and the
-    # DiagnosticVerdicts docstring): "certified" / "conservative" / "uncertifiable" /
+    # DiagnosticVerdicts docstring): "certified" / "conservative" / "not_certified" /
     # "invalid", plus how a certification was earned ("bootstrap" vs "screen"). Unlike
     # `classification` -- whose vocabulary is preserved for backward compatibility and whose
     # WARNING-blindness is deliberate -- the verdict makes the calibrated conservative tier
@@ -392,40 +432,511 @@ class DiagnosticReport:
 # One short action phrase per verdict, printed beside it in the final summary so the reader
 # does not need DiagnosticVerdicts' docstring open to know what the word means for them.
 _VERDICT_ACTION_PHRASES = {
-    DiagnosticVerdicts.CERTIFIED: "report this CI",
-    DiagnosticVerdicts.CONSERVATIVE: "report this CI; its width is likely inflated",
-    DiagnosticVerdicts.UNCERTIFIABLE: "do NOT report this CI as validated",
-    DiagnosticVerdicts.INVALID: "do NOT report this CI",
+    # Phrased in terms of the ADJUSTED SANDWICH VARIANCE, not "this CI": the variance estimate
+    # is what the analysis definitely reports (the printout's own heading is "Adjusted sandwich
+    # variance estimate"), and the suite's evidence is specifically about the adjusted
+    # sandwich -- the verdict says nothing either way about the classical sandwich (see the
+    # note the verdict key carries).
+    DiagnosticVerdicts.CERTIFIED: "report the adjusted sandwich variance",
+    DiagnosticVerdicts.CONSERVATIVE: (
+        "report the adjusted sandwich variance, but it may be inflated"
+    ),
+    DiagnosticVerdicts.NOT_CERTIFIED: (
+        "DO NOT REPORT the adjusted sandwich variance as validated"
+    ),
+    DiagnosticVerdicts.INVALID: "DO NOT REPORT the adjusted sandwich variance",
 }
+
+
+_ANSI_RESET = "\x1b[0m"
+# 256-color codes for orange and purple (the 16-color palette has neither); plain 32/33/31 for
+# green/yellow/red. Verdicts: green CERTIFIED, yellow CONSERVATIVE, orange NOT CERTIFIED, red
+# INVALID. Statuses: green PASSED, orange WARNING, purple INDETERMINATE, red FAILED. The two
+# no-result outcomes (DID NOT RUN, UNAVAILABLE) render red: an unevaluated run must not look
+# calmer than a failed one.
+_ANSI_COLORS = {
+    "green": "\x1b[32m",
+    "yellow": "\x1b[33m",
+    "orange": "\x1b[38;5;208m",
+    "purple": "\x1b[38;5;141m",
+    "red": "\x1b[31m",
+    "cyan": "\x1b[36m",
+}
+
+# Zero-width sentinels bracketing each criterion's measured VALUE in the laid-out text.
+# Values are arbitrary strings (numbers, counts, ranges) that can wrap across lines, so a
+# token vocabulary cannot find them the way _COLOR_BY_TOKEN finds statuses; instead
+# _criterion_lines brackets each value span per line while it still knows where the value
+# is, and format_diagnostic_summary either swaps the sentinels for cyan/reset (color) or
+# strips them (plain). Either way they are gone from the returned text, and they are
+# inserted only AFTER wrapping and marker alignment, so they never shift the layout they
+# annotate.
+_VALUE_START = "\x00"
+_VALUE_END = "\x01"
+
+# Longest token first: the regex alternation matches left-to-right in this order, which is what
+# keeps "NOT CERTIFIED" one orange unit instead of an uncolored NOT beside a green CERTIFIED.
+_COLOR_BY_TOKEN = {
+    "[not evaluated]": "purple",
+    "[indeterminate]": "purple",
+    "DO NOT REPORT": "red",
+    "NOT CERTIFIED": "orange",
+    "[FAIL]": "red",
+    "[warn]": "orange",
+    "[ok]": "green",
+    "INDETERMINATE": "purple",
+    "CONSERVATIVE": "yellow",
+    "DID NOT RUN": "red",
+    "UNAVAILABLE": "red",
+    "CERTIFIED": "green",
+    "WARNING": "orange",
+    "PASSED": "green",
+    "FAILED": "red",
+    "INVALID": "red",
+}
+_COLOR_TOKEN_PATTERN = re.compile(
+    "|".join(re.escape(token) for token in _COLOR_BY_TOKEN)
+)
+
+
+def _apply_summary_colors(text: str) -> str:
+    """
+    One regex pass over the finished block, AFTER all layout: ANSI codes are visually
+    zero-width but count toward len(), so coloring before the padding/wrapping math would
+    shift every column they touch. A single pass also means an already-colored token can
+    never be re-matched by a shorter token inside it.
+    """
+    return _COLOR_TOKEN_PATTERN.sub(
+        lambda match: (
+            _ANSI_COLORS[_COLOR_BY_TOKEN[match.group(0)]] + match.group(0) + _ANSI_RESET
+        ),
+        text,
+    )
+
+
+def _verdict_label(verdict: str) -> str:
+    """
+    The verdict as displayed: upper-cased, with underscores as spaces so NOT_CERTIFIED reads as
+    "NOT CERTIFIED". The stored value keeps its underscore -- it is a wire value that pickled
+    reports and downstream comparisons depend on.
+    """
+    return verdict.upper().replace("_", " ")
+
+
+# How a CERTIFIED verdict was reached (DiagnosticReport.verdict_basis). Rendered only when the
+# run actually has a basis, since it is meaningless on the other three verdicts.
+_BASIS_LEGEND = {
+    VerdictBases.BOOTSTRAP: (
+        "the bootstrap ran and its standard errors agreed with the sandwich's"
+    ),
+    VerdictBases.SCREEN: (
+        "the run was quiet enough that the bootstrap was never needed"
+    ),
+}
+
+# Every heading the legend can print. _legend_lines sizes its heading column from this, so a
+# renamed or added heading stays aligned automatically.
+_STATUS_HEADING = "CHECK STATUS KEY"
+_VERDICT_HEADING = "VERDICT KEY"
+_BASIS_HEADING = "CERTIFICATION BASIS KEY"
+_CHECKS_HEADING = "CHECKS KEY"
+# Only the headings that share the inline column size it. A heading longer than the column --
+# "CERTIFICATION BASIS KEY" is 23 characters -- is rendered on its own line by _key_block
+# instead, so one long heading cannot push every other block's labels 12 columns to the right
+# and squeeze their text into extra wrapping.
+_INLINE_LEGEND_HEADINGS = (_STATUS_HEADING, _VERDICT_HEADING, _CHECKS_HEADING)
 
 _SUMMARY_NAME_WIDTH = 34
 _SUMMARY_STATUS_WIDTH = 15
 _SUMMARY_DETAIL_WIDTH = 78
+# The column the detail text starts in, and so also the indent of its continuation lines.
+_SUMMARY_DETAIL_INDENT = _SUMMARY_NAME_WIDTH + 2 + _SUMMARY_STATUS_WIDTH
+# Rules span the full row rather than a narrower fixed 72, which used to leave every long row
+# hanging past the end of its own box.
+_SUMMARY_TOTAL_WIDTH = _SUMMARY_DETAIL_INDENT + _SUMMARY_DETAIL_WIDTH
+
+# What each status column value means. Spelled out in the summary itself because this block is
+# read by people who did not run the suite and will not go looking for CheckStatuses.
+_STATUS_LEGEND = {
+    CheckStatuses.PASSED: "check ran and found nothing wrong",
+    CheckStatuses.WARNING: "check found something that may or may not matter -- read the detail",
+    CheckStatuses.INDETERMINATE: (
+        "check could not be evaluated -- this run's data gave it nothing it could measure"
+    ),
+    CheckStatuses.FAILED: "check measured a real problem",
+}
 
 
-def _summary_row(name: str, status: str, detail: str) -> str:
-    if len(detail) > _SUMMARY_DETAIL_WIDTH:
-        detail = detail[: _SUMMARY_DETAIL_WIDTH - 3] + "..."
+# What each row ASKS, in one line, for the summary's check key. Rendered only for the rows a
+# given report actually contains. Full detail for every check -- including the reasoning behind
+# each tolerance and what it cannot establish -- is in docs/diagnostics.md.
+_CHECK_DESCRIPTIONS = {
+    "first_wave_input_checks": (
+        "Do the supplied data and configuration pass every basic wiring check -- dozens, "
+        "from column dtypes to argument indexing to value finiteness?"
+    ),
+    "action_probabilities_reconstructed": (
+        "Do the recorded action probabilities match what your policy function reproduces?"
+    ),
+    "estimating_functions_sum_to_zero": (
+        "Do the recorded parameters solve their estimating equations, at every update and at "
+        "inference?"
+    ),
+    "root_and_implementation": (
+        "Does the final estimate solve its estimating equation, and does this package's math "
+        "(the derivative, the linear solve) check out?"
+    ),
+    "local_nonlinearity": (
+        "How far off is the straight-line approximation the variance estimate relies on?"
+    ),
+    "exact_nonlinear_perturbation": (
+        "Re-solving exactly instead of approximating: does the answer move?"
+    ),
+    "multiplier_bootstrap": (
+        "Does a resampling second opinion reproduce the standard errors we report? Note: triggered only when an extra strict local_nonlinearity gate is exceeded"
+    ),
+    "jacobian_drift": (
+        "Does the derivative stay close to the one we used, as we move away from the solution?"
+    ),
+    "bread_stability": (
+        "Are the standard errors well-determined, and stable under tiny numerical nudges?"
+    ),
+    "influence_concentration": (
+        "Do enough subjects drive the result, or does a handful of them?"
+    ),
+    "exploration_and_weights": (
+        "Was there real randomization at every decision, and do the weights stay sane?"
+    ),
+    "joint_bread_condition_number": (
+        "Is the matrix that every solve goes through well-conditioned?"
+    ),
+    "diagnostic suite": "Did the diagnostic suite itself run to completion?",
+}
+
+
+def _wrap_detail_paragraph(paragraph: str) -> list[str]:
+    return textwrap.wrap(
+        paragraph,
+        width=_SUMMARY_DETAIL_WIDTH,
+        # A bulleted paragraph keeps its continuation lines inside the bullet, so
+        # consecutive bullets stay visually separate.
+        subsequent_indent="  " if paragraph.startswith("- ") else "",
+        # Never split a token: these details carry identifiers and numeric literals
+        # ("joint_bread_condition_number", "1.473e+13") that are unreadable broken in half.
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [""]
+
+
+def _criterion_lines(criterion: CriterionResult) -> list[str]:
+    """
+    One criterion, laid out: "- <requirement>: <measured value>" wrapped, the value bracketed
+    in _VALUE_START/_VALUE_END on every line it touches, and the outcome marker padded flush
+    to the detail column's right edge ON THE LAST LINE -- wrapping first and padding after is
+    the only order that keeps the markers in a straight column when the text spans lines.
+    """
+    lines = _wrap_detail_paragraph(f"- {criterion.description}: {criterion.value}")
+    # Walk the value back from the end of the wrapped text: it occupies the final
+    # len(criterion.value) logical characters, minus one space swallowed at each line break
+    # that falls inside it (textwrap consumes exactly the single space between words).
+    remaining = len(criterion.value)
+    span_start_by_line: dict[int, int] = {}
+    for index in range(len(lines) - 1, -1, -1):
+        if remaining <= 0:
+            break
+        content_length = len(lines[index]) - (2 if index else 0)
+        take = min(remaining, content_length)
+        span_start_by_line[index] = len(lines[index]) - take
+        remaining -= take + 1  # the +1 is the space consumed at the wrap point
+    for index, start in span_start_by_line.items():
+        lines[index] = (
+            lines[index][:start] + _VALUE_START + lines[index][start:] + _VALUE_END
+        )
+    marker = _criterion_marker(criterion)
+    # Minus the two sentinels just inserted -- unless the value was empty and none were.
+    last_plain_length = len(lines[-1]) - (2 if span_start_by_line else 0)
+    if last_plain_length + 2 + len(marker) <= _SUMMARY_DETAIL_WIDTH:
+        padding = _SUMMARY_DETAIL_WIDTH - last_plain_length - len(marker)
+        lines[-1] = lines[-1] + " " * padding + marker
+    else:
+        # No room on the last line: the marker gets its own line, still flush right.
+        lines.append(" " * (_SUMMARY_DETAIL_WIDTH - len(marker)) + marker)
+    return lines
+
+
+def _summary_row(
+    name: str, status: str, detail: str | Sequence[str | CriterionResult]
+) -> str:
+    """
+    One row: name, status, then the detail WRAPPED into its column rather than truncated.
+
+    Truncation was the original behavior and it lost the part that mattered -- these details
+    end in the specific numbers and target names that say what actually went wrong, so cutting
+    at a fixed width reliably discarded the actionable half and left the boilerplate. Long
+    details now continue on following lines, indented to the detail column so the name/status
+    columns stay scannable.
+
+    detail is either a plain string (split on its own line breaks -- textwrap.wrap treats \n
+    as ordinary whitespace, so without the split a second line would fold back onto the
+    first) or a sequence mixing strings with CriterionResults, each of which renders via
+    _criterion_lines with its value bracketed for cyan and its outcome marker flush right.
+    """
     # The +2s guarantee a gutter even when a name or status fills its column exactly.
-    return (
+    head = (
         f"{name[:_SUMMARY_NAME_WIDTH]:<{_SUMMARY_NAME_WIDTH + 2}}"
         f"{status.upper():<{_SUMMARY_STATUS_WIDTH}}"
-        f"{detail}"
-    ).rstrip()
+    )
+    paragraphs = detail.split("\n") if isinstance(detail, str) else list(detail)
+    paragraphs = [paragraph for paragraph in paragraphs if paragraph]
+    if not paragraphs:
+        return head.rstrip()
+    wrapped: list[str] = []
+    for paragraph in paragraphs:
+        if isinstance(paragraph, CriterionResult):
+            wrapped.extend(_criterion_lines(paragraph))
+        else:
+            wrapped.extend(_wrap_detail_paragraph(paragraph))
+    lines = [head + wrapped[0]]
+    lines.extend(" " * _SUMMARY_DETAIL_INDENT + line for line in wrapped[1:])
+    # rstrip is safe against the sentinels: neither \x00 nor \x01 is whitespace.
+    return "\n".join(line.rstrip() for line in lines)
 
 
-def _check_result_detail(result: CheckResult) -> str:
-    detail = result.message or (result.warnings[0] if result.warnings else "")
-    extra_flags = len(result.warnings) - (0 if result.message else 1)
-    suffix = ""
-    if result.warnings and extra_flags > 0:
-        suffix = f" (+{extra_flags} more flag{'s' if extra_flags > 1 else ''})"
-    # Truncate the base text, never the flag-count suffix: "how much more is there" must
-    # survive however long the first warning happens to be.
-    max_base_length = _SUMMARY_DETAIL_WIDTH - len(suffix)
-    if len(detail) > max_base_length:
-        detail = detail[: max_base_length - 3] + "..."
-    return detail + suffix
+def _criterion_marker(criterion: CriterionResult) -> str:
+    if criterion.ok is None:
+        return "[not evaluated]"
+    if criterion.ok:
+        return "[ok]"
+    return {
+        "warn": "[warn]",
+        "indeterminate": "[indeterminate]",
+    }.get(criterion.severity, "[FAIL]")
+
+
+def _check_result_detail(result: CheckResult) -> list[str | CriterionResult]:
+    """
+    The detail paragraphs for one row: any prose message first, then the itemized criteria
+    (one line per criterion: requirement, measured value, own outcome marker), then EVERY
+    message the check reported, labeled as such and bulleted.
+
+    Two earlier behaviors are deliberately gone, both casualties of the same failing-run
+    review. `message or warnings[0]` hid every warning the moment a message existed; and the
+    "(+N more flags)" elision hid all but the first warning -- on a genuinely failing run the
+    hidden ones were exactly the explanation (a check whose listed gates were all satisfied
+    still failed, and the reason sat behind "+4 more flags"). The label matters as much as the
+    completeness: the criterion lines are the summary's own rendering, while these are
+    verbatim findings from inside the check, and a reader has to be able to tell which is
+    which -- especially because a check's status can be set by its findings, not only by the
+    criteria above them.
+    """
+    paragraphs = []
+    if result.message:
+        # A message may carry its own line breaks; each becomes its own paragraph.
+        paragraphs.extend(line for line in result.message.split("\n") if line)
+    criteria = getattr(result, "criteria", [])
+    if criteria:
+        paragraphs.append("criteria:")
+        paragraphs.extend(criteria)
+    if result.warnings:
+        paragraphs.append("messages from the check:")
+        paragraphs.extend(f"- {warning}" for warning in result.warnings)
+    return paragraphs
+
+
+def _key_lines(
+    heading: str, label: str, text: str, heading_width: int, label_width: int
+):
+    """
+    One legend entry -- heading, label, then text wrapped into whatever width is left and
+    indented under itself. Wrapped for the same reason the rows are: the longest check name is
+    34 characters, so a fixed-width key line would otherwise run past the block's own rules.
+    """
+    indent = heading_width + label_width
+    wrapped = textwrap.wrap(
+        text,
+        width=max(_SUMMARY_TOTAL_WIDTH - indent, 20),
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [""]
+    lines = [f"{heading:<{heading_width}}{label:<{label_width}}{wrapped[0]}".rstrip()]
+    lines.extend(" " * indent + continued for continued in wrapped[1:])
+    return lines
+
+
+def _key_block(heading, entries, heading_width, label_width):
+    """
+    One legend block: its heading, then one entry per (label, text) pair.
+
+    A heading that does not fit the inline column is emitted on its own line and the entries
+    start beneath it. Without that, a long heading either collides with its first label
+    ("CERTIFICATION BASIS KEYBOOTSTRAP") or forces every block to indent to its width.
+    """
+    lines = []
+    inline_heading = heading if len(heading) < heading_width else ""
+    if not inline_heading:
+        lines.append(heading)
+    for index, (label, text) in enumerate(entries):
+        lines.extend(
+            _key_lines(
+                inline_heading if index == 0 else "",
+                label,
+                text,
+                heading_width,
+                label_width,
+            )
+        )
+    return lines
+
+
+def _legend_lines(row_names: Sequence[str] = (), verdict_basis: str = "") -> list[str]:
+    """
+    The status, verdict and check keys.
+
+    The first two are sourced from CheckStatuses and _VERDICT_ACTION_PHRASES rather than
+    restated, so a new status or a reworded verdict action cannot drift out of sync here. The
+    check key covers only the rows THIS report contains: the opt-in checks (exact perturbation,
+    multiplier bootstrap, jacobian drift) usually do not run, and describing checks that
+    produced no row would pad the block with answers to questions nobody asked.
+    """
+    # Sized from the INLINE headings only; _key_block puts an over-wide heading on its own
+    # line. Sizing from every heading instead would fix the collision but indent all four
+    # blocks to the longest one.
+    heading_width = max(len(heading) for heading in _INLINE_LEGEND_HEADINGS) + 2
+
+    # ORDER: the checks key leads, because it is what a first-time reader needs before any row
+    # below makes sense; the status and verdict keys interpret the columns; the basis key only
+    # applies when a run was certified.
+    lines: list[str] = []
+    described = [name for name in row_names if name in _CHECK_DESCRIPTIONS]
+    if described:
+        lines.extend(
+            _key_block(
+                _CHECKS_HEADING,
+                [(name, _CHECK_DESCRIPTIONS[name]) for name in described],
+                heading_width,
+                max(len(name) for name in described) + 2,
+            )
+        )
+        lines.append("")
+        lines.append(
+            f"{'':<{heading_width}}Quantities quoted in SE are fractions of the reported "
+            "standard error."
+        )
+        lines.append(
+            f"{'':<{heading_width}}Full detail for every check: docs/diagnostics.md"
+        )
+        lines.append("")
+
+    lines.extend(
+        _key_block(
+            _STATUS_HEADING,
+            [(status.upper(), meaning) for status, meaning in _STATUS_LEGEND.items()],
+            heading_width,
+            max(len(status) for status in _STATUS_LEGEND) + 2,
+        )
+    )
+
+    lines.append("")
+    lines.append(
+        f"{'':<{heading_width}}A suite row lists every criterion that can set its status, "
+        "each with its measured value"
+    )
+    lines.append(
+        f"{'':<{heading_width}}and its own outcome: [ok], [FAIL], [warn] (fires as a "
+        "WARNING), [indeterminate], or"
+    )
+    lines.append(
+        f'{"":<{heading_width}}[not evaluated]. The "messages from the check:" bullets are '
+        "the check's own findings --"
+    )
+    lines.append(f"{'':<{heading_width}}the specifics of whichever criterion fired.")
+
+    # Blank line between the keys: they answer different questions (what one row means, what
+    # the whole run means, how it was certified, what each row is asking) and run together as
+    # one undifferentiated block without it.
+    lines.append("")
+    lines.extend(
+        _key_block(
+            _VERDICT_HEADING,
+            [
+                (_verdict_label(verdict), action)
+                for verdict, action in _VERDICT_ACTION_PHRASES.items()
+            ],
+            heading_width,
+            max(len(_verdict_label(v)) for v in _VERDICT_ACTION_PHRASES) + 2,
+        )
+    )
+
+    lines.append("")
+    lines.append(
+        f"{'':<{heading_width}}The verdict gates only the adjusted sandwich variance."
+    )
+    lines.append(
+        f"{'':<{heading_width}}The parameter estimate and the classical sandwich are computed "
+        "and saved either"
+    )
+    lines.append(
+        f"{'':<{heading_width}}way -- but a flagged run does NOT mean the classical sandwich "
+        "is accurate instead."
+    )
+
+    if verdict_basis:
+        lines.append("")
+        lines.extend(
+            _key_block(
+                _BASIS_HEADING,
+                [(basis.upper(), meaning) for basis, meaning in _BASIS_LEGEND.items()],
+                heading_width,
+                max(len(basis) for basis in _BASIS_LEGEND) + 2,
+            )
+        )
+
+    return lines
+
+
+def _verdict_next_step_lines(report: DiagnosticReport | None) -> list[str]:
+    """
+    The actionable next step, when there is one the summary can name.
+
+    Exists because UNCERTIFIABLE has two very different causes that rendered identically: an
+    unevaluable check (nothing the reader can do without changing the data), and the a_{j,l}
+    screen calling for the multiplier bootstrap when it was not run -- which is entirely
+    fixable by re-running with it on. A reader of the old block could not tell which they had,
+    and nothing anywhere told them certification was still available.
+
+    Rendered AFTER the verdict rather than folded into it so the verdict line stays one
+    scannable sentence.
+    """
+    if report is None or report.verdict != DiagnosticVerdicts.NOT_CERTIFIED:
+        return []
+    if "multiplier_bootstrap" in report.check_results:
+        return []
+    local = report.check_results.get("local_nonlinearity")
+    if local is None:
+        return []
+    headline = _local_nonlinearity_headline_max(local.metrics)
+    # tolerances_used is dataclasses.asdict(config), so the run's own settings are on the
+    # report -- no need to thread the config in, and a re-read report stays self-describing.
+    screen = report.tolerances_used.get("bootstrap_screen_a_jl_threshold")
+    mode = report.tolerances_used.get("multiplier_bootstrap")
+    if screen is None or math.isnan(headline) or headline <= screen:
+        return []
+    text = (
+        f"NEXT STEP: this is fixable. The linearization error ({headline:.3g} SE) is above "
+        f"the {screen:g} SE screen, so certifying this run requires the multiplier "
+        f"bootstrap's second opinion -- and it did not run "
+        f"(multiplier_bootstrap={mode!r}). Re-run with "
+        f'multiplier_bootstrap="auto"; if the bootstrap reproduces the reported standard '
+        f"errors, the verdict becomes CERTIFIED."
+    )
+    wrapped = textwrap.wrap(
+        text,
+        width=_SUMMARY_TOTAL_WIDTH,
+        subsequent_indent=" " * len("NEXT STEP: "),
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped
 
 
 def diagnostics_flagged(report: DiagnosticReport | None) -> bool:
@@ -442,7 +953,7 @@ def diagnostics_flagged(report: DiagnosticReport | None) -> bool:
         return True
     if report.verdict:
         return report.verdict in (
-            DiagnosticVerdicts.UNCERTIFIABLE,
+            DiagnosticVerdicts.NOT_CERTIFIED,
             DiagnosticVerdicts.INVALID,
         )
     return report.classification == DiagnosticClassifications.FAILED
@@ -450,8 +961,11 @@ def diagnostics_flagged(report: DiagnosticReport | None) -> bool:
 
 def format_diagnostic_summary(
     report: DiagnosticReport | None,
-    pipeline_rows: Sequence[tuple[str, str, str]] = (),
+    pipeline_rows: Sequence[
+        tuple[str, str, str | Sequence[str | CriterionResult]]
+    ] = (),
     suite_error: str = "",
+    color: bool | None = None,
 ) -> str:
     """
     Renders the end-of-run diagnostic summary: one status row per input check and per suite
@@ -465,10 +979,22 @@ def format_diagnostic_summary(
     `suite_error`); that renders as an explicit DID NOT RUN row and an UNAVAILABLE verdict,
     which diagnostics_flagged treats as flagged.
     """
+    # Row names are collected first so the check key describes exactly the rows that follow.
+    row_names = (
+        ["diagnostic suite"]
+        if report is None
+        else [*report.input_check_results, *report.check_results]
+    )
+    row_names += [name for name, _, _ in pipeline_rows]
     lines = [
-        "=" * 72,
+        "=" * _SUMMARY_TOTAL_WIDTH,
         "DIAGNOSTIC SUMMARY",
-        "-" * 72,
+        "-" * _SUMMARY_TOTAL_WIDTH,
+        # The key goes ABOVE the rows, not below: the verdict has to stay the last substantive
+        # line (a reader who scrolls to the bottom must land on the decision), so the only
+        # other place for it would be wedged between the rows and the verdict.
+        *_legend_lines(row_names, "" if report is None else report.verdict_basis),
+        "-" * _SUMMARY_TOTAL_WIDTH,
     ]
     if report is None:
         detail = f"error: {suite_error}" if suite_error else ""
@@ -489,15 +1015,28 @@ def format_diagnostic_summary(
         verdict = report.verdict or report.classification
         action = _VERDICT_ACTION_PHRASES.get(verdict, "")
         basis = f" (basis: {report.verdict_basis})" if report.verdict_basis else ""
-        verdict_line = f"VERDICT: {verdict.upper()}{basis}"
+        verdict_line = f"VERDICT: {_verdict_label(verdict)}{basis}"
         if action:
             verdict_line += f" -- {action}"
     for name, status, detail in pipeline_rows:
         lines.append(_summary_row(name, status, detail))
-    lines.append("-" * 72)
+    lines.append("-" * _SUMMARY_TOTAL_WIDTH)
     lines.append(verdict_line)
-    lines.append("=" * 72)
-    return "\n".join(lines)
+    lines.extend(_verdict_next_step_lines(report))
+    lines.append("=" * _SUMMARY_TOTAL_WIDTH)
+    text = "\n".join(lines)
+    if color is None:
+        # Auto: color only a real terminal, and honor the NO_COLOR convention. Captured
+        # output -- pytest, subprocess pipes, log files -- stays plain, so nothing that
+        # greps or pins this block ever sees an escape code it did not ask for.
+        color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+    if not color:
+        return text.replace(_VALUE_START, "").replace(_VALUE_END, "")
+    # Tokens first (none can straddle a sentinel), then the value sentinels become cyan.
+    text = _apply_summary_colors(text)
+    return text.replace(_VALUE_START, _ANSI_COLORS["cyan"]).replace(
+        _VALUE_END, _ANSI_RESET
+    )
 
 
 ###############################################################################
@@ -739,12 +1278,65 @@ def check_root_and_implementation(
             if status == CheckStatuses.PASSED:
                 status = CheckStatuses.WARNING
 
+    # Per-criterion outcomes, each with its own measured value. The metric keys used below are
+    # only populated inside the `if finite_ok:` branch, so on a nonfinite g0/B_hat/M_hat run
+    # (which hard-fails) the dependent criteria report [not evaluated] rather than KeyError.
+    fd_error = metrics.get("finite_difference_max_relative_error", math.nan)
+    criteria = [
+        CriterionResult(
+            description=(
+                "the estimating-function value g0, its derivative B_hat, and its "
+                "covariance M_hat are all finite"
+            ),
+            value="yes" if finite_ok else "no",
+            ok=bool(finite_ok),
+        ),
+        CriterionResult(
+            description=(
+                f"estimate within {config.root_error_tolerance_se:g} SE of exactly solving "
+                "its estimating equation (root_error_tolerance_se)"
+            ),
+            value=f"{metrics['a_root_max']:.3g} SE" if finite_ok else "not evaluated",
+            ok=bool(metrics["a_root_max"] <= config.root_error_tolerance_se)
+            if finite_ok
+            else None,
+        ),
+        CriterionResult(
+            description=(
+                "the internal linear algebra is solved cleanly -- leftover solve error "
+                f"at most {config.backward_residual_tolerance:g} "
+                "(backward_residual_tolerance)"
+            ),
+            value=f"{metrics['backward_relative_residual']:.1e}"
+            if finite_ok
+            else "not evaluated",
+            ok=bool(
+                metrics["backward_relative_residual"]
+                <= config.backward_residual_tolerance
+            )
+            if finite_ok
+            else None,
+        ),
+        CriterionResult(
+            description=(
+                "our computed derivative agrees with one measured directly by tiny "
+                "nudges (finite differences) within 1%"
+            ),
+            value=f"{fd_error:.2%} worst disagreement"
+            if not math.isnan(fd_error)
+            else "not evaluated",
+            ok=bool(fd_error <= 1e-2) if not math.isnan(fd_error) else None,
+            severity="warn",
+        ),
+    ]
+    # The failure prose (if any) stays in message; the measurements now live in the criteria.
     return CheckResult(
         name="root_and_implementation",
         status=status,
         metrics=metrics,
         warnings=warnings,
         message="; ".join(failure_reasons),
+        criteria=criteria,
     )
 
 
@@ -1069,6 +1661,18 @@ def check_local_nonlinearity(
         and headline_max > config.nonlinear_correction_tolerance_se
     ):
         status = CheckStatuses.WARNING
+        # This branch -- the check's HEADLINE finding -- used to set WARNING and say nothing:
+        # it appended no warning and the CheckResult below is built with message="", so the
+        # end-of-run summary rendered a bare "local_nonlinearity WARNING" with an empty detail
+        # column and the measured number reachable only by unpickling metrics["per_radius"].
+        # A status with no stated reason is not actionable, and it is the one number a reader
+        # needs to judge whether the exceedance is marginal or severe.
+        # The figure itself is in `message` (printed on every row, pass or not), so this says
+        # only what exceeding the gate MEANS -- otherwise a WARNING row prints it twice.
+        warnings_list.append(
+            "The warn criterion above is a rule of thumb, not a calibrated number; "
+            "certification is decided by the separate bootstrap screen."
+        )
     if warnings_list and status == CheckStatuses.PASSED:
         status = CheckStatuses.WARNING
     if any(
@@ -1098,7 +1702,22 @@ def check_local_nonlinearity(
             f"{headline_radius}); those directions are censored from every statistic above, "
             "which selects toward the well-behaved part of the neighborhood."
         )
-        if (
+        # Escalation, not just degradation: each censored probe is a MEASURED event -- g_tilde
+        # was nonfinite at that point. Partial censoring degrades the sample (a pass on the
+        # survivors is untrustworthy, hence INDETERMINATE), but TOTAL censoring at the headline
+        # radius is direct evidence: the estimating function is undefined everywhere probed at
+        # sampling scale, so the linearization the adjusted sandwich relies on has no domain
+        # there. That is a failure the check measured, not one it failed to measure.
+        if headline_probes and headline_evaluable == 0:
+            status = CheckStatuses.FAILED
+            warnings_list.append(
+                f"g_tilde was nonfinite at ALL {headline_probes} probe points at the "
+                f"headline radius {headline_radius}: the linearization the adjusted "
+                "sandwich variance relies on is undefined across the sampling-scale "
+                "neighborhood of the estimate -- a measured failure, not an unevaluable "
+                "probe set."
+            )
+        elif (
             headline_evaluable < _min_evaluable_probes
             or headline_censored > _severe_censored_fraction * headline_probes
         ):
@@ -1106,9 +1725,61 @@ def check_local_nonlinearity(
         elif status == CheckStatuses.PASSED:
             status = CheckStatuses.WARNING
 
+    # Per-criterion outcomes. headline_max is NaN when every probe at the headline radius was
+    # domain-censored -- that criterion then reads [not evaluated] rather than showing "nan SE"
+    # as if it were a measurement (the censoring message carries that story).
+    rank_deficient_any = any(
+        per_radius[radius]["joint_mahalanobis"]["rank_deficient"]
+        for radius in per_radius
+    )
+    criteria = [
+        CriterionResult(
+            description=(
+                "the straight-line approximation is off by at most "
+                f"{config.nonlinear_correction_tolerance_se:g} SE when probed "
+                f"{headline_radius}x a typical sampling fluctuation away "
+                "(nonlinear_correction_tolerance_se)"
+            ),
+            value=f"{headline_max:.3g} SE"
+            if not math.isnan(headline_max)
+            else "no evaluable probe",
+            ok=bool(headline_max <= config.nonlinear_correction_tolerance_se)
+            if not math.isnan(headline_max)
+            else None,
+            severity="warn",
+        ),
+        CriterionResult(
+            description=(
+                "no degenerate directions: the reported estimates' covariance has full "
+                "rank, so every component is actually probed"
+            ),
+            value="rank-deficient" if rank_deficient_any else "yes",
+            ok=not rank_deficient_any,
+            severity="indeterminate",
+        ),
+        CriterionResult(
+            description=(
+                "enough probe points stayed well-defined at the headline distance (at "
+                f"least {_min_evaluable_probes} evaluable, at most "
+                f"{_severe_censored_fraction:.0%} undefined; NONE evaluable is a measured "
+                "failure)"
+            ),
+            value=f"{headline_evaluable} of {headline_probes} evaluable",
+            ok=not (
+                headline_evaluable < _min_evaluable_probes
+                or headline_censored > _severe_censored_fraction * headline_probes
+            ),
+            # Partial censoring only degrades the evidence (INDETERMINATE); zero evaluable
+            # probes is direct evidence the linearization has no domain at sampling scale.
+            severity="fail"
+            if headline_probes and headline_evaluable == 0
+            else "indeterminate",
+        ),
+    ]
     return CheckResult(
         name="local_nonlinearity",
         status=status,
+        criteria=criteria,
         metrics={
             "per_radius": per_radius,
             "headline_radius": headline_radius,
@@ -1119,7 +1790,6 @@ def check_local_nonlinearity(
             ),
         },
         warnings=warnings_list,
-        message="",
     )
 
 
@@ -1541,7 +2211,7 @@ def _resolve_bootstrap_batch_width(
 
     "auto" is DELIBERATELY NOT ACCEPTED HERE, and is rejected rather than honored: adversarial
     review found a reproducible fixture on which enabling batching moves the check from
-    `indeterminate` to `failed` and the verdict from `uncertifiable` to `invalid` on identical
+    `indeterminate` to `failed` and the verdict from `not_certified` to `invalid` on identical
     data and seed. Nothing that can silently change a verdict may select itself. The mode is kept
     reachable only as an explicit "always" so the driver stays testable and fixable.
     """
@@ -1608,11 +2278,20 @@ def _starvation_early_stop_reached(
     and R = N - k the remaining ones. Every completion of the ensemble -- every assignment of
     "failed" or "converged with row z" to the R trials not yet run -- ends with a converged count
     C_final <= c + R. If c + R < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE then C_final is below that
-    minimum for EVERY completion, so the first status rung of both checks fires first and the
-    status is INDETERMINATE whatever the remaining draws would have done. Since
-    _combine_classification and _derive_verdict are pure functions of the check statuses, the
-    classification, verdict and verdict_basis are unchanged too. The re-solves skipped were
-    therefore pure cost.
+    minimum for EVERY completion, so no completion can reach the gate or pass rungs: the status
+    is decided by the two rungs above them -- FAILED when the failure rate's Clopper-Pearson
+    lower bound clears bad_direction_probability_target (confirmed fragility), INDETERMINATE
+    otherwise. The stop can only fire with c <= 2, i.e. with at least k - 2 failures among the
+    k executed trials, and R <= 2 remaining; for any plan of N >= 9 trials that pins the lower
+    bound far above any practical target for the truncated ensemble AND every completion of it
+    (lb(k-2, k) and lb(k-2, k+2) are both >> 0.01 once k >= 7), so the status -- and with it
+    classification, verdict and verdict_basis, which are pure functions of the statuses -- is
+    exactly what the full plan would have produced. Only a toy plan (N < 9, reachable only by
+    overriding num_perturbation_directions or num_bootstrap_draws far below their defaults) can
+    leave the two sides of the bound comparison in different rungs, and even there both rungs
+    sit in the do-not-report family (FAILED -> INVALID, INDETERMINATE -> NOT CERTIFIED), with
+    truncation only ever softening FAILED to INDETERMINATE, never inventing a failure. The
+    re-solves skipped were therefore pure cost.
 
     MAXIMALITY -- why nothing more aggressive is offered. Suppose instead c < 3 <= c + R and some
     target has a nonzero sandwich SE. Two completions give two different statuses: if every
@@ -1670,8 +2349,9 @@ def _resolve_accounting_metrics_and_warnings(
         warnings_list.append(
             f"Stopped after {num_trials} of {num_planned_trials} planned {trial_noun}: at most "
             f"{num_converged + num_planned_trials - num_trials} could have converged, below the "
-            f"{MIN_CONVERGED_TRIALS_FOR_ENSEMBLE} required for any ensemble statistic, so the "
-            "check is INDETERMINATE for every possible completion of the ensemble. Trial counts "
+            f"{MIN_CONVERGED_TRIALS_FOR_ENSEMBLE} required for any ensemble statistic -- no "
+            "completion of the ensemble could have passed (the status is FAILED when the "
+            "failure rate is statistically confirmed, INDETERMINATE otherwise). Trial counts "
             "and failure fractions below describe the truncated ensemble, not the plan."
         )
     if num_divergence_aborts:
@@ -1961,7 +2641,8 @@ def check_exact_nonlinear_perturbations(
         for j in range(num_directions):
             # Evaluated BEFORE this trial is solved, so the counts it reads are exactly the (c, k)
             # of the soundness argument in _starvation_early_stop_reached: every trial from here
-            # on is skipped, and the check is INDETERMINATE for every completion of the ensemble.
+            # on is skipped, and no completion of the ensemble could have passed (FAILED when
+            # fragility is statistically confirmed, INDETERMINATE otherwise).
             if _starvation_early_stop_reached(
                 config,
                 len(converged_pattern),
@@ -2032,6 +2713,19 @@ def check_exact_nonlinear_perturbations(
     observed_failure_fraction = num_root_failures / num_trials if num_trials else 1.0
     solver_unhealthy = (
         observed_failure_fraction > config.bad_direction_probability_target
+    )
+    # The LOWER bound separates "could not evaluate" from "measured a failure": failures are
+    # counted over ALL executed trials (no optimistic-subset caveat), so when even the lower
+    # confidence bound of the failure rate clears the target, fragility is statistically
+    # confirmed and the check FAILS -- e.g. 198/198 failures bounds the rate above ~0.985.
+    # A merely thin or truncated ensemble (the bound cannot clear the target) stays
+    # INDETERMINATE.
+    failure_lower_bound = clopper_pearson_lower_bound(
+        num_root_failures, num_trials, config.confidence_level
+    )
+    solver_confirmed_unhealthy = bool(
+        not math.isnan(failure_lower_bound)
+        and failure_lower_bound > config.bad_direction_probability_target
     )
 
     if num_converged >= MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
@@ -2157,11 +2851,23 @@ def check_exact_nonlinear_perturbations(
         ):
             gates_failed = True
 
-    # Status precedence: a FAILED verdict from the converged subset stands even when the solver
-    # is unhealthy (exclusion of the non-converged -- typically hardest -- directions biases the
-    # subset OPTIMISTIC, so a failure on it is trustworthy); a PASS on that same optimistic
-    # subset is not, hence INDETERMINATE.
-    if num_converged == 0 or num_converged < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
+    # Status precedence: statistically confirmed fragility FAILS outright (measured on all
+    # executed trials, so no optimistic-subset caveat applies and it needs no ensemble
+    # statistics at all); then a FAILED verdict from the converged subset stands even when the
+    # solver is unhealthy (exclusion of the non-converged -- typically hardest -- directions
+    # biases the subset OPTIMISTIC, so a failure on it is trustworthy); a PASS on that same
+    # optimistic subset is not, hence INDETERMINATE.
+    if solver_confirmed_unhealthy:
+        status = CheckStatuses.FAILED
+        warnings_list.append(
+            f"Re-solve failure fraction {observed_failure_fraction:.4g} "
+            f"({num_root_failures}/{num_trials}) has lower confidence bound "
+            f"{failure_lower_bound:.4g}, above bad_direction_probability_target="
+            f"{config.bad_direction_probability_target:g}: the estimating equation "
+            "measurably cannot be re-solved at perturbation scale. This is a confirmed "
+            "fragility of the equation, not an unevaluable ensemble."
+        )
+    elif num_converged == 0 or num_converged < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
         status = CheckStatuses.INDETERMINATE
     elif gates_failed:
         status = CheckStatuses.FAILED
@@ -2232,12 +2938,104 @@ def check_exact_nonlinear_perturbations(
         "domain_failure_upper_bound": domain_failure_upper_bound,
     }
 
+    # Per-criterion outcomes. Guards mirror the status logic: an empty evaluable_se_ratios or a
+    # NaN mean-shift gate reads [not evaluated], never a NaN posing as a measurement; a
+    # below-band SE ratio while the solver is unhealthy does not fail (the excluded directions
+    # bias the spread down), so that criterion is excused rather than marked [FAIL].
+    quantile_shift_values = [
+        abs(shifts[key])
+        for shifts in quantile_shifts.values()
+        for key in ("lower_shift_se", "upper_shift_se")
+        if not math.isnan(shifts[key])
+    ]
+    max_quantile_shift = (
+        max(quantile_shift_values) if quantile_shift_values else math.nan
+    )
+    se_ratio_excused = se_ratio_below and solver_unhealthy
+    if se_ratio_band_evaluable:
+        se_ratio_value = (
+            f"{float(np.min(evaluable_se_ratios)):.3g} to "
+            f"{float(np.max(evaluable_se_ratios)):.3g}"
+        )
+        if se_ratio_excused and not se_ratio_above:
+            se_ratio_value += (
+                " (below the band, but excused: failed re-solves bias it down)"
+            )
+    else:
+        se_ratio_value = "not evaluable on this ensemble"
+    criteria = [
+        CriterionResult(
+            description=(
+                f"at least {MIN_CONVERGED_TRIALS_FOR_ENSEMBLE} of the re-solves converged"
+            ),
+            value=f"{num_converged} of {num_trials}",
+            ok=bool(num_converged >= MIN_CONVERGED_TRIALS_FOR_ENSEMBLE),
+            severity="indeterminate",
+        ),
+        CriterionResult(
+            description=(
+                f"re-solve failure rate at most "
+                f"{config.bad_direction_probability_target:g} "
+                "(bad_direction_probability_target)"
+            ),
+            value=f"{observed_failure_fraction:.4g} (lower confidence bound "
+            f"{failure_lower_bound:.3g})"
+            if solver_confirmed_unhealthy
+            else f"{observed_failure_fraction:.4g}",
+            ok=not solver_unhealthy,
+            # Exceeding the target is INDETERMINATE while it could still be bad luck or a
+            # solver budget issue, but FAILS once the rate's lower confidence bound clears
+            # the target: at that point the fragility is measured, not merely unresolved.
+            severity="fail" if solver_confirmed_unhealthy else "indeterminate",
+        ),
+        CriterionResult(
+            description=(
+                "every re-solved/linear SE ratio inside "
+                f"{null_bands['se_ratio_lower']:.3g}-{null_bands['se_ratio_upper']:.3g}, "
+                "the range expected if nothing were wrong"
+            ),
+            value=se_ratio_value,
+            ok=(
+                not (se_ratio_above or (se_ratio_below and not solver_unhealthy))
+                if se_ratio_band_evaluable
+                else None
+            ),
+        ),
+        CriterionResult(
+            description=(
+                f"the re-solved estimates' average shift at most "
+                f"{mean_shift_threshold:.3g} SE (the largest expected if nothing "
+                "were wrong)"
+            )
+            if not math.isnan(mean_shift_threshold)
+            else (
+                "the re-solved estimates' average shift within the largest expected "
+                "if nothing were wrong"
+            ),
+            value=f"{b_L:.3g} SE"
+            if mean_shift_gate_evaluable
+            else "not evaluable on this ensemble",
+            ok=(not mean_shift_failed) if mean_shift_gate_evaluable else None,
+        ),
+        CriterionResult(
+            description=(
+                "the ensemble's 2.5% and 97.5% points each shift at most "
+                f"{config.quantile_shift_tolerance_se:g} SE (quantile_shift_tolerance_se)"
+            ),
+            value=f"worst {max_quantile_shift:.3g} SE"
+            if not math.isnan(max_quantile_shift)
+            else "not evaluated",
+            ok=bool(max_quantile_shift <= config.quantile_shift_tolerance_se)
+            if not math.isnan(max_quantile_shift)
+            else None,
+        ),
+    ]
     return CheckResult(
         name="exact_nonlinear_perturbation",
         status=status,
         metrics=metrics,
         warnings=warnings_list,
-        message="",
+        criteria=criteria,
     )
 
 
@@ -2383,7 +3181,8 @@ def check_multiplier_bootstrap(
     for wave_start in range(0, num_planned_trials, wave_size):
         # Evaluated BEFORE the next wave is re-solved, so the counts it reads are exactly the
         # (c, k) of the soundness argument in _starvation_early_stop_reached: every trial from
-        # here on is skipped, and the check is INDETERMINATE for every completion of the ensemble.
+        # here on is skipped, and no completion of the ensemble could have passed (FAILED
+        # when fragility is statistically confirmed, INDETERMINATE otherwise).
         # Serially this is per trial and identical to the pre-batching behaviour. Batched, it can
         # only be tested at wave boundaries, where the remaining count is a multiple of the wave
         # width -- so with any wave wider than 2 the predicate is effectively unreachable and the
@@ -2457,11 +3256,18 @@ def check_multiplier_bootstrap(
     domain_failure_upper_bound = clopper_pearson_upper_bound(
         num_domain_failures, num_trials, config.confidence_level
     )
-    # Observed fraction, not the Clopper-Pearson bound -- same rationale as in
-    # check_exact_nonlinear_perturbations.
+    # Observed fraction for the unhealthy gate, and the lower confidence bound for the
+    # confirmed-fragility gate -- same rationale as in check_exact_nonlinear_perturbations.
     observed_failure_fraction = num_root_failures / num_trials if num_trials else 1.0
     solver_unhealthy = (
         observed_failure_fraction > config.bad_direction_probability_target
+    )
+    failure_lower_bound = clopper_pearson_lower_bound(
+        num_root_failures, num_trials, config.confidence_level
+    )
+    solver_confirmed_unhealthy = bool(
+        not math.isnan(failure_lower_bound)
+        and failure_lower_bound > config.bad_direction_probability_target
     )
 
     warnings_list: list[str] = []
@@ -2573,9 +3379,21 @@ def check_multiplier_bootstrap(
         "sandwich SE is likely overstated (conservative) on this dataset."
     )
 
-    # Same precedence rationale as check_exact_nonlinear_perturbations: exclusions select the
-    # easy draws, so a FAILED verdict from the converged subset stands, but a PASS does not.
-    if num_converged < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
+    # Same precedence rationale as check_exact_nonlinear_perturbations: statistically
+    # confirmed fragility FAILS outright (measured on all executed re-solves, with no
+    # optimistic-subset caveat); after that, exclusions select the easy draws, so a FAILED
+    # verdict from the converged subset stands, but a PASS does not.
+    if solver_confirmed_unhealthy:
+        status = CheckStatuses.FAILED
+        warnings_list.append(
+            f"Bootstrap re-solve failure fraction {observed_failure_fraction:.4g} "
+            f"({num_root_failures}/{num_trials}) has lower confidence bound "
+            f"{failure_lower_bound:.4g}, above bad_direction_probability_target="
+            f"{config.bad_direction_probability_target:g}: the estimating equation "
+            "measurably cannot be re-solved under resampling-scale perturbations. This is "
+            "a confirmed fragility of the equation, not an unevaluable ensemble."
+        )
+    elif num_converged < MIN_CONVERGED_TRIALS_FOR_ENSEMBLE:
         status = CheckStatuses.INDETERMINATE
     elif any_above or mean_shift_failed:
         status = CheckStatuses.FAILED
@@ -2667,12 +3485,93 @@ def check_multiplier_bootstrap(
         "multiplier_distribution": config.bootstrap_multiplier_distribution,
     }
 
+    # Per-criterion outcomes, guarded the same way the status logic is: evaluable_ratios is
+    # empty when every target is unidentified or too few trials converged (np.argmax on an
+    # empty array RAISES rather than returning NaN), and b_L / mean_shift_threshold are NaN
+    # whenever the ensemble was too thin to simulate a null band -- those criteria then read
+    # [not evaluated] instead of showing NaN as if it were a measurement.
+    ratio_gates_evaluable = bool(evaluable_ratios.size) and band_evaluable
+    if ratio_gates_evaluable:
+        worst_ratio = float(evaluable_ratios[np.argmax(np.abs(evaluable_ratios - 1.0))])
+        ratio_value = f"worst {worst_ratio:.3g}"
+    else:
+        ratio_value = "not evaluable on this ensemble"
+    criteria = [
+        CriterionResult(
+            description=(
+                f"at least {MIN_CONVERGED_TRIALS_FOR_ENSEMBLE} of the bootstrap re-solves "
+                "converged"
+            ),
+            value=f"{num_converged} of {num_trials}",
+            ok=bool(num_converged >= MIN_CONVERGED_TRIALS_FOR_ENSEMBLE),
+            severity="indeterminate",
+        ),
+        CriterionResult(
+            description=(
+                f"re-solve failure rate at most "
+                f"{config.bad_direction_probability_target:g} "
+                "(bad_direction_probability_target)"
+            ),
+            value=f"{observed_failure_fraction:.4g} (lower confidence bound "
+            f"{failure_lower_bound:.3g})"
+            if solver_confirmed_unhealthy
+            else f"{observed_failure_fraction:.4g}",
+            ok=not solver_unhealthy,
+            # Same escalation as the exact check: INDETERMINATE while the exceedance could
+            # be bad luck, FAILED once the lower confidence bound confirms it.
+            severity="fail" if solver_confirmed_unhealthy else "indeterminate",
+        ),
+        CriterionResult(
+            description=(
+                f"no bootstrap/sandwich SE ratio above {band_hi:.3g}, the top of the range "
+                "expected if nothing were wrong (above it, the sandwich SE is likely "
+                "understated)"
+            )
+            if not math.isnan(band_hi)
+            else (
+                "no bootstrap/sandwich SE ratio above the top of the range expected if "
+                "nothing were wrong"
+            ),
+            value=ratio_value,
+            ok=(not any_above) if ratio_gates_evaluable else None,
+        ),
+        CriterionResult(
+            description=(
+                f"no bootstrap/sandwich SE ratio below {band_lo:.3g}, the bottom of that "
+                "range (below it, the sandwich SE is likely conservative)"
+            )
+            if not math.isnan(band_lo)
+            else (
+                "no bootstrap/sandwich SE ratio below the bottom of the range expected if "
+                "nothing were wrong"
+            ),
+            value=ratio_value,
+            ok=(not any_below) if ratio_gates_evaluable else None,
+            severity="warn",
+        ),
+        CriterionResult(
+            description=(
+                f"the re-solved estimates' average shift at most "
+                f"{mean_shift_threshold:.3g} SE (the largest expected if nothing "
+                "were wrong)"
+            )
+            if not math.isnan(mean_shift_threshold)
+            else (
+                "the re-solved estimates' average shift within the largest expected "
+                "if nothing were wrong"
+            ),
+            value=f"{b_L:.3g} SE"
+            if mean_shift_gate_evaluable
+            else "not evaluable on this ensemble",
+            ok=(not mean_shift_failed) if mean_shift_gate_evaluable else None,
+        ),
+    ]
     return CheckResult(
         name="multiplier_bootstrap",
         status=status,
         metrics=metrics,
         warnings=warnings_list,
-        message="",
+        criteria=criteria,
     )
 
 
@@ -2753,7 +3652,26 @@ def check_jacobian_drift(
             else math.nan,
         },
         warnings=warnings_list,
-        message="",
+        # The "sampled maximum, not a certified supremum" qualifier lives both in the standing
+        # warning and in the criterion description: it is the single most important thing about
+        # the number, and this check never fails or blocks on its own.
+        criteria=[
+            CriterionResult(
+                description=(
+                    "the estimate's derivative matrix drifts by less than 1 along every "
+                    f"sampled path (a sampled maximum over {rho_by_direction.size} "
+                    "direction(s), not a guaranteed worst case; this check never fails on "
+                    "its own)"
+                ),
+                value=f"worst {float(np.max(rho_by_direction)):.3g}"
+                if rho_by_direction.size
+                else "no sampled directions",
+                ok=bool(not np.any(rho_by_direction >= 1.0))
+                if rho_by_direction.size
+                else None,
+                severity="warn",
+            )
+        ],
     )
 
 
@@ -2870,10 +3788,17 @@ def check_bread_stability(
     warnings_list = []
     status = CheckStatuses.PASSED
     if rank_estimate < target_dim:
-        status = CheckStatuses.INDETERMINATE
+        # FAILED, not INDETERMINATE: in the ADS-142 undercoverage hunt this condition
+        # identified 76/76 of the zero-width-interval collapses, and _derive_verdict already
+        # treats it as INVALID-grade evidence -- the row's status now says the same thing the
+        # verdict does, instead of reading "could not be evaluated" while silently driving
+        # the worst verdict.
+        status = CheckStatuses.FAILED
         warnings_list.append(
             f"Target covariance rank estimate {rank_estimate} < target dimension "
-            f"{target_dim}; identification of some contrasts may be weak."
+            f"{target_dim}: some reported components are unidentified. In calibration "
+            "experiments this condition marked every catastrophic variance collapse, so it "
+            "is a measured failure, not a weak-identification caveat."
         )
     if sensitivity_max > config.se_distortion_tolerance:
         warnings_list.append(
@@ -2904,7 +3829,33 @@ def check_bread_stability(
             "numerical_sensitivity_max_relative_se_change": sensitivity_max,
         },
         warnings=warnings_list,
-        message="",
+        # Reports the SE sensitivity and the identification rank, deliberately NOT the bread
+        # condition number: that same figure already has its own pipeline row
+        # (joint_bread_condition_number), and repeating it here would read as two findings.
+        # NaN-guarded because a nonfinite perturbed SE propagates into sensitivity_max, and
+        # `nan > tolerance` is False -- a NaN reads [not evaluated], not a passing "nan%".
+        criteria=[
+            CriterionResult(
+                description=f"all {target_dim} estimate components identified",
+                value=f"{rank_estimate} of {target_dim}",
+                ok=bool(rank_estimate >= target_dim),
+            ),
+            CriterionResult(
+                description=(
+                    f"SE moves at most {config.se_distortion_tolerance:.0%} under a "
+                    f"numerically negligible {rel_scale:.0e} nudge to the bread matrix "
+                    "(se_distortion_tolerance; on its own this criterion never fails the "
+                    "check)"
+                ),
+                value=f"{sensitivity_max:.2%}"
+                if not math.isnan(sensitivity_max)
+                else "not evaluable (nonfinite perturbed SE)",
+                ok=bool(sensitivity_max <= config.se_distortion_tolerance)
+                if not math.isnan(sensitivity_max)
+                else None,
+                severity="indeterminate",
+            ),
+        ],
     )
 
 
@@ -2999,12 +3950,56 @@ def check_influence_concentration(
             stacks, theta_dim, theta_block_factored, unique_indices, subject_ids
         )
 
+    # Derived from by_target, NOT from the loop locals n_eff/p_max/L_c: those hold the LAST
+    # target's values at this point, or a stale earlier target's if the last one hit the
+    # degenerate `continue`, and are unbound entirely when there are no targets.
+    evaluable_n_eff = [
+        entry["n_eff"] for entry in by_target.values() if not math.isnan(entry["n_eff"])
+    ]
+    evaluable_p_max = [
+        entry["p_max"] for entry in by_target.values() if not math.isnan(entry["p_max"])
+    ]
+    n_eff_gate = max(
+        config.influence_n_eff_min_floor, config.influence_n_eff_min_fraction * n
+    )
+    # Both criteria are severity="warn": this check never fails or blocks on its own.
     return CheckResult(
         name="influence_concentration",
         status=status,
         metrics=metrics,
         warnings=warnings_list,
-        message="",
+        criteria=[
+            CriterionResult(
+                description=(
+                    f"an effective sample of at least {n_eff_gate:.1f} subjects behind "
+                    "every reported quantity (the larger of "
+                    f"{config.influence_n_eff_min_floor:g} subjects and "
+                    f"{config.influence_n_eff_min_fraction:.0%} of the {n}; this check "
+                    "never fails on its own)"
+                ),
+                value=f"worst {min(evaluable_n_eff):.1f} of {n}"
+                if evaluable_n_eff
+                else "not evaluable (no variance to attribute)",
+                ok=bool(min(evaluable_n_eff) >= n_eff_gate)
+                if evaluable_n_eff
+                else None,
+                severity="warn",
+            ),
+            CriterionResult(
+                description=(
+                    "no single subject accounts for more than "
+                    f"{config.influence_p_max_tolerance:.0%} of any reported quantity's "
+                    "variance (influence_p_max_tolerance)"
+                ),
+                value=f"largest {max(evaluable_p_max):.1%}"
+                if evaluable_p_max
+                else "not evaluable (no variance to attribute)",
+                ok=bool(max(evaluable_p_max) <= config.influence_p_max_tolerance)
+                if evaluable_p_max
+                else None,
+                severity="warn",
+            ),
+        ],
     )
 
 
@@ -3169,6 +4164,8 @@ def check_exploration_and_weights(
 
     ess_by_direction = []
     max_cumulative_weight_by_direction = []
+    num_nonfinite_weight_directions = 0
+    num_weight_directions = 0
     for trajectory in perturbed_weight_trajectories:
         final_weights = np.array(
             [
@@ -3179,8 +4176,10 @@ def check_exploration_and_weights(
         )
         if final_weights.size == 0:
             continue
+        num_weight_directions += 1
         if not np.all(np.isfinite(final_weights)):
             status = CheckStatuses.FAILED
+            num_nonfinite_weight_directions += 1
             warnings_list.append(
                 "Nonfinite importance weight encountered under perturbation."
             )
@@ -3209,12 +4208,93 @@ def check_exploration_and_weights(
                 np.array(pi_grad_norms)
             )
 
+    # Per-criterion outcomes. On an empty active set pandas' min()/max() are NaN while the
+    # finiteness and (0,1) tests both vacuously hold, so every probability criterion reads
+    # [not evaluated] rather than "[nan, nan]" posing as a passing measurement. The floor and
+    # ceiling bounds are Optional and default to None: each appears only when the caller
+    # actually supplied that bound.
+    have_rows = bool(all_probs.size)
+    probs_finite = bool(np.all(np.isfinite(all_probs)))
+    prob_range_value = (
+        f"[{metrics['action_prob_global_min']:.4g}, "
+        f"{metrics['action_prob_global_max']:.4g}] over {all_probs.size} active rows"
+        if have_rows
+        else "no active rows"
+    )
+    criteria = [
+        CriterionResult(
+            description="every recorded action probability finite",
+            value=prob_range_value,
+            ok=probs_finite if have_rows else None,
+        ),
+        CriterionResult(
+            description="every recorded action probability strictly inside (0, 1)",
+            value=prob_range_value,
+            ok=bool(not (np.any(all_probs <= 0) or np.any(all_probs >= 1)))
+            if have_rows
+            else None,
+        ),
+    ]
+    if config.exploration_floor is not None:
+        criteria.append(
+            CriterionResult(
+                description=(
+                    "every recorded action probability at or above the deployment's "
+                    f"exploration_floor {config.exploration_floor:g}"
+                ),
+                value=f"min {metrics['action_prob_global_min']:.4g}"
+                if have_rows
+                else "no active rows",
+                ok=bool(not np.any(all_probs < config.exploration_floor))
+                if have_rows
+                else None,
+            )
+        )
+    if config.exploration_ceiling is not None:
+        criteria.append(
+            CriterionResult(
+                description=(
+                    "every recorded action probability at or below the deployment's "
+                    f"exploration_ceiling {config.exploration_ceiling:g}"
+                ),
+                value=f"max {metrics['action_prob_global_max']:.4g}"
+                if have_rows
+                else "no active rows",
+                ok=bool(not np.any(all_probs > config.exploration_ceiling))
+                if have_rows
+                else None,
+            )
+        )
+    criteria.append(
+        CriterionResult(
+            description=(
+                "the importance weights stay finite when the policy parameters are "
+                "nudged a typical sampling fluctuation"
+            ),
+            value=f"{num_nonfinite_weight_directions} of {num_weight_directions} "
+            "nudge direction(s) produced a nonfinite weight"
+            if num_weight_directions
+            else "not evaluated on this run",
+            ok=(num_nonfinite_weight_directions == 0)
+            if num_weight_directions
+            else None,
+        )
+    )
+    # The ESS figure is informational, not a criterion: no threshold for it has been
+    # calibrated, so it is reported without a gate and can never set the status.
+    finite_ess = [value for value in ess_by_direction if math.isfinite(value)]
     return CheckResult(
         name="exploration_and_weights",
         status=status,
         metrics=metrics,
         warnings=warnings_list,
-        message="",
+        message=(
+            f"worst-direction importance weights keep {min(finite_ess):.0%} of the "
+            "effective sample (reported without a gate)"
+            if finite_ess
+            else ""
+        ),
+        criteria=criteria,
     )
 
 
@@ -3263,9 +4343,12 @@ def _derive_verdict(
        (`bread_stability`'s `target_covariance_rank_estimate < theta_dim`). The rank condition
        is pulled up to INVALID rather than left in UNCERTIFIABLE because it identified 76/76 of
        the zero-width-interval collapses in the undercoverage hunt -- runs whose CIs miss with
-       certainty.
-    2. UNCERTIFIABLE -- any indeterminate check (re-solve fragility, censored ensembles,
-       unevaluable gates), or the a_{j,l} screen called for the multiplier bootstrap and it did
+       certainty. (check_bread_stability now also FAILS on it directly, so any_failed usually
+       covers this; the explicit metrics read stays as defense for reports pickled by older
+       check versions, whose row says INDETERMINATE.)
+    2. UNCERTIFIABLE -- any indeterminate check (an unconfirmed re-solve exceedance, a
+       partially censored ensemble, unevaluable gates; CONFIRMED fragility and TOTAL censoring
+       now fail instead), or the a_{j,l} screen called for the multiplier bootstrap and it did
        not run (`multiplier_bootstrap="off"`, or the report predates the check): the calibrated
        division of labor makes the bootstrap the verdict layer once the screen trips, so its
        absence there means no verdict was reached, not a pass.
@@ -3299,7 +4382,7 @@ def _derive_verdict(
         return DiagnosticVerdicts.INVALID, ""
 
     if any(r.status == CheckStatuses.INDETERMINATE for r in check_results.values()):
-        return DiagnosticVerdicts.UNCERTIFIABLE, ""
+        return DiagnosticVerdicts.NOT_CERTIFIED, ""
 
     bootstrap = check_results.get("multiplier_bootstrap")
     local = check_results.get("local_nonlinearity")
@@ -3310,7 +4393,7 @@ def _derive_verdict(
         and (math.isnan(headline) or headline <= config.bootstrap_screen_a_jl_threshold)
     )
     if bootstrap is None and not screen_quiet:
-        return DiagnosticVerdicts.UNCERTIFIABLE, ""
+        return DiagnosticVerdicts.NOT_CERTIFIED, ""
 
     influence = check_results.get("influence_concentration")
     conservative = (

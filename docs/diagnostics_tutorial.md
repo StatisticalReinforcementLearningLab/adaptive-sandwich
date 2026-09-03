@@ -14,7 +14,8 @@ report = pickle.load(open("diagnostic_report.pkl", "rb"))
 report.verdict, report.verdict_basis, report.classification
 ```
 
-**`report.verdict` is the decision-level answer to "can I report this CI?"** in four values --
+**`report.verdict` is the decision-level answer to "can I report the adjusted sandwich
+variance?"** in four values --
 `certified` (report it; `verdict_basis` says whether the multiplier bootstrap verified the SEs
 or the run was quiet enough that the calibrated screen never called for it), `conservative`
 (report it, width likely inflated -- the one finding `classification` structurally cannot
@@ -27,17 +28,21 @@ existed carry an empty string -- fall back to reading `classification` plus `war
 
 `classification` remains the compatibility-stable field, with four possible values:
 
-- **`failed`** -- a hard prerequisite broke: an `input_check_results` entry failed (section 4.1),
-  `root_and_implementation` broke, out-of-range action probabilities, non-finite values, or a
-  material distortion was *measured* -- reachable only via the opt-in checks: the exact-nonlinear
-  check's gates, or `check_multiplier_bootstrap` finding bootstrap SEs above their null band
-  (the sandwich SE understated -- the anticonservative direction). Stop and look at
+- **`failed`** -- a hard prerequisite broke, or a collapse was *measured*: an
+  `input_check_results` entry failed (section 4.1), `root_and_implementation` broke,
+  out-of-range action probabilities, non-finite values, an unidentified reported component
+  (`bread_stability`'s rank gate -- 76/76 of the undercoverage hunt's zero-width collapses),
+  `g_tilde` nonfinite at every sampling-scale probe (`local_nonlinearity`'s total-censoring
+  gate), a re-solve failure rate whose Clopper-Pearson lower bound clears
+  `bad_direction_probability_target` (confirmed fragility, both re-solve checks), or a material
+  distortion measured by the opt-in checks: the exact-nonlinear check's gates, or
+  `check_multiplier_bootstrap` finding bootstrap SEs above their null band (the sandwich SE
+  understated -- the anticonservative direction). Stop and look at
   `check_results`/`input_check_results` before trusting anything else in the report.
-- **`indeterminate`** -- weak/degenerate identification, an unstable solve, `g_tilde` undefined at
-  too many of the local-nonlinearity probe points (section 3), or (for the opt-in
-  re-solving checks) continuation/bootstrap re-solves that actually failed to converge -- which
-  is itself a fragility finding about the estimating equation, not merely missing information
-  (see section 4.6) -- or a gate the check could not evaluate at all, which by design reads
+- **`indeterminate`** -- an unstable solve, `g_tilde` undefined at too many (but not all) of
+  the local-nonlinearity probe points (section 3), a re-solve failure fraction above the target
+  without enough trials to statistically confirm it (a confirmed rate is `failed` -- see
+  section 4.6), or a gate the check could not evaluate at all, which by design reads
   `indeterminate` rather than `passed`. Not proof of wrongness, but not resolvable from this
   dataset. Treat it as "cannot certify," not "probably fine": the status logic is deliberately
   built so that a miscalibrated design cannot slip through as a pass on an optimistically
@@ -72,13 +77,14 @@ a genuine statistical finding (e.g. the root wasn't actually solved) can look id
 | `classification == "failed"`, an entry in `input_check_results` is the culprit | That entry's `.message` | A data/wiring bug (e.g. action probabilities that can't be reconstructed from the supplied function) -- section 4.1. Not a statistical finding at all; fix the data/wiring before looking at anything else. |
 | `classification == "failed"`, `root_and_implementation` is the culprit | `metrics["a_root_max"]`, `metrics["backward_relative_residual"]` | The estimating equation wasn't actually solved, the derivative doesn't match the function, or (if `backward_relative_residual` is the one that's large) the *linear solve itself* is broken -- see section 5's case E. All are implementation bugs, not statistics questions -- fix before looking at anything else. |
 | `classification == "failed"`, `exploration_and_weights` is the culprit | `action_prob_global_min`/`_max`, `fraction_at_or_near_floor`/`_ceiling` | A recorded action probability left `(0, 1)`, or violated a design bound you supplied. A real positivity/overlap violation, not a numerical artifact. |
-| `classification == "indeterminate"`, `bread_stability` is the culprit | `target_covariance_rank_estimate` vs. `target_covariance_dim`, `numerical_sensitivity_max_relative_se_change` | Either the target is weakly identified (a rank-deficient *target* covariance `L @ V_hat @ L^T`, not the full joint `V_hat` -- which is why this gate can actually fire at real study scale), or the reported SEs themselves move under a numerically negligible perturbation of the bread -- a fragility problem distinct from identification. |
+| `classification == "failed"`, `bread_stability` is the culprit | `target_covariance_rank_estimate` vs. `target_covariance_dim` | The target is unidentified: a rank-deficient *target* covariance `L @ V_hat @ L^T` (not the full joint `V_hat` -- which is why this gate can actually fire at real study scale). The best-measured predictor of catastrophic variance collapse in the ADS-142 hunt (76/76 zero-width-interval runs), so it fails outright and drives an `invalid` verdict. |
+| `classification == "indeterminate"`, `bread_stability` is the culprit | `numerical_sensitivity_max_relative_se_change` | The reported SEs move under a numerically negligible perturbation of the bread -- numerical fragility distinct from identification (the rank gate, which *fails*, covers that). |
 | `classification == "locally_supported"`, but `warnings` is non-empty | Which check's name prefixes each warning string | `local_nonlinearity` and `influence_concentration` warnings never change the classification (see section 3, and section 4.4 for influence_concentration specifically -- it has *no* path to anything but `PASSED`/`WARNING` at all) -- read them yourself, they're the two checks most likely to have something real to say even when nothing "failed." |
-| You turned on the expensive checks and got `indeterminate` from `exact_nonlinear_perturbation` | `root_failure_fraction`/`num_converged_trials` vs. `num_trials`, then `mean_shift_gate_evaluable` and the warnings | Either some continuation solves actually failed (the status is driven by the *observed* failure fraction -- zero observed failures no longer reads `indeterminate` at small direction counts), or a distortion gate could not be evaluated at all (typically a singular target covariance), which is deliberately not a pass. The distortion statistics you do get were computed on the converged subset only, which is optimistically selected -- treat them as a lower bound on trouble. `root_failure_upper_bound` (Clopper-Pearson) is still reported if you want the certified bound; ~300+ directions for a ~1% one. |
-| `multiplier_bootstrap` is `failed` | `se_ratio_by_target` vs. `se_ratio_null_band`, `mean_shift_se` vs. `mean_shift_threshold` | Bootstrap SEs sit above the null band for at least one identified target (the sandwich SE is likely *understated* on this dataset -- the dangerous direction), or the resampled roots are systematically displaced (curvature bias). Do not report the interval as-is. |
+| You turned on the expensive checks and got `indeterminate` from `exact_nonlinear_perturbation` | `root_failure_fraction`/`num_converged_trials` vs. `num_trials`, then `mean_shift_gate_evaluable` and the warnings | Either some continuation solves failed but not enough to statistically confirm a rate above target (a confirmed rate -- Clopper-Pearson lower bound over `bad_direction_probability_target` -- reads `failed`, not `indeterminate`; the unhealthy gate below that is driven by the *observed* fraction, so zero observed failures no longer reads `indeterminate` at small direction counts), or a distortion gate could not be evaluated at all (typically a singular target covariance), which is deliberately not a pass. The distortion statistics you do get were computed on the converged subset only, which is optimistically selected -- treat them as a lower bound on trouble. `root_failure_upper_bound` (Clopper-Pearson) is still reported if you want the certified bound; ~300+ directions for a ~1% one. |
+| `multiplier_bootstrap` is `failed` | `root_failure_fraction` and its lower bound first, then `se_ratio_by_target` vs. `se_ratio_null_band`, `mean_shift_se` vs. `mean_shift_threshold` | Confirmed fragility (the re-solve failure rate's Clopper-Pearson lower bound clears `bad_direction_probability_target` -- the equation measurably cannot be re-solved under resampling-scale perturbations), bootstrap SEs above the null band for at least one identified target (the sandwich SE likely *understated* -- the dangerous direction), or systematically displaced resampled roots (curvature bias). Do not report the interval as-is. |
 | `multiplier_bootstrap` is `warning` | `se_ratio_by_target` below the band | Bootstrap SEs sit *below* the sandwich's: the sandwich is likely overstating uncertainty (the conservative blow-up direction ADS-142 found to be the common failure mode). The interval's direction is trustworthy; its width is inflated. |
-| `multiplier_bootstrap` is `indeterminate` | `root_failure_fraction`, `se_ratio_band_unevaluable_targets`, `mean_shift_gate_evaluable` | Either the equation would not re-solve under resampling-scale perturbations (fragility is the finding), or a gate could not be fully evaluated -- e.g. a target with no identified sandwich SE to compare against, so no SE comparison was performed for it. Both read as "cannot certify," not "probably fine": the check is built never to pass on an unevaluated or optimistically censored comparison. Whether that design property translates into catching real anticonservative designs is what the in-flight bootstrap-validation experiment (`docs/adr/0002`, "Follow-up experiments") is meant to measure -- wave 2 itself contained no anticonservative cells to test it on. |
-| A re-solve check ran fewer trials than you configured (`num_trials` < `num_planned_trials`, or `monte_carlo_counts["num_bootstrap_draws_executed"]` < `num_bootstrap_draws`) | `early_stopped`, `early_stop_reason`, and the warning naming the truncation | The sequential early stop fired: too few trials could still converge to compute any ensemble statistic, so the status was already `indeterminate` for every possible completion. Deliberate and verdict-preserving, not a crash or a timeout -- section 4.6. The reported fractions and Clopper-Pearson bounds are computed on what actually ran, so they are wider, never narrower. |
+| `multiplier_bootstrap` is `indeterminate` | `root_failure_fraction`, `se_ratio_band_unevaluable_targets`, `mean_shift_gate_evaluable` | Either re-solves failed at a rate above target but below statistical confirmation (a confirmed rate reads `failed`), or a gate could not be fully evaluated -- e.g. a target with no identified sandwich SE to compare against, so no SE comparison was performed for it. Both read as "cannot certify," not "probably fine": the check is built never to pass on an unevaluated or optimistically censored comparison. Whether that design property translates into catching real anticonservative designs is what the in-flight bootstrap-validation experiment (`docs/adr/0002`, "Follow-up experiments") is meant to measure -- wave 2 itself contained no anticonservative cells to test it on. |
+| A re-solve check ran fewer trials than you configured (`num_trials` < `num_planned_trials`, or `monte_carlo_counts["num_bootstrap_draws_executed"]` < `num_bootstrap_draws`) | `early_stopped`, `early_stop_reason`, and the warning naming the truncation | The sequential early stop fired: too few trials could still converge to compute any ensemble statistic, so no completion could have passed -- the status is `failed` when the failure rate is statistically confirmed, `indeterminate` otherwise. Deliberate and (for real-sized plans) status-preserving, not a crash or a timeout -- section 4.6. The reported fractions and Clopper-Pearson bounds are computed on what actually ran, so they are wider, never narrower. |
 
 ## 3. `a_{j,l}` vs. `r_j`/`q_j` -- the headline metric and its raw ingredients
 
@@ -139,9 +145,11 @@ exceedance fraction, and Clopper-Pearson bound above is then computed over the s
 only -- which are exactly the directions where the map stayed well-behaved, so a clean-looking
 summary on a censored ensemble is optimistically selected. Any censoring at all attaches a warning
 and downgrades a `passed` to `warning`; the check goes `indeterminate` once the headline radius
-has fewer than 3 surviving probes or more than half of them censored. So this is the second way
-`local_nonlinearity` can reach a gating status (the first being the joint-Mahalanobis
-rank-deficiency condition) -- the size of `a_{j,l}` itself still never gates.
+has fewer than 3 surviving probes or more than half of them censored, and `failed` when NONE
+survive -- total censoring is a measured statement that the linearization has no domain at
+sampling scale, not a gap in the evidence. So these are the further ways `local_nonlinearity`
+can reach a gating status (alongside the joint-Mahalanobis rank-deficiency condition) -- the
+size of `a_{j,l}` itself still never gates.
 
 ## 4. What the rest of the suite is actually for
 
@@ -636,10 +644,12 @@ answered the "should it?" question with a measured no (the failures it predicts 
 conservative, so a hard gate would block valid inference).
 
 **Q: A check says `indeterminate`. Is that better or worse than `failed`?**
-A: Neither -- they mean different things. `failed` means something concrete and measured broke.
-`indeterminate` means the suite couldn't resolve the question either way (rank deficiency, an
-unstable solve, or too few directions) -- usually the actionable response is "get more
-information" (more directions, a better-conditioned design), not "this is definitely wrong."
+A: Neither -- they mean different things. `failed` means something concrete and measured broke
+(including measured collapses: rank deficiency, total probe censoring, a statistically
+confirmed re-solve failure rate). `indeterminate` means the suite couldn't resolve the question
+either way (an unstable solve, too few directions, an exceedance not yet statistically
+confirmed) -- usually the actionable response is "get more information" (more directions, a
+better-conditioned design), not "this is definitely wrong."
 
 **Q: Why is `input_check_results` a separate dict instead of just another entry in
 `check_results`?**

@@ -68,16 +68,19 @@ class DiagnosticVerdicts:
     """
     The decision-level summary derived from the suite (DiagnosticReport.verdict) -- the four
     outcomes the ADS-142 calibration experiments showed a single run can actually support
-    (docs/adr/0002, results sections), phrased as the answer to "can I report this CI?":
+    (docs/adr/0002, results sections), phrased as the answer to "can I report the
+    adjusted sandwich variance?" (the estimate and the classical sandwich are computed
+    regardless; the verdict says nothing about the classical sandwich's own accuracy):
 
     - CERTIFIED: report it. Everything gated passed; see DiagnosticReport.verdict_basis for
       whether the multiplier bootstrap verified the SEs directly ("bootstrap") or the run was
       quiet enough that the calibrated a_{j,l} screen never called for it ("screen").
-    - CONSERVATIVE: report it, with the caveat that its width is likely inflated -- the
+    - CONSERVATIVE: report it, with the caveat that the variance may be inflated
+      -- the
       calibrated conservatism signals fired (bootstrap SEs below their null band, and/or
       influence concentration under its floor). Direction trustworthy, power wasted; the
       ADR 0003 percentile refit bootstrap is the interval-level remedy.
-    - UNCERTIFIABLE: do not report it as validated. Something is unresolved -- re-solve
+    - NOT_CERTIFIED: do not report it as validated. Something is unresolved -- re-solve
       fragility, a censored ensemble, an unevaluable gate, or the screen called for the
       bootstrap and it was not run. Empirically, every genuinely miscalibrated design in the
       calibration grids landed here (or in INVALID) rather than falsely certifying.
@@ -88,8 +91,20 @@ class DiagnosticVerdicts:
 
     CERTIFIED = "certified"
     CONSERVATIVE = "conservative"
-    UNCERTIFIABLE = "uncertifiable"
+    NOT_CERTIFIED = "not_certified"
     INVALID = "invalid"
+
+    # Renamed from UNCERTIFIABLE on 2026-09-02. "Uncertifiable" asserted IMPOSSIBILITY, but the
+    # verdict means "not established yet" -- and its most common cause (the a_{j,l} screen
+    # calling for the multiplier bootstrap when it did not run) is fixed by re-running, which
+    # the summary now says outright. A verdict whose own next-step line reads "this is fixable"
+    # should not be named un-certifi-able.
+    #
+    # The old NAME stays as an alias so a downstream comparison against
+    # DiagnosticVerdicts.UNCERTIFIABLE keeps working. Reports pickled before the rename carry
+    # the old wire value "uncertifiable" and are deliberately NOT special-cased: re-reading one
+    # is out of scope, so such a report's verdict simply will not match any current constant.
+    UNCERTIFIABLE = NOT_CERTIFIED
 
 
 class VerdictBases:

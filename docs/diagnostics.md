@@ -198,9 +198,14 @@ every statistic above is computed on an optimistically selected subset -- a meas
 it still stands, but a clean pass on it does not (the same precedence the exact and bootstrap
 checks apply to their non-converged directions). Censoring escalates to `indeterminate` once the
 headline radius has fewer than 3 evaluable probes or more than half of its probes censored, at
-which point the surviving subset cannot support any verdict. `passed` otherwise. This check
-**never** hard-fails on its own -- see "Why `r_j`/raw `q_j` have no universal threshold" below for
-why.
+which point the surviving subset cannot support any verdict -- and to `failed` when NO probe at
+the headline radius survives: each censored probe is a measured event (`g_tilde` was nonfinite at
+that point), so total censoring at sampling scale is direct evidence that the linearization the
+adjusted sandwich relies on has no domain around the estimate, not an absence of evidence.
+`passed` otherwise. The **size of the measured `a_{j,l}` never hard-fails on its own** -- see
+"Why `r_j`/raw `q_j` have no universal threshold" below for why; total censoring is the one
+`failed` this check can produce, and it is a statement about `g_tilde`'s domain, not about any
+nonlinearity magnitude.
 
 **Radius-scaling/pairing warnings** (informational, not pass/fail): comparing the smallest and
 largest configured radii, a warning fires if the observed exponent of `r_j`'s median vs. radius
@@ -296,10 +301,16 @@ remains fully visible via `root_failure_fraction` and the status logic below):
   exhausting their iteration budget. All four are described under "What the re-solve checks cost"
   below; every fraction above is computed against `num_trials`, i.e. against what was run.
 
-**Status logic** (precedence matters -- solver health is judged on the **observed** failure
-fraction vs. `config.bad_direction_probability_target`, not the Clopper-Pearson bound, which
-exceeds any small target at practical trial counts even with zero observed failures):
-`indeterminate` if fewer than 3 solves converged. Otherwise `failed` if a distortion gate fires
+**Status logic** (precedence matters). First, **confirmed fragility fails outright**: when the
+failure fraction's one-sided Clopper-Pearson *lower* bound (`clopper_pearson_lower_bound`, at
+`config.confidence_level`) exceeds `config.bad_direction_probability_target`, the equation
+measurably cannot be re-solved at perturbation scale -- counted over ALL executed trials, so no
+optimistic-subset caveat applies, and no ensemble statistic is needed. This is the rung that
+separates "could not evaluate" from "measured a collapse" (0 of 198 converging bounds the rate
+above ~0.985). Below that rung, solver health is judged on the **observed** failure fraction vs.
+the same target -- not the Clopper-Pearson *upper* bound, which exceeds any small target at
+practical trial counts even with zero observed failures: `indeterminate` if fewer than 3 solves
+converged. Otherwise `failed` if a distortion gate fires
 on the converged subset -- `se_ratios` **above** the null band, `mean_shift_se` above its banded
 threshold `max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (the tolerance defaults to
 `0.10` and acts as the floor, not as the whole comparison), or any quantile shift beyond
@@ -317,12 +328,21 @@ unavailable, the status is `indeterminate` with a warning naming which gate(s) w
 
 ### 3b. Frozen-score multiplier bootstrap -- `check_multiplier_bootstrap`
 
-Off by default (`config.multiplier_bootstrap = "off"`); `"always"` runs it unconditionally, and
-`"auto"` uses the cheap `a_{j,l}` check as a screen -- the bootstrap runs only when
+`"auto"` by default as of 2026-09-02 (previously `"off"`); `"off"` disables it, `"always"` runs
+it unconditionally, and `"auto"` uses the cheap `a_{j,l}` check as a screen -- the bootstrap runs only when
 `check_local_nonlinearity`'s headline max exceeds `config.bootstrap_screen_a_jl_threshold`
 (default `0.05`, an ADS-142-calibrated screen: against the exact check's `a^NL > 0.10` key on
 the borderline cells it missed ~11% of exceedances while triggering on ~54% of replicates) or
 that check did not `pass` outright.
+
+The default moved to `"auto"` because `"off"` made certification unreachable for any run above
+the screen: `_derive_verdict` makes the bootstrap the verdict layer once the screen trips, so a
+screened-in run with no bootstrap result is UNCERTIFIABLE by construction however healthy it is.
+Cost is no longer the objection it was -- the hours-scale figures predate the `g_tilde` closure
+fix, and 100 paired draws now measure `12.7-21.7 s` at `n=100`/`T=50` (see 3c) -- and `"auto"`
+costs nothing at all on a run whose screen stays quiet. The caveat in `docs/adr/0002` still
+stands: the batched path's verdict-equivalence is measured on clean fixtures only, and a fragile
+ensemble with solves near the convergence boundary is unmeasured.
 
 This is the suite's answer to "certify this one dataset without a simulator." It draws
 `config.num_bootstrap_draws` (default `100`, paired `+/-`) multiplier vectors `nu_b` with iid
@@ -374,14 +394,16 @@ section 3c).
 `DiagnosticReport.monte_carlo_counts` carries `num_bootstrap_draws_executed` next to the planned
 `num_bootstrap_draws` for the same reason, whenever this check ran at all.
 
-**Status logic:** `indeterminate` if fewer than 3 re-solves converged. `failed` if any evaluable
+**Status logic:** same confirmed-fragility rung first as the exact check's -- `failed` when the
+failure fraction's Clopper-Pearson lower bound clears `config.bad_direction_probability_target`
+(fragility under resampling-scale perturbations statistically confirmed on all executed
+re-solves). Then `indeterminate` if fewer than 3 re-solves converged. `failed` if any evaluable
 target's ratio exceeds the band's upper edge (the bootstrap distribution is wider than the
 sandwich claims -- the **anticonservative** direction) or `mean_shift_se` exceeds its banded
 threshold `max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (systematic
 curvature-induced displacement of the resampled roots). Else `indeterminate` if the observed
-re-solve failure fraction exceeds `config.bad_direction_probability_target` -- fragility under
-resampling-scale perturbations is itself a finding, and the converged subset is optimistically
-selected. Else `indeterminate` if a gate could not be fully evaluated -- any target in
+re-solve failure fraction exceeds the target without the lower bound confirming it -- fragility
+suspected but not measured, and the converged subset is optimistically selected. Else `indeterminate` if a gate could not be fully evaluated -- any target in
 `se_ratio_band_unevaluable_targets`, an unavailable null band, or a suppressed/unavailable
 mean-shift gate -- because with no SE comparison performed for some target there is nothing left
 to have passed (a below-band ratio elsewhere is still reported as a warning in that case). Else
@@ -460,7 +482,7 @@ faster. And the batched path is never load-bearing for whether a result exists a
 `g_tilde` survives `jit`+`vmap` (host-side control flow on the argument, a callback, a shape the
 tracer refuses), so a failure to compile at the pinned width logs a warning and falls back to the
 serial solver with `resolve_batch_width` reported as `0` -- a bootstrap that did not run would be
-an `uncertifiable` verdict, i.e. a materially different report, which is not an acceptable outcome
+a `not_certified` verdict, i.e. a materially different report, which is not an acceptable outcome
 for a performance knob. A failure *after* some waves have already been re-solved cannot be undone
 that way: the remaining waves fall back, `resolve_batch_width` still names the width that ran, and
 the check attaches a warning that the ensemble mixes the two arithmetics -- they agree well inside
@@ -473,13 +495,16 @@ truncation; the bootstrap additionally reports `num_draws_executed < num_draws`,
 `DiagnosticReport.monte_carlo_counts` carries `num_bootstrap_draws_executed` next to the planned
 `num_bootstrap_draws`. Every fraction and Clopper-Pearson bound in the check is computed against
 what actually ran, so they get *wider*, never narrower. The stop is status-preserving by
-construction: it fires only when `converged_so_far + trials_remaining < 3`, at which point the
-first status rung (`indeterminate` below 3 converged solves) is already determined for **every**
-possible completion of the ensemble, so the reported `status` -- and therefore `classification`
-and `verdict`, which are pure functions of the check statuses -- is what the full plan would have
-produced. Because it requires at most 2 trials to remain, it can never skip more than 2, i.e. ~1%
-of a 100-paired-draw plan and 4% of a 25-draw one; it exists for the guarantee and the honest
-accounting, not for the speed.
+construction: it fires only when `converged_so_far + trials_remaining < 3`, at which point no
+completion of the ensemble can reach the gate or pass rungs -- the status is decided between
+`failed` (confirmed fragility: the failure rate's lower bound clears the target) and
+`indeterminate`, and for any plan of 9+ trials that comparison lands the same way for the
+truncated ensemble and every completion of it, so the reported `status` -- and therefore
+`classification` and `verdict`, which are pure functions of the check statuses -- is what the
+full plan would have produced (a toy plan below ~9 trials can at worst soften a would-be
+`failed` to `indeterminate`, both in the do-not-report family). Because it requires at most 2
+trials to remain, it can never skip more than 2, i.e. ~1% of a 100-paired-draw plan and 4% of a
+25-draw one; it exists for the guarantee and the honest accounting, not for the speed.
 
 The two optimizations do not compose, and the direction of that is worth knowing before you go
 looking for a truncation that never happens: batched re-solves can only test the predicate at a
@@ -489,14 +514,17 @@ wave boundary, where the remaining count is a multiple of the wave width, so at 
 costs at most the 2 trials above, and the accounting stays honest either way -- the metrics report
 what actually ran, which under batching is the whole plan.
 
-The tempting stronger rule -- "stop once the solver is *certainly* unhealthy" -- is **not**
-implemented, because it is not verdict-preserving. Unhealthiness only confines the status to
-`{failed, indeterminate}`: the `failed` rung deliberately sits above the unhealthy rung in both
-checks, so a distortion measured on the optimistically-censored converged subset still counts. In
-the ADS-142 influence cell every one of 50 cluster runs was certainly unhealthy from the first
-trial (failure fractions `0.12-0.86`) and every one nevertheless reported `failed` from its
-converged subset; stopping on unhealthiness would have turned 50 `invalid` verdicts into 50
-`uncertifiable` ones.
+The tempting stronger rule -- "stop once fragility is *confirmed*" -- is **not** implemented,
+because confirmation at a truncation point does not survive every completion: the lower bound
+falls as remaining trials converge (`lb(x, n)` shrinks in `n` at fixed `x`), so a rate confirmed
+above the target mid-ensemble can end the full plan below it. Mere unhealthiness (observed
+fraction above the target, unconfirmed) is weaker still: it only confines the status to
+`{failed, indeterminate}`, and the distortion-gate `failed` rung deliberately sits above the
+unhealthy rung in both checks so a distortion measured on the optimistically-censored converged
+subset still counts. In the ADS-142 influence cell every one of 50 cluster runs had failure
+fractions of `0.12-0.86` -- rates whose lower bounds clear the default target, so under the
+current rungs they report `failed` as confirmed fragility (they previously reported the same
+`failed` from their converged subsets' distortion gates; the verdict is `invalid` either way).
 
 **One metric the divergence abort does move.** A solve that would have gone non-finite at a *later*
 iteration is now recorded as a root failure rather than a domain failure, so
@@ -571,19 +599,24 @@ Always runs (unless the root check hard-failed). Purely numerical/linear-algebra
   statistical identification.
 
 **No universal condition-number threshold is hard-coded anywhere in this function** -- every
-number above is reported as a metric, and only two things drive the status: `indeterminate` if
-`target_covariance_rank_estimate < target_covariance_dim` (weak/degenerate identification of the
-reported contrasts), and (further)
-`indeterminate` if `numerical_sensitivity_max_relative_se_change > config.se_distortion_tolerance`
+number above is reported as a metric, and only two things drive the status: `failed` if
+`target_covariance_rank_estimate < target_covariance_dim` (unidentified reported components),
+and otherwise `indeterminate` if
+`numerical_sensitivity_max_relative_se_change > config.se_distortion_tolerance`
 (default `0.05`) -- i.e. the reported SEs are themselves numerically fragile at a scale well below
 real precision loss. `passed` otherwise.
 
-**Why there is deliberately no `failed` tier here:** the ADS-142 experiment asked whether a
-second, higher sensitivity threshold predicts actual per-replicate variance failure and measured
-a clear no -- in the cell where variance blow-ups actually occurred, `sensitivity > 0.20` caught
-only ~5% of >2x-inflated replicates (vs. `n_eff`'s ~59% at its default floor), and the blow-ups
-it does catch are *conservative* (empirical coverage never fell below ~0.94 anywhere in the
-9,883-run grid). `indeterminate` is the calibrated ceiling for this check, not a placeholder.
+**Why the two gates land on different tiers:** rank deficiency `failed` because it is the
+suite's single best-measured predictor of catastrophe -- it identified 76/76 of the
+zero-width-interval collapses in the ADS-142 undercoverage hunt, and `_derive_verdict` was
+already treating it as INVALID-grade evidence (the row now says the same thing the verdict
+does). The sensitivity gate stays capped at `indeterminate` because the same experiments
+measured the opposite for it: a second, higher sensitivity threshold does NOT predict actual
+per-replicate variance failure -- in the cell where variance blow-ups occurred,
+`sensitivity > 0.20` caught only ~5% of >2x-inflated replicates (vs. `n_eff`'s ~59% at its
+default floor), and the blow-ups it does catch are *conservative* (empirical coverage never fell
+below ~0.94 anywhere in the 9,883-run grid). `indeterminate` is the calibrated ceiling for the
+sensitivity gate, not a placeholder.
 
 ### 6. Influence concentration -- `check_influence_concentration`
 
@@ -741,13 +774,17 @@ unverified claim for a claim this package has no reason to think is better-found
 - `locally_supported`: the observed-data checks pass, but no end-to-end simulator calibration is
   available.
 - `failed`: a hard prerequisite (an input-check result, root/implementation, out-of-range
-  probabilities, non-finite values) or a material measured distortion failed -- SE-ratio/
-  mean-shift/quantile-shift beyond its null band or tolerance in the exact nonlinear check, or
-  bootstrap SEs above their null band (sandwich SE understated) in `check_multiplier_bootstrap`.
-- `indeterminate`: weak identification, rank-deficient target covariance, unstable solves,
-  insufficient perturbation directions, a distortion gate that could not be evaluated at all,
-  severe domain censoring of the local-nonlinearity probes, or inadequate simulator coverage
-  prevent a conclusion either way.
+  probabilities, non-finite values) or a measured collapse or distortion -- a rank-deficient
+  target covariance (unidentified reported components), total domain censoring of the
+  local-nonlinearity probes (`g_tilde` nonfinite at every sampling-scale probe), a re-solve
+  failure rate statistically confirmed above `bad_direction_probability_target` (either
+  re-solve check), SE-ratio/mean-shift/quantile-shift beyond its null band or tolerance in the
+  exact nonlinear check, or bootstrap SEs above their null band (sandwich SE understated) in
+  `check_multiplier_bootstrap`.
+- `indeterminate`: numerically fragile SEs, unstable solves, insufficient perturbation
+  directions, a failure rate above target but below statistical confirmation, a distortion gate
+  that could not be evaluated at all, severe (but not total) domain censoring of the
+  local-nonlinearity probes, or inadequate simulator coverage prevent a conclusion either way.
 
 ## Verdict -- the decision-level summary (`DiagnosticReport.verdict`)
 
@@ -755,14 +792,17 @@ unverified claim for a claim this package has no reason to think is better-found
 WARNING-blindness (section 4.4 of the tutorial) means an automated consumer reading only
 `classification` cannot see the suite's most common non-clean finding -- calibrated
 *conservatism*. `report.verdict` is the additive fix: a pure function of the check results
-(`_derive_verdict`) that answers "can I report this CI?" in four values, each carrying the
+(`_derive_verdict`) that answers "can I report the adjusted sandwich variance?" in
+four values, each carrying the
 operating characteristics the ADS-142 experiments measured for it (see the
 `DiagnosticVerdicts` docstring in `constants.py` for the full statement):
 
 - `invalid` -- a hard/measured failure, or a rank-deficient target covariance (pulled up from
   `indeterminate` because that condition identified 76/76 zero-width-CI collapses in the
   undercoverage hunt). Do not report.
-- `uncertifiable` -- something unresolved: re-solve fragility, censored ensembles, unevaluable
+- `not_certified` (renamed from `uncertifiable` on 2026-09-02: the verdict means "not
+  established yet", not "impossible to establish" -- its most common cause is fixed by
+  re-running with the multiplier bootstrap on) -- something unresolved: re-solve fragility, censored ensembles, unevaluable
   gates, or the `a_{j,l}` screen called for the bootstrap and it did not run. Empirically,
   every genuinely miscalibrated design landed here or in `invalid` rather than falsely
   certifying. Do not report as validated.
@@ -803,7 +843,7 @@ verdict) at ~25s per run. `local_nonlinearity` is its calibrated replacement; ol
 `debug_pieces.pkl` files still carry its `local_linearization_error_ratio_*` keys.)
 
 A run is **flagged** (`diagnostics.diagnostics_flagged`, plus the extreme-condition row) when
-the verdict is `uncertifiable`/`invalid`, when the suite was requested but produced no report
+the verdict is `not_certified`/`invalid`, when the suite was requested but produced no report
 (a crashed suite must not look like a passing one), or when the condition gate fires. A
 flagged run:
 

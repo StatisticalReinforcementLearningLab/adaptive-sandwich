@@ -153,6 +153,44 @@ def _parse_comma_separated_indices(ctx, param, value):
 # this will remain an invariant as we deal with more complicated data missingness
 # TODO: I think I'm agnostic to indexing of calendar times but should check because
 # otherwise need to add a check here to verify required format.
+def _action_prob_reconstruction_row_content(first_wave_measurements):
+    """
+    (message, criteria) for the reconstruction check's summary row, from the first wave's
+    returned measurement.
+
+    Falls back to prose with no criteria when the measurement is unavailable -- a first wave
+    run by an older caller pattern, or an empty study whose agreement is NaN -- rather than
+    printing "agree to within nan" as if it were a measurement.
+    """
+    measurement = (first_wave_measurements or {}).get(
+        "action_prob_reconstruction"
+    ) or {}
+    max_abs_difference = measurement.get("max_abs_difference", math.nan)
+    if math.isnan(max_abs_difference):
+        return (
+            "Verified in the first wave (see the row above); no agreement measurement "
+            "was recorded."
+        ), []
+    return "Measured in the first wave; not re-executed here.", [
+        diagnostics.CriterionResult(
+            description=(
+                f"recorded and reconstructed probabilities agree to within "
+                f"{measurement['atol']:g} absolute difference"
+            ),
+            value=(
+                f"max difference {max_abs_difference:.2g} over "
+                f"{measurement['num_cells']} active rows"
+            ),
+            # Reaching the suite at all proves this hard-failure check passed.
+            ok=True,
+        )
+    ]
+
+
+# NOTE: everything from @cli.command down to analyze_dataset_wrapper is ONE decorator
+# chain -- any def placed inside it captures the decorators and becomes the CLI command
+# (and, being a click Command, parses sys.argv when called). A helper inserted there
+# broke every direct analyze_dataset() call before being moved up here.
 @cli.command(name="analyze")
 @click.option(
     "--analysis_df_pickle",
@@ -345,7 +383,8 @@ def _parse_comma_separated_indices(ctx, param, value):
     type=bool,
     default=True,
     help="If True (the default), the CLI exits with status 3 when the diagnostics flag the run "
-    "-- the suite's verdict is uncertifiable/invalid, the suite was requested but produced no "
+    "-- the diagnostic suite's verdict is not_certified/invalid, the suite was requested but "
+    "produced no "
     "report, or the joint bread condition number exceeds the extreme gate -- so automated "
     "pipelines cannot mistake a flagged analysis for a clean one. The analysis itself still "
     "runs to completion and every output file is written; only the exit status differs. Set "
@@ -702,7 +741,7 @@ EXTREME_CONDITION_NUMBER_THRESHOLD = 1e12
 
 def build_pipeline_diagnostic_summary_rows(
     joint_bread_cond: float,
-) -> tuple[list[tuple[str, str, str]], bool]:
+) -> tuple[list[tuple[str, str, list]], bool]:
     """
     The final diagnostic summary's row(s) for headline numeric diagnostics computed OUTSIDE
     the suite (the suite's own checks carry their own statuses), as (name, status, detail)
@@ -716,15 +755,19 @@ def build_pipeline_diagnostic_summary_rows(
         (
             "joint_bread_condition_number",
             CheckStatuses.FAILED if extreme_condition else CheckStatuses.PASSED,
-            (
-                f"cond = {joint_bread_cond:.3e}"
-                + (
-                    f" > {EXTREME_CONDITION_NUMBER_THRESHOLD:.0e}: solves against the "
-                    f"bread carry no significant digits at float32 precision"
-                    if extreme_condition
-                    else f" (gate: {EXTREME_CONDITION_NUMBER_THRESHOLD:.0e})"
-                )
-            ),
+            [
+                "criteria:",
+                diagnostics.CriterionResult(
+                    description=(
+                        f"bread-matrix condition number at most "
+                        f"{EXTREME_CONDITION_NUMBER_THRESHOLD:.0e} (above that, results "
+                        "computed from the bread matrix lose all their significant digits "
+                        "at float32 precision)"
+                    ),
+                    value=f"{joint_bread_cond:.3e}",
+                    ok=not extreme_condition,
+                ),
+            ],
         )
     ]
     return rows, extreme_condition
@@ -915,7 +958,7 @@ def analyze_dataset(
     dict: A dictionary containing the theta estimate, adjusted sandwich variance estimate, and
     classical sandwich variance estimate (plus the percentile-bootstrap keys when that was
     requested). When run_diagnostics is True it additionally carries diagnostics_flagged
-    (bool: the suite's verdict was uncertifiable/invalid, the suite produced no report, or
+    (bool: the suite's verdict was not_certified/invalid, the suite produced no report, or
     the joint bread condition number exceeded EXTREME_CONDITION_NUMBER_THRESHOLD),
     diagnostic_verdict and diagnostic_classification -- in the returned dict only, not in
     analysis.pkl (diagnostic_report.pkl is the on-disk source of truth). The CLI wrapper
@@ -942,9 +985,15 @@ def analyze_dataset(
     beta_dim = calculate_beta_dim(
         action_prob_func_args, action_prob_func_args_beta_index
     )
+    # None means the first wave did not run (suppress_all_data_checks); the summary then
+    # falls back to prose instead of quoting a measurement that was never made. Initialized
+    # HERE, above the gated call -- an earlier version initialized it further down alongside
+    # sum_to_zero_result, i.e. AFTER this assignment, silently overwriting the measurements on
+    # every checked run.
+    first_wave_measurements = None
     if not suppress_all_data_checks:
         with log_phase_duration("input_checks"):
-            input_checks.perform_first_wave_input_checks(
+            first_wave_measurements = input_checks.perform_first_wave_input_checks(
                 analysis_df,
                 active_col_name,
                 action_col_name,
@@ -1088,6 +1137,10 @@ def analyze_dataset(
         )
 
     theta_dim = len(theta_est)
+    # None means the check did not run (suppress_all_data_checks); the summary records that as
+    # INDETERMINATE rather than omitting the row, so a suppressed check and a passing one never
+    # look the same.
+    sum_to_zero_result = None
     if not suppress_all_data_checks:
         # SE-standardized form: each component of the residual is measured against its own
         # standard error (per-subject RMS / sqrt(n)), which is portable across reward scales --
@@ -1095,11 +1148,13 @@ def analyze_dataset(
         # earlier bread/sandwich displacement form inherited the sandwich's degeneracies, going
         # blind exactly in the blow-up regimes (docs/adr/0002, corrections 2026-08-31 and
         # 2026-09-02).
-        input_checks.require_estimating_functions_sum_to_zero_se_standardized(
-            per_subject_estimating_function_stacks,
-            beta_dim,
-            theta_dim,
-            suppress_interactive_data_checks,
+        sum_to_zero_result = (
+            input_checks.require_estimating_functions_sum_to_zero_se_standardized(
+                per_subject_estimating_function_stacks,
+                beta_dim,
+                theta_dim,
+                suppress_interactive_data_checks,
+            )
         )
 
     # This bottom right corner of the joint (betas and theta) variance matrix is the portion
@@ -1556,6 +1611,44 @@ def analyze_dataset(
                 beta_index_by_policy_num=beta_index_by_policy_num,
                 subject_ids=subject_ids,
             )
+            # Recorded FIRST so it reads as the foundation the two specific rows below sit
+            # on. Every other first-wave check -- ~40 of them, covering column names and
+            # dtypes, policy numbering, participation windows, argument indices, beta
+            # dimensions and finiteness -- previously appeared nowhere in the report at all,
+            # so a reader could see that reconstruction and sum-to-zero passed while having no
+            # indication that anything else had been checked. Deliberately one row rather than
+            # forty: they are black-and-white wiring questions with no measurement to report,
+            # and each is a hard failure, so the only informative thing to say is whether they
+            # ran. No count is quoted -- a hard-coded number would go stale the next time a
+            # check is added, which is exactly the kind of quiet drift this summary is for.
+            diagnostic_report.input_check_results["first_wave_input_checks"] = (
+                diagnostics.CheckResult(
+                    name="first_wave_input_checks",
+                    status=CheckStatuses.INDETERMINATE,
+                    message="Not run: suppress_all_data_checks=True.",
+                )
+                if suppress_all_data_checks
+                else diagnostics.CheckResult(
+                    name="first_wave_input_checks",
+                    status=CheckStatuses.PASSED,
+                    message=(
+                        "Verified at the START of the analysis, before the diagnostic suite "
+                        "below ran; not re-executed here."
+                    ),
+                    criteria=[
+                        diagnostics.CriterionResult(
+                            description=(
+                                "every first-wave input check passed -- column names and "
+                                "dtypes, policy numbering, participation windows, argument "
+                                "indices, beta dimensions, value finiteness, and more (each "
+                                "is a hard failure that aborts the analysis)"
+                            ),
+                            value="all passed",
+                            ok=True,
+                        )
+                    ],
+                )
+            )
             # The reconstruction check's outcome is RECORDED here rather than re-executed
             # (it evaluates action_prob_func over every active row -- the most expensive input
             # check -- and used to run twice per analysis). perform_first_wave_input_checks
@@ -1565,10 +1658,10 @@ def analyze_dataset(
             # proves it passed. The suppressed case is likewise recorded, not silently
             # omitted: a suppressed input check and a passing one must not look the same in
             # the report. INDETERMINATE, so it stays out of the FAILED set
-            # run_diagnostic_suite's hard-fail gate is built on. The sum-to-zero check is
-            # deliberately not recorded here at all: unlike reconstruction it has numeric
-            # relatives inside the suite (root_and_implementation), so its report-level story
-            # belongs to those checks.
+            # run_diagnostic_suite's hard-fail gate is built on.
+            _reconstruction_message, _reconstruction_criteria = (
+                _action_prob_reconstruction_row_content(first_wave_measurements)
+            )
             diagnostic_report.input_check_results[
                 "action_probabilities_reconstructed"
             ] = (
@@ -1581,10 +1674,80 @@ def analyze_dataset(
                 else diagnostics.CheckResult(
                     name="action_probabilities_reconstructed",
                     status=CheckStatuses.PASSED,
-                    message=(
-                        "Verified by the first-wave input checks before the suite ran "
-                        "(a hard failure there aborts the analysis); not re-executed here."
+                    # The measured agreement as a criterion, not prose: the
+                    # first_wave_input_checks row directly above already carries the
+                    # ran-at-the-start / hard-failure framing, and repeating it here left this
+                    # row saying nothing specific about what IT verified.
+                    message=_reconstruction_message,
+                    criteria=_reconstruction_criteria,
+                )
+            )
+            # The sum-to-zero check gets a row too, reversing an earlier decision to leave it
+            # out on the grounds that root_and_implementation covers the same ground. It does
+            # not: root_and_implementation measures the root correction for the THETA targets
+            # only, while this check is that same a_root construction extended to EVERY
+            # stacked component -- so the per-update beta residuals, which is where a
+            # mis-specified update function shows up, appear in no other row.
+            diagnostic_report.input_check_results[
+                "estimating_functions_sum_to_zero"
+            ] = (
+                diagnostics.CheckResult(
+                    name="estimating_functions_sum_to_zero",
+                    status=CheckStatuses.INDETERMINATE,
+                    message="Not run: suppress_all_data_checks=True.",
+                )
+                if sum_to_zero_result is None
+                else diagnostics.CheckResult(
+                    name="estimating_functions_sum_to_zero",
+                    status=(
+                        CheckStatuses.PASSED
+                        if sum_to_zero_result["max_residual_se"]
+                        <= sum_to_zero_result["soft_tolerance_se"]
+                        # Above the soft tolerance the run only reached this point because the
+                        # interactive prompt was answered "y" (or suppressed), so it passed by
+                        # consent, not by measurement -- which is a WARNING, not a PASS.
+                        else CheckStatuses.WARNING
                     ),
+                    criteria=[
+                        diagnostics.CriterionResult(
+                            description=(
+                                "the recorded parameters solve their estimating "
+                                "equations to within "
+                                f"{sum_to_zero_result['soft_tolerance_se']:g} SE (the "
+                                "soft gate: passes without comment)"
+                            ),
+                            value=(
+                                "worst residual "
+                                f"{sum_to_zero_result['max_residual_se']:.3g} SE at "
+                                f"{sum_to_zero_result['worst_label']}"
+                            ),
+                            ok=bool(
+                                sum_to_zero_result["max_residual_se"]
+                                <= sum_to_zero_result["soft_tolerance_se"]
+                            ),
+                            severity="warn",
+                        ),
+                        diagnostics.CriterionResult(
+                            description=(
+                                "the recorded parameters solve their estimating "
+                                "equations to within "
+                                f"{sum_to_zero_result['hard_tolerance_se']:g} SE (the "
+                                "hard gate: beyond it the analysis aborts, and "
+                                "continuing past the prompt passes by consent, not by "
+                                "measurement)"
+                            ),
+                            value=(
+                                "worst residual "
+                                f"{sum_to_zero_result['max_residual_se']:.3g} SE at "
+                                f"{sum_to_zero_result['worst_label']}"
+                            ),
+                            ok=bool(
+                                sum_to_zero_result["max_residual_se"]
+                                < sum_to_zero_result["hard_tolerance_se"]
+                            ),
+                            severity="warn",
+                        ),
+                    ],
                 )
             )
             logger.info(

@@ -48,6 +48,27 @@ def test_RL_diagnostics_smoke(run_local_pipeline):  # pylint: disable=redefined-
         report = pickle.load(f)
 
     assert isinstance(report, DiagnosticReport)
+    # The input-check rows must carry their measurements, not just statuses. Pinned here, at
+    # the only place that exercises analyze_dataset's report-building end to end, because two
+    # bugs already slipped past the unit suite in exactly this spot on 2026-09-02: a helper
+    # placed inside analyze's click decorator chain (which BROKE every direct analyze_dataset
+    # call while every unit test stayed green), and a late None re-initialization that
+    # silently discarded the first wave's measurements before this report was built.
+    reconstruction_row = report.input_check_results[
+        "action_probabilities_reconstructed"
+    ]
+    (reconstruction_criterion,) = reconstruction_row.criteria
+    assert "agree to within 1e-06" in reconstruction_criterion.description
+    assert "max difference" in reconstruction_criterion.value
+    assert reconstruction_criterion.ok is True
+    assert "first_wave_input_checks" in report.input_check_results
+    sum_to_zero_row = report.input_check_results["estimating_functions_sum_to_zero"]
+    assert any(
+        "solve their estimating equations" in criterion.description
+        and "worst residual" in criterion.value
+        and " SE at " in criterion.value
+        for criterion in sum_to_zero_row.criteria
+    )
     assert report.classification in (
         DiagnosticClassifications.LOCALLY_SUPPORTED,
         DiagnosticClassifications.FAILED,

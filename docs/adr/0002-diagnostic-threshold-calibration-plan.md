@@ -685,7 +685,9 @@ columns across this change.
   assuming otherwise.
 - The batched path's verdict-equivalence is measured on clean fixtures. The case that matters -- a
   fragile ensemble with solves near the convergence boundary, where a ~5e-7 perturbation could
-  flip a convergence flag -- is unmeasured. That is the second reason it is off by default.
+  flip a convergence flag -- is unmeasured. This was "the second reason it is off by
+  default"; as of the 2026-09-02 addendum below the default is `"auto"` and this is the
+  only remaining reason to keep `"off"` reachable.
 - The abort's savings figures come from synthetic sweeps and this repository's fixtures; the
   failure-*mode* mix (blow-up caught immediately vs. slow creep never caught) is what drives them
   and could differ on the real stacked estimating function.
@@ -697,3 +699,54 @@ columns across this change.
   it needs a test pinning `check_local_nonlinearity`'s status and the report's
   `verdict`/`verdict_basis` across chunk sizes, since float32 reassociation moves `a_{j,l}` by
   ~1e-6 relative and the `0.05` screen is what `verdict_basis` reads.
+
+## Addendum (2026-09-02): the performance objection is resolved; `multiplier_bootstrap` now defaults to `"auto"`
+
+The 2026-09-01 addendum above established that the multi-hour bootstrap figures were an artifact
+of the pre-fix `g_tilde` closure and should not be quoted as current cost. This records the
+consequence that had not yet been taken: **the default moved from `"off"` to `"auto"`.**
+
+**Why the objection is gone.** With the closure built and jitted once, a 100-paired-draw check
+(200 trials, 8,027 `g_tilde` evaluations) measures `12.7 s` and `21.7 s` in two independent local
+harnesses at `n=100`/`T=50`/`eta_dim=200` -- the spread is machine load, not different work --
+against the `~1.8 h` the same evaluation count projects under the old closure. At 25 paired draws
+it is `3.5 s` / `5.4 s`. These are local numbers (Apple-silicon CPU, JAX CPU backend, float32);
+absolute seconds could move by roughly 2x on a cluster core, but the ratio is the transferable
+part, and no plausible factor puts seconds back into hours.
+
+**Why the default had to move, independent of cost.** `_derive_verdict` makes the bootstrap the
+verdict layer once the `a_{j,l}` screen trips. With `multiplier_bootstrap="off"`, therefore, any
+run whose headline `a_{j,l}` exceeded `bootstrap_screen_a_jl_threshold` (0.05) was
+`not_certified` **by construction** -- not because anything was measured wrong, but because the
+evidence the verdict wanted was never gathered. A healthy run at `a_{j,l} = 0.123` could not be
+certified at any cost, and nothing in the end-of-run summary said that certification was still
+available or how to get it. That is a defaulting error, not a calibration one: the screen was
+doing its job and the verdict layer it routed to was switched off.
+
+Verified on this repo's `tests/benchmarks/fixtures/small`: the same dataset that returned
+`not_certified` under `"off"` returns `certified (basis: bootstrap)` under `"auto"`, with a
+bootstrap/sandwich SE ratio of `1.08` inside a `0.828-1.18` null band and a `0.0615 SE` mean
+shift. `"auto"` costs nothing on a run whose screen stays quiet, since the screen has to trip
+before the bootstrap runs at all.
+
+**What did NOT change, and remains the reason to keep an opt-out.** The caveat in this ADR's
+"Pending, and not to be quoted as measured" list still stands in full: the batched path's
+verdict-equivalence is measured on *clean* fixtures only, and the case that matters -- a fragile
+ensemble with solves near the convergence boundary, where a ~5e-7 perturbation could flip a
+convergence flag -- is unmeasured. That list previously called this "the second reason it is off
+by default"; with cost no longer being the first, it is now the *only* reason, and it argues for
+keeping `"off"` reachable rather than for keeping it as the default. Runs that need the old
+behavior should set `multiplier_bootstrap="off"` explicitly.
+
+**Related output changes landed at the same time**, all aimed at the same failure mode -- a
+reader could not tell why a run was not certified, or that anything could be done about it:
+- the end-of-run summary now prints each check's headline measurement and the gate it is
+  compared against, on passing rows as well as failing ones;
+- it carries a status key, a verdict key, and a one-line description of every check it rendered;
+- when the verdict is `not_certified` *because* the screen called for a bootstrap that did not
+  run, the block names that cause and the remedy explicitly;
+- the verdict `uncertifiable` was renamed `not_certified` (displayed `NOT CERTIFIED`). The old
+  name asserted impossibility, but the verdict means "not established yet", and its most common
+  cause is fixed by re-running. `DiagnosticVerdicts.UNCERTIFIABLE` remains as an alias for the
+  new value; reports pickled before the rename carry the old wire value and are not
+  special-cased, since re-reading one is out of scope.

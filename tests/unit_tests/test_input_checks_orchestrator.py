@@ -107,6 +107,22 @@ def _reward_orch(decision_time, subject_id):
     return 1.0 + 0.1 * decision_time + 0.5 * subject_id
 
 
+def _assert_first_wave_passes_orch(study):
+    """
+    RETARGETED on 2026-09-02: perform_first_wave_input_checks used to return None, and eleven
+    tests pinned that. It now returns the measurements the diagnostic summary reports --
+    currently the action-probability reconstruction's agreement -- so a passing run is pinned
+    by the SHAPE of that return instead: the measurement must exist, be finite, and sit within
+    the reconstruction's own tolerance, because a pass with a missing or out-of-tolerance
+    measurement would mean the check and its report have drifted apart.
+    """
+    measurements = input_checks.perform_first_wave_input_checks(**study)
+    reconstruction = measurements["action_prob_reconstruction"]
+    assert set(reconstruction) == {"max_abs_difference", "num_cells", "atol"}
+    assert reconstruction["num_cells"] > 0
+    assert 0.0 <= reconstruction["max_abs_difference"] <= reconstruction["atol"]
+
+
 def _build_study_orch(
     *,
     stale_action_prob_beta=False,
@@ -443,7 +459,7 @@ def test_perform_first_wave_input_checks_passes_on_valid_study_orch():
     """
     study = _build_study_orch()
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_passes_with_integer_policy_num_column_orch():
@@ -455,7 +471,7 @@ def test_perform_first_wave_input_checks_passes_with_integer_policy_num_column_o
     study = _build_study_orch(integer_policy_num_dtype=True)
 
     assert study["analysis_df"]["policy_num"].dtype == "int64"
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_on_empty_study_reports_it_clearly_orch():
@@ -497,7 +513,7 @@ def test_perform_first_wave_input_checks_interactive_confirmation_accepted_orch(
 
     monkeypatch.setattr("builtins.input", _answer_yes)
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
     assert len(prompts) == 1
     assert "2 subjects" in prompts[0]
     assert "4 decision times" in prompts[0]
@@ -1033,7 +1049,7 @@ def test_perform_first_wave_input_checks_passes_masked_configuration_orch():
 
     assert study["alg_update_func_args_mask_index"] == 5
     assert study["alg_update_func_args_ragged_indices"] == (2, 3, 4)
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_rejects_shared_beta_as_ragged_index_orch():
@@ -1135,7 +1151,7 @@ def test_perform_first_wave_input_checks_accepts_variadic_alg_update_func_orch()
 
     study["alg_update_func"] = _variadic_alg_update_func
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_accepts_variadic_forwarding_shim_orch():
@@ -1151,7 +1167,7 @@ def test_perform_first_wave_input_checks_accepts_variadic_forwarding_shim_orch()
 
     study["alg_update_func"] = _forwarding_shim
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_accepts_variadic_forwarding_shim_with_mask_orch():
@@ -1169,7 +1185,7 @@ def test_perform_first_wave_input_checks_accepts_variadic_forwarding_shim_with_m
     study["alg_update_func"] = _forwarding_shim
 
     assert study["alg_update_func_args_mask_index"] == 5
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_accepts_extra_defaulted_parameter_orch():
@@ -1189,7 +1205,7 @@ def test_perform_first_wave_input_checks_accepts_extra_defaulted_parameter_orch(
 
     study["alg_update_func"] = _ridge_penalized_alg_update_func
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_rejects_too_few_args_for_defaulted_signature_orch():
@@ -1540,7 +1556,7 @@ def test_perform_first_wave_input_checks_exempts_theta_parameter_name_from_colum
     study["inference_func"] = _inference_func_with_theta_second
     study["inference_func_args_theta_index"] = 1
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_rejects_duplicate_subject_time_rows_orch():
@@ -1698,7 +1714,7 @@ def test_perform_first_wave_input_checks_accepts_nan_values_on_inactive_rows_orc
         .all()
         .all()
     )
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)
 
 
 def test_perform_first_wave_input_checks_rejects_nonfinite_action_prob_func_arg_orch():
@@ -1919,4 +1935,4 @@ def test_perform_first_wave_input_checks_accepts_two_policies_at_one_decision_ti
     second_subject_beta = study["action_prob_func_args"][3][_SUBJECT_IDS_ORCH[-1]][0]
     assert not np.array_equal(first_subject_beta, second_subject_beta)
 
-    assert input_checks.perform_first_wave_input_checks(**study) is None
+    _assert_first_wave_passes_orch(study)

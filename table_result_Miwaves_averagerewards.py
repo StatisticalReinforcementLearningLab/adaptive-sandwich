@@ -67,7 +67,7 @@ if args.evaluate > 0: # n = 10000
         if args.alg == 'TS': # old path
             subpath = path + f"Miwaves_TS_n{n_true}_T{T}/{i}/decisionBtwnUpdates=1_habituation={args.habituation}_treatment={args.treatment}_steepness={args.steepness}_averagerewards/exp=1"
         else: # SAC
-            subpath = path + f"Miwaves_sac_n{n_true}_T{T}/{i}/decisionBtwnUpdates=1_habituation={args.habituation}_treatment={args.treatment}_steepness={args.steepness}_actorridge={args.actorridge}_averagerewards/exp=1"
+            subpath = path + f"Miwaves_sac_n{n_true}_T{T}/{i}/decisionBtwnUpdates=1_habituation={args.habituation}_treatment={args.treatment}_steepness={args.steepness}_actorridge{args.actorridge}_averagerewards/exp=1"
         data = pd.read_csv(subpath+'/data.csv')
         rewards_list_true.append(data['reward'].mean())
 
@@ -107,13 +107,13 @@ else: # 0
             raise NotImplementedError
     elif args.alg == 'SAC': # default: args.habituation == 1 high habituation, steepness = 1.0, actorridge = 0.01
         if args.treatment == 1: # low treatment effect
-            true_reward_mean = None
-            true_reward_median = None
-            true_var = None
+            true_reward_mean = 1.861584
+            true_reward_median = 1.861553
+            true_var = 0.000031
         elif args.treatment == 2: # high treatment effect
-            true_reward_mean = None
-            true_reward_median = None
-            true_var = None
+            true_reward_mean = 1.914112
+            true_reward_median = 1.914035
+            true_var = 0.000028
         else:
             raise NotImplementedError
     else:
@@ -131,7 +131,7 @@ for i in tqdm(range(N_seed)):
     if args.alg == 'TS': # old path
         subpath = path + f"Miwaves_TS_n{n}_T{T}/{i}/decisionBtwnUpdates=1_habituation={args.habituation}_treatment={args.treatment}_steepness={args.steepness}_averagerewards/exp=1"
     else:
-        subpath = path + f"Miwaves_sac_n{n}_T{T}/{i}/decisionBtwnUpdates=1_habituation={args.habituation}_treatment={args.treatment}_steepness={args.steepness}_actorridge={args.actorridge}_averagerewards/exp=1"
+        subpath = path + f"Miwaves_sac_n{n}_T{T}/{i}/decisionBtwnUpdates=1_habituation={args.habituation}_treatment={args.treatment}_steepness={args.steepness}_actorridge{args.actorridge}_averagerewards/exp=1"
     try:
         RL_data = pd.read_csv(subpath+'/data.csv')
         rewards_list.append(RL_data['reward'].mean())

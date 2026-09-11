@@ -819,7 +819,7 @@ class SoftActorCritic:
         constant_ridge=0, # 1: constant ridge penalty, 0: decayed ridge penalty (classical)
         actor_ridge_penalty=0.0, # ridge penalty for the actor, default 0.0
     ):
-        self.state_feats = state_feats # syn: ['intercept', 'past_reward']
+        self.state_feats = state_feats # syn: ['intercept', 'past_reward'], miwavesL: ['intercept', 'S1', 'S2', 'S3']
         self.treat_feats = treat_feats # syn: ['intercept', 'past_reward']
         self.alg_seed = alg_seed
         self.lower_clip = lower_clip

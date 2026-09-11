@@ -94,17 +94,18 @@ def run_study_simulation(args, study_env, study_RLalg, user_env_data):
             rewards, brush_times = study_env.sample_rewards(
                 curr_timestep_data, actions, t
             )
-        elif args.dataset_type == RLStudyArgs.SYNTHETIC:
+        # elif args.dataset_type == RLStudyArgs.SYNTHETIC:
+        else:
             # synthetic env: (1) average rewards without alphas, (2) treatment effect with alphas
             if args.alpha1 != 0.0 or args.alpha2 != 0.0: ####### importance to change
                 rewards = study_env.sample_rewards_prefeatures(curr_timestep_data, actions, t, args.alpha1, args.alpha2)  # from the environment
             else:
                 rewards = study_env.sample_rewards(curr_timestep_data, actions, t)  # from the environment
 
-        elif args.dataset_type == RLStudyArgs.MIWAVES: # # Miwaves no alpha
-            rewards = study_env.sample_rewards(curr_timestep_data, actions, t)
-        else:  
-            raise ValueError("Invalid Dataset Type")
+        # elif args.dataset_type == RLStudyArgs.MIWAVES: # # Miwaves no alpha
+        #     rewards = study_env.sample_rewards(curr_timestep_data, actions, t)
+        # else:  
+        #     raise ValueError("Invalid Dataset Type")
      
 
         # Record all collected data #######################################

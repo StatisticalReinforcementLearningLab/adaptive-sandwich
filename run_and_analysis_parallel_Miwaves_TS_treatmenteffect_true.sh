@@ -41,7 +41,7 @@ n=30 #
 reward_modification=0 # 0: no reward modification; 1: reward modification
 
 ######## new hyperparameters to set for Miwaves sim
-steepness=10 # 20/0.95=21.053
+steepness=10.0 # 20/0.95=21.053
 miwaves_habituation=1 # -1: no habituation; 1: high habituation, 6: low habituation
 miwaves_treatmenteffect=2 # 1: overall_low, 2: overall_high, 0:none
 
@@ -57,6 +57,10 @@ prior_mean="2.12,0.0,0.0,-0.69,0.0,0.0,0.0,0.0" # Dim=8 for no action-centering;
 prior_var_upper_triangle="0.6084,0,0,0,0,0,0,0,0.1444,0,0,0,0,0,0,0.3844,0,0,0,0,0,0.9604,0,0,0,0,0.0729,0,0,0,0.1089,0,0,0.09,0,0.1024" # 8+7+6+5+4+3+2+1=36 elements for no action-centering
 noise_var=1.0
 act_cost_threshold=0.1 # need to be changed
+
+####### new alpa for enviroment
+alpha1=0.1
+alpha2=0.1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -75,11 +79,11 @@ alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
 alg_update_func_args_previous_betas_index=-1 # for recursive algorithms; -1 if not used
 # inference_func_filename="functions_to_pass_to_analysis/synthetic_get_least_squares_loss_inference_no_action_centering.py"
-inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
+inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
 # theta_calculation_func_filename="functions_to_pass_to_analysis/synthetic_estimate_theta_least_squares_no_action_centering.py"
-theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_sum.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_diff_partial_01feature.py"
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
 small_sample_correction="none" # "HC3", "none"
@@ -145,6 +149,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     H  | miwaves_habituation )                          needs_arg; miwaves_habituation="$OPTARG" ;;
     T  | miwaves_treatmenteffect )                      needs_arg; miwaves_treatmenteffect="$OPTARG" ;;
     R  | reward_modification )                          needs_arg; reward_modification="$OPTARG" ;;
+    alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
+    alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal long option --$OPT" ;; # bad long option
   esac
@@ -197,7 +203,8 @@ save_dir="${save_dir_prefix}/${SLURM_ARRAY_TASK_ID}"
 save_dir_glob="${save_dir_prefix}/*"
 mkdir -p "$save_dir"
 
-filename="_averagerewards" # add C in both environment and inference
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Beginning RL simulations.
@@ -226,12 +233,14 @@ python rl_study_simulation_modified.py \
   --prior_mean=$prior_mean \
   --prior_var_upper_triangle=$prior_var_upper_triangle \
   --noise_var=$noise_var \
-  --Twoarmed=0 \
+  --Twoarmed=1 \
   --filename=$filename \
   --act_cost_threshold=$act_cost_threshold \
   --Miwaves_habituation=$miwaves_habituation \
   --Miwaves_treatmenteffect=$miwaves_treatmenteffect \
-  --reward_modification=$reward_modification
+  --reward_modification=$reward_modification \
+  --alpha1=$alpha1 \
+  --alpha2=$alpha2  
 
 echo $(date +"%Y-%m-%d %T") run_and_analysis_parallel_synthetic_thompson_sampling.sh: Finished RL simulations.
 

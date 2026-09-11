@@ -54,6 +54,10 @@ env_seed_override=-1
 alg_seed_override=-1
 act_cost_threshold=0.1
 
+####### new alpa for enviroment
+alpha1=0.1
+alpha2=0.1
+
 # Inference configuration.
 in_study_col_name="in_study"
 action_col_name="action"
@@ -70,10 +74,10 @@ alg_update_func_args_beta_index=0
 alg_update_func_args_action_prob_index=-1
 alg_update_func_args_action_prob_times_index=-1
 alg_update_func_args_previous_betas_index=1
-inference_func_filename="functions_to_pass_to_analysis/primary_analysis_avg_reward_sum_loss.py"
+inference_func_filename="functions_to_pass_to_analysis/inference_partial_linear_regression_01feature.py"
 inference_func_args_theta_index=0
 inference_func_type="loss"
-theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_sum.py"
+theta_calculation_func_filename="functions_to_pass_to_analysis/estimate_theta_avg_reward_diff_partial_01feature.py"
 # Slurm jobs cannot answer interactive prompts; all noninteractive checks remain enabled.
 suppress_interactive_data_checks=1
 suppress_all_data_checks=0
@@ -139,6 +143,8 @@ while getopts T:t:n:u:d:o:r:f:a:s:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:F:L:M:
     v  | lr_pi )                                        needs_arg; lr_pi="$OPTARG" ;;
     W  | constant_ridge )                               needs_arg; constant_ridge="$OPTARG" ;;
     V  | actor_ridge_penalty )                          needs_arg; actor_ridge_penalty="$OPTARG" ;;
+    alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
+    alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
     \? )                                                exit 2 ;;
     * )                                                 die "Illegal option --$OPT" ;;
   esac
@@ -165,7 +171,8 @@ save_dir="${save_dir_prefix}/${SLURM_ARRAY_TASK_ID}"
 save_dir_glob="${save_dir_prefix}/*"
 mkdir -p "$save_dir"
 
-filename="_treatmenteffect"
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+
 
 echo "$(date +"%Y-%m-%d %T") ${script_name}: Beginning SAC simulation."
 python rl_study_simulation_modified.py \
@@ -199,7 +206,9 @@ python rl_study_simulation_modified.py \
   --epoch_actor="$epoch_actor" \
   --lr_pi="$lr_pi" \
   --constant_ridge="$constant_ridge" \
-  --actor_ridge_penalty="$actor_ridge_penalty"
+  --actor_ridge_penalty="$actor_ridge_penalty" \
+  --alpha1=$alpha1 \
+  --alpha2=$alpha2  
 
 echo "$(date +"%Y-%m-%d %T") ${script_name}: Finished SAC simulation."
 

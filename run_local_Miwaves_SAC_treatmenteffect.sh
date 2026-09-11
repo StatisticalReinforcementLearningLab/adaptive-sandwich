@@ -40,7 +40,9 @@ env_seed_override=-1
 alg_seed_override=-1
 act_cost_threshold=0.1 # need to be changed
 
-
+####### new alpa for enviroment
+alpha1=0.1
+alpha2=0.1
 
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
@@ -128,6 +130,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:F:
     v  | lr_pi )                                        needs_arg; lr_pi="$OPTARG" ;;
     W  | constant_ridge )                               needs_arg; constant_ridge="$OPTARG" ;;
     V  | actor_ridge_penalty )                        needs_arg; actor_ridge_penalty="$OPTARG" ;;
+    alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
+    alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -146,7 +150,8 @@ if [ -z "${recruit_n:-}" ]; then
   recruit_n=$n
 fi
 
-filename="_treatmenteffect"
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Beginning RL study simulation."
@@ -180,7 +185,9 @@ python rl_study_simulation_modified.py \
   --epoch_actor=$epoch_actor \
   --lr_pi=$lr_pi \
   --constant_ridge=$constant_ridge \
-  --actor_ridge_penalty=$actor_ridge_penalty
+  --actor_ridge_penalty=$actor_ridge_penalty \
+  --alpha1=$alpha1 \
+  --alpha2=$alpha2  
 
 echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_SAC.sh: Finished RL study simulation."
 

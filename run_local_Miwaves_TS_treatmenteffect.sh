@@ -34,6 +34,10 @@ prior_var_upper_triangle="0.6084,0,0,0,0,0,0,0,0.1444,0,0,0,0,0,0,0.3844,0,0,0,0
 noise_var=1.0
 act_cost_threshold=0.1 # need to be changed
 
+####### new alpa for enviroment
+alpha1=0.1
+alpha2=0.1
+
 # Arguments that only affect inference side.
 in_study_col_name="in_study"
 action_col_name="action"
@@ -117,6 +121,8 @@ while getopts T:t:n:u:d:o:r:e:f:a:s:y:Y:A:G:i:c:p:C:U:E:X:P:b:l:Z:B:D:j:I:h:g:H:
     H  | miwaves_habituation )                          needs_arg; miwaves_habituation="$OPTARG" ;;
     T  | miwaves_treatmenteffect )                      needs_arg; miwaves_treatmenteffect="$OPTARG" ;;
     R  | reward_modification )                          needs_arg; reward_modification="$OPTARG" ;;
+    alpha1 )                                       needs_arg; alpha1="$OPTARG" ;;
+    alpha2 )                                       needs_arg; alpha2="$OPTARG" ;;
     \? )                                        exit 2 ;;  # bad short option (error reported via getopts)
     * )                                         die "Illegal option --$OPT" ;; # bad long option
   esac
@@ -135,7 +141,8 @@ if [ -z "${recruit_n:-}" ]; then
   recruit_n=$n
 fi
 
-filename="_treatmenteffect"
+filename="_treatmenteffect_alpha1${alpha1}_alpha2${alpha2}" # add C in both environment and inference
+
 
 # Simulate an RL study with the supplied arguments.  (We do just one repetition)
 echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Beginning RL study simulation."
@@ -168,7 +175,9 @@ python rl_study_simulation_modified.py \
   --act_cost_threshold=$act_cost_threshold \
   --Miwaves_habituation=$miwaves_habituation \
   --Miwaves_treatmenteffect=$miwaves_treatmenteffect \
-  --reward_modification=$reward_modification
+  --reward_modification=$reward_modification \
+  --alpha1=$alpha1 \
+  --alpha2=$alpha2  
 
 echo "$(date +"%Y-%m-%d %T") run_local_Miwaves_thompson_sampling.sh: Finished RL study simulation."
 

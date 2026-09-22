@@ -81,7 +81,7 @@ a genuine statistical finding (e.g. the root wasn't actually solved) can look id
 | `classification == "indeterminate"`, `bread_stability` is the culprit | `numerical_sensitivity_max_relative_se_change` | The reported SEs move under a numerically negligible perturbation of the bread -- numerical fragility distinct from identification (the rank gate, which *fails*, covers that). |
 | `classification == "locally_supported"`, but `warnings` is non-empty | Which check's name prefixes each warning string | `local_nonlinearity` and `influence_concentration` warnings never change the classification (see section 3, and section 4.4 for influence_concentration specifically -- it has *no* path to anything but `PASSED`/`WARNING` at all) -- read them yourself, they're the two checks most likely to have something real to say even when nothing "failed." |
 | You turned on the expensive checks and got `indeterminate` from `exact_nonlinear_perturbation` | `root_failure_fraction`/`num_converged_trials` vs. `num_trials`, then `mean_shift_gate_evaluable` and the warnings | Either some continuation solves failed but not enough to statistically confirm a rate above target (a confirmed rate -- Clopper-Pearson lower bound over `bad_direction_probability_target` -- reads `failed`, not `indeterminate`; the unhealthy gate below that is driven by the *observed* fraction, so zero observed failures no longer reads `indeterminate` at small direction counts), or a distortion gate could not be evaluated at all (typically a singular target covariance), which is deliberately not a pass. The distortion statistics you do get were computed on the converged subset only, which is optimistically selected -- treat them as a lower bound on trouble. `root_failure_upper_bound` (Clopper-Pearson) is still reported if you want the certified bound; ~300+ directions for a ~1% one. |
-| `multiplier_bootstrap` is `failed` | `root_failure_fraction` and its lower bound first, then `se_ratio_by_target` vs. `se_ratio_null_band`, `mean_shift_se` vs. `mean_shift_threshold` | Confirmed fragility (the re-solve failure rate's Clopper-Pearson lower bound clears `bad_direction_probability_target` -- the equation measurably cannot be re-solved under resampling-scale perturbations), bootstrap SEs above the null band for at least one identified target (the sandwich SE likely *understated* -- the dangerous direction), or systematically displaced resampled roots (curvature bias). Do not report the interval as-is. |
+| `multiplier_bootstrap` is `failed` | `root_failure_fraction` and its lower bound first, then `se_ratio_by_target` vs. `se_ratio_null_band`, `mean_shift_se` vs. `mean_shift_threshold` | Confirmed fragility (the re-solve failure rate's Clopper-Pearson lower bound clears `bad_direction_probability_target` -- the equation measurably cannot be re-solved under resampling-scale perturbations), bootstrap SEs above the null band for at least one identified target (the sandwich SE likely *understated* -- the dangerous direction), or systematically displaced resampled roots (curvature bias, past the `0.50 SE` failing floor). Do not report the interval as-is. Check `failure_drivers`: if it is `["mean_shift"]` alone, the variance was verified and only the interval's CENTRE is at fault, which is why the verdict is `not_certified` rather than `invalid` and why the percentile refit bootstrap fixes it. |
 | `multiplier_bootstrap` is `warning` | `se_ratio_by_target` below the band | Bootstrap SEs sit *below* the sandwich's: the sandwich is likely overstating uncertainty (the conservative blow-up direction ADS-142 found to be the common failure mode). The interval's direction is trustworthy; its width is inflated. |
 | `multiplier_bootstrap` is `indeterminate` | `root_failure_fraction`, `se_ratio_band_unevaluable_targets`, `mean_shift_gate_evaluable` | Either re-solves failed at a rate above target but below statistical confirmation (a confirmed rate reads `failed`), or a gate could not be fully evaluated -- e.g. a target with no identified sandwich SE to compare against, so no SE comparison was performed for it. Both read as "cannot certify," not "probably fine": the check is built never to pass on an unevaluated or optimistically censored comparison. Whether that design property translates into catching real anticonservative designs is what the in-flight bootstrap-validation experiment (`docs/adr/0002`, "Follow-up experiments") is meant to measure -- wave 2 itself contained no anticonservative cells to test it on. |
 | A re-solve check ran fewer trials than you configured (`num_trials` < `num_planned_trials`, or `monte_carlo_counts["num_bootstrap_draws_executed"]` < `num_bootstrap_draws`) | `early_stopped`, `early_stop_reason`, and the warning naming the truncation | The sequential early stop fired: too few trials could still converge to compute any ensemble statistic, so no completion could have passed -- the status is `failed` when the failure rate is statistically confirmed, `indeterminate` otherwise. Deliberate and (for real-sized plans) status-preserving, not a crash or a timeout -- section 4.6. The reported fractions and Clopper-Pearson bounds are computed on what actually ran, so they are wider, never narrower. |
@@ -359,15 +359,27 @@ is unearned; a failure on it is trustworthy), or a gate could not be evaluated a
 unevaluable `se_ratios` comparison (singular target covariance) or mean-shift gate is
 `indeterminate`, never `passed`; `passed` otherwise.
 
-`mean_shift_se` is no longer compared against the fixed `mean_shift_tolerance_se`. It is measured
-on complete `+/-` pairs only and compared against `mean_shift_threshold =
-max(mean_shift_null_upper, config.mean_shift_tolerance_se)` -- the simulated finite-draw null
-quantile of the same statistic, floored at the configured tolerance. Under intact antithetic
-pairing the null band is exactly `0` and the `0.10` floor is what binds (so nothing changes for
-the ordinary case); with unpaired draws the band is what stops raw sampling noise -- about `0.26`
-SE in one dimension at the default `J = 15` -- from reading as curvature. `mean_shift_null_upper`,
-`mean_shift_threshold`, `mean_shift_gate_evaluable`, and `mean_shift_num_rows` are all reported so
-you can see which of the two bound.
+`mean_shift_se` is measured on complete `+/-` pairs only and compared against TWO banded
+thresholds: `mean_shift_warn_threshold = max(mean_shift_null_upper,
+config.mean_shift_warn_tolerance_se)` (floor `0.30`) and `mean_shift_threshold =
+max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (floor `0.50`), where
+`mean_shift_null_upper` is the simulated finite-draw null quantile of the same statistic. Under
+intact antithetic pairing the null band is exactly `0` and the floors bind; with unpaired draws
+the band is what stops raw sampling noise -- about `0.26` SE in one dimension at the default
+`J = 15` -- from reading as curvature. `mean_shift_null_upper`, both thresholds,
+`mean_shift_gate_evaluable`, `mean_shift_warned`/`mean_shift_failed`,
+`mean_shift_worst_contrast_wald_coverage` and `mean_shift_num_rows` are all reported so you can
+see which bound and what it costs. That coverage number is a bound over linear contrasts of the
+targets, not each interval's own coverage -- exact when you report one target, conservative when
+you report several (see `docs/diagnostics.md`).
+
+The floors are set from Wald coverage, which is the whole consequence of the statistic: `b_L` is
+a bias of the estimate in units of its own SE, so a nominal-95% interval centred on it covers
+`0.940` at `0.30 SE` and `0.921` at `0.50 SE`. Between the two floors the check reads `warning`
+and the run can still be `certified` -- the variance was verified, the interval is merely off
+centre, and the CAVEAT line says by how much. Above the failing floor it reads `failed`, but a
+mean-shift-ONLY failure gives `not_certified`, not `invalid`: see the verdict section of
+`docs/diagnostics.md`.
 
 **`check_multiplier_bootstrap`** (see `docs/diagnostics.md` section 3b) reuses the same
 continuation machinery to re-solve the equation under frozen-score multiplier-bootstrap draws
@@ -670,8 +682,9 @@ the failures it predicts are conservative); `p_max`'s 0.5 default is essentially
 `a_{j,l}`'s 0.10 is a design-severity gauge whose calibrated per-dataset role is the 0.05
 bootstrap screen; `check_bread_stability` deliberately keeps `indeterminate` as its ceiling
 (a `failed` tier was measured and rejected); the exact check's and bootstrap's ensemble gates
-are simulated exact nulls rather than tolerances (`mean_shift_tolerance_se` survives only as the
-practical-significance floor under that check's null band); and `backward_residual_tolerance` and
+are simulated exact nulls rather than tolerances (`mean_shift_warn_tolerance_se` and
+`mean_shift_tolerance_se` survive as coverage-calibrated floors under that check's null band);
+and `backward_residual_tolerance` and
 the sum-to-zero displacement gates are correctness smoke detectors pinned to machine behavior.
 Read the ADR before changing a default -- it records not just the values but the evidence and the
 decisions taken on it, and it is explicit about which of them are measured and which are still

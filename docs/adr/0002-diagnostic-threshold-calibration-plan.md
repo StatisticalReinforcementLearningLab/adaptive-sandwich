@@ -750,3 +750,102 @@ reader could not tell why a run was not certified, or that anything could be don
   cause is fixed by re-running. `DiagnosticVerdicts.UNCERTIFIABLE` remains as an alias for the
   new value; reports pickled before the rename carry the old wire value and are not
   special-cased, since re-reading one is out of scope.
+
+## Addendum (2026-09-22): the mean-shift floor is calibrated against coverage, and split in two
+
+**What prompted it.** A mixed-effects avg-outcome design
+(`--sigma_e2=1 --steepness=30.0 --discounted_action_sum_coef=-20.0`, n=100, T=10) reported
+`VERDICT: INVALID -- DO NOT REPORT the adjusted sandwich variance` on runs where every other
+criterion passed, on a mean shift of `0.13-0.15 SE` against the `0.10` floor. A 5,000-task
+array (job `47637338`, 4,994 complete reports, `multiplier_bootstrap="always"`) settled what
+that verdict was worth:
+
+| quantity | value |
+| --- | --- |
+| adjusted Wald coverage (vs pool mean / vs n=2000 surrogate truth) | 0.9405 / 0.9397 |
+| classical sandwich coverage | 0.877 |
+| sandwich SE median / empirical SD | **1.000** |
+| bootstrap SE median / empirical SD | 0.972 |
+| largest adjusted variance / median (none nonfinite, none >10x) | 3.2x |
+| verdicts certified / invalid / conservative | 2562 / 1965 / 467 |
+| coverage by verdict: certified / invalid / conservative | 0.944 / **0.924** / 0.989 |
+| bootstrap failures that were mean-shift-ONLY | **1835 of 1965** |
+| mean shift median / p90 / max | 0.080 / 0.171 / 0.596 SE |
+
+At the `0.10` floor the gate withheld 38.5% of runs to recall 47% of the CI misses
+(miss rate 0.073 among flagged vs 0.051 among clean) -- barely above chance. Misses were driven
+by which replicates drew a small variance estimate (miss rate 13% / 7% / 3% / 0.6% across
+adjusted-variance quartiles), which the mean shift hardly tracks (corr with log variance
+-0.12). There was no directional error among flagged runs (mean standardized error within
++/-0.07 out to 0.2 SE).
+
+**The statistic is real; the floor was not.** Re-analyzing one dataset under eight diagnostic
+seeds gave 0.151-0.174 SE, so this is a stable per-dataset property, not Monte Carlo noise: the
+ordinary second-order curvature bias of a nonlinear Z-estimator. The n=2000 truth surrogate
+(job `47666050`) confirms it -- the n=100 pool mean sits 0.12 empirical SE below truth, matching
+the 0.08 median mean shift. What was never calibrated is the threshold. `0.10` entered this ADR
+as the a-priori *answer-key* definition of "material distortion" for calibrating the cheap
+`a_{j,l}` screen, and survived as the floor when the null band was added.
+
+**The fix.** Both floors are now set from the only consequence the statistic has -- Wald
+coverage, `Phi(1.96 - b_L) - Phi(-1.96 - b_L)`: `0.949` at `0.10`, `0.940` at `0.30`, `0.921`
+at `0.50`.
+
+- `mean_shift_warn_tolerance_se = 0.30` (~1 coverage point) -> `warning`
+- `mean_shift_tolerance_se = 0.50` (~3 coverage points) -> `failed` (was `0.10`)
+
+Re-aggregating the stored bootstrap-validation reports shows the raised floor costs nothing in
+separation (values predate the complete-pairs fix, so the censored cells' are inflated):
+
+| cell | n | mean shift med / p90 | >0.10 | >0.30 | >0.50 | known truth |
+| --- | --- | --- | --- | --- | --- | --- |
+| A_easy | 50 | 0.012 / 0.024 | 0% | 0% | 0% | calibrated |
+| B_control | 4 | 0.012 / 0.016 | 0% | 0% | 0% | calibrated |
+| A_medium | 50 | 0.287 / 0.428 | 94% | 44% | 6% | conservative |
+| B_influence@25 | 50 | 0.645 / 1.012 | 100% | 96% | 70% | conservative blow-up |
+| A_hard | 50 | 1.713 / 3.628 | 100% | 100% | 80% | conservative blow-up |
+| U5@25 | 42 | 1.235 / 2.845 | 100% | 100% | 100% | **anticonservative** |
+| mixed-effects | 4994 | 0.080 / 0.171 | 39% | 0.2% | 0% | calibrated |
+
+`0.10` and `0.30` are indistinguishable on every calibration cell -- 0% on both clean ones,
+94-100% on every distorted one, 100% on the program's only anticonservative cell -- while
+`0.30` drops the healthy-design false-alarm rate from 39% to 0.2%.
+
+**Two tiers, because location degrades gracefully.** Unlike a spread gate, where the reported
+variance is either right or wrong, a 0.3 SE displacement leaves a usable interval and 0.5 SE
+does not. One gate could only say one of those things.
+
+**Verdict routing: a location finding is not a variance finding.** Both re-solve checks now
+record `failure_drivers` / `warning_drivers`, and `_derive_verdict` reads them:
+
+- `failed` with `mean_shift` as the ONLY driver -> `not_certified`, not `invalid`. The Wald
+  interval is unsupported, so it is not a pass; the SE comparison passed, so "DO NOT REPORT the
+  adjusted sandwich variance" would be a claim about the one quantity the run verified.
+- `warning` with `mean_shift` as the only driver -> stays `certified`. It must not borrow
+  `conservative`, whose meaning is "width likely inflated". A below-band ratio alongside it
+  still wins.
+- Both tiers print a CAVEAT/NEXT STEP block naming the displacement, the expected coverage, and
+  the remedy (ADR 0003's percentile refit bootstrap re-centres the interval without touching
+  the variance). It is suppressed when a spread gate also fired, since its "the variance was
+  confirmed" premise would then be false.
+- Reports pickled before the drivers existed carry neither key and read exactly as they did:
+  every failure a variance failure.
+
+**Caveats.** All of this is at n=100 on one design plus the stored ADS-142 cells; the stored
+values predate the complete-pairs fix; and that the bootstrap's centre displacement equals the
+estimator's true bias is confirmed here (0.08 measured vs 0.12 actual) but not in general. A
+location-ONLY bootstrap *failure* is not reachable with the bump-map fixture family -- a bounded
+even bump big enough to displace the mean by 0.5 SE inflates the SD ~30% on the way, past the
+per-target band -- so that routing is pinned against `_derive_verdict` directly.
+
+**Unrelated fix landed alongside.** 6 of the 5,000 tasks hard-failed
+`require_action_probabilities_in_analysis_df_can_be_reconstructed` on a single row disagreeing
+by 1.07e-6 to 1.88e-6 against its `atol=1e-6`, while a float64 re-evaluation of the same rows
+agreed to 3e-10. The check re-executes the caller's `action_prob_func` in float32, and this
+policy's posterior mean cancels two ~8.2-sized terms down to ~0.036, carrying their rounding
+through the link -- the old comment's premise that a probability output bounds that noise was
+wrong. The tolerance is now `100 * eps_f32` (~1.19e-5), the same noise floor the SE-standardized
+sum-to-zero check uses and ~15x the worst disagreement across the 4,994 passing runs (8.0e-7),
+and the failure is a named `ValueError` rather than a bare `np.testing` `AssertionError`. It
+stays a hard failure and keeps its discriminating power: real wiring errors move probabilities
+by 1e-2 to 1.

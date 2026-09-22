@@ -70,6 +70,59 @@ def _build_reconstruction_fixture(
     return analysis_df, action_prob_func_args
 
 
+def test_reconstruction_tolerance_absorbs_float32_noise_but_not_wiring_errors():
+    """
+    The tolerance is a float32 NOISE FLOOR, not a statistical judgment: this check re-executes
+    the caller's action_prob_func in float32 while the recorded column carries whatever the
+    deployment wrote (float64 in practice).
+
+    The old 1e-6 assumed the output being a probability bounded that noise. It does not -- the
+    noise comes from arithmetic INSIDE the supplied function, so a policy whose posterior mean
+    is a difference of larger terms carries their rounding through the link. The mixed-effects
+    smooth-posterior policy at steepness 30 cancels two ~8.2-sized terms down to ~0.036 and
+    lands up to 1.9e-6 off, which hard-failed 6 of 5000 cluster replicates whose probabilities
+    were perfectly correct (float64 reconstruction agreed to 3e-10).
+    """
+    analysis_df, action_prob_func_args = _build_reconstruction_fixture()
+    args = (
+        "action_prob",
+        "calendar_t",
+        "user_id",
+        "active",
+        action_prob_func_args,
+        _action_prob_func,
+    )
+    row = (analysis_df["calendar_t"] == 0) & (analysis_df["user_id"] == 0)
+    recorded = float(analysis_df.loc[row, "action_prob"].iloc[0])
+
+    # Just under the floor: float32 noise of exactly the kind the cluster runs produced.
+    analysis_df.loc[row, "action_prob"] = (
+        recorded + 0.9 * input_checks.ACTION_PROB_RECONSTRUCTION_ATOL
+    )
+    measurement = (
+        input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+            analysis_df, *args
+        )
+    )
+    assert measurement["atol"] == input_checks.ACTION_PROB_RECONSTRUCTION_ATOL
+    assert 0 < measurement["max_abs_difference"] < measurement["atol"]
+
+    # Just over it still fails, so raising the floor did not blunt the check.
+    analysis_df.loc[row, "action_prob"] = (
+        recorded + 1.1 * input_checks.ACTION_PROB_RECONSTRUCTION_ATOL
+    )
+    with pytest.raises(
+        ValueError, match="does not match what action_prob_func produces"
+    ):
+        input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+            analysis_df, *args
+        )
+
+    # The floor stays orders of magnitude below any real wiring error (wrong beta index, wrong
+    # function, stale args), which move probabilities by 1e-2 to 1.
+    assert input_checks.ACTION_PROB_RECONSTRUCTION_ATOL < 1e-4
+
+
 def test_require_action_probabilities_in_analysis_df_can_be_reconstructed_passes():
     analysis_df, action_prob_func_args = _build_reconstruction_fixture()
 
@@ -111,7 +164,13 @@ def test_require_action_probabilities_in_analysis_df_can_be_reconstructed_mismat
         (analysis_df["calendar_t"] == 0) & (analysis_df["user_id"] == 0), "action_prob"
     ] = 999.0
 
-    with pytest.raises(AssertionError):
+    # A named ValueError naming the row and the size of the disagreement, not the bare
+    # np.testing AssertionError this used to raise: the reconstruction runs in float32, so a
+    # reader hitting this needs to be told immediately whether they are looking at a wiring
+    # error or at arithmetic noise. See ACTION_PROB_RECONSTRUCTION_ATOL.
+    with pytest.raises(
+        ValueError, match="does not match what action_prob_func produces"
+    ):
         input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
             analysis_df,
             "action_prob",
@@ -780,3 +839,53 @@ def test_original_and_threaded_agreement_failure_message_is_bounded():
     # The 3,200-value arrays appear only in summarized form.
     assert "..." in message
     assert len(message.splitlines()) < 40
+
+
+def test_reconstruction_rejects_non_finite_values_and_names_the_offending_row():
+    """
+    Two things the rewritten mismatch check owes its callers (PR #79 review).
+
+    NaN must FAIL. `np.testing.assert_allclose`, which this replaced, rejected a lone NaN for
+    free; a bare `difference > atol` silently PASSES one, because NaN compares greater than
+    nothing -- which would let an action_prob_func that returns NaN through a hard check.
+
+    And the message must name the `(decision_time, subject_id)` it is talking about. A
+    flattened position is not something a caller can act on.
+    """
+    args = ("action_prob", "calendar_t", "user_id", "active")
+
+    # The message names the row, whichever row it is.
+    for calendar_t, user_id in ((0, 0), (0, 1), (1, 0)):
+        analysis_df, action_prob_func_args = _build_reconstruction_fixture()
+        analysis_df.loc[
+            (analysis_df["calendar_t"] == calendar_t)
+            & (analysis_df["user_id"] == user_id),
+            "action_prob",
+        ] = 0.4242
+        with pytest.raises(ValueError, match=re.escape(f"= ({calendar_t}, {user_id})")):
+            input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+                analysis_df, *args, action_prob_func_args, _action_prob_func
+            )
+
+    # A non-finite RECORDED value fails, and is the row reported even though NaN is not
+    # "greater than" the tolerance.
+    analysis_df, action_prob_func_args = _build_reconstruction_fixture()
+    analysis_df.loc[
+        (analysis_df["calendar_t"] == 0) & (analysis_df["user_id"] == 0), "action_prob"
+    ] = np.nan
+    with pytest.raises(ValueError, match=re.escape("= (0, 0)")):
+        input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+            analysis_df, *args, action_prob_func_args, _action_prob_func
+        )
+
+    # A non-finite RECONSTRUCTED value fails too -- the action_prob_func side.
+    def nan_action_prob_func(beta, features):
+        return _action_prob_func(beta, features) * np.nan
+
+    analysis_df, action_prob_func_args = _build_reconstruction_fixture()
+    with pytest.raises(
+        ValueError, match="does not match what action_prob_func produces"
+    ):
+        input_checks.require_action_probabilities_in_analysis_df_can_be_reconstructed(
+            analysis_df, *args, action_prob_func_args, nan_action_prob_func
+        )

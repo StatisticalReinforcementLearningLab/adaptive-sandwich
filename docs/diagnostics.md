@@ -282,14 +282,44 @@ remains fully visible via `root_failure_fraction` and the status logic below):
   that leaves, and dropped incomplete pairs attach a warning). Inside a complete pair the linear
   parts cancel identically, so dropping whole pairs can only remove curvature signal, never
   manufacture it -- which is what keeps this a measurement of curvature rather than an artifact of
-  convergence censoring. It is judged against `mean_shift_threshold = max(mean_shift_null_upper,
-  config.mean_shift_tolerance_se)`: the simulated finite-draw null upper quantile of
-  `||mean_j(rows)||` for the observed converged pattern, floored at the configured tolerance. The
-  band is what makes the comparison honest at finite `J` -- with unpaired draws the statistic is
-  raw sampling noise of size `sqrt(chi2_dim / J)` (~`0.26` in one dimension at `J = 15`), which
-  the former fixed `0.10` comparison read as a failure on a provably affine map; under intact
-  antithetic pairing the null band collapses to exactly `0` and
-  `config.mean_shift_tolerance_se` is the binding threshold. `mean_shift_gate_evaluable` records
+  convergence censoring. It is judged against TWO banded thresholds --
+  `mean_shift_warn_threshold = max(mean_shift_null_upper, config.mean_shift_warn_tolerance_se)`
+  (default floor `0.30`) and `mean_shift_threshold = max(mean_shift_null_upper,
+  config.mean_shift_tolerance_se)` (default floor `0.50`) -- where `mean_shift_null_upper` is the
+  simulated finite-draw null upper quantile of `||mean_j(rows)||` for the observed converged
+  pattern. The band is what makes the comparison honest at finite `J` -- with unpaired draws the
+  statistic is raw sampling noise of size `sqrt(chi2_dim / J)` (~`0.26` in one dimension at
+  `J = 15`), which a bare floor comparison reads as a failure on a provably affine map; under
+  intact antithetic pairing the null band collapses to exactly `0` and the floors bind.
+
+  The floors are calibrated against **Wald coverage**, the only consequence a displacement of the
+  re-solved estimates has: `b_L` is a bias of the estimate in units of its own SE, so a
+  nominal-95% interval centred on it covers `Phi(1.96 - b_L) - Phi(-1.96 - b_L)` -- `0.949` at
+  `0.10`, `0.940` at `0.30`, `0.921` at `0.50` (reported per run as
+  `mean_shift_worst_contrast_wald_coverage`, computed by `wald_coverage_at_bias`). Warning costs
+  ~1 coverage point, failing ~3. Two tiers because location degrades gracefully, unlike spread:
+  at `0.3 SE` the interval is still usable, at `0.5 SE` it is not, and one gate could only say
+  one of those things.
+
+  **That coverage figure is a worst-direction BOUND, not each interval's coverage.** `b_L` is a
+  Mahalanobis norm over however many targets are reported, so it equals the largest standardized
+  bias attained by any linear contrast of them; an individual coordinate's interval, whose bias
+  is one component of that vector, covers at least as well. With a single reported target -- the
+  case both floors were calibrated on -- the two coincide, and the gate is exact. With several,
+  the gate is deliberately conservative in the same way the `se_ratios` gate is, judging the
+  worst direction rather than an average. Per-target standardized shifts are not currently
+  computed; that is the natural refinement if the conservatism ever bites.
+
+  The single `0.10` floor these replace was never calibrated against anything: it entered
+  `docs/adr/0002` as the a-priori definition of "material distortion" used as the ANSWER KEY for
+  calibrating the cheap `a_{j,l}` screen, and survived as this floor when the null band was added.
+  Measured against it, `0.10` separates nothing -- it fires on 0% of both ADS-142 calibrated cells
+  and 94-100% of every distorted one, exactly as `0.30` does -- while condemning healthy designs
+  wholesale: on a 4,994-replicate mixed-effects run whose adjusted-sandwich SE matched the
+  empirical SD to three digits (ratio `1.000`) with no variance blow-up at all, it FAILED 39% of
+  replicates, whose CIs then covered at `0.924` against the certified replicates' `0.944`. At
+  `0.30` that false-alarm rate is 0.2%, and the one anticonservative cell in the whole calibration
+  program is still flagged 100% of the time. `mean_shift_gate_evaluable` records
   whether the comparison could be made at all: with unpaired draws there is no cancellation to
   lean on, so an unhealthy solver suppresses the gate (an observed exceedance is reported as a
   warning instead), and the status logic turns that into `indeterminate` rather than a pass.
@@ -316,8 +346,9 @@ the same target -- not the Clopper-Pearson *upper* bound, which exceeds any smal
 practical trial counts even with zero observed failures: `indeterminate` if fewer than 3 solves
 converged. Otherwise `failed` if a distortion gate fires
 on the converged subset -- `se_ratios` **above** the null band, `mean_shift_se` above its banded
-threshold `max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (the tolerance defaults to
-`0.10` and acts as the floor, not as the whole comparison), or any quantile shift beyond
+FAILING threshold `max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (the tolerance
+defaults to `0.50` and acts as the floor, not as the whole comparison; between the warn floor
+`0.30` and that one the check reads `warning` instead), or any quantile shift beyond
 `config.quantile_shift_tolerance_se` (default `0.10`); a below-band `se_ratios` also fails, but
 only when the solver is healthy, because convergence-censoring itself compresses the converged
 subset (the excluded directions are the hardest ones), making below-band readings on a censored
@@ -404,15 +435,26 @@ failure fraction's Clopper-Pearson lower bound clears `config.bad_direction_prob
 re-solves). Then `indeterminate` if fewer than 3 re-solves converged. `failed` if any evaluable
 target's ratio exceeds the band's upper edge (the bootstrap distribution is wider than the
 sandwich claims -- the **anticonservative** direction) or `mean_shift_se` exceeds its banded
-threshold `max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (systematic
-curvature-induced displacement of the resampled roots). Else `indeterminate` if the observed
+FAILING threshold `max(mean_shift_null_upper, config.mean_shift_tolerance_se)` (systematic
+curvature-induced displacement of the resampled roots, past the point where a Wald interval
+centred on the estimate keeps its nominal coverage). Else `indeterminate` if the observed
 re-solve failure fraction exceeds the target without the lower bound confirming it -- fragility
 suspected but not measured, and the converged subset is optimistically selected. Else `indeterminate` if a gate could not be fully evaluated -- any target in
 `se_ratio_band_unevaluable_targets`, an unavailable null band, or a suppressed/unavailable
 mean-shift gate -- because with no SE comparison performed for some target there is nothing left
 to have passed (a below-band ratio elsewhere is still reported as a warning in that case). Else
 `warning` if any ratio falls below the band (sandwich SE overstated -- the **conservative**
-blow-up direction ADS-142 found to be the common failure mode). `passed` otherwise.
+blow-up direction ADS-142 found to be the common failure mode) **or** `mean_shift_se` exceeds its
+warn threshold (the estimate is off centre by ~1 coverage point, while its SE comparison passed).
+`passed` otherwise.
+
+Which gate produced the status is recorded in `failure_drivers` / `warning_drivers`, so
+`_derive_verdict` can separate a **location** finding from a **variance** one without re-deriving
+the ladder: a `warning` whose only driver is `mean_shift` is NOT the calibrated conservative
+signal, and a `failed` whose only driver is `mean_shift` is `not_certified` rather than `invalid`
+-- "DO NOT REPORT the adjusted sandwich variance" would be a claim about the one quantity the SE
+band just confirmed. Reports pickled before these keys existed read exactly as they did before
+(every failure a variance failure).
 
 ### 3c. What the re-solve checks cost, and the knobs that change it
 
@@ -801,7 +843,8 @@ four values, each carrying the
 operating characteristics the ADS-142 experiments measured for it (see the
 `DiagnosticVerdicts` docstring in `constants.py` for the full statement):
 
-- `invalid` -- a hard/measured failure, or a rank-deficient target covariance (pulled up from
+- `invalid` -- a hard/measured failure (except a mean-shift-only one, below), or a
+  rank-deficient target covariance (pulled up from
   `indeterminate` because that condition identified 76/76 zero-width-CI collapses in the
   undercoverage hunt). Do not report.
 - `not_certified` (renamed from `uncertifiable` on 2026-09-02: the verdict means "not
@@ -809,10 +852,17 @@ operating characteristics the ADS-142 experiments measured for it (see the
   re-running with the multiplier bootstrap on) -- something unresolved: re-solve fragility, censored ensembles, unevaluable
   gates, or the `a_{j,l}` screen called for the bootstrap and it did not run. Empirically,
   every genuinely miscalibrated design landed here or in `invalid` rather than falsely
-  certifying. Do not report as validated.
+  certifying. Do not report as validated. **Also** a LOCATION-only failure: a re-solve check
+  whose `mean_shift_se` cleared its failing floor while its SE comparison passed. The Wald
+  interval is not supported (so not a pass), but the variance was verified (so not `invalid`),
+  and the remedy is named on the NEXT STEP line -- the ADR 0003 percentile refit bootstrap
+  re-centres the interval without touching the variance.
 - `conservative` -- clean except that a calibrated conservatism signal fired (bootstrap
   below-band, or the influence `n_eff` floor): direction trustworthy, width likely inflated.
-  The ADR 0003 percentile refit bootstrap is the interval-level remedy.
+  The ADR 0003 percentile refit bootstrap is the interval-level remedy. A bootstrap `warning`
+  driven ONLY by the mean-shift warn tier does not reach this rung: it says the interval is off
+  centre, not that its width is inflated, so it leaves the verdict `certified` and surfaces as
+  a CAVEAT line instead.
 - `certified` -- everything gated passed. `verdict_basis` records how: `"bootstrap"` (the
   SE comparison ran and passed) or `"screen"` (a quiet run that never called for it).
 

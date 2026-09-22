@@ -23,7 +23,12 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        # --locked FAILS if uv.lock is out of date with pyproject.toml instead of silently
+        # regenerating it. Without it a stale lock never surfaces in CI -- every uv command
+        # re-locks by default -- so the drift is invisible here and instead lands on whoever
+        # next runs the pre-commit hook, as an unrelated uv.lock diff in their branch. That is
+        # how the lifejacket 1.3.0 -> 2.0.0 bump went unlocked from de10751 until PR #79.
+        run: uv sync --extra dev --locked
 
       - name: Run unit tests
         run: uv run python -m pytest tests/unit_tests

@@ -25,6 +25,14 @@ np.set_printoptions(threshold=np.inf)
 
 logger = logging.getLogger(__name__)
 
+# Absolute agreement required between the recorded action probabilities and the ones this
+# module reconstructs by re-executing the caller's action_prob_func. 100 float32 ulps: the
+# reconstruction runs in float32, so this is a machine-precision noise floor, not a statistical
+# tolerance -- see the long comment in
+# require_action_probabilities_in_analysis_df_can_be_reconstructed for why the output being a
+# probability does NOT bound that noise, and for the measurements behind the constant.
+ACTION_PROB_RECONSTRUCTION_ATOL = float(100 * np.finfo(np.float32).eps)
+
 
 def perform_unconditional_zeroth_wave_input_checks(
     output_dir,
@@ -670,11 +678,43 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
 
     # An ABSOLUTE tolerance is dimensionally correct here, unlike for estimating-function
     # values: probabilities are unitless and bounded in (0, 1), so there is no reward-scale
-    # exposure, and 1e-6 leaves ~10x headroom over float32 evaluation noise at typical
-    # probabilities. Do not "fix" this to a relative/scale-aware tolerance.
+    # exposure. Do not "fix" this to a relative/scale-aware tolerance.
+    #
+    # The SIZE of the tolerance is set by float32 evaluation noise inside the caller's own
+    # action_prob_func, which this check re-executes in float32 while the recorded column is
+    # whatever precision the deployment wrote (float64 in practice). That noise is NOT bounded
+    # by the output living in (0, 1) -- the old 1e-6 here assumed it was, and was wrong. A
+    # policy whose posterior mean is a DIFFERENCE of larger terms carries their float32
+    # rounding into the probability through the link's slope: the mixed-effects smooth-posterior
+    # policy at steepness 30 cancels two ~8.2-sized terms down to ~0.036, landing 1.1e-6 to
+    # 1.9e-6 off on a handful of rows (measured: 6 of 5000 cluster replicates hard-FAILED here,
+    # max disagreement 1.9e-6, while the same rows reconstruct to 3e-10 in float64 -- pure
+    # arithmetic precision, no wiring error). 100 float32 ulps is the same noise floor
+    # require_estimating_functions_sum_to_zero_se_standardized uses, and it is ~15x above the
+    # worst disagreement seen across those 5000 runs (max 8.0e-7 among the ones that passed).
+    #
+    # It remains a HARD failure, and it keeps all of its discriminating power: a real wiring
+    # bug (wrong beta index, wrong function, stale args, wrong steepness) moves probabilities
+    # by 1e-2 to 1, not by 1e-5. Nothing in between is a plausible bug signature.
     actual_values = np.asarray(actual_action_probs, dtype="float64")
     reconstructed_values = np.asarray(reconstructed_action_probs, dtype="float64")
-    np.testing.assert_allclose(actual_values, reconstructed_values, atol=1e-6)
+    absolute_differences = np.abs(actual_values - reconstructed_values)
+    num_mismatched = int(np.sum(absolute_differences > ACTION_PROB_RECONSTRUCTION_ATOL))
+    if num_mismatched:
+        worst = int(np.argmax(absolute_differences))
+        raise ValueError(
+            "require_action_probabilities_in_analysis_df_can_be_reconstructed found "
+            f"{num_mismatched} of {actual_values.size} active row(s) whose recorded action "
+            "probability does not match what action_prob_func produces from its recorded "
+            f"arguments: worst disagreement {absolute_differences[worst]:.3g} (recorded "
+            f"{actual_values[worst]:.9g} vs reconstructed {reconstructed_values[worst]:.9g}), "
+            f"above the tolerance {ACTION_PROB_RECONSTRUCTION_ATOL:.3g}. A disagreement this "
+            "large is a wiring error -- the wrong action_prob_func, the wrong "
+            "action_prob_func_args_beta_index, stale arguments, or different constants than "
+            "the deployment ran with. (Float32 evaluation noise inside action_prob_func is "
+            "what the tolerance already absorbs; it is well under 1e-5 even for policies that "
+            "lose precision to cancellation.)"
+        )
     # Returned so the diagnostic summary can report the measured agreement rather than prose
     # boilerplate; callers that ignore the return value are unaffected. NaN, not 0.0, for an
     # empty study: "agreed to within 0" would claim a measurement where none was made.
@@ -685,7 +725,7 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
             else math.nan
         ),
         "num_cells": int(actual_values.size),
-        "atol": 1e-6,
+        "atol": ACTION_PROB_RECONSTRUCTION_ATOL,
     }
 
 

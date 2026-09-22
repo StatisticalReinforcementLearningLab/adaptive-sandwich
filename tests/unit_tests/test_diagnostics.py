@@ -1035,8 +1035,12 @@ def test_exact_check_fails_on_curvature_induced_mean_shift():
     stacks, B, V_hat = _scalar_bootstrap_inputs()
     w = math.sqrt(float(V_hat[0, 0]))
 
+    # Curvature 1.10 puts the mean shift at ~0.57 SE, above the FAILING floor (0.5 SE, the
+    # displacement at which a Wald interval drops to ~92% coverage). 0.35 -- what this fixture
+    # used while a single uncalibrated 0.10 floor governed both tiers -- now lands at ~0.15 SE,
+    # which is a passing run by design: see DiagnosticConfig.mean_shift_tolerance_se.
     result = _run_scalar_exact_check(
-        _bounded_even_bump_map(w, 0.35),
+        _bounded_even_bump_map(w, 1.10),
         stacks,
         B,
         V_hat,
@@ -1050,12 +1054,16 @@ def test_exact_check_fails_on_curvature_induced_mean_shift():
     )
     assert result.status == CheckStatuses.FAILED
     assert result.metrics["mean_shift_gate_evaluable"] is True
+    assert result.metrics["mean_shift_failed"] is True
     assert result.metrics["mean_shift_se"] > result.metrics["mean_shift_threshold"]
     # Under intact antithetic pairing the simulated null band collapses to zero, so the floor
     # config.mean_shift_tolerance_se is the binding threshold in this ordinary case.
     assert result.metrics["mean_shift_threshold"] == pytest.approx(
         d.DiagnosticConfig().mean_shift_tolerance_se
     )
+    # The mean-shift gate is the SOLE driver, which is what routes this to NOT_CERTIFIED
+    # rather than INVALID -- the reported variance was not impeached.
+    assert result.metrics["failure_drivers"] == ["mean_shift"]
     # The SE-ratio gate is NOT what failed here: the ratio sits inside its own null band.
     band_lo, band_hi = result.metrics["se_ratio_null_band"]
     assert band_lo < min(result.metrics["se_ratios"])
@@ -1511,7 +1519,7 @@ def test_multiplier_bootstrap_fails_on_curvature_induced_mean_shift():
     w = math.sqrt(float(V_hat[0, 0]))
 
     result = _run_scalar_bootstrap(
-        _bounded_even_bump_map(w, 0.35),
+        _bounded_even_bump_map(w, 1.10),
         stacks,
         B,
         V_hat,
@@ -1521,13 +1529,22 @@ def test_multiplier_bootstrap_fails_on_curvature_induced_mean_shift():
     )
     assert result.status == CheckStatuses.FAILED
     assert result.metrics["mean_shift_gate_evaluable"] is True
+    assert result.metrics["mean_shift_failed"] is True
+    assert "mean_shift" in result.metrics["failure_drivers"]
     assert result.metrics["mean_shift_se"] > result.metrics["mean_shift_threshold"]
-    # The mean-shift gate is the sole trigger: the SE ratio stays inside its null band, and the
-    # solver is healthy (every draw is globally solvable), so neither the band gate nor the
-    # failure-fraction gate can be what produced this verdict.
-    band_lo, band_hi = result.metrics["se_ratio_null_band"]
-    assert band_lo < result.metrics["se_ratio_by_target"]["theta_0"] < band_hi
+    # The solver is healthy (every draw is globally solvable), so fragility is not what
+    # produced this verdict.
     assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
+    assert "solver_fragility" not in result.metrics["failure_drivers"]
+    # Unlike the exact check's version of this test, the SE ratio does NOT stay inside its band
+    # here, and no curvature of this fixture family makes it: the bootstrap's per-target band is
+    # ~[0.86, 1.14] at 100 paired draws, while a bounded even bump big enough to displace the
+    # mean by the failing 0.5 SE inflates the SD by ~30% on the way (measured across widths
+    # 0.3-1.1 SE and both band widths at 25-100 draws). That is a property of smooth monotone
+    # maps, not a gap in the gate -- a location-ONLY bootstrap FAILURE is tested against
+    # _derive_verdict directly instead, in the verdict-routing tests.
+    band_lo, band_hi = result.metrics["se_ratio_null_band"]
+    assert not band_lo < result.metrics["se_ratio_by_target"]["theta_0"] < band_hi
 
 
 def test_multiplier_bootstrap_fails_on_confirmed_fragility_of_a_censored_ensemble():
@@ -1800,6 +1817,11 @@ def test_run_diagnostic_suite_survives_an_undefined_neighborhood():
 #     the former fixed 0.10 comparison read as curvature on provably affine maps (16 of 20 seeds).
 # ---------------------------------------------------------------------------
 
+# The single uncalibrated floor both mean-shift tiers used to share. Kept as a literal so the
+# band regression below still measures itself against the comparison it was written to kill,
+# rather than drifting with whatever the calibrated floors are set to today.
+_SUPERSEDED_FIXED_MEAN_SHIFT_FLOOR = 0.10
+
 
 def test_mean_shift_gate_does_not_fire_on_an_affine_map_with_unpaired_directions():
     seeds = range(8)
@@ -1815,18 +1837,19 @@ def test_mean_shift_gate_does_not_fire_on_an_affine_map_with_unpaired_directions
         )
         metrics = result.metrics
         assert metrics["mean_shift_gate_evaluable"] is True
-        # Without antithetic cancellation the band -- not the fixed floor -- is what binds.
+        # Without antithetic cancellation the band -- not the fixed floor -- is what binds at
+        # the WARN tier, which is the tier the old fixed 0.10 comparison corresponded to.
         assert (
-            metrics["mean_shift_threshold"]
-            > 2 * d.DiagnosticConfig().mean_shift_tolerance_se
+            metrics["mean_shift_warn_threshold"]
+            > 2 * _SUPERSEDED_FIXED_MEAN_SHIFT_FLOOR
         )
-        assert metrics["mean_shift_threshold"] == pytest.approx(
+        assert metrics["mean_shift_warn_threshold"] == pytest.approx(
             metrics["mean_shift_null_upper"]
         )
         observed.append(
             (
-                metrics["mean_shift_se"] > metrics["mean_shift_threshold"],
-                metrics["mean_shift_se"] > d.DiagnosticConfig().mean_shift_tolerance_se,
+                metrics["mean_shift_se"] > metrics["mean_shift_warn_threshold"],
+                metrics["mean_shift_se"] > _SUPERSEDED_FIXED_MEAN_SHIFT_FLOOR,
             )
         )
 
@@ -1848,6 +1871,9 @@ def test_mean_shift_floor_binds_under_intact_antithetic_pairing():
     assert result.metrics["mean_shift_null_upper"] < 1e-9
     assert result.metrics["mean_shift_threshold"] == pytest.approx(
         d.DiagnosticConfig().mean_shift_tolerance_se
+    )
+    assert result.metrics["mean_shift_warn_threshold"] == pytest.approx(
+        d.DiagnosticConfig().mean_shift_warn_tolerance_se
     )
     assert result.metrics["mean_shift_num_rows"] == result.metrics["num_trials"]
 
@@ -2730,3 +2756,281 @@ def test_diagnostics_flagged_definition():
     )
     # No report at all (the suite crashed): an unevaluated run must read as flagged.
     assert d.diagnostics_flagged(None)
+
+
+# ---------------------------------------------------------------------------
+# 21. The mean-shift gate's TWO tiers, and the verdict routing that keeps a LOCATION finding
+#     from being reported as a VARIANCE finding. The single 0.10 floor these replace was never
+#     calibrated against coverage: it entered docs/adr/0002 as the a-priori answer-key
+#     definition of "material distortion" and survived as the floor. On a 4,994-replicate
+#     mixed-effects run whose sandwich SE matched the empirical SD to three digits it FAILED
+#     39% of replicates -- all mean-shift-only -- and printed "DO NOT REPORT the adjusted
+#     sandwich variance" over a variance its own SE band had just confirmed.
+# ---------------------------------------------------------------------------
+
+
+def _narrow_bump_map(w, curvature, width):
+    """
+    A bump of width `width * SE` rather than the 1-SE bump of _bounded_even_bump_map.
+
+    Narrowing it is what isolates LOCATION from SPREAD, which is the whole point of having a
+    warn tier to test: past a couple of bump widths the map is g(eta) ~ eta + curvature*w, an
+    affine map with an intercept, so it displaces every solved root by nearly the same amount
+    while leaving the spread almost untouched. Monotone (hence globally solvable) while
+    0.858 * curvature / width < 1.
+    """
+
+    def g_tilde(eta):
+        return eta + curvature * w * (1.0 - jnp.exp(-((eta / (width * w)) ** 2)))
+
+    return g_tilde
+
+
+def test_exact_check_warns_rather_than_fails_on_a_moderate_mean_shift():
+    # ~0.37 SE: past the warn floor (0.30, ~1 coverage point) and under the failing one
+    # (0.50, ~3 points). The old single floor made this identical to a 5-SE displacement.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    w = math.sqrt(float(V_hat[0, 0]))
+    result = _run_scalar_exact_check(
+        _bounded_even_bump_map(w, 0.80),
+        stacks,
+        B,
+        V_hat,
+        d.DiagnosticConfig(
+            num_exact_directions=15,
+            nonlinear_solver_max_iterations=200,
+            quantile_shift_tolerance_se=1e6,
+        ),
+    )
+    assert result.status == CheckStatuses.WARNING
+    assert result.metrics["mean_shift_warned"] is True
+    assert result.metrics["mean_shift_failed"] is False
+    assert result.metrics["warning_drivers"] == ["mean_shift"]
+    assert result.metrics["failure_drivers"] == []
+    warn = result.metrics["mean_shift_warn_threshold"]
+    assert (
+        warn < result.metrics["mean_shift_se"] < result.metrics["mean_shift_threshold"]
+    )
+    # The coverage consequence is reported alongside the raw SE count, because the SE count is
+    # not something a reader can act on and the coverage is.
+    assert 0.93 < result.metrics["mean_shift_wald_coverage"] < 0.95
+
+
+def test_multiplier_bootstrap_warns_on_a_location_only_mean_shift():
+    # The narrow bump keeps the SE ratio inside its band, so the mean shift is the only thing
+    # the bootstrap has to say -- a WARNING, and one that must NOT read as the calibrated
+    # "variance inflated" CONSERVATIVE signal.
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    w = math.sqrt(float(V_hat[0, 0]))
+    result = _run_scalar_bootstrap(
+        _narrow_bump_map(w, 0.55, 0.5),
+        stacks,
+        B,
+        V_hat,
+        d.DiagnosticConfig(
+            num_bootstrap_draws=100, nonlinear_solver_max_iterations=200
+        ),
+    )
+    assert result.status == CheckStatuses.WARNING
+    assert result.metrics["warning_drivers"] == ["mean_shift"]
+    band_lo, band_hi = result.metrics["se_ratio_null_band"]
+    assert band_lo < result.metrics["se_ratio_by_target"]["theta_0"] < band_hi
+    assert result.metrics["num_converged_trials"] == result.metrics["num_trials"]
+
+
+def _bootstrap_result(status, failure_drivers=None, warning_drivers=None, **extra):
+    metrics = {"mean_shift_se": 0.6, "mean_shift_threshold": 0.5, **extra}
+    if failure_drivers is not None:
+        metrics["failure_drivers"] = failure_drivers
+    if warning_drivers is not None:
+        metrics["warning_drivers"] = warning_drivers
+    return _cr("multiplier_bootstrap", status, metrics)
+
+
+def test_location_only_failure_is_not_certified_rather_than_invalid():
+    # The headline routing change. A mean-shift-only FAILURE means the Wald interval is not
+    # supported (so: not a pass) while the SE comparison passed (so: the variance is not
+    # impeached, and INVALID's "DO NOT REPORT the adjusted sandwich variance" would be false).
+    config = d.DiagnosticConfig()
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.PASSED),
+            "multiplier_bootstrap": _bootstrap_result(
+                CheckStatuses.FAILED, failure_drivers=["mean_shift"]
+            ),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.NOT_CERTIFIED
+
+    # A failure with ANY variance driver alongside it stays INVALID.
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.PASSED),
+            "multiplier_bootstrap": _bootstrap_result(
+                CheckStatuses.FAILED, failure_drivers=["se_ratio_above", "mean_shift"]
+            ),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.INVALID
+
+
+def test_mean_shift_warning_certifies_while_below_band_warning_stays_conservative():
+    config = d.DiagnosticConfig()
+    passed_local = _cr("local_nonlinearity", CheckStatuses.PASSED)
+
+    # Mean-shift-only WARNING: the variance was verified, so the verdict is CERTIFIED on the
+    # bootstrap's own basis. The off-centre finding reaches the reader through the check row
+    # and the caveat line, not by borrowing a verdict that says "width likely inflated".
+    verdict, basis = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _bootstrap_result(
+                CheckStatuses.WARNING,
+                failure_drivers=[],
+                warning_drivers=["mean_shift"],
+            ),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CERTIFIED
+    assert basis == VerdictBases.SCREEN
+
+    # Below-band WARNING: unchanged, still the calibrated CONSERVATIVE signal.
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _bootstrap_result(
+                CheckStatuses.WARNING,
+                failure_drivers=[],
+                warning_drivers=["se_ratio_below"],
+            ),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CONSERVATIVE
+
+    # BOTH: the conservative signal is present, so it wins -- the mean-shift warning must not
+    # mask a real statement about the variance's width.
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _bootstrap_result(
+                CheckStatuses.WARNING,
+                failure_drivers=[],
+                warning_drivers=["se_ratio_below", "mean_shift"],
+            ),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CONSERVATIVE
+
+
+def test_reports_without_drivers_keep_their_pre_split_verdicts():
+    # Reports pickled before the two-tier gate carry no *_drivers keys. They must read exactly
+    # as they did: every FAILED a variance failure (INVALID), every bootstrap WARNING the
+    # conservative signal -- never silently downgraded by the new routing.
+    config = d.DiagnosticConfig()
+    passed_local = _cr("local_nonlinearity", CheckStatuses.PASSED)
+
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _bootstrap_result(CheckStatuses.FAILED),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.INVALID
+
+    verdict, _ = d._derive_verdict(
+        {
+            "local_nonlinearity": passed_local,
+            "multiplier_bootstrap": _bootstrap_result(CheckStatuses.WARNING),
+        },
+        {},
+        False,
+        1,
+        config,
+    )
+    assert verdict == DiagnosticVerdicts.CONSERVATIVE
+
+
+def test_wald_coverage_at_bias_matches_the_calibration_table():
+    # The numbers the two floors are set from (DiagnosticConfig.mean_shift_tolerance_se).
+    assert d.wald_coverage_at_bias(0.0) == pytest.approx(0.95, abs=5e-4)
+    assert d.wald_coverage_at_bias(0.10) == pytest.approx(0.9489, abs=5e-4)
+    assert d.wald_coverage_at_bias(0.30) == pytest.approx(0.9396, abs=5e-4)
+    assert d.wald_coverage_at_bias(0.50) == pytest.approx(0.9209, abs=5e-4)
+    # Symmetric in the sign of the displacement: b_L is a norm, but the helper is also used on
+    # signed quantities in the summary text.
+    assert d.wald_coverage_at_bias(-0.5) == pytest.approx(d.wald_coverage_at_bias(0.5))
+    assert math.isnan(d.wald_coverage_at_bias(math.nan))
+
+
+def test_mean_shift_caveat_is_suppressed_when_a_variance_gate_also_fired():
+    # The caveat block asserts "the reported VARIANCE was confirmed ... but the centre is off".
+    # When a spread gate fired too that sentence is false and the verdict is already INVALID on
+    # the variance, so the block must not appear at all.
+    def _report(drivers):
+        result = _cr(
+            "multiplier_bootstrap",
+            CheckStatuses.FAILED,
+            {
+                "mean_shift_se": 0.62,
+                "mean_shift_threshold": 0.5,
+                "mean_shift_warn_threshold": 0.3,
+                "mean_shift_failed": True,
+                "mean_shift_warned": True,
+                "mean_shift_wald_coverage": d.wald_coverage_at_bias(0.62),
+                "failure_drivers": drivers,
+                "warning_drivers": [],
+            },
+        )
+        return d.DiagnosticReport(
+            classification="",
+            check_results={
+                "multiplier_bootstrap": result,
+                "local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.PASSED),
+            },
+            input_check_results={},
+            metrics={},
+            tolerances_used={},
+            warnings=[],
+            monte_carlo_counts={},
+            target_labels=["theta_0"],
+            rank_diagnostics={},
+        )
+
+    location_only = _report(["mean_shift"])
+    location_only.verdict, _ = d._derive_verdict(
+        location_only.check_results, {}, False, 1, d.DiagnosticConfig()
+    )
+    lines = d._verdict_next_step_lines(location_only)
+    assert lines and "VARIANCE was confirmed" in " ".join(lines)
+    assert location_only.verdict == DiagnosticVerdicts.NOT_CERTIFIED
+
+    also_variance = _report(["se_ratio_above", "mean_shift"])
+    also_variance.verdict, _ = d._derive_verdict(
+        also_variance.check_results, {}, False, 1, d.DiagnosticConfig()
+    )
+    assert d._verdict_next_step_lines(also_variance) == []
+    assert also_variance.verdict == DiagnosticVerdicts.INVALID

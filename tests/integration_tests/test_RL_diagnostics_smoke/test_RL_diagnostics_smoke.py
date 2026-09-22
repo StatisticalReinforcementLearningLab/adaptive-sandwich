@@ -13,6 +13,7 @@ from lifejacket import post_deployment_analysis
 from lifejacket.constants import CheckStatuses, DiagnosticClassifications
 from lifejacket.diagnostics import DiagnosticReport
 from lifejacket.helper_functions import load_function_from_same_named_file
+from lifejacket.input_checks import ACTION_PROB_RECONSTRUCTION_ATOL
 from lifejacket.post_deployment_analysis import analyze_dataset
 
 
@@ -58,7 +59,10 @@ def test_RL_diagnostics_smoke(run_local_pipeline):  # pylint: disable=redefined-
         "action_probabilities_reconstructed"
     ]
     (reconstruction_criterion,) = reconstruction_row.criteria
-    assert "agree to within 1e-06" in reconstruction_criterion.description
+    assert (
+        f"agree to within {ACTION_PROB_RECONSTRUCTION_ATOL:g}"
+        in reconstruction_criterion.description
+    )
     assert "max difference" in reconstruction_criterion.value
     assert reconstruction_criterion.ok is True
     assert "first_wave_input_checks" in report.input_check_results

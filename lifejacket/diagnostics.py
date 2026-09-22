@@ -79,12 +79,29 @@ class DiagnosticConfig:
     backward_residual_tolerance: float = 1e-6
     nonlinear_correction_tolerance_se: float = 0.10
     se_distortion_tolerance: float = 0.05
-    # Not a standalone cutoff: the mean-shift gate of the exact and bootstrap checks compares
-    # b_L against max(this, the simulated finite-draw null upper quantile), so this is the
-    # absolute practical-significance FLOOR (a displacement under a tenth of a target SE is not
-    # worth reporting however detectable it becomes at large J) while the band absorbs the
-    # finite-draw noise. See _evaluate_mean_shift_gate.
-    mean_shift_tolerance_se: float = 0.10
+    # The mean-shift gate's two practical-significance FLOORS, each compared against b_L as
+    # max(floor, simulated finite-draw null upper quantile) -- the band absorbs finite-draw
+    # noise, the floor says how big a displacement has to be before it is worth acting on. See
+    # _evaluate_mean_shift_gate.
+    #
+    # Both floors are CALIBRATED AGAINST COVERAGE, which is the only consequence a displacement
+    # of the re-solved estimates has: b_L is a bias of the estimate in units of its own SE, so
+    # a 95% Wald interval centred on the estimate covers Phi(1.96 - b_L) - Phi(-1.96 - b_L) --
+    # 0.949 at 0.10, 0.940 at 0.30, 0.921 at 0.50, 0.830 at 1.0. Warning at 0.30 SE costs one
+    # coverage point, failing at 0.50 SE costs three.
+    #
+    # The former single 0.10 floor was NOT calibrated: it entered docs/adr/0002 as the
+    # a-priori "material distortion" definition used as an ANSWER KEY for calibrating the cheap
+    # a_{j,l} screen, then survived as this floor when the null band was added. At 0.10 it
+    # condemns healthy designs wholesale -- on a 4,994-replicate mixed-effects run whose
+    # adjusted-sandwich SE matched the empirical SD to three digits (ratio 1.000) and which
+    # produced no variance blow-up at all, it FAILED 39% of replicates, whose CIs then covered
+    # at 0.924 against the certified replicates' 0.944. Against the ADS-142 validation cells it
+    # separates nothing either: it fires on 0% of both calibrated cells and 94-100% of every
+    # distorted one, exactly as 0.30 does, while 0.30 drops the healthy-design false-alarm rate
+    # from 39% to 0.2% and still fires on 100% of the one anticonservative cell in the program.
+    mean_shift_warn_tolerance_se: float = 0.30
+    mean_shift_tolerance_se: float = 0.50
     quantile_shift_tolerance_se: float = 0.10
     bad_direction_probability_target: float = 0.01
     confidence_level: float = 0.95
@@ -960,6 +977,72 @@ def _legend_lines(row_names: Sequence[str] = (), verdict_basis: str = "") -> lis
     return lines
 
 
+def _mean_shift_next_step_lines(report: DiagnosticReport) -> list[str]:
+    """
+    The caveat/next-step block for a mean-shift finding at either tier, or [] when there is
+    none.
+
+    Exists because the verdict word is about the VARIANCE ("report the adjusted sandwich
+    variance") while this finding is about the estimate's LOCATION: a CERTIFIED run carrying a
+    mean-shift warning would otherwise print an unqualified "report it", and a NOT_CERTIFIED
+    one would not say which of its several possible causes applied or that a remedy exists.
+    """
+    worst_name, worst_result, worst_shift = "", None, -math.inf
+    for name in ("multiplier_bootstrap", "exact_nonlinear_perturbation"):
+        result = report.check_results.get(name)
+        if result is None:
+            continue
+        if not (
+            result.metrics.get("mean_shift_warned")
+            or result.metrics.get("mean_shift_failed")
+        ):
+            continue
+        # Only when the mean shift is the ONLY thing this check found. The block's whole claim
+        # is "the variance was confirmed, the centre was not" -- if a spread gate fired too,
+        # that claim is false, the verdict is already INVALID on the variance, and a note about
+        # re-centring the interval would be actively misleading.
+        drivers = set(_status_drivers(result, "failure_drivers") or []) | set(
+            _status_drivers(result, "warning_drivers") or []
+        )
+        if drivers - {"mean_shift"}:
+            continue
+        shift = result.metrics.get("mean_shift_se", math.nan)
+        if not math.isnan(shift) and shift > worst_shift:
+            worst_name, worst_result, worst_shift = name, result, shift
+    if worst_result is None:
+        return []
+
+    coverage = worst_result.metrics.get(
+        "mean_shift_wald_coverage", wald_coverage_at_bias(worst_shift)
+    )
+    failed = bool(worst_result.metrics.get("mean_shift_failed"))
+    threshold_key = "mean_shift_threshold" if failed else "mean_shift_warn_threshold"
+    threshold = worst_result.metrics.get(threshold_key, math.nan)
+    lead = "NEXT STEP" if failed else "CAVEAT"
+    verb = (
+        "is not supported as-is"
+        if failed
+        else "is usable, with one caveat worth stating"
+    )
+    text = (
+        f"{lead}: the reported VARIANCE was confirmed by {worst_name} -- its "
+        f"bootstrap-vs-sandwich SE comparison passed -- but the same check measured the "
+        f"re-solved estimates sitting {worst_shift:.3g} SE off centre (threshold "
+        f"{threshold:.3g}), so a 95% Wald interval centred on this estimate {verb}: expect it "
+        f"to cover about {coverage:.1%}. The remedy is the percentile refit bootstrap, which "
+        f"re-centres the interval without changing the variance: re-run with "
+        f"percentile_bootstrap_draws set (see docs/adr/0003) and report "
+        f"percentile_bootstrap_ci."
+    )
+    return textwrap.wrap(
+        text,
+        width=_SUMMARY_TOTAL_WIDTH,
+        subsequent_indent=" " * len(f"{lead}: "),
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+
+
 def _verdict_next_step_lines(report: DiagnosticReport | None) -> list[str]:
     """
     The actionable next step, when there is one the summary can name.
@@ -973,7 +1056,18 @@ def _verdict_next_step_lines(report: DiagnosticReport | None) -> list[str]:
     Rendered AFTER the verdict rather than folded into it so the verdict line stays one
     scannable sentence.
     """
-    if report is None or report.verdict != DiagnosticVerdicts.NOT_CERTIFIED:
+    if report is None:
+        return []
+
+    # The mean-shift tiers, at either severity: the verdict word alone cannot say that what was
+    # measured is an off-centre interval rather than a bad variance, nor that there is a
+    # specific remedy for it. Checked before the bootstrap-not-run branch because a run can
+    # only have a mean-shift finding if a re-solve check DID run.
+    location_lines = _mean_shift_next_step_lines(report)
+    if location_lines:
+        return location_lines
+
+    if report.verdict != DiagnosticVerdicts.NOT_CERTIFIED:
         return []
     if "multiplier_bootstrap" in report.check_results:
         return []
@@ -2576,6 +2670,20 @@ def _mean_shift_null_upper(
     )["mean_shift_upper"]
 
 
+def wald_coverage_at_bias(bias_in_se: float) -> float:
+    """
+    Coverage of a nominal-95% Wald interval centred on an estimate that is `bias_in_se` standard
+    errors off centre: Phi(1.96 - b) - Phi(-1.96 - b). This is the entire consequence of the
+    mean-shift statistic, and what both of its floors are calibrated against, so the summary
+    can quote the number the reader actually cares about instead of an abstract SE count.
+    """
+    if math.isnan(bias_in_se):
+        return math.nan
+    z = 1.959963984540054
+    normal_cdf = lambda x: 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))  # noqa: E731
+    return normal_cdf(z - abs(bias_in_se)) - normal_cdf(-z - abs(bias_in_se))
+
+
 def _evaluate_mean_shift_gate(
     b_L: float,
     mean_shift_null_upper: float,
@@ -2583,22 +2691,28 @@ def _evaluate_mean_shift_gate(
     solver_unhealthy: bool,
     config: DiagnosticConfig,
     warnings_list: list[str],
-) -> tuple[float, bool, bool]:
+) -> tuple[float, float, bool, bool, bool]:
     """
     The shared mean-shift gate of check_exact_nonlinear_perturbations and
-    check_multiplier_bootstrap: returns (threshold, gate_evaluable, gate_failed) for the b_L
-    computed on _mean_shift_ensemble's rows, appending an explanatory warning whenever an
-    exceedance is observed but deliberately not gated on.
+    check_multiplier_bootstrap: returns (warn_threshold, fail_threshold, gate_evaluable,
+    gate_warned, gate_failed) for the b_L computed on _mean_shift_ensemble's rows, appending an
+    explanatory warning whenever an exceedance is observed but deliberately not gated on.
 
-    b_L is compared against max(simulated finite-draw null upper quantile,
-    config.mean_shift_tolerance_se). The band is what makes the comparison honest at finite J:
-    with unpaired draws b_L is raw sampling noise of size sqrt(chi2_dim / J) -- about 0.26 SE in
-    one dimension at the default J = 15, which the former fixed 0.10 comparison read as a failure
-    on a provably affine map. config.mean_shift_tolerance_se survives as the absolute
-    practical-significance FLOOR (a displacement below a tenth of a target SE is not worth
-    reporting however many draws make it detectable), and it is the binding threshold in the
-    ordinary antithetic case, where the null band collapses to exactly 0 because every complete
-    pair cancels.
+    b_L is compared against max(simulated finite-draw null upper quantile, floor) at each of two
+    floors -- config.mean_shift_warn_tolerance_se and config.mean_shift_tolerance_se. The band is
+    what makes the comparison honest at finite J: with unpaired draws b_L is raw sampling noise
+    of size sqrt(chi2_dim / J) -- about 0.26 SE in one dimension at the default J = 15, which a
+    bare floor comparison would read as a real displacement on a provably affine map. The floors
+    are what make it MEAN something: they are the sizes at which an off-centre estimate starts to
+    cost Wald coverage (see the DiagnosticConfig comment for the calibration). Under intact
+    antithetic pairing the band collapses to exactly 0 -- every complete pair cancels -- and the
+    floors are the binding thresholds.
+
+    TWO tiers because the statistic is a LOCATION measurement and location degrades gracefully:
+    unlike a spread gate, where the reported variance is either right or wrong, a displacement
+    of 0.3 SE leaves a usable interval (94% coverage) and 0.5 SE does not (92%). Collapsing both
+    into one verdict either condemns healthy runs or hides real bias; the caller maps the warn
+    tier onto WARNING and the fail tier onto FAILED.
 
     With unpaired draws there is no cancellation to lean on, so censoring CAN manufacture a
     location shift that the null band -- which replicates the observed pattern but still treats
@@ -2607,8 +2721,9 @@ def _evaluate_mean_shift_gate(
     never into a pass.
     """
     if math.isnan(mean_shift_null_upper):
-        return math.nan, False, False
-    threshold = max(mean_shift_null_upper, config.mean_shift_tolerance_se)
+        return math.nan, math.nan, False, False, False
+    warn_threshold = max(mean_shift_null_upper, config.mean_shift_warn_tolerance_se)
+    fail_threshold = max(mean_shift_null_upper, config.mean_shift_tolerance_se)
     if num_dropped_rows:
         warnings_list.append(
             f"{num_dropped_rows} converged row(s) whose antithetic partner did not converge were "
@@ -2619,17 +2734,111 @@ def _evaluate_mean_shift_gate(
         config.paired_directions or not solver_unhealthy
     )
     if evaluable:
-        return threshold, True, bool(b_L > threshold)
+        return (
+            warn_threshold,
+            fail_threshold,
+            True,
+            bool(b_L > warn_threshold),
+            bool(b_L > fail_threshold),
+        )
 
-    if not math.isnan(b_L) and b_L > threshold:
+    if not math.isnan(b_L) and b_L > warn_threshold:
         warnings_list.append(
-            f"Mean shift {b_L:.4g} SE exceeds its null threshold {threshold:.4g}, but the "
+            f"Mean shift {b_L:.4g} SE exceeds its null threshold {warn_threshold:.4g}, but the "
             "directions are unpaired and the solver is unhealthy, so the displacement cannot be "
             "separated from the censoring of non-converged directions (there is no antithetic "
             "partner left to cancel the linear part against); the mean-shift gate was not "
             "applied."
         )
-    return threshold, False, False
+    return warn_threshold, fail_threshold, False, False, False
+
+
+def _mean_shift_criteria(
+    b_L: float,
+    warn_threshold: float,
+    fail_threshold: float,
+    gate_evaluable: bool,
+    warned: bool,
+    failed: bool,
+) -> list[CriterionResult]:
+    """
+    The mean-shift gate's summary rows, shared by both re-solve checks: one row per tier, so the
+    reader sees both what was required to report the interval as-is and what was required to
+    report it at all, and which of the two this run crossed.
+
+    Two rows rather than one because the tiers carry different consequences and a single row
+    could only name one of them -- the old single row said "at most 0.1 SE (the largest expected
+    if nothing were wrong)", which was both uncalibrated and, at the failing tier, a claim about
+    the wrong quantity.
+    """
+    value = (
+        f"{b_L:.3g} SE (expected Wald coverage {wald_coverage_at_bias(b_L):.1%})"
+        if gate_evaluable
+        else "not evaluable on this ensemble"
+    )
+    rows = []
+    for threshold, tier_failed, severity, wording in (
+        (
+            fail_threshold,
+            failed,
+            "fail",
+            "the re-solved estimates' average shift at most {t:.3g} SE, beyond which a "
+            "Wald interval centred on the estimate loses more than ~3 points of coverage",
+        ),
+        (
+            warn_threshold,
+            warned,
+            "warn",
+            "the re-solved estimates' average shift at most {t:.3g} SE, beyond which the "
+            "interval is off centre enough to cost ~1 point of coverage",
+        ),
+    ):
+        rows.append(
+            CriterionResult(
+                description=(
+                    wording.format(t=threshold)
+                    if not math.isnan(threshold)
+                    else "the re-solved estimates' average shift within its null band"
+                ),
+                value=value,
+                ok=(not tier_failed) if gate_evaluable else None,
+                severity=severity,
+            )
+        )
+    return rows
+
+
+def _mean_shift_message(
+    b_L: float, threshold: float, tier: str, tolerance_floor: float
+) -> str:
+    """
+    The one-sentence finding for a mean-shift exceedance, shared by both re-solve checks.
+
+    Phrased as what was MEASURED (the estimate is off centre, by this much, costing this much
+    coverage) and what it is NOT (a statement about the variance, which these checks test
+    separately and which may well have just passed) -- the distinction the old single-tier
+    wording lost when a mean-shift trip printed the same "DO NOT REPORT the adjusted sandwich
+    variance" as a genuine variance failure.
+    """
+    coverage = wald_coverage_at_bias(b_L)
+    lead = (
+        "systematically displaced (curvature-induced bias)"
+        if tier == "fail"
+        else "displaced (curvature-induced bias)"
+    )
+    consequence = (
+        f"A 95% Wald interval centred on this estimate is expected to cover about "
+        f"{coverage:.1%} rather than 95%."
+    )
+    remedy = (
+        "This is a statement about where the interval sits, not about the reported variance; "
+        "the percentile refit bootstrap (percentile_bootstrap_draws) re-centres it."
+    )
+    return (
+        f"Mean shift {b_L:.4g} SE exceeds its {tier} threshold {threshold:.4g} (the simulated "
+        f"finite-draw null band, floored at {tolerance_floor:g}): the re-solved estimates are "
+        f"{lead}. {consequence} {remedy}"
+    )
 
 
 def se_ratios_from_generalized_eigenvalues(
@@ -2891,22 +3100,28 @@ def check_exact_nonlinear_perturbations(
         config.random_seed + 6,
         config,
     )
-    mean_shift_threshold, mean_shift_gate_evaluable, mean_shift_failed = (
-        _evaluate_mean_shift_gate(
-            b_L,
-            mean_shift_null_upper,
-            len(converged_pattern) - len(mean_shift_pattern),
-            solver_unhealthy,
-            config,
-            warnings_list,
-        )
+    (
+        mean_shift_warn_threshold,
+        mean_shift_threshold,
+        mean_shift_gate_evaluable,
+        mean_shift_warned,
+        mean_shift_failed,
+    ) = _evaluate_mean_shift_gate(
+        b_L,
+        mean_shift_null_upper,
+        len(converged_pattern) - len(mean_shift_pattern),
+        solver_unhealthy,
+        config,
+        warnings_list,
     )
 
     # An ABOVE-band se_ratio on the converged subset is trustworthy under censoring (the
     # excluded directions are the hardest, so exclusion biases the spread DOWN); a BELOW-band
     # ratio on a censored subset is exactly what that censoring produces on its own, so it only
     # counts as a failure when the solver is healthy.
-    gates_failed = se_ratio_above or (se_ratio_below and not solver_unhealthy)
+    se_ratio_failed = se_ratio_above or (se_ratio_below and not solver_unhealthy)
+    gates_failed = se_ratio_failed
+    quantile_shift_failed = False
     if mean_shift_failed:
         gates_failed = True
     for shifts in quantile_shifts.values():
@@ -2919,6 +3134,27 @@ def check_exact_nonlinear_perturbations(
             )
         ):
             gates_failed = True
+            quantile_shift_failed = True
+
+    # Which gate(s) actually produced this run's status, recorded for _derive_verdict so it can
+    # tell a LOCATION finding (mean shift: the estimate is off centre; the reported variance is
+    # untouched and may have just passed its own band) from a VARIANCE finding (se_ratios,
+    # quantile shifts) without re-deriving any of the logic above. A consumer reading an older
+    # pickled report finds these keys absent, which _derive_verdict treats as the pre-split
+    # behaviour: every failure is a variance failure.
+    failure_drivers = [
+        name
+        for name, fired in (
+            ("se_ratio_above", se_ratio_above),
+            ("se_ratio_below", se_ratio_below and not solver_unhealthy),
+            ("mean_shift", mean_shift_failed),
+            ("quantile_shift", quantile_shift_failed),
+        )
+        if fired
+    ]
+    warning_drivers = (
+        ["mean_shift"] if mean_shift_warned and not mean_shift_failed else []
+    )
 
     # Status precedence: statistically confirmed fragility FAILS outright (measured on all
     # executed trials, so no optimistic-subset caveat applies and it needs no ensemble
@@ -2970,8 +3206,28 @@ def check_exact_nonlinear_perturbations(
             "ensemble (typically a singular target covariance), so no comparison against their "
             "null bands was performed; the check is INDETERMINATE rather than passed."
         )
+    elif mean_shift_warned:
+        # Every spread gate passed and the solver is healthy: the only finding is that the
+        # re-solved estimates sit off centre by enough to cost a point of coverage but not
+        # enough to invalidate the interval. WARNING, not FAILED -- see _evaluate_mean_shift_gate.
+        status = CheckStatuses.WARNING
+        warnings_list.append(
+            _mean_shift_message(
+                b_L,
+                mean_shift_warn_threshold,
+                "warning",
+                config.mean_shift_warn_tolerance_se,
+            )
+        )
     else:
         status = CheckStatuses.PASSED
+
+    if mean_shift_failed:
+        warnings_list.append(
+            _mean_shift_message(
+                b_L, mean_shift_threshold, "failure", config.mean_shift_tolerance_se
+            )
+        )
 
     metrics = {
         "a_nl_by_target": {
@@ -2986,9 +3242,15 @@ def check_exact_nonlinear_perturbations(
         ],
         "mean_shift_se": b_L,
         "mean_shift_null_upper": mean_shift_null_upper,
+        "mean_shift_warn_threshold": mean_shift_warn_threshold,
         "mean_shift_threshold": mean_shift_threshold,
         "mean_shift_gate_evaluable": mean_shift_gate_evaluable,
+        "mean_shift_warned": mean_shift_warned,
+        "mean_shift_failed": mean_shift_failed,
+        "mean_shift_wald_coverage": wald_coverage_at_bias(b_L),
         "mean_shift_num_rows": len(mean_shift_pattern),
+        "failure_drivers": failure_drivers,
+        "warning_drivers": warning_drivers,
         "quantile_shifts_se": quantile_shifts,
         "num_trials": num_trials,
         "num_converged_trials": num_converged,
@@ -3070,21 +3332,13 @@ def check_exact_nonlinear_perturbations(
                 else None
             ),
         ),
-        CriterionResult(
-            description=(
-                f"the re-solved estimates' average shift at most "
-                f"{mean_shift_threshold:.3g} SE (the largest expected if nothing "
-                "were wrong)"
-            )
-            if not math.isnan(mean_shift_threshold)
-            else (
-                "the re-solved estimates' average shift within the largest expected "
-                "if nothing were wrong"
-            ),
-            value=f"{b_L:.3g} SE"
-            if mean_shift_gate_evaluable
-            else "not evaluable on this ensemble",
-            ok=(not mean_shift_failed) if mean_shift_gate_evaluable else None,
+        *_mean_shift_criteria(
+            b_L,
+            mean_shift_warn_threshold,
+            mean_shift_threshold,
+            mean_shift_gate_evaluable,
+            mean_shift_warned,
+            mean_shift_failed,
         ),
         CriterionResult(
             description=(
@@ -3432,15 +3686,19 @@ def check_multiplier_bootstrap(
         config.random_seed + 13,
         config,
     )
-    mean_shift_threshold, mean_shift_gate_evaluable, mean_shift_failed = (
-        _evaluate_mean_shift_gate(
-            b_L,
-            mean_shift_null_upper,
-            len(converged_pattern) - len(mean_shift_pattern),
-            solver_unhealthy,
-            config,
-            warnings_list,
-        )
+    (
+        mean_shift_warn_threshold,
+        mean_shift_threshold,
+        mean_shift_gate_evaluable,
+        mean_shift_warned,
+        mean_shift_failed,
+    ) = _evaluate_mean_shift_gate(
+        b_L,
+        mean_shift_null_upper,
+        len(converged_pattern) - len(mean_shift_pattern),
+        solver_unhealthy,
+        config,
+        warnings_list,
     )
 
     narrower_than_band_message = (
@@ -3473,10 +3731,12 @@ def check_multiplier_bootstrap(
             )
         if mean_shift_failed:
             warnings_list.append(
-                f"Bootstrap mean shift {b_L:.4g} SE exceeds its null threshold "
-                f"{mean_shift_threshold:.4g} (the simulated finite-draw null band, floored at "
-                f"mean_shift_tolerance_se={config.mean_shift_tolerance_se}): the resampled "
-                "roots are systematically displaced (curvature-induced bias)."
+                _mean_shift_message(
+                    b_L,
+                    mean_shift_threshold,
+                    "failure",
+                    config.mean_shift_tolerance_se,
+                )
             )
     elif solver_unhealthy:
         status = CheckStatuses.INDETERMINATE
@@ -3509,11 +3769,48 @@ def check_multiplier_bootstrap(
             )
         if any_below:
             warnings_list.append(narrower_than_band_message)
-    elif any_below:
+    elif any_below or mean_shift_warned:
+        # Two different WARNINGs share this rung and must not be confused downstream: a
+        # below-band ratio is a statement about the reported VARIANCE (overstated -> the
+        # calibrated CONSERVATIVE verdict), a mean-shift warning is a statement about where the
+        # interval SITS (the variance just passed its own band). warning_drivers below is what
+        # lets _derive_verdict keep them apart.
         status = CheckStatuses.WARNING
-        warnings_list.append(narrower_than_band_message)
+        if any_below:
+            warnings_list.append(narrower_than_band_message)
+        if mean_shift_warned:
+            warnings_list.append(
+                _mean_shift_message(
+                    b_L,
+                    mean_shift_warn_threshold,
+                    "warning",
+                    config.mean_shift_warn_tolerance_se,
+                )
+            )
     else:
         status = CheckStatuses.PASSED
+
+    # See the identically-named block in check_exact_nonlinear_perturbations: which gate drove
+    # the status, so _derive_verdict can separate a location finding from a variance one without
+    # re-deriving the ladder. Absent on reports pickled before the split, which _derive_verdict
+    # reads as "every failure is a variance failure" -- the pre-split behaviour.
+    failure_drivers = [
+        name
+        for name, fired in (
+            ("solver_fragility", solver_confirmed_unhealthy),
+            ("se_ratio_above", any_above),
+            ("mean_shift", mean_shift_failed),
+        )
+        if fired
+    ]
+    warning_drivers = [
+        name
+        for name, fired in (
+            ("se_ratio_below", any_below and status == CheckStatuses.WARNING),
+            ("mean_shift", mean_shift_warned and not mean_shift_failed),
+        )
+        if fired
+    ]
 
     metrics = {
         "bootstrap_se_by_target": {
@@ -3527,9 +3824,15 @@ def check_multiplier_bootstrap(
         "se_ratio_band_unevaluable_targets": unevaluable_targets,
         "mean_shift_se": b_L,
         "mean_shift_null_upper": mean_shift_null_upper,
+        "mean_shift_warn_threshold": mean_shift_warn_threshold,
         "mean_shift_threshold": mean_shift_threshold,
         "mean_shift_gate_evaluable": mean_shift_gate_evaluable,
+        "mean_shift_warned": mean_shift_warned,
+        "mean_shift_failed": mean_shift_failed,
+        "mean_shift_wald_coverage": wald_coverage_at_bias(b_L),
         "mean_shift_num_rows": len(mean_shift_pattern),
+        "failure_drivers": failure_drivers,
+        "warning_drivers": warning_drivers,
         "num_draws": num_draws,
         # Distinct multiplier draws actually re-solved. Under the sign-major trial order an early
         # stop truncates the SECOND sign block first, so this equals num_draws unless the stop
@@ -3618,21 +3921,13 @@ def check_multiplier_bootstrap(
             ok=(not any_below) if ratio_gates_evaluable else None,
             severity="warn",
         ),
-        CriterionResult(
-            description=(
-                f"the re-solved estimates' average shift at most "
-                f"{mean_shift_threshold:.3g} SE (the largest expected if nothing "
-                "were wrong)"
-            )
-            if not math.isnan(mean_shift_threshold)
-            else (
-                "the re-solved estimates' average shift within the largest expected "
-                "if nothing were wrong"
-            ),
-            value=f"{b_L:.3g} SE"
-            if mean_shift_gate_evaluable
-            else "not evaluable on this ensemble",
-            ok=(not mean_shift_failed) if mean_shift_gate_evaluable else None,
+        *_mean_shift_criteria(
+            b_L,
+            mean_shift_warn_threshold,
+            mean_shift_threshold,
+            mean_shift_gate_evaluable,
+            mean_shift_warned,
+            mean_shift_failed,
         ),
     ]
     return CheckResult(
@@ -4417,6 +4712,34 @@ def _combine_classification(check_results: dict[str, CheckResult]) -> str:
     return DiagnosticClassifications.LOCALLY_SUPPORTED
 
 
+def _status_drivers(result: CheckResult | None, key: str) -> list[str] | None:
+    """
+    The recorded list of gates that produced a check's status ("failure_drivers" /
+    "warning_drivers"), or None when the check does not record them.
+
+    None is load-bearing and distinct from []: it means the report predates the drivers (or
+    comes from a check that has no gate split), and every caller must then fall back to the
+    pre-split reading of the bare status rather than assume "no gates fired".
+    """
+    if result is None:
+        return None
+    drivers = result.metrics.get(key)
+    return list(drivers) if isinstance(drivers, (list, tuple)) else None
+
+
+def _is_location_only(result: CheckResult) -> bool:
+    """
+    True when a FAILED re-solve check failed its mean-shift gate and nothing else -- i.e. the
+    finding is about WHERE the estimate sits, not about the variance, which its own SE
+    comparison passed. See the location_only_failure rung in _derive_verdict.
+
+    False for any check that does not record drivers, which keeps reports pickled before the
+    two-tier gate reading exactly as they did: every failure a variance failure.
+    """
+    drivers = _status_drivers(result, "failure_drivers")
+    return drivers == ["mean_shift"]
+
+
 def _derive_verdict(
     check_results: dict[str, CheckResult],
     input_check_results: dict[str, CheckResult],
@@ -4432,7 +4755,8 @@ def _derive_verdict(
 
     Precedence, and the evidence behind each rung:
 
-    1. INVALID -- any hard/measured failure, or a rank-deficient target covariance
+    1. INVALID -- any hard/measured failure EXCEPT a mean-shift-only one (see rung 2), or a
+       rank-deficient target covariance
        (`bread_stability`'s `target_covariance_rank_estimate < theta_dim`). The rank condition
        is pulled up to INVALID rather than left in UNCERTIFIABLE because it identified 76/76 of
        the zero-width-interval collapses in the undercoverage hunt -- runs whose CIs miss with
@@ -4442,15 +4766,20 @@ def _derive_verdict(
     2. UNCERTIFIABLE -- any indeterminate check (an unconfirmed re-solve exceedance, a
        partially censored ensemble, unevaluable gates; CONFIRMED fragility and TOTAL censoring
        now fail instead), any indeterminate INPUT row (an input prerequisite that never ran,
-       e.g. under suppress_all_data_checks -- unvalidated inputs cannot certify), or the
+       e.g. under suppress_all_data_checks -- unvalidated inputs cannot certify), the
        a_{j,l} screen called for the multiplier bootstrap and it did
        not run (`multiplier_bootstrap="off"`, or the report predates the check): the calibrated
        division of labor makes the bootstrap the verdict layer once the screen trips, so its
-       absence there means no verdict was reached, not a pass.
+       absence there means no verdict was reached, not a pass -- or a LOCATION-only failure: a
+       re-solve check whose mean shift cleared its failing floor (default 0.5 SE, ~3 coverage
+       points) while its SE comparison passed. The Wald interval is unsupported, so this is not
+       a pass; the variance is not impeached, so it is not INVALID either.
     3. CONSERVATIVE -- nothing failed or unresolved, but a calibrated conservatism signal fired:
        the bootstrap's below-band WARNING (sandwich SE overstated), or
        `influence_concentration`'s WARNING (its n_eff floor has measured precision 0.73 /
        recall 0.59 for a >2x-inflated variance, and the inflation it predicts is conservative).
+       A bootstrap WARNING driven ONLY by the mean-shift warn tier does not reach this rung --
+       it says the interval is off centre, not that its width is inflated.
     4. CERTIFIED -- everything else, with `verdict_basis` recording how: "bootstrap" (the
        linearization-free SE comparison ran and passed) or "screen" (the run was quiet enough
        that the screen never called for it -- every screen-quiet design in the calibration grids
@@ -4465,8 +4794,15 @@ def _derive_verdict(
     """
     any_failed = (
         hard_failed
-        or any(r.status == CheckStatuses.FAILED for r in check_results.values())
+        or any(
+            r.status == CheckStatuses.FAILED and not _is_location_only(r)
+            for r in check_results.values()
+        )
         or any(r.status == CheckStatuses.FAILED for r in input_check_results.values())
+    )
+    location_only_failure = any(
+        r.status == CheckStatuses.FAILED and _is_location_only(r)
+        for r in check_results.values()
     )
     bread = check_results.get("bread_stability")
     rank_estimate = (
@@ -4476,14 +4812,25 @@ def _derive_verdict(
     if any_failed or rank_deficient:
         return DiagnosticVerdicts.INVALID, ""
 
-    if any(
-        r.status == CheckStatuses.INDETERMINATE for r in check_results.values()
-    ) or any(
-        r.status == CheckStatuses.INDETERMINATE for r in input_check_results.values()
+    if (
+        any(r.status == CheckStatuses.INDETERMINATE for r in check_results.values())
+        or any(
+            r.status == CheckStatuses.INDETERMINATE
+            for r in input_check_results.values()
+        )
+        or location_only_failure
     ):
         # Input rows too: an INDETERMINATE one means an input prerequisite did not run
         # (suppress_all_data_checks) or could not conclude, and unvalidated inputs cannot
         # certify -- without this, suppressing the first wave left quiet runs CERTIFIED.
+        #
+        # location_only_failure lands here rather than in INVALID: a re-solve check that failed
+        # ONLY its mean-shift gate measured the estimate to be off centre by enough to cost
+        # real coverage, which does mean the Wald interval is not supported -- but its SE
+        # comparison passed, so "DO NOT REPORT the adjusted sandwich variance" would be a claim
+        # about the one quantity this run actually verified. NOT_CERTIFIED is the honest rung,
+        # and it already carries the "fixable, see NEXT STEP" framing that fits: the percentile
+        # refit bootstrap re-centres the interval without touching the variance.
         return DiagnosticVerdicts.NOT_CERTIFIED, ""
 
     bootstrap = check_results.get("multiplier_bootstrap")
@@ -4498,8 +4845,20 @@ def _derive_verdict(
         return DiagnosticVerdicts.NOT_CERTIFIED, ""
 
     influence = check_results.get("influence_concentration")
+    # A bootstrap WARNING is only the CONSERVATIVE signal when it is the below-band SE ratio --
+    # the calibrated "variance is wider than it needs to be" finding. A mean-shift warning
+    # shares the WARNING status but says the opposite kind of thing (the variance was
+    # confirmed; the interval is off centre by ~1 coverage point), so it must not borrow a
+    # verdict that reads "width likely inflated". It leaves the verdict CERTIFIED and is
+    # surfaced by the check's own row and the caveat line under the verdict.
+    bootstrap_warning_drivers = _status_drivers(bootstrap, "warning_drivers")
     conservative = (
-        bootstrap is not None and bootstrap.status == CheckStatuses.WARNING
+        bootstrap is not None
+        and bootstrap.status == CheckStatuses.WARNING
+        and (
+            bootstrap_warning_drivers is None
+            or "se_ratio_below" in bootstrap_warning_drivers
+        )
     ) or (influence is not None and influence.status == CheckStatuses.WARNING)
     if conservative:
         return DiagnosticVerdicts.CONSERVATIVE, ""

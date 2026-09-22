@@ -908,7 +908,9 @@ def test_perform_first_wave_input_checks_rejects_corrupted_recorded_action_proba
         (analysis_df["calendar_t"] == 4) & (analysis_df["user_id"] == 1), "action1prob"
     ] = 0.123456
 
-    with pytest.raises(AssertionError, match="Not equal to tolerance"):
+    with pytest.raises(
+        ValueError, match="does not match what action_prob_func produces"
+    ):
         input_checks.perform_first_wave_input_checks(**study)
 
 

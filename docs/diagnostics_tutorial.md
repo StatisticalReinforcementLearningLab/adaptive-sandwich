@@ -368,8 +368,10 @@ intact antithetic pairing the null band is exactly `0` and the floors bind; with
 the band is what stops raw sampling noise -- about `0.26` SE in one dimension at the default
 `J = 15` -- from reading as curvature. `mean_shift_null_upper`, both thresholds,
 `mean_shift_gate_evaluable`, `mean_shift_warned`/`mean_shift_failed`,
-`mean_shift_wald_coverage` and `mean_shift_num_rows` are all reported so you can see which bound
-and what it costs.
+`mean_shift_worst_contrast_wald_coverage` and `mean_shift_num_rows` are all reported so you can
+see which bound and what it costs. That coverage number is a bound over linear contrasts of the
+targets, not each interval's own coverage -- exact when you report one target, conservative when
+you report several (see `docs/diagnostics.md`).
 
 The floors are set from Wald coverage, which is the whole consequence of the statistic: `b_L` is
 a bias of the estimate in units of its own SE, so a nominal-95% interval centred on it covers

@@ -987,24 +987,32 @@ def _mean_shift_next_step_lines(report: DiagnosticReport) -> list[str]:
     mean-shift warning would otherwise print an unqualified "report it", and a NOT_CERTIFIED
     one would not say which of its several possible causes applied or that a remedy exists.
     """
+    resolve_checks = [
+        (name, report.check_results[name])
+        for name in ("multiplier_bootstrap", "exact_nonlinear_perturbation")
+        if name in report.check_results
+    ]
+
+    # The block's whole claim is "the variance was confirmed, only the centre was not", so it
+    # must be suppressed when ANY re-solve check reports a spread finding -- not merely when
+    # the one being quoted does. With both expensive checks enabled they can disagree: the
+    # exact check can be mean-shift-only while the bootstrap has an above-band SE ratio, and
+    # scoping this test to the candidate alone would print "the variance was confirmed, just
+    # re-centre" under an INVALID verdict that says the opposite.
+    spread_findings = set()
+    for _, result in resolve_checks:
+        spread_findings |= set(_status_drivers(result, "failure_drivers") or []) | set(
+            _status_drivers(result, "warning_drivers") or []
+        )
+    if spread_findings - {"mean_shift"}:
+        return []
+
     worst_name, worst_result, worst_shift = "", None, -math.inf
-    for name in ("multiplier_bootstrap", "exact_nonlinear_perturbation"):
-        result = report.check_results.get(name)
-        if result is None:
-            continue
+    for name, result in resolve_checks:
         if not (
             result.metrics.get("mean_shift_warned")
             or result.metrics.get("mean_shift_failed")
         ):
-            continue
-        # Only when the mean shift is the ONLY thing this check found. The block's whole claim
-        # is "the variance was confirmed, the centre was not" -- if a spread gate fired too,
-        # that claim is false, the verdict is already INVALID on the variance, and a note about
-        # re-centring the interval would be actively misleading.
-        drivers = set(_status_drivers(result, "failure_drivers") or []) | set(
-            _status_drivers(result, "warning_drivers") or []
-        )
-        if drivers - {"mean_shift"}:
             continue
         shift = result.metrics.get("mean_shift_se", math.nan)
         if not math.isnan(shift) and shift > worst_shift:
@@ -1013,7 +1021,7 @@ def _mean_shift_next_step_lines(report: DiagnosticReport) -> list[str]:
         return []
 
     coverage = worst_result.metrics.get(
-        "mean_shift_wald_coverage", wald_coverage_at_bias(worst_shift)
+        "mean_shift_worst_contrast_wald_coverage", wald_coverage_at_bias(worst_shift)
     )
     failed = bool(worst_result.metrics.get("mean_shift_failed"))
     threshold_key = "mean_shift_threshold" if failed else "mean_shift_warn_threshold"
@@ -1029,8 +1037,10 @@ def _mean_shift_next_step_lines(report: DiagnosticReport) -> list[str]:
         f"{'bootstrap-vs-sandwich' if worst_name == 'multiplier_bootstrap' else 'nonlinear-vs-linear'} "
         f"SE comparison passed -- but the same check measured the "
         f"re-solved estimates sitting {worst_shift:.3g} SE off centre (threshold "
-        f"{threshold:.3g}), so a 95% Wald interval centred on this estimate {verb}: expect it "
-        f"to cover about {coverage:.1%}. The remedy is the percentile refit bootstrap, which "
+        f"{threshold:.3g}), so a 95% Wald interval centred on this estimate {verb}: on the "
+        f"worst-affected linear contrast expect it to cover about {coverage:.1%}, and an "
+        f"individual target's interval at least that. The remedy is the percentile refit "
+        f"bootstrap, which "
         f"re-centres the interval without changing the variance: re-run with "
         f"percentile_bootstrap_draws set (see docs/adr/0003) and report "
         f"percentile_bootstrap_ci."
@@ -2677,6 +2687,14 @@ def wald_coverage_at_bias(bias_in_se: float) -> float:
     errors off centre: Phi(1.96 - b) - Phi(-1.96 - b). This is the entire consequence of the
     mean-shift statistic, and what both of its floors are calibrated against, so the summary
     can quote the number the reader actually cares about instead of an abstract SE count.
+
+    EXACT for a scalar standardized bias; a worst-direction LOWER BOUND when fed the callers'
+    b_L, which is the Mahalanobis norm ||V_L^{-1/2} mean|| over however many targets are
+    reported. That norm is the largest standardized bias attained by any linear contrast of the
+    targets, so the coverage it implies is the worst contrast's; an individual coordinate's
+    interval, whose own bias is a component of that vector, covers at least as well. With one
+    reported target -- the case both floors were calibrated on -- the two coincide. Callers must
+    therefore present this as a bound, not as the expected coverage of each reported interval.
     """
     if math.isnan(bias_in_se):
         return math.nan
@@ -2773,7 +2791,7 @@ def _mean_shift_criteria(
     the wrong quantity.
     """
     value = (
-        f"{b_L:.3g} SE (expected Wald coverage {wald_coverage_at_bias(b_L):.1%})"
+        f"{b_L:.3g} SE (worst-contrast Wald coverage >= {wald_coverage_at_bias(b_L):.1%})"
         if gate_evaluable
         else "not evaluable on this ensemble"
     )
@@ -2784,14 +2802,16 @@ def _mean_shift_criteria(
             failed,
             "fail",
             "the re-solved estimates' average shift at most {t:.3g} SE, beyond which a "
-            "Wald interval centred on the estimate loses more than ~3 points of coverage",
+            "Wald interval on the worst-affected contrast loses more than ~3 points of "
+            "coverage",
         ),
         (
             warn_threshold,
             warned,
             "warn",
             "the re-solved estimates' average shift at most {t:.3g} SE, beyond which the "
-            "interval is off centre enough to cost ~1 point of coverage",
+            "interval is off centre enough to cost ~1 point of coverage on the "
+            "worst-affected contrast",
         ),
     ):
         rows.append(
@@ -2822,14 +2842,17 @@ def _mean_shift_message(
     variance" as a genuine variance failure.
     """
     coverage = wald_coverage_at_bias(b_L)
+    # Callers pass "failure" / "warning"; comparing against "fail" here silently made every
+    # failure message use the warning's weaker wording.
     lead = (
         "systematically displaced (curvature-induced bias)"
-        if tier == "fail"
+        if tier == "failure"
         else "displaced (curvature-induced bias)"
     )
     consequence = (
-        f"A 95% Wald interval centred on this estimate is expected to cover about "
-        f"{coverage:.1%} rather than 95%."
+        f"A 95% Wald interval on the worst-affected linear contrast is expected to cover "
+        f"about {coverage:.1%} rather than 95% (a bound: b_L is a Mahalanobis norm over the "
+        f"reported targets, so an individual coordinate's interval covers at least this)."
     )
     remedy = (
         "This is a statement about where the interval sits, not about the reported variance; "
@@ -3263,7 +3286,7 @@ def check_exact_nonlinear_perturbations(
         "mean_shift_gate_evaluable": mean_shift_gate_evaluable,
         "mean_shift_warned": mean_shift_warned,
         "mean_shift_failed": mean_shift_failed,
-        "mean_shift_wald_coverage": wald_coverage_at_bias(b_L),
+        "mean_shift_worst_contrast_wald_coverage": wald_coverage_at_bias(b_L),
         "mean_shift_num_rows": len(mean_shift_pattern),
         "failure_drivers": failure_drivers,
         "warning_drivers": warning_drivers,
@@ -3849,7 +3872,7 @@ def check_multiplier_bootstrap(
         "mean_shift_gate_evaluable": mean_shift_gate_evaluable,
         "mean_shift_warned": mean_shift_warned,
         "mean_shift_failed": mean_shift_failed,
-        "mean_shift_wald_coverage": wald_coverage_at_bias(b_L),
+        "mean_shift_worst_contrast_wald_coverage": wald_coverage_at_bias(b_L),
         "mean_shift_num_rows": len(mean_shift_pattern),
         "failure_drivers": failure_drivers,
         "warning_drivers": warning_drivers,
@@ -4883,11 +4906,13 @@ def _derive_verdict(
     if conservative:
         return DiagnosticVerdicts.CONSERVATIVE, ""
 
-    basis = (
-        VerdictBases.BOOTSTRAP
-        if bootstrap is not None and bootstrap.status == CheckStatuses.PASSED
-        else VerdictBases.SCREEN
-    )
+    # Every failing, indeterminate and conservative bootstrap outcome has already returned by
+    # this point, so a bootstrap result that is still here is one that RAN and whose SE
+    # comparison passed -- which is exactly what the "bootstrap" basis asserts. Keying this on
+    # status == PASSED instead mislabelled the one case the two-tier gate newly allows through,
+    # a mean-shift-only WARNING, as certified by "screen": a claim that the bootstrap was never
+    # needed, about a run where it ran and settled the variance.
+    basis = VerdictBases.BOOTSTRAP if bootstrap is not None else VerdictBases.SCREEN
     return DiagnosticVerdicts.CERTIFIED, basis
 
 

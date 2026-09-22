@@ -2813,7 +2813,7 @@ def test_exact_check_warns_rather_than_fails_on_a_moderate_mean_shift():
     )
     # The coverage consequence is reported alongside the raw SE count, because the SE count is
     # not something a reader can act on and the coverage is.
-    assert 0.93 < result.metrics["mean_shift_wald_coverage"] < 0.95
+    assert 0.93 < result.metrics["mean_shift_worst_contrast_wald_coverage"] < 0.95
 
 
 def test_multiplier_bootstrap_warns_on_a_location_only_mean_shift():
@@ -2904,7 +2904,9 @@ def test_mean_shift_warning_certifies_while_below_band_warning_stays_conservativ
         config,
     )
     assert verdict == DiagnosticVerdicts.CERTIFIED
-    assert basis == VerdictBases.SCREEN
+    # basis is "bootstrap", not "screen": the bootstrap RAN and its SE comparison passed, which
+    # is exactly what that basis asserts. "screen" would claim it was never needed.
+    assert basis == VerdictBases.BOOTSTRAP
 
     # Below-band WARNING: unchanged, still the calibrated CONSERVATIVE signal.
     verdict, _ = d._derive_verdict(
@@ -3000,7 +3002,9 @@ def test_mean_shift_caveat_is_suppressed_when_a_variance_gate_also_fired():
                 "mean_shift_warn_threshold": 0.3,
                 "mean_shift_failed": True,
                 "mean_shift_warned": True,
-                "mean_shift_wald_coverage": d.wald_coverage_at_bias(0.62),
+                "mean_shift_worst_contrast_wald_coverage": d.wald_coverage_at_bias(
+                    0.62
+                ),
                 "failure_drivers": drivers,
                 "warning_drivers": [],
             },
@@ -3053,7 +3057,7 @@ def _resolve_check(name, status, drivers, warning_drivers=()):
             "mean_shift_warn_threshold": 0.3,
             "mean_shift_failed": True,
             "mean_shift_warned": True,
-            "mean_shift_wald_coverage": d.wald_coverage_at_bias(0.62),
+            "mean_shift_worst_contrast_wald_coverage": d.wald_coverage_at_bias(0.62),
             "failure_drivers": list(drivers),
             "warning_drivers": list(warning_drivers),
         },
@@ -3146,3 +3150,149 @@ def test_mean_shift_caveat_names_the_right_comparison_per_check():
         text = " ".join(d._verdict_next_step_lines(report))
         assert expected in text
         assert unexpected not in text
+
+
+# ---------------------------------------------------------------------------
+# 23. REGRESSION (PR #79, balanced review): four defects the first review round did not reach --
+#     suppression scoped to one check when two can disagree, a Mahalanobis norm presented as a
+#     scalar coverage, a mislabelled verdict basis, and an unreachable message branch.
+# ---------------------------------------------------------------------------
+
+
+def _report_with(check_results):
+    return d.DiagnosticReport(
+        classification="",
+        check_results={
+            **check_results,
+            "local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.PASSED),
+        },
+        input_check_results={},
+        metrics={},
+        tolerances_used={},
+        warnings=[],
+        monte_carlo_counts={},
+        target_labels=["theta_0"],
+        rank_diagnostics={},
+    )
+
+
+def test_caveat_suppressed_when_the_OTHER_resolve_check_found_a_spread_problem():
+    # With both expensive checks enabled they can disagree. Scoping the suppression test to the
+    # candidate alone let a mean-shift-only exact check be quoted as "the VARIANCE was
+    # confirmed, just re-centre" while the bootstrap was simultaneously reporting an above-band
+    # SE ratio -- i.e. under an INVALID verdict saying the opposite.
+    report = _report_with(
+        {
+            "exact_nonlinear_perturbation": _resolve_check(
+                "exact_nonlinear_perturbation", CheckStatuses.FAILED, ["mean_shift"]
+            ),
+            "multiplier_bootstrap": _resolve_check(
+                "multiplier_bootstrap", CheckStatuses.FAILED, ["se_ratio_above"]
+            ),
+        }
+    )
+    report.verdict, _ = d._derive_verdict(
+        report.check_results, {}, False, 1, d.DiagnosticConfig()
+    )
+    assert report.verdict == DiagnosticVerdicts.INVALID
+    assert d._verdict_next_step_lines(report) == []
+
+    # Both mean-shift-only: the block is still emitted, quoting the larger displacement.
+    report = _report_with(
+        {
+            "exact_nonlinear_perturbation": _resolve_check(
+                "exact_nonlinear_perturbation", CheckStatuses.FAILED, ["mean_shift"]
+            ),
+            "multiplier_bootstrap": _resolve_check(
+                "multiplier_bootstrap", CheckStatuses.FAILED, ["mean_shift"]
+            ),
+        }
+    )
+    report.verdict, _ = d._derive_verdict(
+        report.check_results, {}, False, 1, d.DiagnosticConfig()
+    )
+    assert d._verdict_next_step_lines(report)
+
+
+def test_mean_shift_coverage_is_presented_as_a_worst_contrast_bound():
+    # b_L is ||V_L^{-1/2} mean||, a Mahalanobis norm over the reported targets, so the coverage
+    # it implies belongs to the worst linear contrast -- each coordinate's own interval covers
+    # at least as well. Presenting it as "expected Wald coverage" overstated coordinate-wise
+    # undercoverage whenever more than one target is reported.
+    report = _report_with(
+        {
+            "multiplier_bootstrap": _resolve_check(
+                "multiplier_bootstrap", CheckStatuses.FAILED, ["mean_shift"]
+            )
+        }
+    )
+    report.verdict, _ = d._derive_verdict(
+        report.check_results, {}, False, 1, d.DiagnosticConfig()
+    )
+    text = " ".join(d._verdict_next_step_lines(report))
+    assert "worst-affected linear contrast" in text
+    assert "at least that" in text
+
+    stacks, B, V_hat = _scalar_bootstrap_inputs()
+    w = math.sqrt(float(V_hat[0, 0]))
+    result = _run_scalar_bootstrap(
+        _narrow_bump_map(w, 0.55, 0.5),
+        stacks,
+        B,
+        V_hat,
+        d.DiagnosticConfig(
+            num_bootstrap_draws=100, nonlinear_solver_max_iterations=200
+        ),
+    )
+    # The metric name itself has to carry the caveat: a downstream consumer reading
+    # "wald_coverage" off a report would otherwise take it for a per-coordinate number.
+    assert "mean_shift_worst_contrast_wald_coverage" in result.metrics
+    assert "mean_shift_wald_coverage" not in result.metrics
+    (row,) = [
+        c for c in result.criteria if "average shift" in c.description and c.ok is False
+    ]
+    assert "worst-contrast Wald coverage >=" in row.value
+
+
+def test_a_bootstrap_that_ran_and_passed_its_se_comparison_certifies_on_bootstrap_basis():
+    # The basis was keyed on `status == PASSED`, so the one case the two-tier gate newly allows
+    # through -- a mean-shift-only WARNING -- was labelled certified by "screen", claiming the
+    # bootstrap was never needed about a run where it ran and settled the variance.
+    verdict, results = _verdict_for(
+        _cr(
+            "multiplier_bootstrap",
+            CheckStatuses.WARNING,
+            {
+                "mean_shift_se": 0.4,
+                "mean_shift_warn_threshold": 0.3,
+                "mean_shift_threshold": 0.5,
+                "mean_shift_warned": True,
+                "mean_shift_failed": False,
+                "failure_drivers": [],
+                "warning_drivers": ["mean_shift"],
+            },
+        )
+    )
+    assert verdict == DiagnosticVerdicts.CERTIFIED
+    _, basis = d._derive_verdict(results, {}, False, 1, d.DiagnosticConfig())
+    assert basis == VerdictBases.BOOTSTRAP
+
+    # A quiet run that never called for the bootstrap still certifies on "screen".
+    _, basis = d._derive_verdict(
+        {"local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.PASSED)},
+        {},
+        False,
+        1,
+        d.DiagnosticConfig(),
+    )
+    assert basis == VerdictBases.SCREEN
+
+
+def test_failure_tier_message_uses_the_failure_wording():
+    # The tier branch compared against "fail" while both callers pass "failure", so every
+    # failure message silently used the warning's weaker "displaced" phrasing.
+    failure = d._mean_shift_message(0.62, 0.5, "failure", 0.5)
+    warning = d._mean_shift_message(0.40, 0.3, "warning", 0.3)
+    assert "systematically displaced" in failure
+    assert "systematically displaced" not in warning
+    assert "displaced (curvature-induced bias)" in warning

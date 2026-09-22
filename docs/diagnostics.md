@@ -295,10 +295,20 @@ remains fully visible via `root_failure_fraction` and the status logic below):
   The floors are calibrated against **Wald coverage**, the only consequence a displacement of the
   re-solved estimates has: `b_L` is a bias of the estimate in units of its own SE, so a
   nominal-95% interval centred on it covers `Phi(1.96 - b_L) - Phi(-1.96 - b_L)` -- `0.949` at
-  `0.10`, `0.940` at `0.30`, `0.921` at `0.50` (reported per run as `mean_shift_wald_coverage`,
-  computed by `wald_coverage_at_bias`). Warning costs ~1 coverage point, failing ~3. Two tiers
-  because location degrades gracefully, unlike spread: at `0.3 SE` the interval is still usable,
-  at `0.5 SE` it is not, and one gate could only say one of those things.
+  `0.10`, `0.940` at `0.30`, `0.921` at `0.50` (reported per run as
+  `mean_shift_worst_contrast_wald_coverage`, computed by `wald_coverage_at_bias`). Warning costs
+  ~1 coverage point, failing ~3. Two tiers because location degrades gracefully, unlike spread:
+  at `0.3 SE` the interval is still usable, at `0.5 SE` it is not, and one gate could only say
+  one of those things.
+
+  **That coverage figure is a worst-direction BOUND, not each interval's coverage.** `b_L` is a
+  Mahalanobis norm over however many targets are reported, so it equals the largest standardized
+  bias attained by any linear contrast of them; an individual coordinate's interval, whose bias
+  is one component of that vector, covers at least as well. With a single reported target -- the
+  case both floors were calibrated on -- the two coincide, and the gate is exact. With several,
+  the gate is deliberately conservative in the same way the `se_ratios` gate is, judging the
+  worst direction rather than an average. Per-target standardized shifts are not currently
+  computed; that is the natural refinement if the conservatism ever bites.
 
   The single `0.10` floor these replace was never calibrated against anything: it entered
   `docs/adr/0002` as the a-priori definition of "material distortion" used as the ANSWER KEY for

@@ -699,21 +699,41 @@ def require_action_probabilities_in_analysis_df_can_be_reconstructed(
     actual_values = np.asarray(actual_action_probs, dtype="float64")
     reconstructed_values = np.asarray(reconstructed_action_probs, dtype="float64")
     absolute_differences = np.abs(actual_values - reconstructed_values)
-    num_mismatched = int(np.sum(absolute_differences > ACTION_PROB_RECONSTRUCTION_ATOL))
+    # A NaN on either side must FAIL, and it does not compare greater than anything -- so the
+    # mask needs the non-finite test spelled out. (np.testing.assert_allclose, which this
+    # replaced, rejected a lone NaN for free; a bare `> atol` silently passes it, which would
+    # let an action_prob_func that returns NaN sail through a HARD check.) The ordering below
+    # also matters for the report: differences are ranked with non-finite ones promoted to
+    # +inf, so the row named in the message is a NaN row whenever one exists.
+    non_finite = ~np.isfinite(absolute_differences)
+    mismatched = non_finite | (absolute_differences > ACTION_PROB_RECONSTRUCTION_ATOL)
+    num_mismatched = int(np.sum(mismatched))
     if num_mismatched:
-        worst = int(np.argmax(absolute_differences))
+        ranked = np.where(non_finite, np.inf, absolute_differences)
+        worst = int(np.argmax(ranked))
+        # visited_keys is appended in the same order the chunks are concatenated (one entry per
+        # subject in each shape group, groups in iteration order), so it indexes the flattened
+        # arrays directly -- which is what lets the message name the offending
+        # (decision_time, subject_id) instead of an opaque position.
+        worst_key = (
+            visited_keys[worst]
+            if worst < len(visited_keys)
+            else f"unknown (index {worst})"
+        )
         raise ValueError(
             "require_action_probabilities_in_analysis_df_can_be_reconstructed found "
             f"{num_mismatched} of {actual_values.size} active row(s) whose recorded action "
             "probability does not match what action_prob_func produces from its recorded "
-            f"arguments: worst disagreement {absolute_differences[worst]:.3g} (recorded "
-            f"{actual_values[worst]:.9g} vs reconstructed {reconstructed_values[worst]:.9g}), "
-            f"above the tolerance {ACTION_PROB_RECONSTRUCTION_ATOL:.3g}. A disagreement this "
-            "large is a wiring error -- the wrong action_prob_func, the wrong "
-            "action_prob_func_args_beta_index, stale arguments, or different constants than "
-            "the deployment ran with. (Float32 evaluation noise inside action_prob_func is "
-            "what the tolerance already absorbs; it is well under 1e-5 even for policies that "
-            "lose precision to cancellation.)"
+            f"arguments. Worst: (decision_time, subject_id) = {worst_key}, recorded "
+            f"{actual_values[worst]:.9g} vs reconstructed {reconstructed_values[worst]:.9g} "
+            f"(difference {absolute_differences[worst]:.3g}, tolerance "
+            f"{ACTION_PROB_RECONSTRUCTION_ATOL:.3g}). A disagreement this large is a wiring "
+            "error -- the wrong action_prob_func, the wrong action_prob_func_args_beta_index, "
+            "stale arguments, or different constants than the deployment ran with; a NaN or "
+            "infinity means action_prob_func did not produce a usable probability at all. "
+            "(Float32 evaluation noise inside action_prob_func is what the tolerance already "
+            "absorbs; it is well under 1e-5 even for policies that lose precision to "
+            "cancellation.)"
         )
     # Returned so the diagnostic summary can report the measured agreement rather than prose
     # boilerplate; callers that ignore the return value are unaffected. NaN, not 0.0, for an

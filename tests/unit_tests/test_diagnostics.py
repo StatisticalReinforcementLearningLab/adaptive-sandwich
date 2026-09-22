@@ -3034,3 +3034,115 @@ def test_mean_shift_caveat_is_suppressed_when_a_variance_gate_also_fired():
     )
     assert d._verdict_next_step_lines(also_variance) == []
     assert also_variance.verdict == DiagnosticVerdicts.INVALID
+
+
+# ---------------------------------------------------------------------------
+# 22. REGRESSION (PR #79 review): the driver lists must record EVERY gate that fired, not just
+#     the one that set the status. Under-recording them silently re-routes verdicts, because
+#     _is_location_only reads "no variance driver" as "the variance was never impeached".
+# ---------------------------------------------------------------------------
+
+
+def _resolve_check(name, status, drivers, warning_drivers=()):
+    return _cr(
+        name,
+        status,
+        {
+            "mean_shift_se": 0.62,
+            "mean_shift_threshold": 0.5,
+            "mean_shift_warn_threshold": 0.3,
+            "mean_shift_failed": True,
+            "mean_shift_warned": True,
+            "mean_shift_wald_coverage": d.wald_coverage_at_bias(0.62),
+            "failure_drivers": list(drivers),
+            "warning_drivers": list(warning_drivers),
+        },
+    )
+
+
+def _verdict_for(check):
+    results = {
+        check.name: check,
+        "local_nonlinearity": _cr("local_nonlinearity", CheckStatuses.PASSED),
+    }
+    verdict, _ = d._derive_verdict(results, {}, False, 1, d.DiagnosticConfig())
+    return verdict, results
+
+
+def test_confirmed_fragility_beside_a_mean_shift_failure_stays_invalid():
+    # The exact check's driver list used to omit solver_confirmed_unhealthy, so a run that
+    # BOTH confirmed re-solve fragility and failed its mean-shift gate recorded only
+    # ["mean_shift"] -- downgrading a confirmed fragility from INVALID to NOT_CERTIFIED and
+    # bypassing the rung the ADR says it must take.
+    verdict, _ = _verdict_for(
+        _resolve_check(
+            "exact_nonlinear_perturbation",
+            CheckStatuses.FAILED,
+            ["solver_fragility", "mean_shift"],
+        )
+    )
+    assert verdict == DiagnosticVerdicts.INVALID
+    # ... while the genuinely location-only case still routes to NOT_CERTIFIED.
+    verdict, _ = _verdict_for(
+        _resolve_check(
+            "exact_nonlinear_perturbation", CheckStatuses.FAILED, ["mean_shift"]
+        )
+    )
+    assert verdict == DiagnosticVerdicts.NOT_CERTIFIED
+
+
+def test_below_band_ratio_beside_a_mean_shift_failure_suppresses_the_caveat():
+    # warning_drivers used to be gated on `status == WARNING`, so a below-band SE ratio went
+    # unrecorded whenever the mean-shift gate FAILED on the same run. The caveat block then
+    # announced that the variance had been confirmed -- on a run whose bootstrap SEs had just
+    # come in under their own null band.
+    check = _resolve_check(
+        "multiplier_bootstrap",
+        CheckStatuses.FAILED,
+        ["mean_shift"],
+        warning_drivers=["se_ratio_below"],
+    )
+    verdict, results = _verdict_for(check)
+    report = d.DiagnosticReport(
+        classification="",
+        check_results=results,
+        input_check_results={},
+        metrics={},
+        tolerances_used={},
+        warnings=[],
+        monte_carlo_counts={},
+        target_labels=["theta_0"],
+        rank_diagnostics={},
+    )
+    report.verdict = verdict
+    assert d._verdict_next_step_lines(report) == []
+
+
+def test_mean_shift_caveat_names_the_right_comparison_per_check():
+    # The caveat called every source a "bootstrap-vs-sandwich" comparison, which is wrong
+    # exactly when the exact continuation check is the one that measured the displacement.
+    for name, expected, unexpected in (
+        ("multiplier_bootstrap", "bootstrap-vs-sandwich", "nonlinear-vs-linear"),
+        (
+            "exact_nonlinear_perturbation",
+            "nonlinear-vs-linear",
+            "bootstrap-vs-sandwich",
+        ),
+    ):
+        check = _resolve_check(name, CheckStatuses.FAILED, ["mean_shift"])
+        verdict, results = _verdict_for(check)
+        report = d.DiagnosticReport(
+            classification="",
+            check_results=results,
+            input_check_results={},
+            metrics={},
+            tolerances_used={},
+            warnings=[],
+            monte_carlo_counts={},
+            target_labels=["theta_0"],
+            rank_diagnostics={},
+        )
+        report.verdict = verdict
+        text = " ".join(d._verdict_next_step_lines(report))
+        assert expected in text
+        assert unexpected not in text

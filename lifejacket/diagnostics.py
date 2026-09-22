@@ -1026,7 +1026,8 @@ def _mean_shift_next_step_lines(report: DiagnosticReport) -> list[str]:
     )
     text = (
         f"{lead}: the reported VARIANCE was confirmed by {worst_name} -- its "
-        f"bootstrap-vs-sandwich SE comparison passed -- but the same check measured the "
+        f"{'bootstrap-vs-sandwich' if worst_name == 'multiplier_bootstrap' else 'nonlinear-vs-linear'} "
+        f"SE comparison passed -- but the same check measured the "
         f"re-solved estimates sitting {worst_shift:.3g} SE off centre (threshold "
         f"{threshold:.3g}), so a 95% Wald interval centred on this estimate {verb}: expect it "
         f"to cover about {coverage:.1%}. The remedy is the percentile refit bootstrap, which "
@@ -3142,9 +3143,16 @@ def check_exact_nonlinear_perturbations(
     # quantile shifts) without re-deriving any of the logic above. A consumer reading an older
     # pickled report finds these keys absent, which _derive_verdict treats as the pre-split
     # behaviour: every failure is a variance failure.
+    #
+    # solver_fragility is FIRST and is recorded even though it short-circuits the ladder below:
+    # leaving it out let a run that confirmed re-solve fragility AND failed its mean-shift gate
+    # record only ["mean_shift"], which _is_location_only reads as "the variance was never
+    # impeached" -- routing a confirmed fragility to NOT_CERTIFIED and bypassing its INVALID
+    # rung entirely.
     failure_drivers = [
         name
         for name, fired in (
+            ("solver_fragility", solver_confirmed_unhealthy),
             ("se_ratio_above", se_ratio_above),
             ("se_ratio_below", se_ratio_below and not solver_unhealthy),
             ("mean_shift", mean_shift_failed),
@@ -3152,9 +3160,17 @@ def check_exact_nonlinear_perturbations(
         )
         if fired
     ]
-    warning_drivers = (
-        ["mean_shift"] if mean_shift_warned and not mean_shift_failed else []
-    )
+    # Recorded on their own terms, NOT gated on the final status: a spread finding that is
+    # outranked by a failure elsewhere is still a spread finding, and the mean-shift caveat's
+    # suppression guard needs to see it (see _mean_shift_next_step_lines).
+    warning_drivers = [
+        name
+        for name, fired in (
+            ("se_ratio_below", se_ratio_below and solver_unhealthy),
+            ("mean_shift", mean_shift_warned and not mean_shift_failed),
+        )
+        if fired
+    ]
 
     # Status precedence: statistically confirmed fragility FAILS outright (measured on all
     # executed trials, so no optimistic-subset caveat applies and it needs no ensemble
@@ -3803,10 +3819,14 @@ def check_multiplier_bootstrap(
         )
         if fired
     ]
+    # Recorded on their own terms, NOT gated on the final status. Gating se_ratio_below on
+    # status == WARNING hid it whenever the mean-shift gate FAILED on the same run, leaving
+    # failure_drivers == ["mean_shift"] and the caveat below announcing that the variance had
+    # been confirmed -- on a run whose bootstrap SEs had just come in under their own band.
     warning_drivers = [
         name
         for name, fired in (
-            ("se_ratio_below", any_below and status == CheckStatuses.WARNING),
+            ("se_ratio_below", any_below),
             ("mean_shift", mean_shift_warned and not mean_shift_failed),
         )
         if fired
